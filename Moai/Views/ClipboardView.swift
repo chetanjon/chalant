@@ -11,14 +11,11 @@ struct ClipboardView: View {
 
     var body: some View {
         if clipboard.clips.isEmpty {
-            VStack {
-                Spacer()
-                Text("Everything you copy lands here.")
-                    .font(Theme.Fonts.body)
-                    .foregroundStyle(Theme.textHint)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity)
+            EmptyState(
+                symbol: "doc.on.clipboard",
+                title: "Nothing copied yet",
+                hint: "Everything you copy lands here."
+            )
         } else {
             ScrollView {
                 VStack(spacing: Theme.Space.s) {

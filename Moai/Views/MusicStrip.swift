@@ -139,6 +139,8 @@ struct MusicStrip: View {
         .onHover { artworkHovered = $0 }
         .animation(Theme.Motion.hover, value: artworkHovered)
         .shadow(color: Color.black.opacity(0.35), radius: 5, y: 2)
+        // The album's own color spills softly out of the artwork.
+        .shadow(color: accent.opacity(0.35), radius: 12)
     }
 
     private func subtitle(_ playing: MusicController.NowPlaying) -> String {

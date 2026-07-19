@@ -23,11 +23,13 @@ struct ShortcutsView: View {
                 addRow
             }
             if store.shortcuts.isEmpty && !adding {
-                VStack {
-                    Spacer()
-                    Text("Save the places you jump to — sites, apps, folders.")
-                        .font(Theme.Fonts.body)
-                        .foregroundStyle(Theme.textHint)
+                VStack(spacing: Theme.Space.m) {
+                    EmptyState(
+                        symbol: "arrow.up.right",
+                        title: "Nowhere to go yet",
+                        hint: "Save the places you jump to — sites, apps, folders."
+                    )
+                    .frame(maxHeight: .infinity)
                     Button {
                         beginAdding()
                     } label: {
@@ -37,10 +39,8 @@ struct ShortcutsView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(PressableStyle())
-                    .padding(.top, Theme.Space.xs)
-                    Spacer()
+                    .padding(.bottom, Theme.Space.m)
                 }
-                .frame(maxWidth: .infinity)
             } else {
                 ScrollView {
                     LazyVGrid(

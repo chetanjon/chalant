@@ -119,7 +119,13 @@ struct DoView: View {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(Theme.Fonts.icon(.xl))
                     .foregroundStyle(
-                        model.draftPrompt.isEmpty ? Theme.textTertiary : accent
+                        model.draftPrompt.isEmpty
+                            ? AnyShapeStyle(Theme.textTertiary)
+                            : AnyShapeStyle(Theme.accentGradient(accent))
+                    )
+                    .shadow(
+                        color: accent.opacity(model.draftPrompt.isEmpty ? 0 : 0.4),
+                        radius: 6
                     )
                     .contentShape(Circle())
             }

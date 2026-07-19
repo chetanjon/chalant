@@ -68,6 +68,16 @@ enum Theme {
     static let accentMint = Color(hue: 0.42, saturation: 0.38, brightness: 0.78)
     static let accentRose = Color(hue: 0.97, saturation: 0.42, brightness: 0.80)
 
+    /// The accent as a soft two-stop gradient — active elements get
+    /// a hint of light falling across them instead of a flat tint.
+    static func accentGradient(_ accent: Color) -> LinearGradient {
+        LinearGradient(
+            colors: [accent, accent.opacity(0.72)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
     /// nil means "album" — follow the artwork-derived accent.
     static func fixedAccent(for mode: String) -> Color? {
         switch mode {
@@ -91,11 +101,15 @@ enum Theme {
         static let bodyMedium = Font.system(size: 12, weight: .medium)
         static let bodyEmphasis = Font.system(size: 12, weight: .semibold)
         static let title = Font.system(size: 13, weight: .semibold)
+        /// The wordmark and pane titles: rounded and a touch bolder —
+        /// the one place the app signs its name.
+        static let brand = Font.system(size: 13, weight: .bold, design: .rounded)
         /// Reading text: answers and the input line. Same size as
         /// title, regular weight — long text at semibold shouts.
         static let reading = Font.system(size: 13)
-        static let numeral = Font.system(size: 20, weight: .semibold, design: .monospaced)
-        static let display = Font.system(size: 30, weight: .semibold, design: .monospaced)
+        // Big numbers get SF Rounded: friendlier clocks, same widths.
+        static let numeral = Font.system(size: 20, weight: .semibold, design: .rounded).monospacedDigit()
+        static let display = Font.system(size: 34, weight: .semibold, design: .rounded).monospacedDigit()
 
         // Monospaced variants, reserved for time and numbers.
         static let microMono = Font.system(size: 9, weight: .medium, design: .monospaced)
@@ -103,7 +117,7 @@ enum Theme {
         static let labelMono = Font.system(size: 11, weight: .semibold, design: .monospaced)
         static let bodyMono = Font.system(size: 12, design: .monospaced)
         static let bodyEmphasisMono = Font.system(size: 12, weight: .semibold, design: .monospaced)
-        static let counterMono = Font.system(size: 15, weight: .semibold, design: .monospaced)
+        static let counterMono = Font.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit()
 
         /// SF Symbol sizing, one scale for every glyph in the app.
         enum IconScale: CGFloat {
