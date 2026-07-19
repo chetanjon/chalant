@@ -15,8 +15,8 @@ struct ClipboardView: View {
             VStack {
                 Spacer()
                 Text("Everything you copy lands here.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textTertiary)
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textHint)
                 Spacer()
             }
             .frame(maxWidth: .infinity)
@@ -32,9 +32,9 @@ struct ClipboardView: View {
     }
 
     private func row(_ clip: ClipboardStore.Clip) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Theme.Space.m) {
             Text(clip.text)
-                .font(.system(size: 11))
+                .font(Theme.Fonts.body)
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -51,8 +51,9 @@ struct ClipboardView: View {
                 clipboard.remove(clip)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.vertical, Theme.Space.s)
         .moaiCard(radius: Theme.Radius.row)
+        .hoverHighlight()
     }
 }

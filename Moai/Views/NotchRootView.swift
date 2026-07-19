@@ -75,7 +75,7 @@ struct NotchRootView: View {
         if model.state == .collapsed {
             // On hover the droplet "reaches" — shoulders widen, belly
             // sags — a soft beat of anticipation before opening.
-            let reaching = model.isHovering && motionFeel != "still"
+            let reaching = model.isHovering && Theme.Feel.current.ambient
             return IslandShape(
                 eave: Theme.Island.eaveCollapsed + (reaching ? 1.5 : 0),
                 bottomRadius: Theme.Island.radiusCollapsed,
@@ -109,7 +109,7 @@ struct NotchRootView: View {
                     // Fades out fast on close — a slow fade inside the
                     // shrinking clip reads as shimmer.
                     .overlay {
-                        if auroraOn, motionFeel != "still", model.state != .collapsed {
+                        if auroraOn, Theme.Feel.current.ambient, model.state != .collapsed {
                             AuroraView(accent: accent)
                                 .clipShape(islandShape)
                                 .transition(
@@ -141,7 +141,7 @@ struct NotchRootView: View {
                     // music or a timer is going. Intensity breathes in
                     // place — nothing travels along the border.
                     .overlay {
-                        if glowOn, motionFeel != "still",
+                        if glowOn, Theme.Feel.current.ambient,
                            model.state == .collapsed, hasLeftWing {
                             TimelineView(.animation(minimumInterval: 1 / 15)) { context in
                                 let t = context.date.timeIntervalSinceReferenceDate
@@ -206,7 +206,9 @@ struct NotchRootView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .top)
-        .environment(\.moaiAccent, music.accent)
+        // The user's accent choice, not the raw album color — fixed
+        // modes must win everywhere below this point.
+        .environment(\.moaiAccent, accent)
     }
 
     /// State contents at their own natural sizes, clipped to the
@@ -255,76 +257,73 @@ struct NotchRootView: View {
         HStack {
             if focus.isActive {
                 HStack(spacing: 5) {
-                    ZStack {
-                        Circle()
-                            .stroke(Color.white.opacity(0.15), lineWidth: 1.5)
-                        Circle()
-                            .trim(from: 0, to: max(0.02, focus.progress))
-                            .stroke(accent, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
-                            .animation(.linear(duration: 1), value: focus.progress)
-                    }
-                    .frame(width: 11, height: 11)
+                    ProgressRing(
+                        progress: focus.progress,
+                        size: 11,
+                        lineWidth: 1.5,
+                        tint: accent,
+                        trackOpacity: 0.15
+                    )
                     Text(focus.display)
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .font(Theme.Fonts.labelMono)
                         .foregroundStyle(Theme.textPrimary)
                         .opacity(focus.isPaused ? 0.5 : 1)
                 }
-                .padding(.leading, 11)
+                .padding(.leading, Theme.Space.wingInset)
             } else if timer.isActive {
                 Text(timer.display)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .font(Theme.Fonts.labelMono)
                     .foregroundStyle(Theme.textPrimary)
-                    .padding(.leading, 11)
+                    .padding(.leading, Theme.Space.wingInset)
             } else if music.nowPlaying?.isPlaying == true {
                 Image(systemName: "waveform")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Theme.Fonts.icon(.s))
                     .foregroundStyle(accent)
                     .symbolEffect(
                         .variableColor.iterative,
                         options: .repeating,
-                        isActive: motionFeel != "still"
+                        isActive: Theme.Feel.current.ambient
                     )
-                    .padding(.leading, 11)
+                    .padding(.leading, Theme.Space.wingInset)
             }
             Spacer()
             if hasLeftWing || model.isHovering {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(Theme.Fonts.icon(.s))
                     .foregroundStyle(model.isHovering ? Theme.textSecondary : Theme.textTertiary)
                     .symbolEffect(.bounce, value: model.isHovering)
-                    .padding(.trailing, batteryVisible ? 6 : 12)
+                    .padding(.trailing, batteryVisible ? Theme.Space.s : Theme.Space.l)
             }
             if batteryVisible, let battery = stats.battery {
                 HStack(spacing: 2) {
                     if battery.charging {
                         Image(systemName: "bolt.fill")
-                            .font(.system(size: 8, weight: .semibold))
+                            .font(Theme.Fonts.icon(.xs))
                     }
                     Text("\(battery.level)%")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .font(Theme.Fonts.captionMono)
                 }
                 .foregroundStyle(battery.level <= 20 && !battery.charging ? accent : Theme.textTertiary)
-                .padding(.trailing, 11)
+                .padding(.trailing, Theme.Space.wingInset)
             }
         }
     }
 
     private var listeningContent: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Theme.Space.m) {
             Text("listening")
-                .font(.system(size: 11, weight: .semibold))
+                .font(Theme.Fonts.label)
                 .tracking(3)
                 .foregroundStyle(Theme.textSecondary)
             levelBars
             Text(voice.transcript.isEmpty ? "Say it." : voice.transcript)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textPrimary)
+                .font(Theme.Fonts.body)
+                .foregroundStyle(voice.transcript.isEmpty ? Theme.textHint : Theme.textPrimary)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 22)
+                .padding(.horizontal, Theme.Space.xxl)
             Text("RELEASE TO RUN")
-                .font(.system(size: 9, weight: .semibold))
+                .font(Theme.Fonts.micro)
                 .tracking(1.2)
                 .foregroundStyle(Theme.textTertiary)
         }
@@ -334,16 +333,11 @@ struct NotchRootView: View {
             model.endListening()
         }
         .overlay(alignment: .topTrailing) {
-            Button {
+            CloseButton {
                 model.cancelListening()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Theme.textTertiary)
             }
-            .buttonStyle(.plain)
-            .padding(.top, model.notchSize.height + 8)
-            .padding(.trailing, 14)
+            .padding(.top, model.notchSize.height + Theme.Space.xs)
+            .padding(.trailing, Theme.Space.m)
         }
     }
 

@@ -8,22 +8,22 @@ struct MusicStrip: View {
 
     var body: some View {
         if let playing = music.nowPlaying {
-            HStack(spacing: 12) {
+            HStack(spacing: Theme.Space.l) {
                 artworkView
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(playing.track)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(Theme.Fonts.bodyEmphasis)
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                     Text(subtitle(playing))
-                        .font(.system(size: 10))
+                        .font(Theme.Fonts.caption)
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
 
-                    HStack(spacing: 6) {
+                    HStack(spacing: Theme.Space.s) {
                         Text(Self.clock(scrubPosition ?? playing.position))
-                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                            .font(Theme.Fonts.microMono)
                             .foregroundStyle(Theme.textTertiary)
                         Slider(
                             value: Binding(
@@ -41,33 +41,34 @@ struct MusicStrip: View {
                         .controlSize(.mini)
                         .tint(accent)
                         Text(Self.clock(playing.duration))
-                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                            .font(Theme.Fonts.microMono)
                             .foregroundStyle(Theme.textTertiary)
                     }
                 }
 
-                VStack(spacing: 6) {
-                    HStack(spacing: 12) {
-                        transportButton("backward.fill", size: 11) {
+                VStack(spacing: Theme.Space.xs) {
+                    HStack(spacing: Theme.Space.xs) {
+                        transportButton("backward.fill") {
                             music.previous()
                         }
                         Button {
                             playing.isPlaying ? music.pause() : music.play()
                         } label: {
                             Image(systemName: playing.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 12, weight: .bold))
+                                .font(Theme.Fonts.icon(.m, weight: .bold))
                                 .foregroundStyle(Color.black)
                                 .frame(width: 26, height: 26)
                                 .background(Circle().fill(Color.white.opacity(0.92)))
+                                .contentShape(Circle())
                         }
-                        .buttonStyle(.plain)
-                        transportButton("forward.fill", size: 11) {
+                        .buttonStyle(PressableStyle())
+                        transportButton("forward.fill") {
                             music.next()
                         }
                     }
-                    HStack(spacing: 5) {
+                    HStack(spacing: Theme.Space.xs) {
                         Image(systemName: "speaker.wave.2.fill")
-                            .font(.system(size: 8))
+                            .font(Theme.Fonts.icon(.xs))
                             .foregroundStyle(Theme.textTertiary)
                         Slider(
                             value: Binding(
@@ -88,8 +89,8 @@ struct MusicStrip: View {
                     }
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
+            .padding(.horizontal, Theme.Space.l)
+            .padding(.vertical, Theme.Space.m)
             .moaiCard()
         }
     }
@@ -104,7 +105,7 @@ struct MusicStrip: View {
                 ZStack {
                     Theme.surface
                     Image(systemName: "music.note")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(Theme.Fonts.icon(.l))
                         .foregroundStyle(Theme.textTertiary)
                 }
             }
@@ -126,15 +127,14 @@ struct MusicStrip: View {
 
     private func transportButton(
         _ symbol: String,
-        size: CGFloat,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: size, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-        }
-        .buttonStyle(.plain)
+        HoverGlyphButton(
+            symbol: symbol,
+            scale: .s,
+            tint: Theme.textPrimary,
+            action: action
+        )
     }
 
     private static func clock(_ seconds: Double) -> String {

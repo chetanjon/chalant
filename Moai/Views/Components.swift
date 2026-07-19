@@ -23,6 +23,126 @@ extension View {
     }
 }
 
+/// The field treatment: brighter fill than a card, hairline stroke
+/// that warms to the accent while the field is in use.
+private struct MoaiField: ViewModifier {
+    var active: Bool
+    @Environment(\.moaiAccent) private var accent
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous)
+                    .fill(Theme.field)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous)
+                    .strokeBorder(
+                        active ? accent.opacity(0.5) : Theme.hairlineFaint,
+                        lineWidth: 1
+                    )
+            )
+    }
+}
+
+extension View {
+    func moaiField(active: Bool = false) -> some View {
+        modifier(MoaiField(active: active))
+    }
+}
+
+/// Rows and chips answer the cursor: the surface lifts, the edge
+/// sharpens. Owns its own hover state so every instance is independent.
+private struct HoverHighlight: ViewModifier {
+    var radius: CGFloat
+    @State private var hovered = false
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(Color.white.opacity(hovered ? 0.03 : 0))
+                    .allowsHitTesting(false)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(Color.white.opacity(hovered ? 0.10 : 0), lineWidth: 1)
+                    .allowsHitTesting(false)
+            )
+            .onHover { hovered = $0 }
+            .animation(Theme.Motion.hover, value: hovered)
+    }
+}
+
+extension View {
+    func hoverHighlight(radius: CGFloat = Theme.Radius.row) -> some View {
+        modifier(HoverHighlight(radius: radius))
+    }
+}
+
+/// Every custom button presses back: a soft sink on click. Under
+/// Still (or system Reduce Motion) only the opacity dips.
+struct PressableStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        let still = !Theme.Feel.current.ambient
+        return configuration.label
+            .scaleEffect(configuration.isPressed && !still ? 0.95 : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(Theme.Motion.hover, value: configuration.isPressed)
+    }
+}
+
+/// The universal small glyph button: a comfortable 22pt hit target
+/// around the icon, a tint lift and faint halo on hover, and a press
+/// sink. Every bare-glyph control in the app routes through this.
+struct HoverGlyphButton: View {
+    let symbol: String
+    var scale: Theme.Fonts.IconScale = .s
+    var tint: Color = Theme.textSecondary
+    var weight: Font.Weight = .semibold
+    let action: () -> Void
+
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(Theme.Fonts.icon(scale, weight: weight))
+                .foregroundStyle(hovered ? lifted : tint)
+                .frame(minWidth: 22, minHeight: 22)
+                .background(Circle().fill(Color.white.opacity(hovered ? 0.07 : 0)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle())
+        .onHover { hovered = $0 }
+        .animation(Theme.Motion.hover, value: hovered)
+    }
+
+    /// One step up the text hierarchy; colors outside it keep their
+    /// tint and rely on the halo for feedback.
+    private var lifted: Color {
+        if tint == Theme.textTertiary { return Theme.textSecondary }
+        if tint == Theme.textSecondary { return Theme.textPrimary }
+        return tint
+    }
+}
+
+/// The one close affordance, everywhere a surface can be dismissed.
+struct CloseButton: View {
+    var scale: Theme.Fonts.IconScale = .xs
+    let action: () -> Void
+
+    var body: some View {
+        HoverGlyphButton(
+            symbol: "xmark",
+            scale: scale,
+            tint: Theme.textTertiary,
+            weight: .bold,
+            action: action
+        )
+    }
+}
+
 /// Small icon-only row action (copy, delete, share...).
 struct IconActionButton: View {
     let symbol: String
@@ -31,12 +151,118 @@ struct IconActionButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(dim ? Theme.textTertiary : tint)
+        HoverGlyphButton(
+            symbol: symbol,
+            scale: .s,
+            tint: dim ? Theme.textTertiary : tint,
+            action: action
+        )
+    }
+}
+
+/// A circular countdown, trimmed from twelve o'clock. One component
+/// for every ring in the app, from the 11pt wing to the focus dial.
+struct ProgressRing<Center: View>: View {
+    let progress: Double
+    let size: CGFloat
+    let lineWidth: CGFloat
+    let tint: Color
+    var trackOpacity: Double = 0.10
+    @ViewBuilder var center: () -> Center
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.white.opacity(trackOpacity), lineWidth: lineWidth)
+            Circle()
+                .trim(from: 0, to: max(0.02, progress))
+                .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.linear(duration: 1), value: progress)
+            center()
         }
-        .buttonStyle(.plain)
+        .frame(width: size, height: size)
+    }
+}
+
+extension ProgressRing where Center == EmptyView {
+    init(
+        progress: Double,
+        size: CGFloat,
+        lineWidth: CGFloat,
+        tint: Color,
+        trackOpacity: Double = 0.10
+    ) {
+        self.init(
+            progress: progress,
+            size: size,
+            lineWidth: lineWidth,
+            tint: tint,
+            trackOpacity: trackOpacity,
+            center: { EmptyView() }
+        )
+    }
+}
+
+/// A soundscape chip that says what it is: icon plus name, or
+/// icon-only with a tooltip where the row is tight.
+struct NoiseButton: View {
+    let color: NoiseEngine.NoiseColor
+    let selected: Bool
+    var compact = false
+    let action: () -> Void
+
+    @Environment(\.moaiAccent) private var accent
+    @State private var hovered = false
+
+    private var name: String {
+        switch color {
+        case .brown: return "Brown"
+        case .white: return "White"
+        case .pink: return "Pink"
+        case .rain: return "Rain"
+        case .cafe: return "Café"
+        }
+    }
+
+    private var symbol: String {
+        switch color {
+        case .brown: return "water.waves"
+        case .white: return "waveform"
+        case .pink: return "waveform.path"
+        case .rain: return "cloud.rain.fill"
+        case .cafe: return "cup.and.saucer.fill"
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Theme.Space.xs) {
+                Image(systemName: symbol)
+                    .font(Theme.Fonts.icon(.xs))
+                if !compact {
+                    Text(name)
+                        .font(Theme.Fonts.caption)
+                }
+            }
+            .foregroundStyle(
+                selected ? accent : (hovered ? Theme.textSecondary : Theme.textTertiary)
+            )
+            .padding(.horizontal, compact ? Theme.Space.xs : Theme.Space.s)
+            .frame(minHeight: 22)
+            .background(
+                Capsule().fill(
+                    selected
+                        ? accent.opacity(0.12)
+                        : Color.white.opacity(hovered ? 0.06 : 0)
+                )
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressableStyle())
+        .help(name)
+        .onHover { hovered = $0 }
+        .animation(Theme.Motion.hover, value: hovered)
     }
 }
 

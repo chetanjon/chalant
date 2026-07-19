@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @MainActor
@@ -73,6 +74,15 @@ final class NotchViewModel: ObservableObject {
         music.start()
         clipboard.start()
         stats.start()
+        // Theme.Feel reads the system Reduce Motion flag at render
+        // time; nudge the tree when it flips so the change is live.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.objectWillChange.send() }
+        }
     }
 
     func expand() {

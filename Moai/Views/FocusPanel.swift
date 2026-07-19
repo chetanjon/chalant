@@ -17,19 +17,19 @@ struct FocusPanel: View {
     // MARK: Idle — pick a session length
 
     private var presets: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
             Text("FOCUS")
-                .font(.system(size: 9, weight: .semibold))
+                .font(Theme.Fonts.micro)
                 .tracking(1.3)
                 .foregroundStyle(Theme.textTertiary)
-            HStack(spacing: 8) {
+            HStack(spacing: Theme.Space.m) {
                 presetChip(15)
                 presetChip(25)
                 presetChip(50)
             }
             Text("Four rounds to a set, short breaks between, a long one after. Noise optional.")
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textTertiary)
+                .font(Theme.Fonts.body)
+                .foregroundStyle(Theme.textHint)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
@@ -41,32 +41,44 @@ struct FocusPanel: View {
         } label: {
             VStack(spacing: 2) {
                 Text("\(minutes)")
-                    .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                    .font(Theme.Fonts.numeral)
                     .foregroundStyle(Theme.textPrimary)
                 Text("min")
-                    .font(.system(size: 9))
+                    .font(Theme.Fonts.micro)
                     .foregroundStyle(Theme.textTertiary)
             }
             .frame(width: 64)
-            .padding(.vertical, 10)
+            .padding(.vertical, Theme.Space.l)
             .moaiCard(radius: Theme.Radius.card)
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
+        .hoverHighlight(radius: Theme.Radius.card)
     }
 
     // MARK: Active session
 
     private var activeCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 16) {
-                ring
+        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+            HStack(spacing: Theme.Space.xl) {
+                ProgressRing(
+                    progress: focus.progress,
+                    size: 54,
+                    lineWidth: 3,
+                    tint: focus.phase == .work ? accent : Theme.accentFallback,
+                    trackOpacity: 0.08
+                ) {
+                    Text("\(focus.roundInSet)")
+                        .font(Theme.Fonts.counterMono)
+                        .foregroundStyle(Theme.textSecondary)
+                }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(focus.phase == .work ? "FOCUS" : "BREAK")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(Theme.Fonts.micro)
                         .tracking(1.3)
                         .foregroundStyle(focus.phase == .work ? accent : Theme.textTertiary)
                     Text(focus.display)
-                        .font(.system(size: 30, weight: .semibold, design: .monospaced))
+                        .font(Theme.Fonts.display)
                         .foregroundStyle(Theme.textPrimary)
                         .opacity(focus.isPaused ? 0.45 : 1)
                     roundDots
@@ -74,46 +86,30 @@ struct FocusPanel: View {
                 Spacer()
                 controls
             }
-            HStack(spacing: 10) {
+            HStack(spacing: Theme.Space.m) {
                 Text("noise")
-                    .font(.system(size: 10))
+                    .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
-                noiseButton("B", .brown)
-                noiseButton("W", .white)
-                noiseButton("P", .pink)
-                noiseButton("R", .rain)
-                noiseButton("C", .cafe)
+                ForEach(NoiseEngine.NoiseColor.allCases, id: \.self) { color in
+                    NoiseButton(
+                        color: color,
+                        selected: focus.noiseColor == color
+                    ) {
+                        focus.setNoise(color)
+                    }
+                }
                 Spacer()
                 if focus.isPaused {
                     Text("paused")
-                        .font(.system(size: 10))
+                        .font(Theme.Fonts.caption)
                         .foregroundStyle(Theme.textTertiary)
                 }
             }
             Spacer(minLength: 0)
         }
-        .padding(.top, 4)
+        .padding(.top, Theme.Space.xs)
         .animation(Theme.Motion.content, value: focus.isPaused)
         .animation(Theme.Motion.content, value: focus.phase)
-    }
-
-    private var ring: some View {
-        ZStack {
-            Circle()
-                .stroke(Color.white.opacity(0.08), lineWidth: 3)
-            Circle()
-                .trim(from: 0, to: max(0.003, focus.progress))
-                .stroke(
-                    focus.phase == .work ? accent : Theme.accentFallback,
-                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
-                .animation(.linear(duration: 1), value: focus.progress)
-            Text("\(focus.roundInSet)")
-                .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Theme.textSecondary)
-        }
-        .frame(width: 54, height: 54)
     }
 
     private var roundDots: some View {
@@ -131,42 +127,24 @@ struct FocusPanel: View {
     }
 
     private var controls: some View {
-        HStack(spacing: 14) {
-            Button {
+        HStack(spacing: Theme.Space.s) {
+            HoverGlyphButton(
+                symbol: focus.isPaused ? "play.fill" : "pause.fill",
+                scale: .m,
+                tint: Theme.textPrimary
+            ) {
                 focus.togglePause()
-            } label: {
-                Image(systemName: focus.isPaused ? "play.fill" : "pause.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
             }
-            .buttonStyle(.plain)
-            Button {
+            HoverGlyphButton(
+                symbol: "forward.end.fill",
+                scale: .s,
+                tint: Theme.textSecondary
+            ) {
                 focus.skip()
-            } label: {
-                Image(systemName: "forward.end.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.textSecondary)
             }
-            .buttonStyle(.plain)
-            Button {
+            CloseButton(scale: .s) {
                 focus.stop()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Theme.textTertiary)
             }
-            .buttonStyle(.plain)
         }
-    }
-
-    private func noiseButton(_ label: String, _ color: NoiseEngine.NoiseColor) -> some View {
-        Button {
-            focus.setNoise(color)
-        } label: {
-            Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(focus.noiseColor == color ? accent : Theme.textTertiary)
-        }
-        .buttonStyle(.plain)
     }
 }

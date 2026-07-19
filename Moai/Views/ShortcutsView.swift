@@ -10,7 +10,6 @@ struct ShortcutsView: View {
     @State private var adding = false
     @State private var draftTitle = ""
     @State private var draftLink = ""
-    @State private var hovered: UUID?
     @FocusState private var linkFieldFocused: Bool
 
     init(model: NotchViewModel) {
@@ -19,7 +18,7 @@ struct ShortcutsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
             if adding {
                 addRow
             }
@@ -27,28 +26,33 @@ struct ShortcutsView: View {
                 VStack {
                     Spacer()
                     Text("Save the places you jump to — sites, apps, folders.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.textTertiary)
+                        .font(Theme.Fonts.body)
+                        .foregroundStyle(Theme.textHint)
                     Button {
                         beginAdding()
                     } label: {
                         Text("Add a shortcut")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(Theme.Fonts.label)
                             .foregroundStyle(accent)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .padding(.top, 4)
+                    .buttonStyle(PressableStyle())
+                    .padding(.top, Theme.Space.xs)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity)
             } else {
                 ScrollView {
                     LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 96), spacing: 8)],
-                        spacing: 8
+                        columns: [GridItem(.adaptive(minimum: 96), spacing: Theme.Space.m)],
+                        spacing: Theme.Space.m
                     ) {
                         ForEach(store.shortcuts) { shortcut in
-                            chip(shortcut)
+                            ShortcutChip(shortcut: shortcut, store: store) {
+                                if store.open(shortcut) {
+                                    model.collapse()
+                                }
+                            }
                         }
                         if !adding {
                             addChip
@@ -61,114 +65,57 @@ struct ShortcutsView: View {
         .animation(Theme.Motion.content, value: store.shortcuts)
     }
 
-    private func chip(_ shortcut: ShortcutStore.Shortcut) -> some View {
-        Button {
-            if store.open(shortcut) {
-                model.collapse()
-            }
-        } label: {
-            VStack(spacing: 6) {
-                icon(for: shortcut)
-                Text(shortcut.title)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .moaiCard(radius: Theme.Radius.row)
-            .overlay(alignment: .topTrailing) {
-                if hovered == shortcut.id {
-                    Button {
-                        store.remove(shortcut)
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.textTertiary)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(4)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            hovered = hovering ? shortcut.id : (hovered == shortcut.id ? nil : hovered)
-        }
-    }
-
-    private func icon(for shortcut: ShortcutStore.Shortcut) -> some View {
-        Group {
-            if let fileIcon = ShortcutStore.fileIcon(for: shortcut.link) {
-                Image(nsImage: fileIcon)
-                    .resizable()
-                    .frame(width: 26, height: 26)
-            } else {
-                ZStack {
-                    Circle()
-                        .fill(accent.opacity(0.14))
-                    Text(String(shortcut.title.prefix(1)).uppercased())
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(accent)
-                }
-                .frame(width: 26, height: 26)
-            }
-        }
-    }
-
     private var addChip: some View {
         Button {
             beginAdding()
         } label: {
-            VStack(spacing: 6) {
+            VStack(spacing: Theme.Space.s) {
                 Image(systemName: "plus")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(Theme.Fonts.icon(.l, weight: .medium))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(width: 26, height: 26)
                 Text("Add")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
+            .padding(.vertical, Theme.Space.l)
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
                     .strokeBorder(Theme.hairlineFaint, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
             )
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
+        .hoverHighlight()
     }
 
     private var addRow: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Theme.Space.m) {
             TextField("Name (optional)", text: $draftTitle)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(Theme.Fonts.body)
                 .frame(width: 110)
             TextField("github.com, /Applications/…, ~/folder", text: $draftLink)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(Theme.Fonts.body)
                 .focused($linkFieldFocused)
                 .onSubmit(commitAdd)
             Button(action: commitAdd) {
                 Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 16))
+                    .font(Theme.Fonts.icon(.l))
                     .foregroundStyle(draftLink.isEmpty ? Theme.textTertiary : accent)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableStyle())
             .disabled(draftLink.isEmpty)
-            Button {
+            CloseButton {
                 adding = false
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Theme.textTertiary)
             }
-            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .moaiCard(radius: Theme.Radius.field)
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.vertical, Theme.Space.s)
+        .moaiField(active: linkFieldFocused)
     }
 
     private func beginAdding() {
@@ -182,5 +129,79 @@ struct ShortcutsView: View {
         guard !draftLink.isEmpty else { return }
         store.add(title: draftTitle, link: draftLink)
         adding = false
+    }
+}
+
+/// One launcher chip. Holds its own hover state, so the delete
+/// affordance and highlight never bleed between chips.
+private struct ShortcutChip: View {
+    let shortcut: ShortcutStore.Shortcut
+    let store: ShortcutStore
+    let open: () -> Void
+
+    @Environment(\.moaiAccent) private var accent
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: open) {
+            VStack(spacing: Theme.Space.s) {
+                icon
+                Text(shortcut.title)
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(hovered ? Theme.textPrimary : Theme.textSecondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Theme.Space.l)
+            .moaiCard(radius: Theme.Radius.row)
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                    .fill(Color.white.opacity(hovered ? 0.03 : 0))
+                    .allowsHitTesting(false)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                    .strokeBorder(Color.white.opacity(hovered ? 0.10 : 0), lineWidth: 1)
+                    .allowsHitTesting(false)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous))
+        }
+        .buttonStyle(PressableStyle())
+        .overlay(alignment: .topTrailing) {
+            if hovered {
+                Button {
+                    store.remove(shortcut)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(Theme.Fonts.icon(.s))
+                        .foregroundStyle(Theme.textTertiary)
+                        .frame(minWidth: 22, minHeight: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressableStyle())
+            }
+        }
+        .onHover { hovered = $0 }
+        .animation(Theme.Motion.hover, value: hovered)
+    }
+
+    private var icon: some View {
+        Group {
+            if let fileIcon = ShortcutStore.fileIcon(for: shortcut.link) {
+                Image(nsImage: fileIcon)
+                    .resizable()
+                    .frame(width: 26, height: 26)
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(accent.opacity(0.14))
+                    Text(String(shortcut.title.prefix(1)).uppercased())
+                        .font(Theme.Fonts.icon(.m))
+                        .foregroundStyle(accent)
+                }
+                .frame(width: 26, height: 26)
+            }
+        }
+        .scaleEffect(hovered ? 1.06 : 1)
     }
 }

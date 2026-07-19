@@ -15,8 +15,8 @@ struct ShelfView: View {
             VStack {
                 Spacer()
                 Text("Drop files on the notch to stash them here.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textTertiary)
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textHint)
                 Spacer()
             }
             .frame(maxWidth: .infinity)
@@ -33,13 +33,13 @@ struct ShelfView: View {
 
     private func row(_ item: ShelfStore.Item) -> some View {
         let extractedText = shelf.extractText(item)
-        return HStack(spacing: 10) {
+        return HStack(spacing: Theme.Space.m) {
             Image(systemName: "doc.fill")
-                .font(.system(size: 12))
+                .font(Theme.Fonts.icon(.m))
                 .foregroundStyle(Theme.textSecondary)
 
             Text(item.name)
-                .font(.system(size: 11, weight: .medium))
+                .font(Theme.Fonts.bodyMedium)
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -56,9 +56,10 @@ struct ShelfView: View {
                 shelf.remove(item)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.vertical, Theme.Space.s)
         .moaiCard(radius: Theme.Radius.row)
+        .hoverHighlight()
         // Drag the file back out to Finder or any app
         .onDrag {
             NSItemProvider(object: item.url as NSURL)

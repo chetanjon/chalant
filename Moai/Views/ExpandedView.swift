@@ -37,7 +37,7 @@ struct ExpandedView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
             header
 
             if showSettings {
@@ -82,10 +82,10 @@ struct ExpandedView: View {
                 .transition(.opacity)
             }
         }
-        .padding(.horizontal, 22)
-        .padding(.bottom, 16)
+        .padding(.horizontal, Theme.Space.xxl)
+        .padding(.bottom, Theme.Space.xl)
         // Keep content below the physical camera housing.
-        .padding(.top, model.notchSize.height + 8)
+        .padding(.top, model.notchSize.height + Theme.Space.m)
         .foregroundStyle(.white)
         .animation(Theme.Motion.content, value: model.tab)
         .animation(Theme.Motion.content, value: showSettings)
@@ -97,56 +97,40 @@ struct ExpandedView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Theme.Space.xs) {
             Text("Moai")
-                .font(.system(size: 13, weight: .semibold))
+                .font(Theme.Fonts.title)
                 .foregroundStyle(Theme.textPrimary)
             Spacer()
-            Button {
+            HoverGlyphButton(symbol: "mic.fill", tint: accent) {
                 model.toggleListening()
-            } label: {
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(accent)
             }
-            .buttonStyle(.plain)
-            Button {
+            HoverGlyphButton(
+                symbol: "timer",
+                tint: showFocus || focus.isActive ? accent : Theme.textTertiary
+            ) {
                 withAnimation(Theme.Motion.content) {
                     showFocus.toggle()
                     if showFocus { showSettings = false }
                 }
-            } label: {
-                Image(systemName: "timer")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(
-                        showFocus || focus.isActive ? accent : Theme.textTertiary
-                    )
             }
-            .buttonStyle(.plain)
-            Button {
+            HoverGlyphButton(
+                symbol: "gearshape",
+                tint: showSettings ? accent : Theme.textTertiary
+            ) {
                 withAnimation(Theme.Motion.content) {
                     showSettings.toggle()
                     if showSettings { showFocus = false }
                 }
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(showSettings ? accent : Theme.textTertiary)
             }
-            .buttonStyle(.plain)
-            Button {
+            CloseButton {
                 model.collapse()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Theme.textTertiary)
             }
-            .buttonStyle(.plain)
         }
     }
 
     private var tabRow: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Theme.Space.s) {
             tabButton("Do", .ask)
             tabButton("Go", .links)
             tabButton("Clips", .clipboard)
@@ -156,52 +140,35 @@ struct ExpandedView: View {
     }
 
     private func tabButton(_ title: String, _ tab: NotchViewModel.Tab) -> some View {
-        Button {
+        TabPill(
+            title: title,
+            selected: model.tab == tab,
+            namespace: tabNS
+        ) {
             withAnimation(Theme.Motion.content) {
                 model.tab = tab
             }
-        } label: {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(
-                    model.tab == tab ? Theme.textPrimary : Theme.textTertiary
-                )
-                .padding(.horizontal, 11)
-                .padding(.vertical, 5)
-                .background {
-                    if model.tab == tab {
-                        Capsule()
-                            .fill(Color.white.opacity(0.12))
-                            .matchedGeometryEffect(id: "tabPill", in: tabNS)
-                    }
-                }
         }
-        .buttonStyle(.plain)
     }
 
     private var timerStrip: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Theme.Space.m) {
             Text("Timer \(timer.display)")
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .font(Theme.Fonts.bodyEmphasisMono)
                 .foregroundStyle(Theme.textPrimary)
             Spacer()
-            Button {
+            CloseButton {
                 timer.stop()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(Theme.textTertiary)
             }
-            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.vertical, Theme.Space.xs)
         .moaiCard()
     }
 
     private var settings: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: Theme.Space.xl) {
                 settingsSection("Island") {
                     settingRow("Size") {
                         Picker("", selection: $sizePreset) {
@@ -281,22 +248,15 @@ struct ExpandedView: View {
                     SecureField("sk-ant-...", text: $apiKey)
                         .onSubmit { KeychainStore.write(apiKey, account: "anthropicKey") }
                         .textFieldStyle(.plain)
-                        .font(.system(size: 12, design: .monospaced))
-                        .padding(8)
-                        .background(
-                            RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous)
-                                .fill(Theme.field)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous)
-                                .strokeBorder(Theme.hairlineFaint, lineWidth: 1)
-                        )
+                        .font(Theme.Fonts.bodyMono)
+                        .padding(Theme.Space.m)
+                        .moaiField()
                     Text("Optional, for the hard questions. Stays on this Mac.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.textTertiary)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textHint)
                 }
             }
-            .padding(.bottom, 8)
+            .padding(.bottom, Theme.Space.m)
         }
         .onAppear {
             apiKey = KeychainStore.read("anthropicKey") ?? ""
@@ -309,9 +269,9 @@ struct ExpandedView: View {
         _ title: String,
         @ViewBuilder content: () -> some View
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
             Text(title.uppercased())
-                .font(.system(size: 9, weight: .semibold))
+                .font(Theme.Fonts.micro)
                 .tracking(1.3)
                 .foregroundStyle(Theme.textTertiary)
             content()
@@ -324,7 +284,7 @@ struct ExpandedView: View {
     ) -> some View {
         HStack {
             Text(label)
-                .font(.system(size: 12))
+                .font(Theme.Fonts.body)
                 .foregroundStyle(Theme.textSecondary)
             Spacer()
             control()
@@ -357,13 +317,14 @@ struct ExpandedView: View {
                             )
                     )
                 Text(label)
-                    .font(.system(size: 9))
+                    .font(Theme.Fonts.micro)
                     .foregroundStyle(
                         accentMode == mode ? Theme.textSecondary : Theme.textTertiary
                     )
             }
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
     }
 
     private var answerArea: some View {
@@ -371,19 +332,19 @@ struct ExpandedView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if model.isWorking, model.answer.isEmpty {
                     ThinkingDots()
-                        .padding(.top, 4)
+                        .padding(.top, Theme.Space.xs)
                 } else if !model.errorText.isEmpty {
                     Text(model.errorText)
-                        .font(.system(size: 12))
+                        .font(Theme.Fonts.body)
                         .foregroundStyle(Theme.danger)
                 } else if model.answer.isEmpty {
                     Text("remind me to call amma at 6. focus 25. timer 10. note: an idea. notes. Or hold the notch and say it.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.textTertiary)
+                        .font(Theme.Fonts.body)
+                        .foregroundStyle(Theme.textHint)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text(model.answer)
-                        .font(.system(size: 13))
+                        .font(Theme.Fonts.reading)
                         .lineSpacing(3)
                         .foregroundStyle(Theme.textPrimary)
                         .textSelection(.enabled)
@@ -395,57 +356,51 @@ struct ExpandedView: View {
     }
 
     private func contextChip(_ name: String) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Theme.Space.s) {
             Image(systemName: "paperclip")
-                .font(.system(size: 9, weight: .semibold))
+                .font(Theme.Fonts.icon(.xs))
             Text(name)
-                .font(.system(size: 10, weight: .medium))
+                .font(Theme.Fonts.caption)
                 .lineLimit(1)
+            // Tight capsule: a 22pt frame would balloon the chip, so
+            // this stays a bare glyph by design.
             Button {
                 model.pendingContext = nil
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(Theme.Fonts.icon(.xs, weight: .bold))
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableStyle())
         }
         .foregroundStyle(accent)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.xs)
         .background(Capsule().fill(accent.opacity(0.12)))
         .overlay(Capsule().strokeBorder(accent.opacity(0.4), lineWidth: 1))
     }
 
     private var inputBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Theme.Space.m) {
             TextField("What needs doing", text: $model.draftPrompt)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
+                .font(Theme.Fonts.reading)
                 .focused($inputFocused)
                 .onSubmit(sendDraft)
             Button(action: sendDraft) {
                 Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 20))
+                    .font(Theme.Fonts.icon(.xl))
                     .foregroundStyle(
                         model.draftPrompt.isEmpty ? Theme.textTertiary : accent
                     )
+                    .contentShape(Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableStyle())
             .disabled(model.draftPrompt.isEmpty || model.isWorking)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous)
-                .fill(Theme.field)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous)
-                .strokeBorder(
-                    model.draftPrompt.isEmpty ? Theme.hairlineFaint : accent.opacity(0.5),
-                    lineWidth: 1
-                )
-        )
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.vertical, Theme.Space.m)
+        .moaiField(active: !model.draftPrompt.isEmpty)
     }
 
     private func sendDraft() {
@@ -461,46 +416,67 @@ struct FocusStrip: View {
     @Environment(\.moaiAccent) private var accent
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Theme.Space.m) {
             Text(focus.phase == .work ? "Focus \(focus.display)" : "Break \(focus.display)")
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .font(Theme.Fonts.bodyEmphasisMono)
                 .foregroundStyle(Theme.textPrimary)
             Text("cycle \(focus.cycle)")
-                .font(.system(size: 10))
-                .foregroundStyle(Theme.textTertiary)
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textHint)
             Spacer()
-            noiseButton("B", .brown)
-            noiseButton("W", .white)
-            noiseButton("P", .pink)
-            noiseButton("R", .rain)
-            noiseButton("C", .cafe)
-            Button {
-                focus.stop()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(Theme.textTertiary)
+            ForEach(NoiseEngine.NoiseColor.allCases, id: \.self) { color in
+                NoiseButton(
+                    color: color,
+                    selected: focus.noiseColor == color,
+                    compact: true
+                ) {
+                    focus.setNoise(color)
+                }
             }
-            .buttonStyle(.plain)
+            CloseButton {
+                focus.stop()
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.vertical, Theme.Space.xs)
         .moaiCard()
     }
+}
 
-    private func noiseButton(
-        _ label: String,
-        _ color: NoiseEngine.NoiseColor
-    ) -> some View {
-        Button {
-            focus.setNoise(color)
-        } label: {
-            Text(label)
-                .font(.system(size: 10, weight: .semibold))
+/// One tab in the sliding-pill row. Inactive tabs answer hover with
+/// a tint lift and a ghost of the pill.
+struct TabPill: View {
+    let title: String
+    let selected: Bool
+    let namespace: Namespace.ID
+    let action: () -> Void
+
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(Theme.Fonts.label)
                 .foregroundStyle(
-                    focus.noiseColor == color ? accent : Theme.textTertiary
+                    selected ? Theme.textPrimary
+                        : hovered ? Theme.textSecondary : Theme.textTertiary
                 )
+                .padding(.horizontal, Theme.Space.wingInset)
+                .padding(.vertical, 5)
+                .background {
+                    if selected {
+                        Capsule()
+                            .fill(Color.white.opacity(0.12))
+                            .matchedGeometryEffect(id: "tabPill", in: namespace)
+                    } else if hovered {
+                        Capsule()
+                            .fill(Color.white.opacity(0.05))
+                    }
+                }
+                .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
+        .onHover { hovered = $0 }
+        .animation(Theme.Motion.hover, value: hovered)
     }
 }
