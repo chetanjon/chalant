@@ -221,12 +221,16 @@ final class NotchViewModel: ObservableObject {
                 return
             }
 
-            // Beyond local verbs, the optional cloud key takes over.
+            // Beyond local verbs, the selected model takes over. The
+            // on-device model needs no key; cloud providers do.
             let provider = AIProvider.current
-            let key = KeychainStore.read(provider.keychainAccount) ?? ""
-            guard !key.isEmpty else {
-                answer = "That one needs a \(provider.displayName) API key. Reminders, notes, timers, focus, and music all work without it. Gear icon, top right."
-                return
+            var key = ""
+            if provider.needsKey {
+                key = KeychainStore.read(provider.keychainAccount) ?? ""
+                guard !key.isEmpty else {
+                    answer = "That one needs a \(provider.displayName) API key. Reminders, notes, timers, focus, and music all work without it. Gear icon, top right."
+                    return
+                }
             }
 
             var fullPrompt = text

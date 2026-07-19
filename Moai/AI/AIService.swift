@@ -1,14 +1,21 @@
 import Foundation
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
-/// Which cloud brain answers in the Do tab. Fast, cheap tiers across
-/// the board — notch questions want snappy answers, not dissertations.
+/// Which brain answers in the Do tab. "Mac" is Apple's on-device
+/// model — free, private, keyless; the cloud providers are fast,
+/// cheap tiers — notch questions want snappy answers, not
+/// dissertations.
 enum AIProvider: String, CaseIterable {
+    case local
     case claude
     case openai
     case gemini
 
     var displayName: String {
         switch self {
+        case .local: return "Mac"
         case .claude: return "Claude"
         case .openai: return "GPT"
         case .gemini: return "Gemini"
@@ -17,6 +24,7 @@ enum AIProvider: String, CaseIterable {
 
     var model: String {
         switch self {
+        case .local: return "on-device"
         case .claude: return "claude-haiku-4-5"
         case .openai: return "gpt-5-mini"
         // Alias tracks Google's current Flash model, so it never goes
@@ -25,8 +33,12 @@ enum AIProvider: String, CaseIterable {
         }
     }
 
+    /// Whether answers need an API key. The on-device model doesn't.
+    var needsKey: Bool { self != .local }
+
     var keychainAccount: String {
         switch self {
+        case .local: return ""
         case .claude: return "anthropicKey"
         case .openai: return "openaiKey"
         case .gemini: return "geminiKey"
@@ -35,6 +47,7 @@ enum AIProvider: String, CaseIterable {
 
     var keyPlaceholder: String {
         switch self {
+        case .local: return ""
         case .claude: return "sk-ant-..."
         case .openai: return "sk-..."
         case .gemini: return "AIza..."
@@ -42,19 +55,30 @@ enum AIProvider: String, CaseIterable {
     }
 
     /// The user's current pick, shared by typed and spoken input.
+    /// First run prefers the on-device model when the Mac has it —
+    /// Moai should answer out of the box, no key required.
     static var current: AIProvider {
-        AIProvider(rawValue: UserDefaults.standard.string(forKey: "aiProvider") ?? "")
-            ?? .claude
+        if let stored = AIProvider(
+            rawValue: UserDefaults.standard.string(forKey: "aiProvider") ?? ""
+        ) {
+            return stored
+        }
+        return AIService.localModelAvailable ? .local : .claude
     }
 
-    /// Providers worth offering: only those with a key on file. With
-    /// no keys at all, show everything — the chip stays discoverable
-    /// and the keyless hint explains what's missing.
+    /// Providers worth offering: the on-device model when this Mac
+    /// supports it, plus any cloud provider with a key on file. With
+    /// neither, show the cloud providers — the chip stays
+    /// discoverable and the keyless hint explains what's missing.
     static var available: [AIProvider] {
-        let keyed = allCases.filter {
-            !(KeychainStore.read($0.keychainAccount) ?? "").isEmpty
+        var pool: [AIProvider] = []
+        if AIService.localModelAvailable {
+            pool.append(.local)
         }
-        return keyed.isEmpty ? allCases : keyed
+        pool += allCases.filter {
+            $0.needsKey && !(KeychainStore.read($0.keychainAccount) ?? "").isEmpty
+        }
+        return pool.isEmpty ? allCases.filter(\.needsKey) : pool
     }
 
     var next: AIProvider {
@@ -83,6 +107,19 @@ struct AIService {
     static let systemPrompt =
         "You are Moai, a tiny assistant living in the Mac notch. Answer in as few words as possible. Plain text only, no markdown."
 
+    /// True when Apple's on-device model can answer right now:
+    /// Apple Silicon, new-enough macOS, Apple Intelligence turned on.
+    static var localModelAvailable: Bool {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            if case .available = SystemLanguageModel.default.availability {
+                return true
+            }
+        }
+        #endif
+        return false
+    }
+
     /// Streams the answer as text deltas so the island can type it out
     /// live instead of sitting on ThinkingDots until the whole reply lands.
     static func stream(
@@ -90,7 +127,10 @@ struct AIService {
         provider: AIProvider,
         apiKey: String
     ) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
+        if provider == .local {
+            return localStream(prompt: prompt)
+        }
+        return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     let request = try makeRequest(
@@ -131,6 +171,49 @@ struct AIService {
         }
     }
 
+    // MARK: On-device model
+
+    /// Apple's local model streams cumulative snapshots, not deltas —
+    /// diff against the last snapshot so the island types like the
+    /// cloud providers do.
+    private static func localStream(prompt: String) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    #if canImport(FoundationModels)
+                    if #available(macOS 26.0, *) {
+                        guard case .available = SystemLanguageModel.default.availability else {
+                            throw AIError.badResponse(
+                                "The Mac's on-device model isn't ready. Turn on Apple Intelligence in System Settings, or pick a cloud provider with the chip."
+                            )
+                        }
+                        let session = LanguageModelSession(instructions: systemPrompt)
+                        var previous = ""
+                        for try await snapshot in session.streamResponse(to: prompt) {
+                            let text = snapshot.content
+                            if text.hasPrefix(previous) {
+                                let delta = String(text.dropFirst(previous.count))
+                                if !delta.isEmpty { continuation.yield(delta) }
+                            } else {
+                                continuation.yield(text)
+                            }
+                            previous = text
+                        }
+                        continuation.finish()
+                        return
+                    }
+                    #endif
+                    throw AIError.badResponse(
+                        "The on-device model needs a newer macOS. Pick a cloud provider with the chip."
+                    )
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     // MARK: Request framing per provider
 
     private static func makeRequest(
@@ -140,6 +223,9 @@ struct AIService {
     ) throws -> URLRequest {
         let urlString: String
         switch provider {
+        case .local:
+            // Never reached — stream() routes .local to localStream().
+            throw AIError.badResponse("The on-device model has no endpoint.")
         case .claude:
             urlString = "https://api.anthropic.com/v1/messages"
         case .openai:
@@ -158,6 +244,8 @@ struct AIService {
 
         let body: [String: Any]
         switch provider {
+        case .local:
+            throw AIError.badResponse("The on-device model has no endpoint.")
         case .claude:
             request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
             request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
@@ -225,6 +313,8 @@ struct AIService {
 
     private static func delta(from data: Data, provider: AIProvider) -> String? {
         switch provider {
+        case .local:
+            return nil
         case .claude:
             guard let event = try? JSONDecoder().decode(ClaudeEvent.self, from: data),
                   event.type == "content_block_delta",
@@ -279,6 +369,8 @@ struct AIService {
     ) -> String {
         let message: String?
         switch provider {
+        case .local:
+            message = nil
         case .claude:
             message = (try? JSONDecoder().decode(AnthropicErrorEnvelope.self, from: data))?
                 .error?.message

@@ -87,13 +87,14 @@ struct SettingsPane: View {
                     }
                 }
                 section("AI keys", reveal: 3) {
-                    ForEach(AIProvider.allCases, id: \.self) { provider in
+                    let keyed = AIProvider.allCases.filter(\.needsKey)
+                    ForEach(keyed, id: \.self) { provider in
                         keyField(for: provider)
-                        if provider != AIProvider.allCases.last {
+                        if provider != keyed.last {
                             divider
                         }
                     }
-                    Text("Optional, for the hard questions. Pick who answers with the chip next to the Do box. Keys stay on this Mac.")
+                    Text("Optional, for the hard questions. The Mac's own model answers without any key. Pick who answers with the chip next to the Do box. Keys stay on this Mac.")
                         .font(Theme.Fonts.caption)
                         .foregroundStyle(Theme.textHint)
                 }
@@ -102,7 +103,7 @@ struct SettingsPane: View {
             .padding(.bottom, Theme.Space.m)
         }
         .onAppear {
-            for provider in AIProvider.allCases {
+            for provider in AIProvider.allCases where provider.needsKey {
                 apiKeys[provider] = KeychainStore.read(provider.keychainAccount) ?? ""
             }
             launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -132,7 +133,7 @@ struct SettingsPane: View {
     }
 
     private func saveKeys() {
-        for provider in AIProvider.allCases {
+        for provider in AIProvider.allCases where provider.needsKey {
             KeychainStore.write(apiKeys[provider] ?? "", account: provider.keychainAccount)
         }
     }
