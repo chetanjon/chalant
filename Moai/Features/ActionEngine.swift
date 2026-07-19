@@ -149,6 +149,42 @@ final class ActionEngine {
             return await model.events.agendaToday()
         }
 
+        // Reminder recovery: speech sometimes garbles the opening verb
+        // ("said a reminder...") but keeps "remind(er)" intact somewhere.
+        // Runs last so explicit verbs always win.
+        let afterVerb: (rest: String, bare: Bool)? = {
+            if let range = text.range(of: "reminder", options: .caseInsensitive) {
+                let tail = String(text[range.upperBound...])
+                // "reminders" is the plural noun ("show my reminders"),
+                // not a save command.
+                guard !tail.lowercased().hasPrefix("s") else { return nil }
+                return (tail, false)
+            }
+            if let range = text.range(of: "remind", options: .caseInsensitive) {
+                return (String(text[range.upperBound...]), true)
+            }
+            return nil
+        }()
+        if let (tail, bare) = afterVerb {
+            var rest = tail.trimmingCharacters(in: .whitespaces)
+            if bare, rest.lowercased().hasPrefix("me ") {
+                rest = String(rest.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+            }
+            var due: Date?
+            if let (date, range) = Self.extractDate(rest) {
+                due = date
+                rest = Self.removing(range, from: rest)
+            }
+            for connector in ["to ", "for ", "about ", "that "]
+            where rest.lowercased().hasPrefix(connector) {
+                rest = String(rest.dropFirst(connector.count))
+                    .trimmingCharacters(in: .whitespaces)
+                break
+            }
+            guard !rest.isEmpty else { return "Remind you to what?" }
+            return await model.events.addReminder(rest, due: due)
+        }
+
         return nil
     }
 
@@ -160,6 +196,9 @@ final class ActionEngine {
     }
 
     private static func extractDate(_ text: String) -> (Date, NSRange)? {
+        if let relative = relativeTime(text) {
+            return relative
+        }
         if let detector = try? NSDataDetector(
             types: NSTextCheckingResult.CheckingType.date.rawValue
         ) {
@@ -170,6 +209,25 @@ final class ActionEngine {
             }
         }
         return bareHourTime(text)
+    }
+
+    /// Spoken relative times — "in 20 minutes", "in an hour" — which
+    /// NSDataDetector handles unreliably.
+    private static func relativeTime(_ text: String) -> (Date, NSRange)? {
+        guard let regex = try? NSRegularExpression(
+            pattern: "\\bin (\\d{1,3}|a|an) ?(minutes|minute|mins|min|hours|hour|hrs|hr)\\b",
+            options: [.caseInsensitive]
+        ) else { return nil }
+        let nsText = text as NSString
+        guard let match = regex.firstMatch(
+            in: text, range: NSRange(location: 0, length: nsText.length)
+        ) else { return nil }
+        let amountText = nsText.substring(with: match.range(at: 1)).lowercased()
+        let amount = Int(amountText) ?? 1
+        let unit = nsText.substring(with: match.range(at: 2)).lowercased()
+        let seconds = unit.hasPrefix("h") ? amount * 3600 : amount * 60
+        guard seconds > 0 else { return nil }
+        return (Date().addingTimeInterval(TimeInterval(seconds)), match.range)
     }
 
     /// NSDataDetector misses bare hours ("at 6"). Resolve them to the

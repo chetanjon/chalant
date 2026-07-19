@@ -14,12 +14,17 @@ final class VoiceController: NSObject, ObservableObject {
     private let recognizer = SFSpeechRecognizer()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
+    private var finishCompletion: ((String) -> Void)?
+    private var finishTimeout: DispatchWorkItem?
 
     func begin() {
         SFSpeechRecognizer.requestAuthorization { _ in }
         transcript = ""
         level = 0
         failure = nil
+        finishTimeout?.cancel()
+        finishTimeout = nil
+        finishCompletion = nil
 
         switch SFSpeechRecognizer.authorizationStatus() {
         case .denied, .restricted:
@@ -74,25 +79,45 @@ final class VoiceController: NSObject, ObservableObject {
         task = recognizer.recognitionTask(with: request) { [weak self] result, _ in
             guard let result else { return }
             let text = result.bestTranscription.formattedString
+            let isFinal = result.isFinal
             Task { @MainActor in
-                self?.transcript = text
+                guard let self else { return }
+                self.transcript = text
+                // The final result carries the completed tail of the
+                // sentence — deliver on it rather than on a fixed beat,
+                // or trailing words ("...at 6 pm") get truncated.
+                if isFinal {
+                    self.deliver()
+                }
             }
         }
     }
 
-    /// Stop capture, give recognition a beat to finalize, hand back the words.
+    /// Stop capture, wait for the recognizer's final transcription
+    /// (with a safety timeout), then hand back the words.
     func end(completion: @escaping (String) -> Void) {
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
         request?.endAudio()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
-            let text = self?.transcript ?? ""
-            self?.task?.cancel()
-            self?.task = nil
-            self?.request = nil
-            self?.level = 0
-            completion(text)
+        finishCompletion = completion
+        let timeout = DispatchWorkItem { [weak self] in
+            self?.deliver()
         }
+        finishTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: timeout)
+    }
+
+    private func deliver() {
+        finishTimeout?.cancel()
+        finishTimeout = nil
+        guard let completion = finishCompletion else { return }
+        finishCompletion = nil
+        let text = transcript
+        task?.cancel()
+        task = nil
+        request = nil
+        level = 0
+        completion(text)
     }
 }

@@ -53,7 +53,7 @@ final class EventKitService {
         if let due {
             return "Set. \(Self.formatter.string(from: due))."
         }
-        return "Set."
+        return "Set, no time attached — it won't ring. Add one like \"at 6\" next time."
     }
 
     func addEvent(_ title: String, start: Date) async -> String {
