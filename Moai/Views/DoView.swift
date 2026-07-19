@@ -5,6 +5,7 @@ struct DoView: View {
     @ObservedObject var model: NotchViewModel
     @Environment(\.moaiAccent) private var accent
     @FocusState private var inputFocused: Bool
+    @AppStorage("aiProvider") private var aiProvider = "claude"
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
@@ -84,8 +85,29 @@ struct DoView: View {
         .overlay(Capsule().strokeBorder(accent.opacity(0.4), lineWidth: 1))
     }
 
+    /// The provider chip: which cloud brain answers non-local questions.
+    /// Tap to cycle Claude → GPT → Gemini; the choice sticks.
+    private var providerChip: some View {
+        let provider = AIProvider.current
+        return Button {
+            aiProvider = provider.next.rawValue
+        } label: {
+            Text(provider.displayName)
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, Theme.Space.m)
+                .frame(minHeight: 22)
+                .background(Capsule().fill(Color.white.opacity(0.06)))
+                .overlay(Capsule().strokeBorder(Theme.hairlineFaint, lineWidth: 1))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressableStyle())
+        .help("Answers with \(provider.displayName) — tap to switch")
+    }
+
     private var inputBar: some View {
         HStack(spacing: Theme.Space.m) {
+            providerChip
             TextField("What needs doing", text: $model.draftPrompt)
                 .textFieldStyle(.plain)
                 .font(Theme.Fonts.reading)

@@ -221,10 +221,11 @@ final class NotchViewModel: ObservableObject {
                 return
             }
 
-            // Beyond local verbs, the optional key takes over.
-            let key = KeychainStore.read("anthropicKey") ?? ""
+            // Beyond local verbs, the optional cloud key takes over.
+            let provider = AIProvider.current
+            let key = KeychainStore.read(provider.keychainAccount) ?? ""
             guard !key.isEmpty else {
-                answer = "That one needs the optional key. Reminders, notes, timers, focus, and music all work without it. Gear icon, top right."
+                answer = "That one needs a \(provider.displayName) API key. Reminders, notes, timers, focus, and music all work without it. Gear icon, top right."
                 return
             }
 
@@ -242,7 +243,9 @@ final class NotchViewModel: ObservableObject {
             answer = ""
             isWorking = true
             do {
-                for try await delta in ClaudeService.stream(prompt: fullPrompt, apiKey: key) {
+                for try await delta in AIService.stream(
+                    prompt: fullPrompt, provider: provider, apiKey: key
+                ) {
                     answer += delta
                 }
             } catch {

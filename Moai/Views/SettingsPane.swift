@@ -6,9 +6,9 @@ import SwiftUI
 struct SettingsPane: View {
     @ObservedObject var music: MusicController
 
-    // Optional. Everything local runs without it. Lives in the Keychain;
+    // Optional. Everything local runs without them. Live in the Keychain;
     // loaded when the pane appears, saved on submit/dismiss.
-    @State private var apiKey = ""
+    @State private var apiKeys: [AIProvider: String] = [:]
     @State private var launchAtLogin = false
 
     @AppStorage("expandedSizePreset") private var sizePreset = "compact"
@@ -86,14 +86,14 @@ struct SettingsPane: View {
                         Spacer()
                     }
                 }
-                section("Claude key", reveal: 3) {
-                    SecureField("sk-ant-...", text: $apiKey)
-                        .onSubmit { KeychainStore.write(apiKey, account: "anthropicKey") }
-                        .textFieldStyle(.plain)
-                        .font(Theme.Fonts.bodyMono)
-                        .padding(Theme.Space.m)
-                        .moaiField()
-                    Text("Optional, for the hard questions. Stays on this Mac.")
+                section("AI keys", reveal: 3) {
+                    ForEach(AIProvider.allCases, id: \.self) { provider in
+                        keyField(for: provider)
+                        if provider != AIProvider.allCases.last {
+                            divider
+                        }
+                    }
+                    Text("Optional, for the hard questions. Pick who answers with the chip next to the Do box. Keys stay on this Mac.")
                         .font(Theme.Fonts.caption)
                         .foregroundStyle(Theme.textHint)
                 }
@@ -102,10 +102,39 @@ struct SettingsPane: View {
             .padding(.bottom, Theme.Space.m)
         }
         .onAppear {
-            apiKey = KeychainStore.read("anthropicKey") ?? ""
+            for provider in AIProvider.allCases {
+                apiKeys[provider] = KeychainStore.read(provider.keychainAccount) ?? ""
+            }
             launchAtLogin = SMAppService.mainApp.status == .enabled
         }
-        .onDisappear { KeychainStore.write(apiKey, account: "anthropicKey") }
+        .onDisappear { saveKeys() }
+    }
+
+    private func keyField(for provider: AIProvider) -> some View {
+        HStack(spacing: Theme.Space.m) {
+            Text(provider.displayName)
+                .font(Theme.Fonts.body)
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 56, alignment: .leading)
+            SecureField(
+                provider.keyPlaceholder,
+                text: Binding(
+                    get: { apiKeys[provider] ?? "" },
+                    set: { apiKeys[provider] = $0 }
+                )
+            )
+            .onSubmit { saveKeys() }
+            .textFieldStyle(.plain)
+            .font(Theme.Fonts.bodyMono)
+            .padding(Theme.Space.m)
+            .moaiField()
+        }
+    }
+
+    private func saveKeys() {
+        for provider in AIProvider.allCases {
+            KeychainStore.write(apiKeys[provider] ?? "", account: provider.keychainAccount)
+        }
     }
 
     // MARK: Building blocks
