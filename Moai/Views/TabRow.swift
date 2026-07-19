@@ -16,8 +16,13 @@ struct TabRow: View {
         }
     }
 
+    private static let order: [NotchViewModel.Tab] = [.ask, .links, .clipboard, .shelf]
+
     private func pill(_ title: String, _ tab: NotchViewModel.Tab) -> some View {
         TabPill(title: title, selected: model.tab == tab, namespace: ns) {
+            let from = Self.order.firstIndex(of: model.tab) ?? 0
+            let to = Self.order.firstIndex(of: tab) ?? 0
+            model.tabSlideDirection = to >= from ? 1 : -1
             withAnimation(Theme.Motion.content) {
                 model.tab = tab
             }

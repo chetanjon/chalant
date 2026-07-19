@@ -29,6 +29,15 @@ final class NotchViewModel: ObservableObject {
     @Published var tab: Tab = .ask
     @Published var pane: Pane = .none
 
+    /// Pointer position across the island, 0...1, published by the
+    /// window controller's hover poll — quantized so casual movement
+    /// costs a few re-renders per second, not twenty. nil = no light.
+    @Published var pointerUnit: CGFloat?
+
+    /// Which way the next tab switch should slide, set by TabRow just
+    /// before the tab changes so both land in the same transaction.
+    var tabSlideDirection: CGFloat = 1
+
     /// Draft text in the Do box. Lives here so clipboard and shelf
     /// actions can hand content to the Do surface.
     @Published var draftPrompt = ""

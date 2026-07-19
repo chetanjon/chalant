@@ -153,6 +153,7 @@ final class NotchWindowController {
         let location = NSEvent.mouseLocation
         switch viewModel.state {
         case .collapsed:
+            publishPointerUnit(location, zone: collapsedZone(on: screen))
             if collapsedZone(on: screen).contains(location) {
                 // Level-triggered on entry: presence in the zone is enough.
                 // No stale-flag path may block a fresh hover from opening.
@@ -180,6 +181,7 @@ final class NotchWindowController {
                 }
             }
         case .expanded:
+            publishPointerUnit(location, zone: expandedZone(on: screen))
             openIntentWork?.cancel()
             openIntentWork = nil
             let inside = expandedZone(on: screen).contains(location)
@@ -194,11 +196,30 @@ final class NotchWindowController {
         }
     }
 
+    /// Publish a coarse 0...1 pointer position across the hover zone
+    /// so the shell's specular light can follow the cursor. Quantized
+    /// to 1/24 steps and set only on change: a normal sweep costs a
+    /// handful of re-renders, not the full 20 Hz.
+    private func publishPointerUnit(_ location: NSPoint, zone: NSRect) {
+        guard zone.contains(location) else {
+            if viewModel.pointerUnit != nil { viewModel.pointerUnit = nil }
+            return
+        }
+        let raw = (location.x - zone.minX) / zone.width
+        let unit = min(max((raw * 24).rounded() / 24, 0), 1)
+        if viewModel.pointerUnit != unit {
+            viewModel.pointerUnit = unit
+        }
+    }
+
     /// Any state change, hover-driven or not (tap, file drop, click-away
     /// collapse), resets hover bookkeeping to match reality.
     private func stateChanged(_ newState: NotchViewModel.IslandState) {
         openIntentWork?.cancel()
         openIntentWork = nil
+        // The light never survives a state morph; it fades back in on
+        // the next poll if the pointer is still there.
+        viewModel.pointerUnit = nil
         switch newState {
         case .collapsed:
             pointerInside = false

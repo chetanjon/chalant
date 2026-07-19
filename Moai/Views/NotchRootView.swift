@@ -137,6 +137,25 @@ struct NotchRootView: View {
                             .strokeBorder(Theme.lipLight, lineWidth: 1)
                             .opacity(idleEdgeOn && model.state == .collapsed ? 1 : 0)
                     )
+                    // A soft specular highlight that follows the cursor
+                    // along the top edge — the glass answers the hand.
+                    .overlay {
+                        if Theme.Feel.current.ambient, let unit = model.pointerUnit {
+                            islandShape
+                                .strokeBorder(Color.white.opacity(0.14), lineWidth: 1.5)
+                                .mask(
+                                    RadialGradient(
+                                        colors: [.white, .clear],
+                                        center: UnitPoint(x: unit, y: 0),
+                                        startRadius: 0,
+                                        endRadius: 110
+                                    )
+                                )
+                                .allowsHitTesting(false)
+                                .transition(.opacity)
+                        }
+                    }
+                    .animation(Theme.Motion.hover, value: model.pointerUnit)
                     // Breathing accent ring: idle life on the edges when
                     // music or a timer is going. Intensity breathes in
                     // place — nothing travels along the border.
@@ -151,6 +170,11 @@ struct NotchRootView: View {
                                         .strokeBorder(accent.opacity(0.03 + 0.04 * breath), lineWidth: 4)
                                     islandShape
                                         .strokeBorder(accent.opacity(0.08 + 0.10 * breath), lineWidth: 1.5)
+                                    // The belly light breathes with the
+                                    // same rhythm — same clock, no new timer.
+                                    islandShape
+                                        .strokeBorder(Theme.lipLight, lineWidth: 1)
+                                        .opacity(0.10 + 0.20 * breath)
                                 }
                             }
                             .allowsHitTesting(false)
@@ -320,17 +344,17 @@ struct NotchRootView: View {
 
     private var listeningContent: some View {
         VStack(spacing: Theme.Space.m) {
-            Text("listening")
-                .font(Theme.Fonts.label)
-                .tracking(3)
-                .foregroundStyle(Theme.textSecondary)
+            listeningCaption
             levelBars
+            // Fixed two-line box: arriving words must not bounce the
+            // whole stack vertically.
             Text(voice.transcript.isEmpty ? "Say it." : voice.transcript)
                 .font(Theme.Fonts.body)
                 .foregroundStyle(voice.transcript.isEmpty ? Theme.textHint : Theme.textPrimary)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, Theme.Space.xxl)
+                .frame(height: 34)
             Text("RELEASE TO RUN")
                 .font(Theme.Fonts.micro)
                 .tracking(1.2)
@@ -350,12 +374,40 @@ struct NotchRootView: View {
         }
     }
 
+    /// "listening" with a slow shimmer while ambient motion is on.
+    private var listeningCaption: some View {
+        Group {
+            if Theme.Feel.current.ambient {
+                TimelineView(.animation(minimumInterval: 1 / 10)) { context in
+                    let t = context.date.timeIntervalSinceReferenceDate
+                    Text("listening")
+                        .font(Theme.Fonts.label)
+                        .tracking(3)
+                        .foregroundStyle(Theme.textSecondary)
+                        .opacity(0.75 + 0.25 * sin(t / 1.1))
+                }
+            } else {
+                Text("listening")
+                    .font(Theme.Fonts.label)
+                    .tracking(3)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+        }
+    }
+
     private var levelBars: some View {
         HStack(spacing: 3.5) {
             ForEach(0..<21, id: \.self) { index in
                 let center = 1 - abs(CGFloat(index) - 10) / 11
                 Capsule()
-                    .fill(accent.opacity(0.35 + center * 0.65))
+                    .fill(
+                        LinearGradient(
+                            colors: [accent, accent.opacity(0.4)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .opacity(0.35 + center * 0.65)
                     .frame(
                         width: 3.5,
                         height: 4 + voice.level * 30 * (0.35 + center * 0.65)
@@ -363,6 +415,8 @@ struct NotchRootView: View {
             }
         }
         .frame(height: 36)
+        // Live glow only while sound is actually arriving.
+        .shadow(color: accent.opacity(voice.level > 0.05 ? 0.35 : 0), radius: 6)
         .animation(.easeOut(duration: 0.1), value: voice.level)
     }
 

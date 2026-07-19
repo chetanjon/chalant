@@ -9,11 +9,25 @@ struct DoView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
             answerArea
+            // A live wire under the text while the answer streams in.
+            if model.isWorking, !model.answer.isEmpty {
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.5), accent.opacity(0.05)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(height: 1)
+                    .transition(.opacity)
+            }
             if let context = model.pendingContext {
                 contextChip(context.name)
             }
             inputBar
         }
+        .animation(Theme.Motion.content, value: model.isWorking)
         .onAppear { inputFocused = true }
     }
 

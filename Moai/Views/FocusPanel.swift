@@ -26,9 +26,9 @@ struct FocusPanel: View {
                 .tracking(1.3)
                 .foregroundStyle(Theme.textTertiary)
             HStack(spacing: Theme.Space.m) {
-                presetChip(15)
-                presetChip(25)
-                presetChip(50)
+                presetChip(15, "short")
+                presetChip(25, "classic")
+                presetChip(50, "deep")
             }
             Text("Four rounds to a set, short breaks between, a long one after. Noise optional.")
                 .font(Theme.Fonts.body)
@@ -98,7 +98,7 @@ struct FocusPanel: View {
         .padding(.top, Theme.Space.xs)
     }
 
-    private func presetChip(_ minutes: Int) -> some View {
+    private func presetChip(_ minutes: Int, _ mood: String) -> some View {
         Button {
             focus.start(work: minutes)
         } label: {
@@ -106,7 +106,7 @@ struct FocusPanel: View {
                 Text("\(minutes)")
                     .font(Theme.Fonts.numeral)
                     .foregroundStyle(Theme.textPrimary)
-                Text("min")
+                Text(mood)
                     .font(Theme.Fonts.micro)
                     .foregroundStyle(Theme.textTertiary)
             }
@@ -124,17 +124,7 @@ struct FocusPanel: View {
     private var activeCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xl) {
             HStack(spacing: Theme.Space.xl) {
-                ProgressRing(
-                    progress: focus.progress,
-                    size: 54,
-                    lineWidth: 3,
-                    tint: focus.phase == .work ? accent : Theme.accentFallback,
-                    trackOpacity: 0.08
-                ) {
-                    Text("\(focus.roundInSet)")
-                        .font(Theme.Fonts.counterMono)
-                        .foregroundStyle(Theme.textSecondary)
-                }
+                breathingRing
                 VStack(alignment: .leading, spacing: 3) {
                     Text(focus.phase == .work ? "FOCUS" : "BREAK")
                         .font(Theme.Fonts.micro)
@@ -173,6 +163,36 @@ struct FocusPanel: View {
         .padding(.top, Theme.Space.xs)
         .animation(Theme.Motion.content, value: focus.isPaused)
         .animation(Theme.Motion.content, value: focus.phase)
+    }
+
+    private var sessionRing: some View {
+        ProgressRing(
+            progress: focus.progress,
+            size: 54,
+            lineWidth: 3,
+            tint: focus.phase == .work ? accent : Theme.accentFallback,
+            trackOpacity: 0.08
+        ) {
+            Text("\(focus.roundInSet)")
+                .font(Theme.Fonts.counterMono)
+                .foregroundStyle(Theme.textSecondary)
+        }
+    }
+
+    /// During work the ring carries a faint breathing halo — the
+    /// session is alive. Breaks and pauses sit still.
+    @ViewBuilder
+    private var breathingRing: some View {
+        if Theme.Feel.current.ambient, focus.phase == .work, !focus.isPaused {
+            TimelineView(.animation(minimumInterval: 1 / 15)) { context in
+                let t = context.date.timeIntervalSinceReferenceDate
+                let breath = 0.5 + 0.5 * sin(t / (1.6 * Theme.Motion.ambientSlow))
+                sessionRing
+                    .shadow(color: accent.opacity(0.10 + 0.15 * breath), radius: 8)
+            }
+        } else {
+            sessionRing
+        }
     }
 
     private var roundDots: some View {

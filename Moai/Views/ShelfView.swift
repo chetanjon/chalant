@@ -1,9 +1,9 @@
+import AppKit
 import SwiftUI
 
 struct ShelfView: View {
     @ObservedObject var model: NotchViewModel
     @ObservedObject var shelf: ShelfStore
-    @Environment(\.moaiAccent) private var accent
 
     init(model: NotchViewModel) {
         self.model = model
@@ -22,21 +22,32 @@ struct ShelfView: View {
             .frame(maxWidth: .infinity)
         } else {
             ScrollView {
-                VStack(spacing: 6) {
+                VStack(spacing: Theme.Space.s) {
                     ForEach(shelf.items) { item in
-                        row(item)
+                        ShelfRow(item: item, model: model, shelf: shelf)
                     }
                 }
             }
         }
     }
+}
 
-    private func row(_ item: ShelfStore.Item) -> some View {
+/// One stashed file: its real Finder icon, name, and quiet actions
+/// that wake on hover. Draggable back out to any app.
+private struct ShelfRow: View {
+    let item: ShelfStore.Item
+    let model: NotchViewModel
+    let shelf: ShelfStore
+
+    @Environment(\.moaiAccent) private var accent
+    @State private var hovered = false
+
+    var body: some View {
         let extractedText = shelf.extractText(item)
         return HStack(spacing: Theme.Space.m) {
-            Image(systemName: "doc.fill")
-                .font(Theme.Fonts.icon(.m))
-                .foregroundStyle(Theme.textSecondary)
+            Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path))
+                .resizable()
+                .frame(width: 16, height: 16)
 
             Text(item.name)
                 .font(Theme.Fonts.bodyMedium)
@@ -44,22 +55,31 @@ struct ShelfView: View {
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            IconActionButton(symbol: "square.and.arrow.up") {
-                shelf.airDrop(item)
-            }
-            if let extractedText {
-                IconActionButton(symbol: "sparkles", tint: accent) {
-                    model.askAbout(name: item.name, text: extractedText)
+            Group {
+                IconActionButton(symbol: "square.and.arrow.up") {
+                    shelf.airDrop(item)
+                }
+                if let extractedText {
+                    IconActionButton(symbol: "sparkles", tint: accent) {
+                        model.askAbout(name: item.name, text: extractedText)
+                    }
+                }
+                IconActionButton(symbol: "xmark", dim: true) {
+                    shelf.remove(item)
                 }
             }
-            IconActionButton(symbol: "xmark", dim: true) {
-                shelf.remove(item)
-            }
+            .opacity(hovered ? 1 : 0.6)
         }
         .padding(.horizontal, Theme.Space.l)
         .padding(.vertical, Theme.Space.s)
         .moaiCard(radius: Theme.Radius.row)
-        .hoverHighlight()
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                .fill(Color.white.opacity(hovered ? 0.03 : 0))
+                .allowsHitTesting(false)
+        )
+        .onHover { hovered = $0 }
+        .animation(Theme.Motion.hover, value: hovered)
         // Drag the file back out to Finder or any app
         .onDrag {
             NSItemProvider(object: item.url as NSURL)

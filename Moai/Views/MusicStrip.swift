@@ -5,6 +5,7 @@ struct MusicStrip: View {
     @Environment(\.moaiAccent) private var accent
     @State private var scrubPosition: Double?
     @State private var volumeDraft: Double?
+    @State private var artworkHovered = false
 
     var body: some View {
         if let playing = music.nowPlaying {
@@ -116,6 +117,27 @@ struct MusicStrip: View {
             RoundedRectangle(cornerRadius: Theme.Radius.artwork, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
         )
+        // Hovering the artwork reveals a play/pause veil, the way
+        // every system player does it.
+        .overlay {
+            if artworkHovered, let playing = music.nowPlaying {
+                Button {
+                    playing.isPlaying ? music.pause() : music.play()
+                } label: {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: Theme.Radius.artwork, style: .continuous)
+                            .fill(Color.black.opacity(0.45))
+                        Image(systemName: playing.isPlaying ? "pause.fill" : "play.fill")
+                            .font(Theme.Fonts.icon(.l, weight: .bold))
+                            .foregroundStyle(Color.white.opacity(0.92))
+                    }
+                }
+                .buttonStyle(PressableStyle())
+                .transition(.opacity)
+            }
+        }
+        .onHover { artworkHovered = $0 }
+        .animation(Theme.Motion.hover, value: artworkHovered)
         .shadow(color: Color.black.opacity(0.35), radius: 5, y: 2)
     }
 

@@ -19,6 +19,7 @@ struct ExpandedView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
             HeaderBar(model: model, focus: focus)
+                .staggeredReveal(0)
 
             if model.pane == .none {
                 content
@@ -65,17 +66,21 @@ struct ExpandedView: View {
                 withAnimation(Theme.Motion.content) { model.pane = .focus }
             }
             .transition(.opacity)
+            .staggeredReveal(1)
         } else if timer.isActive {
             SessionStrip(kind: .timer, focus: focus, timer: timer) {
                 withAnimation(Theme.Motion.content) { model.pane = .focus }
             }
             .transition(.opacity)
+            .staggeredReveal(1)
         }
         if music.nowPlaying != nil {
             MusicStrip(music: music)
                 .transition(.opacity)
+                .staggeredReveal(1)
         }
         TabRow(model: model)
+            .staggeredReveal(2)
 
         Group {
             switch model.tab {
@@ -89,7 +94,14 @@ struct ExpandedView: View {
                 ShortcutsView(model: model)
             }
         }
-        .transition(.opacity)
+        // A whisper of lateral movement, matched to the pill's slide.
+        .transition(
+            .asymmetric(
+                insertion: .offset(x: 8 * model.tabSlideDirection).combined(with: .opacity),
+                removal: .opacity
+            )
+        )
+        .staggeredReveal(3)
     }
 
     /// A drawer sliding over the content — deliberately different

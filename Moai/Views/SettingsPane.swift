@@ -27,7 +27,7 @@ struct SettingsPane: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
-                section("Island") {
+                section("Island", reveal: 0) {
                     row("Size") {
                         picker($sizePreset, [
                             ("Compact", "compact"), ("Cozy", "cozy"), ("Large", "large"),
@@ -64,7 +64,7 @@ struct SettingsPane: View {
                         ])
                     }
                 }
-                section("Life") {
+                section("Life", reveal: 1) {
                     row("Feel") {
                         picker($motionFeel, [
                             ("Still", "still"), ("Serene", "serene"),
@@ -76,7 +76,7 @@ struct SettingsPane: View {
                     divider
                     toggleRow("Glow with music", $glowOn)
                 }
-                section("Accent") {
+                section("Accent", reveal: 2) {
                     HStack(spacing: Theme.Space.l) {
                         swatch("album", music.accent, label: "Album")
                         swatch("silver", Theme.accentFallback, label: "Silver")
@@ -86,7 +86,7 @@ struct SettingsPane: View {
                         Spacer()
                     }
                 }
-                section("Claude key") {
+                section("Claude key", reveal: 3) {
                     SecureField("sk-ant-...", text: $apiKey)
                         .onSubmit { KeychainStore.write(apiKey, account: "anthropicKey") }
                         .textFieldStyle(.plain)
@@ -112,6 +112,7 @@ struct SettingsPane: View {
 
     private func section(
         _ title: String,
+        reveal: Int,
         @ViewBuilder content: () -> some View
     ) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -127,6 +128,7 @@ struct SettingsPane: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .moaiCard()
         }
+        .staggeredReveal(reveal)
     }
 
     private var divider: some View {

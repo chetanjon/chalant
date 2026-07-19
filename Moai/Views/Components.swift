@@ -80,6 +80,31 @@ extension View {
     }
 }
 
+/// Choreographed open: rows breathe in one after another, top to
+/// bottom, just behind the shell. Under Still it's a plain fade.
+private struct StaggeredReveal: ViewModifier {
+    let index: Int
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        let ambient = Theme.Feel.current.ambient
+        content
+            .opacity(shown ? 1 : 0)
+            .offset(y: shown || !ambient ? 0 : 4)
+            .onAppear {
+                let delay = ambient ? 0.06 + 0.045 * Double(index) : 0
+                withAnimation(Theme.Motion.content.delay(delay)) { shown = true }
+            }
+            .onDisappear { shown = false }
+    }
+}
+
+extension View {
+    func staggeredReveal(_ index: Int) -> some View {
+        modifier(StaggeredReveal(index: index))
+    }
+}
+
 /// Every custom button presses back: a soft sink on click. Under
 /// Still (or system Reduce Motion) only the opacity dips.
 struct PressableStyle: ButtonStyle {
@@ -276,22 +301,28 @@ struct AuroraView: View {
         // Radial gradients, not live blurs: a blur filter re-renders
         // every tick and stutters the expand animation; a gradient
         // composites for free and looks the same at these opacities.
-        TimelineView(.animation(minimumInterval: 1 / 20)) { context in
+        // 12 fps: the blobs drift on 7-11s orbits, so anything faster
+        // burns CPU for motion the eye can't resolve.
+        TimelineView(.animation(minimumInterval: 1 / 12)) { context in
             let calm = Theme.Motion.ambientSlow
             let t = context.date.timeIntervalSinceReferenceDate / calm
             let dim = calm > 1 ? 0.85 : 1.0
+            // Lively pushes a wider drift and lets the second blob's
+            // hue wander — same TimelineView, same frame cost.
+            let lively = Theme.Feel.current == .lively
+            let drift: CGFloat = lively ? 1.15 : 1.0
             ZStack {
                 blob(size: CGSize(width: 340, height: 240), fade: 0.16 * dim)
                     .offset(
-                        x: -170 + CGFloat(sin(t / 9)) * 28,
-                        y: -70 + CGFloat(cos(t / 7)) * 18
+                        x: -170 + CGFloat(sin(t / 9)) * 28 * drift,
+                        y: -70 + CGFloat(cos(t / 7)) * 18 * drift
                     )
                 blob(size: CGSize(width: 380, height: 260), fade: 0.12 * dim)
-                    .hueRotation(.degrees(-14))
+                    .hueRotation(.degrees(-14 + (lively ? sin(t / 13) * 4 : 0)))
                     .saturation(1.2)
                     .offset(
-                        x: 160 + CGFloat(cos(t / 11)) * 32,
-                        y: 100 + CGFloat(sin(t / 8)) * 20
+                        x: 160 + CGFloat(cos(t / 11)) * 32 * drift,
+                        y: 100 + CGFloat(sin(t / 8)) * 20 * drift
                     )
             }
         }
