@@ -1,4 +1,19 @@
+import AppKit
 import SwiftUI
+
+/// Real translucency behind the expanded island: whatever sits under
+/// the notch softly bleeds through, the way system HUDs do.
+struct VisualEffectBlur: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .hudWindow
+        view.blendingMode = .behindWindow
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+}
 
 /// The standard card treatment: quiet surface fill with a faint hairline.
 private struct MoaiCard: ViewModifier {
@@ -240,27 +255,8 @@ struct NoiseButton: View {
     @Environment(\.moaiAccent) private var accent
     @State private var hovered = false
 
-    private var name: String {
-        switch color {
-        case .brown: return "Brown"
-        case .white: return "White"
-        case .pink: return "Pink"
-        case .rain: return "Rain"
-        case .fire: return "Fire"
-        case .cafe: return "Café"
-        }
-    }
-
-    private var symbol: String {
-        switch color {
-        case .brown: return "water.waves"
-        case .white: return "waveform"
-        case .pink: return "waveform.path"
-        case .rain: return "cloud.rain.fill"
-        case .fire: return "flame.fill"
-        case .cafe: return "cup.and.saucer.fill"
-        }
-    }
+    private var name: String { color.displayName }
+    private var symbol: String { color.symbol }
 
     var body: some View {
         Button(action: action) {

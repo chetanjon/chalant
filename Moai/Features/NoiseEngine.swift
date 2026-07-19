@@ -18,10 +18,22 @@ final class NoiseEngine {
     private var source: AVAudioSourceNode?
     private var current: NoiseColor = .brown
 
-    // Real recordings for rain / cafe
+    // Real recordings for rain / fire / cafe
     private var player: AVAudioPlayer?
     private var playerColor: NoiseColor?
-    private let fileLevel: Float = 0.4
+    private let baseFileLevel: Float = 0.4
+    private let baseSynthLevel: Float = 0.35
+
+    /// User volume 0...1; 0.7 reproduces the original fixed levels.
+    private var userVolume: Float = 0.7
+    private var fileLevel: Float { baseFileLevel / 0.7 * userVolume }
+    private var synthLevel: Float { baseSynthLevel / 0.7 * userVolume }
+
+    func setVolume(_ volume: Float) {
+        userVolume = max(0, min(1, volume))
+        player?.setVolume(fileLevel, fadeDuration: 0.1)
+        engine.mainMixerNode.outputVolume = synthLevel
+    }
 
     // Smoothed synth gain, advanced on the render thread.
     private var gain: Float = 0
@@ -54,7 +66,7 @@ final class NoiseEngine {
         } else {
             stopFile(fade: 0.4)
             if source == nil { setupSynth() }
-            engine.mainMixerNode.outputVolume = 0.35
+            engine.mainMixerNode.outputVolume = synthLevel
             if !engine.isRunning {
                 try? engine.start()
             }

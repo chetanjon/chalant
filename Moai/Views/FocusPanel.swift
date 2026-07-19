@@ -139,24 +139,10 @@ struct FocusPanel: View {
                 Spacer()
                 controls
             }
-            HStack(spacing: Theme.Space.m) {
-                Text("noise")
+            if focus.isPaused {
+                Text("paused")
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
-                ForEach(NoiseEngine.NoiseColor.allCases, id: \.self) { color in
-                    NoiseButton(
-                        color: color,
-                        selected: focus.noiseColor == color
-                    ) {
-                        focus.setNoise(color)
-                    }
-                }
-                Spacer()
-                if focus.isPaused {
-                    Text("paused")
-                        .font(Theme.Fonts.caption)
-                        .foregroundStyle(Theme.textTertiary)
-                }
             }
             Spacer(minLength: 0)
         }

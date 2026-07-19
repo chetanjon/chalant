@@ -14,13 +14,12 @@ final class NotchViewModel: ObservableObject {
         case clipboard
         case shelf
         case links
+        case focus
     }
 
-    /// Utility panes slide over the content as a single drawer:
-    /// only one can be open, and collapsing always closes it.
+    /// Settings slides over the grown island; collapsing closes it.
     enum Pane {
         case none
-        case focus
         case settings
     }
 
@@ -28,6 +27,14 @@ final class NotchViewModel: ObservableObject {
     @Published var isHovering = false
     @Published var tab: Tab = .ask
     @Published var pane: Pane = .none
+
+    /// Peek (false) shows the three shared rows; Full (true) grows the
+    /// island in place with tabs and the deep surfaces below them.
+    @Published var full = false
+
+    /// The island's expanded size, measured from the content itself —
+    /// the island hugs what's shown instead of reserving a fixed void.
+    @Published var expandedSize = CGSize(width: 520, height: 170)
 
     /// Pointer position across the island, 0...1, published by the
     /// window controller's hover poll — quantized so casual movement
@@ -57,7 +64,8 @@ final class NotchViewModel: ObservableObject {
     let notes = NotesStore()
     let events = EventKitService()
     let timer = CountdownController()
-    let focus = FocusController()
+    let ambience = AmbienceController()
+    let focus: FocusController
     let voice = VoiceController()
     let stats = SystemStatsController()
     let shortcuts = ShortcutStore()
@@ -83,6 +91,7 @@ final class NotchViewModel: ObservableObject {
     var onExpandChange: ((Bool) -> Void)?
 
     init() {
+        focus = FocusController(ambience: ambience)
         // Before any view can read the key: legacy plaintext storage
         // moves into the Keychain once.
         KeychainStore.migrateFromDefaults(key: "anthropicKey", account: "anthropicKey")
@@ -112,9 +121,9 @@ final class NotchViewModel: ObservableObject {
     func collapse() {
         guard state == .expanded else { return }
         state = .collapsed
-        // Model-held pane state doesn't reset with the view tree the
-        // way @State did — the island must always reopen to content.
+        // The island always reopens small and clean.
         pane = .none
+        full = false
         onExpandChange?(false)
     }
 
@@ -177,6 +186,7 @@ final class NotchViewModel: ObservableObject {
         // and lingering in the listening UI reads as "release didn't
         // work". Dots show while the transcript settles.
         tab = .ask
+        full = true
         state = .expanded
         onExpandChange?(true)
         isWorking = true
@@ -204,6 +214,7 @@ final class NotchViewModel: ObservableObject {
     func askAbout(name: String, text: String) {
         pendingContext = (name, text)
         tab = .ask
+        full = true
         expand()
     }
 
@@ -213,6 +224,9 @@ final class NotchViewModel: ObservableObject {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isWorking else { return }
         errorText = ""
+        // Answers need room — the island grows to show them.
+        tab = .ask
+        full = true
 
         Task {
             // Local verbs first: instant, offline, keyless.

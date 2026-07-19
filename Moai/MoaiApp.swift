@@ -34,6 +34,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         icon?.isTemplate = true
         item.button?.image = icon
         let menu = NSMenu()
+        let settingsItem = NSMenuItem(
+            title: "Settings…",
+            action: #selector(openSettings),
+            keyEquivalent: ","
+        )
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+        menu.addItem(.separator())
         menu.addItem(
             NSMenuItem(
                 title: "Quit Moai",
@@ -43,5 +51,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         item.menu = menu
         statusItem = item
+    }
+
+    @objc private func openSettings() {
+        Task { @MainActor in
+            guard let model = self.notchController?.viewModel else { return }
+            model.expand()
+            model.full = true
+            model.pane = .settings
+        }
     }
 }

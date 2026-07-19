@@ -7,6 +7,7 @@ struct NotchRootView: View {
     @ObservedObject var timer: CountdownController
     @ObservedObject var focus: FocusController
     @ObservedObject var voice: VoiceController
+    @ObservedObject var ambience: AmbienceController
     @ObservedObject var stats: SystemStatsController
     @State private var isDropTargeted = false
     @State private var pressStarted: Date?
@@ -34,6 +35,7 @@ struct NotchRootView: View {
         self.timer = model.timer
         self.focus = model.focus
         self.voice = model.voice
+        self.ambience = model.ambience
         self.stats = model.stats
     }
 
@@ -67,7 +69,7 @@ struct NotchRootView: View {
         switch model.state {
         case .collapsed: return collapsedSize
         case .listening: return Self.listeningSize
-        case .expanded: return NotchViewModel.expandedSize(for: sizePreset)
+        case .expanded: return model.expandedSize
         }
     }
 
@@ -98,8 +100,19 @@ struct NotchRootView: View {
                 // switching fill *styles* between states makes SwiftUI
                 // cross-fade the whole shape (a ghosted double image)
                 // instead of morphing it.
-                islandShape
-                    .fill(Theme.backdrop)
+                ZStack {
+                    // Real glass while open: what's behind the island
+                    // bleeds through the smoked tint. Collapsed stays
+                    // opaque black (and pays nothing for blur).
+                    if model.state != .collapsed {
+                        VisualEffectBlur()
+                            .clipShape(islandShape)
+                            .transition(.opacity)
+                    }
+                    islandShape
+                        .fill(Theme.backdrop)
+                        .opacity(model.state == .collapsed ? 1 : 0.85)
+                }
                     .overlay(
                         islandShape
                             .fill(Color.black)
@@ -257,10 +270,6 @@ struct NotchRootView: View {
 
             if model.state == .expanded {
                 ExpandedView(model: model)
-                    .frame(
-                        width: NotchViewModel.expandedSize(for: sizePreset).width,
-                        height: NotchViewModel.expandedSize(for: sizePreset).height
-                    )
                     .transition(contentTransition(insertionDelay: 0.09))
             }
         }
@@ -318,6 +327,12 @@ struct NotchRootView: View {
                         isActive: Theme.Feel.current.ambient
                     )
                     .padding(.leading, Theme.Space.wingInset)
+            }
+            if let active = ambience.active {
+                Image(systemName: active.symbol)
+                    .font(Theme.Fonts.icon(.xs))
+                    .foregroundStyle(accent)
+                    .padding(.leading, hasLeftWing ? 0 : Theme.Space.wingInset)
             }
             Spacer()
             if hasLeftWing || model.isHovering {

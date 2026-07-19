@@ -59,7 +59,7 @@ final class NotchWindowController {
 
         // The panel is a fixed transparent region at the top of the screen.
         // The island animates inside it, so the window never resizes.
-        let panelSize = CGSize(width: 820, height: 480)
+        let panelSize = CGSize(width: 820, height: 560)
         let frame = NSRect(
             x: screen.frame.midX - panelSize.width / 2,
             y: screen.frame.maxY - panelSize.height,
@@ -247,9 +247,7 @@ final class NotchWindowController {
     }
 
     private func expandedZone(on screen: NSScreen) -> NSRect {
-        let preset = UserDefaults.standard
-            .string(forKey: "expandedSizePreset") ?? "compact"
-        let size = NotchViewModel.expandedSize(for: preset)
+        let size = viewModel.expandedSize
         return hoverZone(on: screen, width: size.width + 28, height: size.height + 16)
     }
 

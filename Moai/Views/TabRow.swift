@@ -8,15 +8,15 @@ struct TabRow: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
-            pill("Do", .ask)
+            pill("Answer", .ask)
             pill("Go", .links)
             pill("Clips", .clipboard)
             pill("Shelf", .shelf)
-            Spacer()
+            pill("Focus", .focus)
         }
     }
 
-    private static let order: [NotchViewModel.Tab] = [.ask, .links, .clipboard, .shelf]
+    private static let order: [NotchViewModel.Tab] = [.ask, .links, .clipboard, .shelf, .focus]
 
     private func pill(_ title: String, _ tab: NotchViewModel.Tab) -> some View {
         TabPill(title: title, selected: model.tab == tab, namespace: ns) {
@@ -53,7 +53,7 @@ struct TabPill: View {
                 .background {
                     if selected {
                         Capsule()
-                            .fill(Color.white.opacity(0.12))
+                            .fill(Color.white.opacity(0.10))
                             .matchedGeometryEffect(id: "tabPill", in: namespace)
                     } else if hovered {
                         Capsule()

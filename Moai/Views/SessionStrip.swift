@@ -41,15 +41,6 @@ struct SessionStrip: View {
                 ) {
                     focus.togglePause()
                 }
-                ForEach(NoiseEngine.NoiseColor.allCases, id: \.self) { color in
-                    NoiseButton(
-                        color: color,
-                        selected: focus.noiseColor == color,
-                        compact: true
-                    ) {
-                        focus.setNoise(color)
-                    }
-                }
             }
             CloseButton {
                 kind == .focus ? focus.stop() : timer.stop()

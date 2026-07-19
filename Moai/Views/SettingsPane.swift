@@ -11,7 +11,6 @@ struct SettingsPane: View {
     @State private var apiKeys: [AIProvider: String] = [:]
     @State private var launchAtLogin = false
 
-    @AppStorage("expandedSizePreset") private var sizePreset = "compact"
     @AppStorage("expandOnHover") private var expandOnHover = true
     @AppStorage("openDelay") private var openDelay = 0.12
     @AppStorage("collapseDelay") private var collapseDelay = 0.05
@@ -28,12 +27,6 @@ struct SettingsPane: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 section("Island", reveal: 0) {
-                    row("Size") {
-                        picker($sizePreset, [
-                            ("Compact", "compact"), ("Cozy", "cozy"), ("Large", "large"),
-                        ])
-                    }
-                    divider
                     toggleRow("Open on hover", $expandOnHover)
                     divider
                     toggleRow("Show edge when idle", $idleEdgeOn)

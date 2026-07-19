@@ -42,7 +42,7 @@ final class ActionEngine {
             return "Timer off."
         }
         if ["stop noise", "quiet"].contains(lower) {
-            model.focus.noise.stop()
+            model.ambience.stop()
             return "Quiet."
         }
 
@@ -127,7 +127,7 @@ final class ActionEngine {
                 (words.contains("cafe") || lower.contains("coffee")) ? .cafe :
                 lower.contains("white") ? .white :
                 lower.contains("pink") ? .pink : .brown
-            model.focus.noise.start(color)
+            model.ambience.play(color)
             switch color {
             case .rain: return "Rain on. Say stop noise when done."
             case .cafe: return "Cafe hum on. Say stop noise when done."

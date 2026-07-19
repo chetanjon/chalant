@@ -57,7 +57,12 @@ final class FocusController: ObservableObject {
     @Published var cycle = 1
     @Published var noiseColor: NoiseEngine.NoiseColor = .brown
 
-    let noise = NoiseEngine()
+    /// Shared ambience owner — focus drives it, never a private engine.
+    let ambience: AmbienceController
+
+    init(ambience: AmbienceController) {
+        self.ambience = ambience
+    }
     private var timer: Timer?
     private(set) var workMinutes = 25
     private let restMinutes = 5
@@ -84,29 +89,30 @@ final class FocusController: ObservableObject {
         phaseTotal = remaining
         isActive = true
         isPaused = false
-        noise.start(noiseColor)
+        // A soundscape the user already chose wins over the default.
+        if let playing = ambience.active { noiseColor = playing }
+        ambience.play(noiseColor)
         run()
     }
 
     func setNoise(_ color: NoiseEngine.NoiseColor) {
         noiseColor = color
-        noise.set(color)
-        if isActive && phase == .work && !noise.isRunning {
-            noise.start(color)
+        if !isActive || phase == .work {
+            ambience.play(color)
         }
     }
 
     func muteNoise() {
-        noise.pause()
+        ambience.pause()
     }
 
     func togglePause() {
         guard isActive else { return }
         isPaused.toggle()
         if isPaused {
-            noise.pause()
+            ambience.pause()
         } else if phase == .work {
-            noise.resume()
+            ambience.resume()
         }
     }
 
@@ -121,7 +127,7 @@ final class FocusController: ObservableObject {
         timer = nil
         isActive = false
         isPaused = false
-        noise.stop()
+        ambience.stop()
     }
 
     private func run() {
@@ -144,12 +150,12 @@ final class FocusController: ObservableObject {
             phase = .rest
             let longBreak = cycle % cyclesPerLongRest == 0
             remaining = (longBreak ? longRestMinutes : restMinutes) * 60
-            noise.pause()
+            ambience.pause()
         } else {
             cycle += 1
             phase = .work
             remaining = workMinutes * 60
-            if !isPaused { noise.resume() }
+            if !isPaused { ambience.resume() }
         }
         phaseTotal = remaining
     }
