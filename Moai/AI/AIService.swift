@@ -19,7 +19,9 @@ enum AIProvider: String, CaseIterable {
         switch self {
         case .claude: return "claude-haiku-4-5"
         case .openai: return "gpt-5-mini"
-        case .gemini: return "gemini-2.5-flash"
+        // Alias tracks Google's current Flash model, so it never goes
+        // stale the way a pinned version (2.5-flash) did for new users.
+        case .gemini: return "gemini-flash-latest"
         }
     }
 
