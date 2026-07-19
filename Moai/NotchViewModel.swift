@@ -196,7 +196,9 @@ final class NotchViewModel: ObservableObject {
             answer = ""
             isWorking = true
             do {
-                answer = try await ClaudeService.send(prompt: fullPrompt, apiKey: key)
+                for try await delta in ClaudeService.stream(prompt: fullPrompt, apiKey: key) {
+                    answer += delta
+                }
             } catch {
                 errorText = error.localizedDescription
             }

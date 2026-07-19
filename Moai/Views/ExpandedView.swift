@@ -330,7 +330,7 @@ struct ExpandedView: View {
     private var answerArea: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if model.isWorking {
+                if model.isWorking, model.answer.isEmpty {
                     ThinkingDots()
                         .padding(.top, 4)
                 } else if !model.errorText.isEmpty {
