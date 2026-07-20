@@ -9,7 +9,6 @@ extension NoiseEngine.NoiseColor {
         case .rain: return "Rain"
         case .fire: return "Fire"
         case .cafe: return "Café"
-        case .construction: return "Construction"
         }
     }
 
@@ -21,7 +20,6 @@ extension NoiseEngine.NoiseColor {
         case .rain: return "cloud.rain.fill"
         case .fire: return "flame.fill"
         case .cafe: return "cup.and.saucer.fill"
-        case .construction: return "hammer.fill"
         }
     }
 }

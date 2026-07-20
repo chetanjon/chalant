@@ -235,6 +235,13 @@ struct NotchRootView: View {
             .onDrop(of: [UTType.fileURL, UTType.image], isTargeted: $isDropTargeted) { providers in
                 handleDrop(providers)
             }
+            // A drag reaching the notch opens the island, so the drop has
+            // the whole open surface to land on instead of the thin pill.
+            .onChange(of: isDropTargeted) { targeted in
+                if targeted, model.state == .collapsed {
+                    model.expand()
+                }
+            }
             .animation(Theme.Motion.island, value: model.state)
             .animation(Theme.Motion.hover, value: model.isHovering)
             .animation(Theme.Motion.hover, value: statusWings)

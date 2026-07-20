@@ -13,7 +13,7 @@ struct ClipboardView: View {
         if clipboard.clips.isEmpty {
             VStack {
                 Spacer()
-                Text("Everything you copy lands here.")
+                Text("Copy text or a screenshot and it lands here.")
                     .font(Theme.Fonts.body)
                     .foregroundStyle(Theme.textHint)
                 Spacer()
@@ -31,8 +31,8 @@ struct ClipboardView: View {
     }
 }
 
-/// One clip. Actions rest quiet and come to full strength when the
-/// row is under the cursor.
+/// One clip, text or image. Actions rest quiet and come to full
+/// strength when the row is under the cursor.
 private struct ClipRow: View {
     let clip: ClipboardStore.Clip
     let model: NotchViewModel
@@ -43,20 +43,29 @@ private struct ClipRow: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.m) {
-            Text(clip.text)
-                .font(Theme.Fonts.body)
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if clip.isImage {
+                thumbnail
+                Text("Screenshot")
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(clip.text ?? "")
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             Group {
-                // Copy it back to the pasteboard
                 IconActionButton(symbol: "doc.on.doc") {
                     clipboard.copyBack(clip)
                 }
-                // Hand it to the Do surface: summarize, rewrite, translate
-                IconActionButton(symbol: "sparkles", tint: accent) {
-                    model.askAbout(name: "clipboard", text: clip.text)
+                // Text can go to the answer surface; an image can't.
+                if let text = clip.text {
+                    IconActionButton(symbol: "sparkles", tint: accent) {
+                        model.askAbout(name: "clipboard", text: text)
+                    }
                 }
                 IconActionButton(symbol: "xmark", dim: true) {
                     clipboard.remove(clip)
@@ -74,5 +83,20 @@ private struct ClipRow: View {
         )
         .onHover { hovered = $0 }
         .animation(Theme.Motion.hover, value: hovered)
+    }
+
+    @ViewBuilder
+    private var thumbnail: some View {
+        if let url = clip.imageURL, let image = NSImage(contentsOf: url) {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 46, height: 32)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+                )
+        }
     }
 }

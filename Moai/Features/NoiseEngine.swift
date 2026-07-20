@@ -12,7 +12,6 @@ final class NoiseEngine {
         case rain
         case fire
         case cafe
-        case construction
     }
 
     private let engine = AVAudioEngine()
@@ -46,12 +45,6 @@ final class NoiseEngine {
     private var pink1: Float = 0
     private var pink2: Float = 0
     private var whiteLast: Float = 0
-
-    // Construction: a slow, decaying low-frequency impact riding a brown
-    // rumble. Distance (two blocks) is the low-pass in both.
-    private var constrPhase = 0
-    private var constrEnv: Float = 0
-    private var constrOsc: Float = 0
 
     private(set) var isRunning = false
 
@@ -211,26 +204,6 @@ final class NoiseEngine {
         case .brown:
             brownLast = (brownLast + 0.02 * white) / 1.02
             value = brownLast * 3.2
-        case .construction:
-            // A distant site: a low rumble carrying a hammer thunk about
-            // twice a second. The impact keeps some midrange (a broadband
-            // burst plus a 150 Hz tone) so laptop speakers actually
-            // reproduce it, then decays fast so it reads as a strike.
-            brownLast = (brownLast + 0.02 * white) / 1.02
-            let rumble = brownLast * 2.6
-            constrPhase += 1
-            if constrPhase >= 26000 {
-                constrPhase = 0
-                constrEnv = 1
-                constrOsc = 0
-            }
-            constrEnv *= 0.9990
-            let punch = constrEnv * constrEnv
-            let tone = sinf(constrOsc)
-            constrOsc += 2 * Float.pi * 150 / 48000
-            if constrOsc > 2 * Float.pi { constrOsc -= 2 * Float.pi }
-            let thunk = (tone * 0.6 + white * 0.55) * punch
-            value = rumble * 0.6 + thunk
         case .rain, .fire, .cafe:
             value = 0
         }

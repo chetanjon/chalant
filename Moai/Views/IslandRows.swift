@@ -167,21 +167,20 @@ struct AmbienceRow: View {
         HStack(spacing: Theme.Space.s) {
             Group {
                 if let active = ambience.active {
-                    // While a sound plays the label becomes its stop button,
-                    // so quieting it is obvious, not a hidden second tap.
+                    // While a sound plays its name becomes a quiet accent
+                    // pill; tapping it stops. Reads as "on, tap to stop"
+                    // the way the sound chips already do.
                     Button {
                         ambience.stop()
                     } label: {
-                        HStack(spacing: 4) {
-                            Text(active.displayName)
-                                .font(Theme.Fonts.caption)
-                                .foregroundStyle(accent)
-                                .lineLimit(1)
-                            Image(systemName: "xmark.circle.fill")
-                                .font(Theme.Fonts.icon(.xs))
-                                .foregroundStyle(accent.opacity(0.8))
-                        }
-                        .contentShape(Rectangle())
+                        Text(active.displayName)
+                            .font(Theme.Fonts.caption)
+                            .foregroundStyle(accent)
+                            .lineLimit(1)
+                            .padding(.horizontal, Theme.Space.s)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(accent.opacity(0.14)))
+                            .contentShape(Capsule())
                     }
                     .buttonStyle(PressableStyle())
                     .help("Stop \(active.displayName)")
