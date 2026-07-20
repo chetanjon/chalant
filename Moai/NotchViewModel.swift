@@ -34,6 +34,9 @@ final class NotchViewModel: ObservableObject {
     /// the island hugs what's shown instead of reserving a fixed void.
     @Published var expandedSize = CGSize(width: 520, height: 170)
 
+    /// A drag is hovering the island: light the accent edge.
+    @Published var isDropTargeted = false
+
     /// Pointer position across the island, 0...1, published by the
     /// window controller's hover poll, quantized so casual movement
     /// costs a few re-renders per second, not twenty. nil = no light.
@@ -195,6 +198,23 @@ final class NotchViewModel: ObservableObject {
         guard state == .listening else { return }
         voice.cancel()
         state = .collapsed
+    }
+
+    /// Files or images dropped on the island, delivered from the panel's
+    /// AppKit drag handler (SwiftUI's onDrop never fires in this panel).
+    func receiveDrop(urls: [URL], images: [NSImage]) {
+        var stashed = false
+        for url in urls where url.isFileURL {
+            shelf.add(url)
+            stashed = true
+        }
+        for image in images {
+            shelf.addImage(image)
+            stashed = true
+        }
+        guard stashed else { return }
+        tab = .shelf
+        expand()
     }
 
     /// Attach text (from a clip or file) and jump to the Do surface.

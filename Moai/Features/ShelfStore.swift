@@ -26,6 +26,20 @@ final class ShelfStore: ObservableObject {
         save()
     }
 
+    /// A dropped image with no file behind it (a screenshot thumbnail):
+    /// write a PNG into the app's own folder, then stash that.
+    func addImage(_ image: NSImage) {
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else { return }
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Moai/Dropped", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("Shot-\(Int(Date().timeIntervalSince1970)).png")
+        guard (try? png.write(to: url)) != nil else { return }
+        add(url)
+    }
+
     func remove(_ item: Item) {
         items.removeAll { $0.id == item.id }
         save()

@@ -9,7 +9,6 @@ struct NotchRootView: View {
     @ObservedObject var voice: VoiceController
     @ObservedObject var ambience: AmbienceController
     @ObservedObject var stats: SystemStatsController
-    @State private var isDropTargeted = false
     @State private var pressStarted: Date?
 
     // Declared so the view re-renders (and re-reads Theme.Motion) the
@@ -196,7 +195,7 @@ struct NotchRootView: View {
                     .overlay(
                         islandShape
                             .strokeBorder(accent.opacity(0.8), lineWidth: 1.5)
-                            .opacity(isDropTargeted ? 1 : 0)
+                            .opacity(model.isDropTargeted ? 1 : 0)
                     )
                     .shadow(
                         color: Color.black.opacity(model.state == .collapsed ? 0 : 0.45),
@@ -232,16 +231,10 @@ struct NotchRootView: View {
                     model.beginListening()
                 }
             )
-            .onDrop(of: [UTType.fileURL, UTType.image], isTargeted: $isDropTargeted) { providers in
-                handleDrop(providers)
-            }
-            // A drag reaching the notch opens the island, so the drop has
-            // the whole open surface to land on instead of the thin pill.
-            .onChange(of: isDropTargeted) { targeted in
-                if targeted, model.state == .collapsed {
-                    model.expand()
-                }
-            }
+            // Drop handling is at the AppKit level in NotchWindowController
+            // (SwiftUI's onDrop never fires in this panel); the accent edge
+            // lights via model.isDropTargeted. The island opens after the
+            // drop lands, not during the drag, so nothing disrupts it.
             .animation(Theme.Motion.island, value: model.state)
             .animation(Theme.Motion.hover, value: model.isHovering)
             .animation(Theme.Motion.hover, value: statusWings)
@@ -441,59 +434,4 @@ struct NotchRootView: View {
         .animation(.easeOut(duration: 0.1), value: voice.level)
     }
 
-    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        var accepted = false
-        for provider in providers {
-            if provider.canLoadObject(ofClass: URL.self) {
-                // A real file from Finder or an app: stash it as-is.
-                accepted = true
-                _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    guard let url, url.isFileURL else { return }
-                    Task { @MainActor in self.stash(url) }
-                }
-            } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
-                // A dragged screenshot or image with no file behind it:
-                // write it to disk first, then stash that.
-                accepted = true
-                provider.loadDataRepresentation(
-                    forTypeIdentifier: UTType.image.identifier
-                ) { data, _ in
-                    guard let data, let url = Self.saveDroppedImage(data) else { return }
-                    Task { @MainActor in self.stash(url) }
-                }
-            }
-        }
-        return accepted
-    }
-
-    private func stash(_ url: URL) {
-        model.shelf.add(url)
-        model.tab = .shelf
-        model.expand()
-    }
-
-    /// Dropped image data (a screenshot thumbnail, an image from a page)
-    /// has no file behind it, so save a PNG into the app's own folder and
-    /// stash that. Kept out of temp so the Shelf bookmark keeps resolving.
-    private static func saveDroppedImage(_ data: Data) -> URL? {
-        let png: Data
-        if let image = NSImage(data: data),
-           let tiff = image.tiffRepresentation,
-           let rep = NSBitmapImageRep(data: tiff),
-           let encoded = rep.representation(using: .png, properties: [:]) {
-            png = encoded
-        } else {
-            png = data
-        }
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Moai/Dropped", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        let url = base.appendingPathComponent("Shot-\(Int(Date().timeIntervalSince1970)).png")
-        do {
-            try png.write(to: url)
-            return url
-        } catch {
-            return nil
-        }
-    }
 }

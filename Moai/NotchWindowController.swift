@@ -1,11 +1,61 @@
 import AppKit
 import Combine
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Borderless panel that can take keyboard focus without activating the app.
 final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+}
+
+/// The panel's hosting view, extended to receive drags. Drops must be
+/// handled by the island's own (frontmost) window, so the panel level is
+/// lowered enough that macOS routes drags to it.
+final class DropHostingView<Content: View>: NSHostingView<Content> {
+    var onDrop: (([URL], [NSImage]) -> Void)?
+    var onTargeted: ((Bool) -> Void)?
+
+    func enableDrops() {
+        registerForDraggedTypes([
+            .fileURL, .png, .tiff,
+            NSPasteboard.PasteboardType(UTType.image.identifier),
+        ])
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        onTargeted?(true)
+        return .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        onTargeted?(false)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        onTargeted?(false)
+        let pasteboard = sender.draggingPasteboard
+
+        var urls: [URL] = []
+        if let objects = pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL] {
+            urls = objects
+        }
+
+        var images: [NSImage] = []
+        if urls.isEmpty,
+           let objects = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage] {
+            images = objects
+        }
+
+        guard !urls.isEmpty || !images.isEmpty else { return false }
+        onDrop?(urls, images)
+        return true
+    }
 }
 
 @MainActor
@@ -76,7 +126,10 @@ final class NotchWindowController {
             backing: .buffered,
             defer: false
         )
-        panel.level = .screenSaver
+        // Status-bar level (the menu bar's own level) still floats over
+        // apps via fullScreenAuxiliary, but unlike screen-saver level it
+        // is low enough that macOS routes file drags to it.
+        panel.level = .statusBar
         panel.collectionBehavior = [
             .canJoinAllSpaces,
             .fullScreenAuxiliary,
@@ -92,8 +145,15 @@ final class NotchWindowController {
         // so the hover monitors never go blind mid-session.
         panel.acceptsMouseMovedEvents = true
 
-        let hosting = NSHostingView(rootView: NotchRootView(model: viewModel))
+        let hosting = DropHostingView(rootView: NotchRootView(model: viewModel))
         hosting.frame = NSRect(origin: .zero, size: panelSize)
+        hosting.enableDrops()
+        hosting.onTargeted = { [weak viewModel] targeted in
+            viewModel?.isDropTargeted = targeted
+        }
+        hosting.onDrop = { [weak viewModel] urls, images in
+            viewModel?.receiveDrop(urls: urls, images: images)
+        }
         panel.contentView = hosting
 
         // When the island expands, take key focus so typing works
@@ -106,6 +166,7 @@ final class NotchWindowController {
 
         panel.orderFrontRegardless()
         self.panel = panel
+
         viewModel.start()
 
         // Clicking anywhere outside the app collapses the island.
