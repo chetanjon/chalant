@@ -14,7 +14,7 @@ struct MusicRow: View {
             HStack(spacing: Theme.Space.l) {
                 artworkView(isPlaying: playing.isPlaying)
 
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: Theme.Space.snug) {
                     HStack(spacing: Theme.Space.s) {
                         Text(playing.track)
                             .font(Theme.Fonts.bodyEmphasis)
@@ -98,18 +98,18 @@ struct MusicRow: View {
             }
         }
         .frame(width: 46, height: 46)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.artwork, style: .continuous))
         // Top-lit sheen: the art reads as a physical, lit surface.
         .overlay(
             LinearGradient(
                 colors: [Color.white.opacity(0.22), .clear],
                 startPoint: .top, endPoint: .center
             )
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.artwork, style: .continuous))
             .allowsHitTesting(false)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.Radius.artwork, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
         )
         // Album-colored glow while playing; a plain drop shadow when paused.

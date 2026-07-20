@@ -165,10 +165,7 @@ struct SettingsPane: View {
         @ViewBuilder content: () -> some View
     ) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Text(title.uppercased())
-                .font(Theme.Fonts.micro)
-                .tracking(1.3)
-                .foregroundStyle(Theme.textTertiary)
+            SectionHeader(title: title)
                 .padding(.leading, Theme.Space.xs)
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 content()
@@ -262,7 +259,7 @@ private struct SettingsSwatch: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 5) {
+            VStack(spacing: Theme.Space.snug) {
                 Circle()
                     .fill(color)
                     .frame(width: 26, height: 26)

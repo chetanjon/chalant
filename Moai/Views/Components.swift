@@ -95,6 +95,62 @@ extension View {
     }
 }
 
+/// The one uppercase micro section header. Trailing rule optional;
+/// tint lifts to the accent where a phase owns the pane.
+struct SectionHeader: View {
+    let title: String
+    var tint: Color = Theme.textTertiary
+    var trailingRule = false
+
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            Text(title.uppercased())
+                .font(Theme.Fonts.micro)
+                .tracking(1.3)
+                .foregroundStyle(tint)
+            if trailingRule {
+                Rectangle()
+                    .fill(Theme.hairlineFaint)
+                    .frame(height: 1)
+            }
+        }
+    }
+}
+
+/// An empty pane: one quiet hint line, plus a CTA only where the
+/// pane itself offers the next step.
+struct EmptyPaneHint<CTA: View>: View {
+    let message: String
+    @ViewBuilder var cta: () -> CTA
+
+    var body: some View {
+        VStack(spacing: Theme.Space.l) {
+            Spacer()
+            Text(message)
+                .font(Theme.Fonts.body)
+                .foregroundStyle(Theme.textHint)
+                .multilineTextAlignment(.center)
+            cta()
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+extension EmptyPaneHint where CTA == EmptyView {
+    init(message: String) {
+        self.init(message: message) { EmptyView() }
+    }
+}
+
+extension View {
+    /// List-row content insets, one treatment for every row card.
+    func rowInsets() -> some View {
+        padding(.horizontal, Theme.Space.l)
+            .padding(.vertical, Theme.Space.s)
+    }
+}
+
 /// Choreographed open: rows breathe in one after another, top to
 /// bottom, just behind the shell. Under Still it's a plain fade.
 private struct StaggeredReveal: ViewModifier {

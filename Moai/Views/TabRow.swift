@@ -27,7 +27,7 @@ struct Switcher: View {
         return Button {
             withAnimation(Theme.Motion.content) { model.tab = tab }
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: Theme.Space.snug) {
                 Image(systemName: Self.symbol(tab))
                     .font(Theme.Fonts.icon(.s))
                 Text(Self.label(tab))

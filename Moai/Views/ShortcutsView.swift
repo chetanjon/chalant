@@ -23,11 +23,7 @@ struct ShortcutsView: View {
                 addRow
             }
             if store.shortcuts.isEmpty && !adding {
-                VStack {
-                    Spacer()
-                    Text("Save the places you jump to, sites, apps, folders.")
-                        .font(Theme.Fonts.body)
-                        .foregroundStyle(Theme.textHint)
+                EmptyPaneHint(message: "Save the places you jump to, sites, apps, folders.") {
                     Button {
                         beginAdding()
                     } label: {
@@ -37,10 +33,7 @@ struct ShortcutsView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(PressableStyle())
-                    .padding(.top, Theme.Space.xs)
-                    Spacer()
                 }
-                .frame(maxWidth: .infinity)
             } else {
                 ScrollView {
                     LazyVGrid(
@@ -154,16 +147,7 @@ private struct ShortcutChip: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Space.l)
             .moaiCard(radius: Theme.Radius.row)
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
-                    .fill(Color.white.opacity(hovered ? 0.03 : 0))
-                    .allowsHitTesting(false)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
-                    .strokeBorder(Color.white.opacity(hovered ? 0.10 : 0), lineWidth: 1)
-                    .allowsHitTesting(false)
-            )
+            .hoverHighlight(radius: Theme.Radius.row)
             .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous))
         }
         .buttonStyle(PressableStyle())

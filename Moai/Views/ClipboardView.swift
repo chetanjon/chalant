@@ -11,14 +11,7 @@ struct ClipboardView: View {
 
     var body: some View {
         if clipboard.clips.isEmpty {
-            VStack {
-                Spacer()
-                Text("Copy text or a screenshot and it lands here.")
-                    .font(Theme.Fonts.body)
-                    .foregroundStyle(Theme.textHint)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity)
+            EmptyPaneHint(message: "Copy text or a screenshot and it lands here.")
         } else {
             ScrollView {
                 VStack(spacing: Theme.Space.s) {
@@ -73,14 +66,9 @@ private struct ClipRow: View {
             }
             .opacity(hovered ? 1 : 0.6)
         }
-        .padding(.horizontal, Theme.Space.l)
-        .padding(.vertical, Theme.Space.s)
+        .rowInsets()
         .moaiCard(radius: Theme.Radius.row)
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
-                .fill(Color.white.opacity(hovered ? 0.03 : 0))
-                .allowsHitTesting(false)
-        )
+        .hoverHighlight(radius: Theme.Radius.row)
         .onHover { hovered = $0 }
         .animation(Theme.Motion.hover, value: hovered)
     }
@@ -92,9 +80,9 @@ private struct ClipRow: View {
                 .resizable()
                 .aspectRatio(contentMode: .fill)
                 .frame(width: 46, height: 32)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.thumb, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    RoundedRectangle(cornerRadius: Theme.Radius.thumb, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
                 )
         }

@@ -288,7 +288,7 @@ struct NotchRootView: View {
     private var collapsedContent: some View {
         HStack {
             if focus.isActive {
-                HStack(spacing: 5) {
+                HStack(spacing: Theme.Space.snug) {
                     ProgressRing(
                         progress: focus.progress,
                         size: 11,
@@ -303,7 +303,7 @@ struct NotchRootView: View {
                 }
                 .padding(.leading, Theme.Space.wingInset)
             } else if timer.isActive {
-                HStack(spacing: 5) {
+                HStack(spacing: Theme.Space.snug) {
                     ProgressRing(
                         progress: timer.progress,
                         size: 11,

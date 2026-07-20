@@ -37,6 +37,11 @@ final class EventKitService: ObservableObject {
     @Published private(set) var events: [DayEvent] = []
     @Published private(set) var reminders: [OpenReminder] = []
 
+    /// Access was asked for and refused; the glance says so instead
+    /// of showing an empty day.
+    @Published private(set) var calendarDenied = false
+    @Published private(set) var remindersDenied = false
+
     private static let formatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEE h:mm a"
@@ -65,7 +70,9 @@ final class EventKitService: ObservableObject {
     }
 
     private func reloadEvents() async {
-        guard await ensureEvents() else { events = []; return }
+        let granted = await ensureEvents()
+        calendarDenied = !granted
+        guard granted else { events = []; return }
         let calendar = Calendar.current
         let start = calendar.startOfDay(for: Date())
         guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return }
@@ -83,7 +90,9 @@ final class EventKitService: ObservableObject {
     }
 
     private func reloadReminders() async {
-        guard await ensureReminders() else { reminders = []; return }
+        let granted = await ensureReminders()
+        remindersDenied = !granted
+        guard granted else { reminders = []; return }
         let predicate = store.predicateForIncompleteReminders(
             withDueDateStarting: nil, ending: nil, calendars: nil
         )

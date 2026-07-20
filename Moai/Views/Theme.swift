@@ -128,6 +128,8 @@ enum Theme {
         static let l: CGFloat = 12
         static let xl: CGFloat = 16
         static let xxl: CGFloat = 22
+        /// Tight icon-to-label and dot gaps.
+        static let snug: CGFloat = 5
         /// Collapsed wings sit flush against the physical notch.
         static let wingInset: CGFloat = 11
     }
@@ -136,7 +138,9 @@ enum Theme {
         static let card: CGFloat = 12
         static let row: CGFloat = 10
         static let field: CGFloat = 12
-        static let artwork: CGFloat = 8
+        static let artwork: CGFloat = 10
+        /// Small inline thumbnails (clipboard shots).
+        static let thumb: CGFloat = 6
     }
 
     /// Droplet silhouette parameters per island state.
@@ -147,6 +151,16 @@ enum Theme {
         static let radiusExpanded: CGFloat = 44
         static let bellyCollapsed: CGFloat = 1.5
         static let bellyExpanded: CGFloat = 10
+    }
+
+    /// Fixed lower-panel heights, one deliberate scale instead of
+    /// numbers scattered through ExpandedView.
+    enum Panel {
+        /// Shortcuts, clipboard, and shelf lists.
+        static let list: CGFloat = 230
+        /// Focus pane, sized to fit presets plus the stats line.
+        static let focus: CGFloat = 200
+        static let settings: CGFloat = 300
     }
 
     /// Motion personality, user-selectable in settings. Serene is the

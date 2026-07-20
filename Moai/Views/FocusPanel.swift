@@ -21,10 +21,7 @@ struct FocusPanel: View {
 
     private var presets: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
-            Text("FOCUS")
-                .font(Theme.Fonts.micro)
-                .tracking(1.3)
-                .foregroundStyle(Theme.textTertiary)
+            SectionHeader(title: "Focus")
             HStack(spacing: Theme.Space.m) {
                 presetChip(15, "short")
                 presetChip(25, "classic")
@@ -80,10 +77,7 @@ struct FocusPanel: View {
                         .foregroundStyle(Theme.textSecondary)
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("TIMER")
-                        .font(Theme.Fonts.micro)
-                        .tracking(1.3)
-                        .foregroundStyle(accent)
+                    SectionHeader(title: "Timer", tint: accent)
                     Text(timer.display)
                         .font(Theme.Fonts.display)
                         .foregroundStyle(Theme.textPrimary)
@@ -126,10 +120,10 @@ struct FocusPanel: View {
             HStack(spacing: Theme.Space.xl) {
                 breathingRing
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(focus.phase == .work ? "FOCUS" : "BREAK")
-                        .font(Theme.Fonts.micro)
-                        .tracking(1.3)
-                        .foregroundStyle(focus.phase == .work ? accent : Theme.textTertiary)
+                    SectionHeader(
+                        title: focus.phase == .work ? "Focus" : "Break",
+                        tint: focus.phase == .work ? accent : Theme.textTertiary
+                    )
                     Text(focus.display)
                         .font(Theme.Fonts.display)
                         .foregroundStyle(Theme.textPrimary)
@@ -182,7 +176,7 @@ struct FocusPanel: View {
     }
 
     private var roundDots: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: Theme.Space.snug) {
             ForEach(1...4, id: \.self) { round in
                 Circle()
                     .fill(

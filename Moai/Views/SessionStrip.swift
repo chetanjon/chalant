@@ -46,8 +46,7 @@ struct SessionStrip: View {
                 kind == .focus ? focus.stop() : timer.stop()
             }
         }
-        .padding(.horizontal, Theme.Space.l)
-        .padding(.vertical, Theme.Space.xs)
+        .rowInsets()
         .moaiCard()
         .hoverHighlight(radius: Theme.Radius.card)
         .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))

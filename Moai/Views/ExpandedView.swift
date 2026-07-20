@@ -137,13 +137,13 @@ struct ExpandedView: View {
         case .ask:
             AnswerView(model: model)
         case .links:
-            ShortcutsView(model: model).frame(height: 230)
+            ShortcutsView(model: model).frame(height: Theme.Panel.list)
         case .clipboard:
-            ClipboardView(model: model).frame(height: 230)
+            ClipboardView(model: model).frame(height: Theme.Panel.list)
         case .shelf:
-            ShelfView(model: model).frame(height: 230)
+            ShelfView(model: model).frame(height: Theme.Panel.list)
         case .focus:
-            FocusPanel(focus: focus, timer: timer).frame(height: 190)
+            FocusPanel(focus: focus, timer: timer).frame(height: Theme.Panel.focus)
         }
     }
 
@@ -159,7 +159,7 @@ struct ExpandedView: View {
             Spacer()
         }
         SettingsPane(music: music)
-            .frame(height: 300)
+            .frame(height: Theme.Panel.settings)
     }
 }
 
@@ -205,8 +205,12 @@ struct TodayView: View {
 
     private var calendarBlock: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            header("Today")
-            if events.events.isEmpty {
+            SectionHeader(title: "Today", trailingRule: true)
+            if events.calendarDenied {
+                Text("Calendar access is off. System Settings, Privacy, Calendars.")
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textHint)
+            } else if events.events.isEmpty {
                 Text("Nothing today.")
                     .font(Theme.Fonts.body)
                     .foregroundStyle(Theme.textHint)
@@ -230,8 +234,12 @@ struct TodayView: View {
 
     private var remindersBlock: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            header("Reminders")
-            if events.reminders.isEmpty {
+            SectionHeader(title: "Reminders", trailingRule: true)
+            if events.remindersDenied {
+                Text("Reminders access is off. System Settings, Privacy, Reminders.")
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textHint)
+            } else if events.reminders.isEmpty {
                 Text("Nothing open.")
                     .font(Theme.Fonts.body)
                     .foregroundStyle(Theme.textHint)
@@ -259,13 +267,4 @@ struct TodayView: View {
         }
     }
 
-    private func header(_ title: String) -> some View {
-        HStack(spacing: Theme.Space.s) {
-            Text(title.uppercased())
-                .font(Theme.Fonts.micro)
-                .tracking(1.3)
-                .foregroundStyle(Theme.textTertiary)
-            Rectangle().fill(Theme.hairlineFaint).frame(height: 1)
-        }
-    }
 }

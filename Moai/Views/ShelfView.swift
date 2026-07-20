@@ -12,14 +12,7 @@ struct ShelfView: View {
 
     var body: some View {
         if shelf.items.isEmpty {
-            VStack {
-                Spacer()
-                Text("Drop files on the notch to stash them here.")
-                    .font(Theme.Fonts.body)
-                    .foregroundStyle(Theme.textHint)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity)
+            EmptyPaneHint(message: "Drop files, links, or images on the notch to stash them here.")
         } else {
             ScrollView {
                 VStack(spacing: Theme.Space.s) {
@@ -50,7 +43,7 @@ private struct ShelfRow: View {
                 .frame(width: 16, height: 16)
 
             Text(item.name)
-                .font(Theme.Fonts.bodyMedium)
+                .font(Theme.Fonts.body)
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -70,14 +63,9 @@ private struct ShelfRow: View {
             }
             .opacity(hovered ? 1 : 0.6)
         }
-        .padding(.horizontal, Theme.Space.l)
-        .padding(.vertical, Theme.Space.s)
+        .rowInsets()
         .moaiCard(radius: Theme.Radius.row)
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
-                .fill(Color.white.opacity(hovered ? 0.03 : 0))
-                .allowsHitTesting(false)
-        )
+        .hoverHighlight(radius: Theme.Radius.row)
         .onHover { hovered = $0 }
         .animation(Theme.Motion.hover, value: hovered)
         // Drag the file back out to Finder or any app
