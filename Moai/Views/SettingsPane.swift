@@ -18,6 +18,7 @@ struct SettingsPane: View {
     @AppStorage("toolGo") private var toolGo = true
     @AppStorage("toolClips") private var toolClips = true
     @AppStorage("toolShelf") private var toolShelf = true
+    @AppStorage("toolNotes") private var toolNotes = true
     @AppStorage("toolFocus") private var toolFocus = true
 
     @AppStorage("expandOnHover") private var expandOnHover = true
@@ -48,6 +49,8 @@ struct SettingsPane: View {
                     toggleRow("Clipboard", $toolClips)
                     divider
                     toggleRow("Files", $toolShelf)
+                    divider
+                    toggleRow("Notes", $toolNotes)
                     divider
                     toggleRow("Focus & timers", $toolFocus)
                 }

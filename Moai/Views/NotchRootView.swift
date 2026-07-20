@@ -307,7 +307,9 @@ struct NotchRootView: View {
                 .tracking(1.3)
                 .foregroundStyle(Theme.textTertiary)
         } else if let playing = music.nowPlaying, playing.isPlaying {
-            MarqueeText(title: playing.track, subtitle: playing.artist)
+            // Just the song name: the two-part line read as clutter
+            // in this little window.
+            MarqueeText(title: playing.track)
                 .id(playing.track)
         } else {
             TimelineView(.everyMinute) { context in

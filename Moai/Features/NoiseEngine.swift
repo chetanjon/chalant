@@ -1,9 +1,11 @@
 import AVFoundation
 
 /// Ambience with two engines: brown/white/pink are synthesized in real
-/// time (a source node, click-free gain ramps); rain and cafe are real
-/// field recordings, looped with faded edges. Everything fades,
-/// nothing clicks, nothing jumps.
+/// time (a source node, click-free gain ramps); rain, fire and cafe are
+/// field recordings looped through a voicing chain, time-pitch plus EQ,
+/// so each one sits the way the real thing does: rain soft and sparse,
+/// a cafe murmuring at the far side of the room, a fire that rumbles in
+/// the hearth instead of hissing. Everything fades, nothing clicks.
 final class NoiseEngine {
     enum NoiseColor: String, CaseIterable {
         case brown
@@ -18,9 +20,15 @@ final class NoiseEngine {
     private var source: AVAudioSourceNode?
     private var current: NoiseColor = .brown
 
-    // Real recordings for rain / fire / cafe
-    private var player: AVAudioPlayer?
+    // Recording chain: player -> time-pitch -> EQ -> mixer.
+    private var filePlayer: AVAudioPlayerNode?
+    private var timePitch: AVAudioUnitTimePitch?
+    private var fileEQ: AVAudioUnitEQ?
+    private var buffers: [NoiseColor: AVAudioPCMBuffer] = [:]
     private var playerColor: NoiseColor?
+    private var currentTrim: Float = 1
+    private var fadeTimer: Timer?
+
     private let baseFileLevel: Float = 0.4
     private let baseSynthLevel: Float = 0.35
 
@@ -28,11 +36,16 @@ final class NoiseEngine {
     private var userVolume: Float = 0.7
     private var fileLevel: Float { baseFileLevel / 0.7 * userVolume }
     private var synthLevel: Float { baseSynthLevel / 0.7 * userVolume }
+    /// Read on the render thread; the mixer stays at unity so it can't
+    /// scale the recording chain along with the synth.
+    private var synthVol: Float = 0.35
 
     func setVolume(_ volume: Float) {
         userVolume = max(0, min(1, volume))
-        player?.setVolume(fileLevel, fadeDuration: 0.1)
-        engine.mainMixerNode.outputVolume = synthLevel
+        synthVol = synthLevel
+        if playerColor != nil {
+            fadePlayer(to: fileLevel * currentTrim, duration: 0.1)
+        }
     }
 
     // Smoothed synth gain, advanced on the render thread.
@@ -57,6 +70,60 @@ final class NoiseEngine {
         }
     }
 
+    // MARK: Voicings
+
+    /// How each recording is seated. Rate below 1 spaces the events
+    /// out (droplets, chatter); pitch in cents warms them; the EQ
+    /// bands shape distance; trim balances loudness between sounds.
+    private struct Voicing {
+        var rate: Float
+        var pitch: Float
+        var trim: Float
+        /// (filter, frequency, gain dB, bandwidth octaves)
+        var bands: [(AVAudioUnitEQFilterType, Float, Float, Float)]
+    }
+
+    private static func voicing(for color: NoiseColor) -> Voicing {
+        switch color {
+        case .rain:
+            // Slower and darker: fewer droplets, none of them sharp.
+            return Voicing(
+                rate: 0.9, pitch: -250, trim: 0.9,
+                bands: [
+                    (.highShelf, 2000, -9, 1),
+                    (.lowPass, 5500, 0, 0.7),
+                    (.parametric, 350, 2, 1.2),
+                ]
+            )
+        case .cafe:
+            // The far corner of a small cafe, not the middle of a
+            // crowd: slowed, softened highs, a little room warmth.
+            return Voicing(
+                rate: 0.78, pitch: -80, trim: 0.8,
+                bands: [
+                    (.lowPass, 3000, 0, 0.8),
+                    (.highShelf, 1500, -7, 1),
+                    (.lowShelf, 250, 2.5, 1),
+                ]
+            )
+        case .fire:
+            // Hearth, not static: real low rumble, crackle kept,
+            // hiss shaved off.
+            return Voicing(
+                rate: 0.95, pitch: -180, trim: 1.0,
+                bands: [
+                    (.lowShelf, 160, 6.5, 1),
+                    (.highShelf, 3800, -5, 1),
+                    (.parametric, 900, -1.5, 1.5),
+                ]
+            )
+        default:
+            return Voicing(rate: 1, pitch: 0, trim: 1, bands: [])
+        }
+    }
+
+    // MARK: Transport
+
     func start(_ color: NoiseColor) {
         current = color
         isRunning = true
@@ -66,7 +133,8 @@ final class NoiseEngine {
         } else {
             stopFile(fade: 0.4)
             if source == nil { setupSynth() }
-            engine.mainMixerNode.outputVolume = synthLevel
+            synthVol = synthLevel
+            engine.mainMixerNode.outputVolume = 1
             if !engine.isRunning {
                 try? engine.start()
             }
@@ -100,15 +168,15 @@ final class NoiseEngine {
 
     func pause() {
         targetGain = 0
-        player?.setVolume(0, fadeDuration: 0.5)
+        fadePlayer(to: 0, duration: 0.5)
     }
 
     func resume() {
         if Self.fileURL(for: current) != nil {
-            if player == nil {
-                startFile(current)
+            if playerColor == current {
+                fadePlayer(to: fileLevel * currentTrim, duration: 0.6)
             } else {
-                player?.setVolume(fileLevel, fadeDuration: 0.6)
+                startFile(current)
             }
         } else {
             targetGain = 1
@@ -119,46 +187,121 @@ final class NoiseEngine {
         targetGain = 0
         isRunning = false
         stopFile(fade: 0.4)
-        // Let the synth fade finish before the engine goes down.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+        // Let the fades finish before the engine goes down.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             guard let self, !self.isRunning else { return }
             self.engine.stop()
         }
     }
 
-    // MARK: Real recordings
+    // MARK: Recording chain
+
+    private func buildFileChain() {
+        guard filePlayer == nil else { return }
+        let player = AVAudioPlayerNode()
+        let pitch = AVAudioUnitTimePitch()
+        let eq = AVAudioUnitEQ(numberOfBands: 3)
+        engine.attach(player)
+        engine.attach(pitch)
+        engine.attach(eq)
+        filePlayer = player
+        timePitch = pitch
+        fileEQ = eq
+    }
+
+    private func loadBuffer(_ color: NoiseColor) -> AVAudioPCMBuffer? {
+        if let cached = buffers[color] { return cached }
+        guard let url = Self.fileURL(for: color),
+              let file = try? AVAudioFile(forReading: url),
+              let buffer = AVAudioPCMBuffer(
+                  pcmFormat: file.processingFormat,
+                  frameCapacity: AVAudioFrameCount(file.length)
+              ),
+              (try? file.read(into: buffer)) != nil
+        else { return nil }
+        buffers[color] = buffer
+        return buffer
+    }
 
     private func startFile(_ color: NoiseColor) {
-        if playerColor == color, let player {
+        if playerColor == color, let player = filePlayer {
             if !player.isPlaying { player.play() }
-            player.setVolume(fileLevel, fadeDuration: 0.6)
+            fadePlayer(to: fileLevel * currentTrim, duration: 0.6)
             return
         }
-        stopFile(fade: 0.4)
-        guard let url = Self.fileURL(for: color),
-              let fresh = try? AVAudioPlayer(contentsOf: url)
-        else { return }
-        fresh.numberOfLoops = -1
-        fresh.volume = 0
-        // Café ran hurried; ease the tempo so the murmur sits back.
-        if color == .cafe {
-            fresh.enableRate = true
-            fresh.rate = 0.82
+        guard let buffer = loadBuffer(color) else { return }
+        buildFileChain()
+        guard let player = filePlayer, let pitch = timePitch, let eq = fileEQ else { return }
+
+        let voice = Self.voicing(for: color)
+        pitch.rate = voice.rate
+        pitch.pitch = voice.pitch
+        for (index, band) in eq.bands.enumerated() {
+            if index < voice.bands.count {
+                let (type, frequency, gainDB, width) = voice.bands[index]
+                band.filterType = type
+                band.frequency = frequency
+                band.gain = gainDB
+                band.bandwidth = width
+                band.bypass = false
+            } else {
+                band.bypass = true
+            }
         }
-        fresh.play()
-        fresh.setVolume(fileLevel, fadeDuration: 0.8)
-        player = fresh
+        currentTrim = voice.trim
+
+        // (Re)wire at this buffer's format; the fade-from-zero hides
+        // any connection transient.
+        engine.connect(player, to: pitch, format: buffer.format)
+        engine.connect(pitch, to: eq, format: buffer.format)
+        engine.connect(eq, to: engine.mainMixerNode, format: buffer.format)
+        engine.mainMixerNode.outputVolume = 1
+        if !engine.isRunning {
+            try? engine.start()
+        }
+
+        player.stop()
+        player.scheduleBuffer(buffer, at: nil, options: .loops)
+        player.volume = 0
+        player.play()
+        fadePlayer(to: fileLevel * voice.trim, duration: 0.8)
         playerColor = color
     }
 
     private func stopFile(fade: TimeInterval) {
-        guard let old = player else { return }
-        old.setVolume(0, fadeDuration: fade)
-        DispatchQueue.main.asyncAfter(deadline: .now() + fade + 0.1) {
-            old.stop()
+        guard playerColor != nil else { return }
+        fadePlayer(to: 0, duration: fade) { [weak self] in
+            self?.filePlayer?.stop()
         }
-        player = nil
         playerColor = nil
+    }
+
+    /// AVAudioPlayerNode has no fade of its own; a light 30Hz ramp
+    /// keeps starts and stops click-free like the synth path.
+    private func fadePlayer(
+        to target: Float,
+        duration: TimeInterval,
+        completion: (() -> Void)? = nil
+    ) {
+        guard let player = filePlayer else { return }
+        fadeTimer?.invalidate()
+        guard duration > 0.01 else {
+            player.volume = target
+            completion?()
+            return
+        }
+        let start = player.volume
+        let begin = Date()
+        let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { timer in
+            let progress = Float(min(1, Date().timeIntervalSince(begin) / duration))
+            player.volume = start + (target - start) * progress
+            if progress >= 1 {
+                timer.invalidate()
+                completion?()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        fadeTimer = timer
     }
 
     // MARK: Synthesis
@@ -207,6 +350,6 @@ final class NoiseEngine {
         case .rain, .fire, .cafe:
             value = 0
         }
-        return max(-1, min(1, value)) * gain
+        return max(-1, min(1, value)) * gain * synthVol
     }
 }

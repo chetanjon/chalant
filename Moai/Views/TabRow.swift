@@ -50,6 +50,7 @@ struct Switcher: View {
         case .links: return "square.grid.2x2"
         case .clipboard: return "doc.on.clipboard"
         case .shelf: return "tray.full"
+        case .notes: return "note.text"
         case .focus: return "timer"
         }
     }
@@ -61,6 +62,7 @@ struct Switcher: View {
         case .links: return "Shortcuts"
         case .clipboard: return "Clipboard"
         case .shelf: return "Files"
+        case .notes: return "Notes"
         case .focus: return "Focus"
         }
     }

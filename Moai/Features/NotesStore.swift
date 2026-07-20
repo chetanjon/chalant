@@ -25,6 +25,10 @@ final class NotesStore: ObservableObject {
         notes.insert(Note(text: text, date: Date()), at: 0)
     }
 
+    func remove(_ note: Note) {
+        notes.removeAll { $0.id == note.id }
+    }
+
     func clear() {
         notes = []
     }

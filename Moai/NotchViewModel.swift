@@ -15,6 +15,7 @@ final class NotchViewModel: ObservableObject {
         case clipboard
         case shelf
         case links
+        case notes
         case focus
     }
 

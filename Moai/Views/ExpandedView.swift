@@ -20,6 +20,7 @@ struct ExpandedView: View {
     @AppStorage("toolGo") private var toolGo = true
     @AppStorage("toolClips") private var toolClips = true
     @AppStorage("toolShelf") private var toolShelf = true
+    @AppStorage("toolNotes") private var toolNotes = true
     @AppStorage("toolFocus") private var toolFocus = true
 
     init(model: NotchViewModel) {
@@ -37,6 +38,7 @@ struct ExpandedView: View {
         if toolGo { tools.append(.links) }
         if toolClips { tools.append(.clipboard) }
         if toolShelf { tools.append(.shelf) }
+        if toolNotes { tools.append(.notes) }
         if toolFocus { tools.append(.focus) }
         return tools
     }
@@ -145,6 +147,8 @@ struct ExpandedView: View {
             ClipboardView(model: model).frame(height: Theme.Panel.list)
         case .shelf:
             ShelfView(model: model).frame(height: Theme.Panel.list)
+        case .notes:
+            NotesView(model: model).frame(height: Theme.Panel.list)
         case .focus:
             FocusPanel(focus: focus, timer: timer, stats: model.focusStats)
                 .frame(height: Theme.Panel.focus)
