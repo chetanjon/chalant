@@ -12,35 +12,17 @@ struct Switcher: View {
     var body: some View {
         HStack(spacing: Theme.Space.xs) {
             if todayEnabled {
-                item(.today)
+                SwitcherItem(tab: .today, model: model)
             }
-            ForEach(tools, id: \.self) { item($0) }
+            ForEach(tools, id: \.self) { tab in
+                SwitcherItem(tab: tab, model: model)
+            }
             Spacer(minLength: 0)
             HoverGlyphButton(symbol: "gearshape", scale: .m, tint: Theme.textTertiary) {
                 withAnimation(Theme.Motion.content) { model.pane = .settings }
             }
         }
-    }
-
-    private func item(_ tab: NotchViewModel.Tab) -> some View {
-        let on = model.tab == tab
-        return Button {
-            withAnimation(Theme.Motion.content) { model.tab = tab }
-        } label: {
-            HStack(spacing: Theme.Space.snug) {
-                Image(systemName: Self.symbol(tab))
-                    .font(Theme.Fonts.icon(.s))
-                Text(Self.label(tab))
-                    .font(Theme.Fonts.label)
-            }
-            .foregroundStyle(on ? Theme.textPrimary : Theme.textSecondary)
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(Color.white.opacity(on ? 0.10 : 0)))
-            .contentShape(Capsule())
-        }
-        .buttonStyle(PressableStyle())
-        .help(Self.label(tab))
+        .animation(Theme.Motion.content, value: model.tab)
     }
 
     static func symbol(_ tab: NotchViewModel.Tab) -> String {
@@ -65,5 +47,44 @@ struct Switcher: View {
         case .notes: return "Notes"
         case .focus: return "Focus"
         }
+    }
+}
+
+/// One switcher pill. Only the active tab wears its name; the rest
+/// are quiet glyphs that lift on hover and answer with a tooltip, so
+/// six tools sit comfortably where three used to.
+private struct SwitcherItem: View {
+    let tab: NotchViewModel.Tab
+    @ObservedObject var model: NotchViewModel
+    @State private var hovered = false
+
+    var body: some View {
+        let on = model.tab == tab
+        Button {
+            withAnimation(Theme.Motion.content) { model.tab = tab }
+        } label: {
+            HStack(spacing: Theme.Space.snug) {
+                Image(systemName: Switcher.symbol(tab))
+                    .font(Theme.Fonts.icon(.s))
+                if on {
+                    Text(Switcher.label(tab))
+                        .font(Theme.Fonts.label)
+                        .fixedSize()
+                        .transition(.opacity)
+                }
+            }
+            .foregroundStyle(
+                on ? Theme.textPrimary
+                    : hovered ? Theme.textSecondary : Theme.textTertiary
+            )
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.white.opacity(on ? 0.10 : 0)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressableStyle())
+        .onHover { hovered = $0 }
+        .animation(Theme.Motion.hover, value: hovered)
+        .help(Switcher.label(tab))
     }
 }

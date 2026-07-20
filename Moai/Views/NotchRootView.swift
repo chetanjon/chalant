@@ -41,7 +41,20 @@ struct NotchRootView: View {
     }
 
     private var statusWings: CGFloat {
-        hasLeftWing ? 88 : 0
+        // Beside a physical notch the pill must widen symmetrically:
+        // the camera sits at the screen's center, so each side gets
+        // the larger wing's width or content slides under the notch.
+        if model.hasPhysicalNotch {
+            return 2 * max(hasLeftWing ? 88 : 0, notchSideNeed)
+        }
+        return hasLeftWing ? 88 : 0
+    }
+
+    /// Width the right-of-camera glance needs on notched displays.
+    private var notchSideNeed: CGFloat {
+        if focus.isActive || timer.isActive { return 92 }
+        if music.nowPlaying?.isPlaying == true { return 107 }
+        return 55
     }
 
     /// Stable per-state sizes: content is framed to its own state's
@@ -296,30 +309,52 @@ struct NotchRootView: View {
 
     @ViewBuilder
     private var middleContent: some View {
-        if focus.isActive {
-            Text(focus.phase == .work ? "FOCUS \(focus.roundInSet) OF 4" : "BREAK")
-                .font(Theme.Fonts.micro)
-                .tracking(1.3)
-                .foregroundStyle(Theme.textTertiary)
-        } else if timer.isActive {
-            Text("TIMER")
-                .font(Theme.Fonts.micro)
-                .tracking(1.3)
-                .foregroundStyle(Theme.textTertiary)
+        if focus.isActive || timer.isActive {
+            sessionHint
         } else if let playing = music.nowPlaying, playing.isPlaying {
             // Just the song name: the two-part line read as clutter
             // in this little window.
             MarqueeText(title: playing.track)
                 .id(playing.track)
         } else {
-            TimelineView(.everyMinute) { context in
-                Text(
-                    context.date,
-                    format: .dateTime.hour(.defaultDigits(amPM: .omitted)).minute()
-                )
-                .font(Theme.Fonts.captionMono)
-                .foregroundStyle(Theme.textTertiary)
-            }
+            clockGlance
+        }
+    }
+
+    /// The same glance beside the camera on notched displays, where
+    /// the middle belongs to hardware and only the wings are usable.
+    @ViewBuilder
+    private var notchSideContent: some View {
+        if focus.isActive || timer.isActive {
+            sessionHint
+        } else if let playing = music.nowPlaying, playing.isPlaying {
+            MarqueeText(title: playing.track)
+                .id(playing.track)
+                .frame(width: 96)
+        } else {
+            clockGlance
+        }
+    }
+
+    private var sessionHint: some View {
+        Text(
+            focus.isActive
+                ? (focus.phase == .work ? "FOCUS \(focus.roundInSet) OF 4" : "BREAK")
+                : "TIMER"
+        )
+        .font(Theme.Fonts.micro)
+        .tracking(1.3)
+        .foregroundStyle(Theme.textTertiary)
+    }
+
+    private var clockGlance: some View {
+        TimelineView(.everyMinute) { context in
+            Text(
+                context.date,
+                format: .dateTime.hour(.defaultDigits(amPM: .omitted)).minute()
+            )
+            .font(Theme.Fonts.captionMono)
+            .foregroundStyle(Theme.textTertiary)
         }
     }
 
@@ -365,6 +400,10 @@ struct NotchRootView: View {
                     .padding(.leading, hasLeftWing ? 0 : Theme.Space.wingInset)
             }
             Spacer()
+            if model.hasPhysicalNotch {
+                notchSideContent
+                    .padding(.trailing, Theme.Space.wingInset)
+            }
         }
     }
 
