@@ -220,6 +220,17 @@ final class ActionEngine {
             return "Trash emptied."
         }
 
+        // Recall: one query across everything the island holds. This
+        // is the thesis made literal, whatever you put here can be
+        // found here.
+        for prefix in ["find ", "where's ", "wheres ", "where is ", "look for "]
+        where lower.hasPrefix(prefix) {
+            let query = String(text.dropFirst(prefix.count))
+                .trimmingCharacters(in: .whitespaces)
+            guard !query.isEmpty else { return "Find what?" }
+            return recall(query)
+        }
+
         // Window snapping: the frontmost app answers. With the summon
         // key this is a window manager with no chrome at all.
         if ["left", "left half", "snap left", "window left"].contains(lower) {
@@ -338,6 +349,50 @@ final class ActionEngine {
         }
 
         return nil
+    }
+
+    /// Search notes, clips, shelf, shortcuts, and the cached day for
+    /// one query; answer with grouped hits. All local, all instant.
+    /// Calendar and reminders search their cache only, so recall
+    /// never raises a permission prompt.
+    private func recall(_ query: String) -> String {
+        let q = query.lowercased()
+        var lines: [String] = []
+
+        func clip(_ text: String) -> String {
+            let flat = text.replacingOccurrences(of: "\n", with: " ")
+            return flat.count > 64 ? String(flat.prefix(64)) + "…" : flat
+        }
+
+        for note in model.notes.notes
+        where note.text.lowercased().contains(q) {
+            lines.append("note · \(clip(note.text))")
+        }
+        for item in model.clipboard.clips
+        where (item.text ?? "").lowercased().contains(q) {
+            lines.append("clip · \(clip(item.text ?? ""))")
+        }
+        for item in model.shelf.items
+        where item.name.lowercased().contains(q) {
+            lines.append("file · \(item.name)")
+        }
+        for shortcut in model.shortcuts.shortcuts
+        where shortcut.title.lowercased().contains(q) {
+            lines.append("go · \(shortcut.title)")
+        }
+        for event in model.events.events
+        where event.title.lowercased().contains(q) {
+            lines.append("today · \(event.title), \(event.time)")
+        }
+        for reminder in model.events.reminders
+        where reminder.title.lowercased().contains(q) {
+            lines.append("reminder · \(reminder.title)")
+        }
+
+        guard !lines.isEmpty else {
+            return "Nothing on the island matching \"\(query)\"."
+        }
+        return lines.prefix(8).joined(separator: "\n")
     }
 
     /// The home folders people ask for by name. Apps win first, so

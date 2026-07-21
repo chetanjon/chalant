@@ -175,6 +175,18 @@ final class NotchViewModel: ObservableObject {
                     }
                     return
                 }
+                // "debug unshelf name" removes a shelf item, the row
+                // buttons being unclickable synthetically.
+                if text.hasPrefix("debug unshelf ") {
+                    let name = String(text.dropFirst("debug unshelf ".count))
+                        .trimmingCharacters(in: .whitespaces).lowercased()
+                    if let item = self.shelf.items.first(where: {
+                        $0.name.lowercased().contains(name)
+                    }) {
+                        self.shelf.remove(item)
+                    }
+                    return
+                }
                 // "debug tab focus" opens a pane for screenshots;
                 // synthetic clicks never reach the switcher.
                 if text.hasPrefix("debug tab ") {
