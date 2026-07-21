@@ -120,6 +120,9 @@ final class NotchViewModel: ObservableObject {
             self.focusStats.recordSession(minutes: minutes)
             self.flashGlance("timer done")
         }
+        focus.onBreakComplete = { [weak self] round in
+            self?.flashGlance("break's over · round \(round)")
+        }
         focus.onWorkPhaseComplete = { [weak self] minutes in
             guard let self else { return }
             let metBefore = self.focusStats.goalMet

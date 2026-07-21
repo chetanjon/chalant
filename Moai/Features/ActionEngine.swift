@@ -167,11 +167,35 @@ final class ActionEngine {
                 model.shortcuts.open(shortcut)
                 return "Opening \(shortcut.title)."
             }
+            // An installed app by name: the summon key plus "open
+            // slack" is a launcher with no setup at all.
+            if let app = AppIndex.shared.lookup(name) {
+                NSWorkspace.shared.openApplication(
+                    at: app, configuration: .init(), completionHandler: nil
+                )
+                return "Opening \(app.deletingPathExtension().lastPathComponent)."
+            }
             if let url = ShortcutStore.resolvedURL(for: name) {
                 NSWorkspace.shared.open(url)
                 return "Opening."
             }
-            return "No shortcut called \"\(name)\". Add it in the Go tab."
+            return "Nothing called \"\(name)\", app or shortcut. Add it in the Go tab."
+        }
+
+        // Quit a running app by name. Never Moai itself.
+        for prefix in ["quit ", "kill "] where lower.hasPrefix(prefix) {
+            let name = String(lower.dropFirst(prefix.count))
+                .trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { return "Quit what?" }
+            let running = NSWorkspace.shared.runningApplications
+                .filter { $0.activationPolicy == .regular && $0 != NSRunningApplication.current }
+            let match = running.first { ($0.localizedName ?? "").lowercased() == name }
+                ?? running.first { ($0.localizedName ?? "").lowercased().hasPrefix(name) }
+                ?? running.first { ($0.localizedName ?? "").lowercased().contains(name) }
+            guard let match else { return "Nothing called \"\(name)\" is running." }
+            let title = match.localizedName ?? name
+            match.terminate()
+            return "Quit \(title)."
         }
 
         // Focus sessions

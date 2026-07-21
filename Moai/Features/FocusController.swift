@@ -67,6 +67,10 @@ final class FocusController: ObservableObject {
     /// so neither ever counts.
     var onWorkPhaseComplete: ((Int) -> Void)?
 
+    /// Fires with the new round number when a break runs to zero on
+    /// its own. A skipped break stays silent: the user is present.
+    var onBreakComplete: ((Int) -> Void)?
+
     /// Shared ambience owner, focus drives it, never a private engine.
     let ambience: AmbienceController
 
@@ -151,10 +155,14 @@ final class FocusController: ObservableObject {
         guard !isPaused else { return }
         remaining -= 1
         guard remaining <= 0 else { return }
-        if phase == .work {
+        let finishedWork = phase == .work
+        if finishedWork {
             onWorkPhaseComplete?(workMinutes)
         }
         advance()
+        if !finishedWork {
+            onBreakComplete?(roundInSet)
+        }
         NSSound.beep()
     }
 
