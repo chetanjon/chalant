@@ -628,10 +628,18 @@ final class EventKitService: ObservableObject {
         await reloadReminders()
         let q = query.lowercased().trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return "Complete which one?" }
-        guard let match = reminders.first(where: {
+        // Best match, not first match: exact title, then the closest
+        // containment. "done with cooking dinner" must never tick off
+        // a sibling called "cook" (it did, live).
+        let candidates = reminders.filter {
             let title = $0.title.lowercased()
-            return title.contains(q) || q.contains(title)
-        }) else {
+            return title == q || title.contains(q) || q.contains(title)
+        }
+        let match = candidates.first { $0.title.lowercased() == q }
+            ?? candidates.min { lhs, rhs in
+                abs(lhs.title.count - q.count) < abs(rhs.title.count - q.count)
+            }
+        guard let match else {
             return "No open reminder matching \"\(query)\"."
         }
         await complete(match)

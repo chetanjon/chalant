@@ -532,6 +532,16 @@ final class ActionEngine {
     /// writes "What's next." and exact matches must still hit.
     static func sanitized(_ raw: String) -> String {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // "6 p.m." loses its meaningful final dot to the trailing-
+        // punctuation strip below and the date detector goes blind;
+        // normalize meridiem dots away first.
+        for meridiem in ["p.m.", "p.m", "a.m.", "a.m"] {
+            text = text.replacingOccurrences(
+                of: meridiem,
+                with: meridiem.hasPrefix("p") ? "pm" : "am",
+                options: .caseInsensitive
+            )
+        }
         while let last = text.last, ".!?,;".contains(last) {
             text.removeLast()
         }

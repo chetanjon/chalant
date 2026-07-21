@@ -25,8 +25,8 @@ targets:
       properties:
         # Version lives here: xcodegen regenerates Info.plist on every
         # run, so a version bumped only in the plist silently resets.
-        CFBundleShortVersionString: 1.0.29
-        CFBundleVersion: "33"
+        CFBundleShortVersionString: 1.0.30
+        CFBundleVersion: "34"
         LSUIElement: true
         NSHighResolutionCapable: true
         CFBundleIconFile: AppIcon

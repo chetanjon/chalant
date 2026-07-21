@@ -447,8 +447,16 @@ final class NotchViewModel: ObservableObject {
             let spoken = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if spoken.isEmpty {
                 self.lastHeard = nil
-                self.answer = self.voice.failure
+                let why = self.voice.failure
                     ?? "Heard nothing. Hold a beat longer next time."
+                self.answer = why
+                // Empty sessions were the only unlogged outcome, and
+                // exactly the ones every mystery report is made of.
+                self.logVoice(
+                    "(nothing)",
+                    outcome: "\(why) [ear: \(self.voice.activeDeviceName ?? "unknown"),"
+                        + " \(self.voice.deviceNote)]"
+                )
             } else {
                 self.submit(spoken)
                 self.lastHeard = spoken
@@ -461,22 +469,23 @@ final class NotchViewModel: ObservableObject {
         }
     }
 
-    /// The last few utterances and what became of them, so "voice
-    /// log" turns any it-did-nothing report into a readable trail.
-    private(set) var voiceLog: [(heard: String, outcome: String)] = []
+    /// The last utterances and what became of them, persisted so the
+    /// trail survives relaunches (the app restarts more than voice
+    /// sessions fail). "voice log" reads it; so does
+    /// `defaults read com.cj.moai voiceLog` from a terminal.
+    private let voiceLogKey = "voiceLog"
 
     func logVoice(_ heard: String, outcome: String) {
-        voiceLog.append((heard, outcome))
-        if voiceLog.count > 5 { voiceLog.removeFirst() }
+        var lines = UserDefaults.standard.stringArray(forKey: voiceLogKey) ?? []
+        lines.append("heard \u{201C}\(heard)\u{201D} → \(outcome)")
+        if lines.count > 10 { lines.removeFirst(lines.count - 10) }
+        UserDefaults.standard.set(lines, forKey: voiceLogKey)
     }
 
     var voiceLogRendered: String {
-        guard !voiceLog.isEmpty else {
-            return "Nothing heard yet this session."
-        }
-        return voiceLog.map { entry in
-            "heard \u{201C}\(entry.heard)\u{201D}\n→ \(entry.outcome)"
-        }.joined(separator: "\n")
+        let lines = UserDefaults.standard.stringArray(forKey: voiceLogKey) ?? []
+        guard !lines.isEmpty else { return "Nothing heard yet." }
+        return lines.suffix(5).joined(separator: "\n")
     }
 
     private var answerCollapseWork: DispatchWorkItem?
