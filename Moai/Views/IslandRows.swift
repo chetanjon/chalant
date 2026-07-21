@@ -286,7 +286,8 @@ struct AmbienceRow: View {
             }
             .frame(width: 92, alignment: .leading)
 
-            ForEach(NoiseEngine.NoiseColor.allCases, id: \.self) { color in
+            // White is gone from the row: piercing, nobody's friend.
+            ForEach(NoiseEngine.NoiseColor.chipChoices, id: \.self) { color in
                 NoiseButton(
                     color: color,
                     selected: ambience.active == color,

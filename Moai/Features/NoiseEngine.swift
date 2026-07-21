@@ -120,14 +120,15 @@ final class NoiseEngine {
                 ]
             )
         case .fire:
-            // Hearth, not static: real low rumble, crackle kept,
-            // hiss shaved off.
+            // A hearth heard from the sofa: the lows are cut, not
+            // boosted (the old +6.5dB shelf boomed), the crackle sits
+            // forward, the hiss stays shaved.
             return Voicing(
-                rate: 0.95, pitch: -180, trim: 1.0,
+                rate: 1.0, pitch: -60, trim: 0.9,
                 bands: [
-                    (.lowShelf, 160, 6.5, 1),
-                    (.highShelf, 3800, -5, 1),
-                    (.parametric, 900, -1.5, 1.5),
+                    (.lowShelf, 200, -8, 1),
+                    (.parametric, 2400, 2, 1.5),
+                    (.highShelf, 6000, -4, 1),
                 ]
             )
         default:

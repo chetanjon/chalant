@@ -454,58 +454,6 @@ struct NoiseButton: View {
     }
 }
 
-/// Two blobs of the album color drifting on slow orbits inside the
-/// glass. Lives only while the island is open, so it costs nothing
-/// when collapsed.
-struct AuroraView: View {
-    let accent: Color
-
-    var body: some View {
-        // Radial gradients, not live blurs: a blur filter re-renders
-        // every tick and stutters the expand animation; a gradient
-        // composites for free and looks the same at these opacities.
-        // 12 fps: the blobs drift on 7-11s orbits, so anything faster
-        // burns CPU for motion the eye can't resolve.
-        TimelineView(.animation(minimumInterval: 1 / 12)) { context in
-            let calm = Theme.Motion.ambientSlow
-            let t = context.date.timeIntervalSinceReferenceDate / calm
-            let dim = calm > 1 ? 0.85 : 1.0
-            // Lively pushes a wider drift and lets the second blob's
-            // hue wander, same TimelineView, same frame cost.
-            let lively = Theme.Feel.current == .lively
-            let drift: CGFloat = lively ? 1.15 : 1.0
-            ZStack {
-                blob(size: CGSize(width: 340, height: 240), fade: 0.16 * dim)
-                    .offset(
-                        x: -170 + CGFloat(sin(t / 9)) * 28 * drift,
-                        y: -70 + CGFloat(cos(t / 7)) * 18 * drift
-                    )
-                blob(size: CGSize(width: 380, height: 260), fade: 0.12 * dim)
-                    .hueRotation(.degrees(-14 + (lively ? sin(t / 13) * 4 : 0)))
-                    .saturation(1.2)
-                    .offset(
-                        x: 160 + CGFloat(cos(t / 11)) * 32 * drift,
-                        y: 100 + CGFloat(sin(t / 8)) * 20 * drift
-                    )
-            }
-        }
-        .allowsHitTesting(false)
-    }
-
-    private func blob(size: CGSize, fade: Double) -> some View {
-        Ellipse()
-            .fill(
-                RadialGradient(
-                    colors: [accent.opacity(fade), accent.opacity(0)],
-                    center: .center,
-                    startRadius: 8,
-                    endRadius: size.width / 2
-                )
-            )
-            .frame(width: size.width, height: size.height)
-    }
-}
-
 /// Three dots doing a gentle wave while Moai works.
 struct ThinkingDots: View {
     @Environment(\.moaiAccent) private var accent

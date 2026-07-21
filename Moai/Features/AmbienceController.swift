@@ -1,6 +1,12 @@
 import SwiftUI
 
 extension NoiseEngine.NoiseColor {
+    /// What the chips offer. White noise is out of the lineup (kept
+    /// in the engine so old settings don't break).
+    static var chipChoices: [NoiseEngine.NoiseColor] {
+        [.brown, .pink, .rain, .fire, .cafe]
+    }
+
     var displayName: String {
         switch self {
         case .brown: return "Brown"

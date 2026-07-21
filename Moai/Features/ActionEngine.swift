@@ -270,7 +270,6 @@ final class ActionEngine {
                 words.contains("rain") ? .rain :
                 (words.contains("fire") || words.contains("fireplace")) ? .fire :
                 (words.contains("cafe") || lower.contains("coffee")) ? .cafe :
-                lower.contains("white") ? .white :
                 lower.contains("pink") ? .pink : .brown
             model.ambience.play(color)
             switch color {

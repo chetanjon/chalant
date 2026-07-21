@@ -293,8 +293,7 @@ struct TodayView: View {
                         Text(event.time)
                             .font(Theme.Fonts.captionMono)
                             .foregroundStyle(Theme.textTertiary)
-                            .frame(width: 62, alignment: .leading)
-                        Circle().fill(accent).frame(width: 5, height: 5)
+                            .frame(width: 58, alignment: .leading)
                         Text(event.title)
                             .font(Theme.Fonts.body)
                             .foregroundStyle(Theme.textPrimary)
@@ -311,8 +310,10 @@ struct TodayView: View {
                             JoinChip(url: url)
                         }
                     }
+                    .rowInsets()
+                    .moaiCard(radius: Theme.Radius.row)
                     // The day so far settles back; what's ahead stays lit.
-                    .opacity(past ? 0.45 : 1)
+                    .opacity(past ? 0.4 : 1)
                 }
             }
         }
@@ -331,26 +332,55 @@ struct TodayView: View {
                     .foregroundStyle(Theme.textHint)
             } else {
                 ForEach(events.reminders) { reminder in
-                    Button {
-                        Task { await events.complete(reminder) }
-                    } label: {
-                        HStack(spacing: Theme.Space.m) {
-                            Image(systemName: "circle")
-                                .font(Theme.Fonts.icon(.s))
-                                .foregroundStyle(Theme.textTertiary)
-                            Text(reminder.title)
-                                .font(Theme.Fonts.body)
-                                .foregroundStyle(Theme.textPrimary)
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressableStyle())
-                    .help("Mark done")
+                    ReminderRow(reminder: reminder, events: events)
                 }
             }
         }
     }
 
+}
+
+/// One open reminder: a tick circle that fills on hover, the title,
+/// and the due time when it has one. The whole row completes it.
+private struct ReminderRow: View {
+    let reminder: OpenReminder
+    let events: EventKitService
+
+    @State private var hovered = false
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter
+    }()
+
+    var body: some View {
+        Button {
+            Task { await events.complete(reminder) }
+        } label: {
+            HStack(spacing: Theme.Space.m) {
+                Image(systemName: hovered ? "checkmark.circle" : "circle")
+                    .font(Theme.Fonts.icon(.s))
+                    .foregroundStyle(hovered ? Theme.textPrimary : Theme.textTertiary)
+                Text(reminder.title)
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if let due = reminder.due {
+                    Text(Self.timeFormatter.string(from: due))
+                        .font(Theme.Fonts.captionMono)
+                        .foregroundStyle(Theme.textTertiary)
+                }
+            }
+            .rowInsets()
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous))
+        }
+        .buttonStyle(PressableStyle())
+        .moaiCard(radius: Theme.Radius.row)
+        .hoverHighlight(radius: Theme.Radius.row)
+        .onHover { hovered = $0 }
+        .animation(Theme.Motion.hover, value: hovered)
+        .help("Mark done")
+    }
 }

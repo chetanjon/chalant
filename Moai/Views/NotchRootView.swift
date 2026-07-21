@@ -16,7 +16,6 @@ struct NotchRootView: View {
     // Declared so the view re-renders (and re-reads Theme.Motion) the
     // moment the user changes the feel in settings.
     @AppStorage("motionFeel") private var motionFeel = "serene"
-    @AppStorage("auroraOn") private var auroraOn = true
     @AppStorage("glowOn") private var glowOn = true
     @AppStorage("idleEdgeOn") private var idleEdgeOn = true
     @AppStorage("accentMode") private var accentMode = "album"
@@ -24,7 +23,10 @@ struct NotchRootView: View {
     @AppStorage("glanceMusic") private var glanceMusic = true
     @AppStorage("glanceSession") private var glanceSession = true
     @AppStorage("glanceNextEvent") private var glanceNextEvent = true
-    @AppStorage("glanceIdle") private var glanceIdle = "clock"
+    // "none" by default: an idle island earns no width, especially on
+    // monitors where the pill sits over working windows (user call,
+    // 2026-07-20).
+    @AppStorage("glanceIdle") private var glanceIdle = "none"
 
     /// This view injects the accent into the environment for everything
     /// below it, so it reads the source directly rather than @Environment
@@ -129,21 +131,6 @@ struct NotchRootView: View {
                 // 2026-07-20).
                 islandShape
                     .fill(Color.black)
-                    // Album-colored aurora drifting inside the glass.
-                    // Fades out fast on close, a slow fade inside the
-                    // shrinking clip reads as shimmer.
-                    .overlay {
-                        if auroraOn, Theme.Feel.current.ambient, model.state != .collapsed {
-                            AuroraView(accent: accent)
-                                .clipShape(islandShape)
-                                .transition(
-                                    .asymmetric(
-                                        insertion: .opacity.animation(.easeIn(duration: 0.4)),
-                                        removal: .opacity.animation(.easeOut(duration: 0.1))
-                                    )
-                                )
-                        }
-                    }
                     // Top-lit glass edge; brighter where light would catch it.
                     .overlay(
                         islandShape

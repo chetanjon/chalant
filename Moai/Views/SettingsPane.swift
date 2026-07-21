@@ -26,14 +26,13 @@ struct SettingsPane: View {
     @AppStorage("openDelay") private var openDelay = 0.12
     @AppStorage("collapseDelay") private var collapseDelay = 0.05
     @AppStorage("motionFeel") private var motionFeel = "serene"
-    @AppStorage("auroraOn") private var auroraOn = true
     @AppStorage("glowOn") private var glowOn = true
     @AppStorage("idleEdgeOn") private var idleEdgeOn = true
     @AppStorage("accentMode") private var accentMode = "album"
     @AppStorage("glanceMusic") private var glanceMusic = true
     @AppStorage("glanceSession") private var glanceSession = true
     @AppStorage("glanceNextEvent") private var glanceNextEvent = true
-    @AppStorage("glanceIdle") private var glanceIdle = "clock"
+    @AppStorage("glanceIdle") private var glanceIdle = "none"
 
     @Environment(\.moaiAccent) private var accent
 
@@ -121,8 +120,6 @@ struct SettingsPane: View {
                             ("Balanced", "balanced"), ("Lively", "lively"),
                         ], width: 236)
                     }
-                    divider
-                    toggleRow("Aurora in the glass", $auroraOn)
                     divider
                     toggleRow("Glow with music", $glowOn)
                 }
