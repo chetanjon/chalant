@@ -97,6 +97,46 @@ final class ActionEngine {
             return await model.events.addReminder(rest, due: due)
         }
 
+        // Calendar edits: cancel, move, undo. Exact stops ("cancel
+        // timer") already matched above, so "cancel " here means an
+        // event. Parses that don't pan out fall through to the model.
+        if ["undo", "undo that", "bring it back", "put it back"].contains(lower) {
+            return await model.events.undoLastEdit()
+        }
+        if lower.hasPrefix("cancel ") {
+            let rest = String(text.dropFirst("cancel ".count))
+                .trimmingCharacters(in: .whitespaces)
+            if !rest.isEmpty {
+                return await model.events.cancelEvent(rest)
+            }
+        }
+        for prefix in ["move ", "push ", "reschedule ", "shift "]
+        where lower.hasPrefix(prefix) {
+            let rest = String(text.dropFirst(prefix.count))
+                .trimmingCharacters(in: .whitespaces)
+            // "move design sync to 4pm": split on the last " to ",
+            // parse the tail as a time ("at 4" handles the bare hour).
+            if let range = rest.range(of: " to ", options: [.backwards, .caseInsensitive]) {
+                let title = String(rest[..<range.lowerBound])
+                let timePart = String(rest[range.upperBound...])
+                if let (date, _) = Self.extractDate(timePart)
+                    ?? Self.extractDate("at \(timePart)") {
+                    return await model.events.moveEvent(title, to: date)
+                }
+                return "Move it to when? Try: move \(title.isEmpty ? "the meeting" : title) to 4pm."
+            }
+            // "push standup by 30 minutes"
+            if let range = rest.range(of: " by ", options: [.backwards, .caseInsensitive]) {
+                let title = String(rest[..<range.lowerBound])
+                let tail = String(rest[range.upperBound...]).lowercased()
+                if let amount = Self.firstNumber(in: tail) {
+                    let seconds = tail.contains("hour") || tail.contains("hr")
+                        ? amount * 3600 : amount * 60
+                    return await model.events.moveEvent(title, by: TimeInterval(seconds))
+                }
+            }
+        }
+
         // Calendar events: needs an explicit verb and a real date
         for prefix in ["schedule ", "put "] where lower.hasPrefix(prefix) {
             let rest = String(text.dropFirst(prefix.count))

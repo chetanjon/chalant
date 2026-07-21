@@ -113,6 +113,24 @@ final class NotchViewModel: ObservableObject {
         clipboard.start()
         stats.start()
         events.startGlanceTicker()
+        #if DEBUG
+        // Terminal-driven verb testing, Debug builds only. Keystrokes
+        // can't be injected into the non-activating panel (they land in
+        // the frontmost app), so autonomous verification posts the
+        // sentence by distributed notification instead:
+        //   Notification name com.cj.moai.debug.submit, text in object.
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("com.cj.moai.debug.submit"),
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let text = note.object as? String else { return }
+            Task { @MainActor in
+                self?.expand()
+                self?.submit(text)
+            }
+        }
+        #endif
         // Theme.Feel reads the system Reduce Motion flag at render
         // time; nudge the tree when it flips so the change is live.
         NSWorkspace.shared.notificationCenter.addObserver(
