@@ -80,35 +80,60 @@ struct NotchRootView: View {
         }
     }
 
+    // MARK: Notchless pill accounting
+    // On a monitor there is no hardware to mimic, so the pill hugs
+    // its content exactly: bars left, a middle line only when it
+    // earns the space, the session countdown right. Song titles do
+    // not ride the middle here; they were width without value.
+
+    private var monitorPlaying: Bool { music.nowPlaying?.isPlaying == true }
+    private var monitorSession: Bool { focus.isActive || timer.isActive }
+
+    private var monitorMiddleWidth: CGFloat {
+        if model.glanceToast != nil { return 148 }
+        if upcomingEvent != nil { return 150 }
+        switch glanceIdle {
+        case "day": return 84
+        case "streak": return focusStats.days.isEmpty ? 60 : 136
+        case "clock": return 60
+        default: return 0
+        }
+    }
+
+    private var monitorContentWidth: CGFloat {
+        (monitorPlaying ? 44 : 0)
+            + (ambience.active != nil && !monitorPlaying ? 26 : 0)
+            + monitorMiddleWidth
+            + (monitorSession ? 90 : 0)
+    }
+
     /// Nothing to say and no hardware to hug: on a monitor the
     /// resting droplet has no business sitting on window chrome.
     private var collapsedIsEmpty: Bool {
-        !model.hasPhysicalNotch
-            && !hasLeftWing
-            && ambience.active == nil
-            && model.glanceToast == nil
-            && upcomingEvent == nil
-            && glanceIdle == "none"
+        !model.hasPhysicalNotch && monitorContentWidth == 0
     }
 
     /// Stable per-state sizes: content is framed to its own state's
     /// size (not the live island size), so an outgoing view fades out
     /// at its natural size instead of being crushed into the pill.
     private var collapsedSize: CGSize {
-        if collapsedIsEmpty {
-            // A sliver, not a pill: idle on a monitor the island
-            // yields the chrome entirely; hover swells it back.
+        if !model.hasPhysicalNotch {
+            if collapsedIsEmpty {
+                // A sliver, not a pill: idle on a monitor the island
+                // yields the chrome entirely; hover swells it back.
+                let grow: CGFloat = model.isHovering ? 1 : 0
+                return CGSize(width: 84 + 64 * grow, height: 10 + 20 * grow)
+            }
             let grow: CGFloat = model.isHovering ? 1 : 0
-            return CGSize(width: 84 + 64 * grow, height: 10 + 20 * grow)
+            return CGSize(
+                width: monitorContentWidth + 32 + 12 * grow,
+                height: 26 + 6 * grow
+            )
         }
         let growW: CGFloat = model.isHovering ? 14 : 0
         let growH: CGFloat = model.isHovering ? 4 : 0
-        // A toast beside busy wings needs more middle than the pill
-        // usually keeps, or it arrives pre-truncated.
-        let toastRoom: CGFloat =
-            !model.hasPhysicalNotch && model.glanceToast != nil ? 64 : 0
         return CGSize(
-            width: model.notchSize.width + statusWings + growW + toastRoom,
+            width: model.notchSize.width + statusWings + growW,
             height: model.notchSize.height + growH
         )
     }
@@ -135,6 +160,15 @@ struct NotchRootView: View {
                     eave: grown ? 8 : 3,
                     bottomRadius: grown ? 10 : 4,
                     belly: reaching ? 1.5 : 0.5
+                )
+            }
+            if !model.hasPhysicalNotch {
+                // The compact content pill sits between sliver and
+                // notch scale; its curves scale with it.
+                return IslandShape(
+                    eave: 10,
+                    bottomRadius: 12,
+                    belly: reaching ? 2 : 1
                 )
             }
             return IslandShape(
@@ -313,41 +347,63 @@ struct NotchRootView: View {
         )
     }
 
-    /// Wings beside the notch, and, where no physical notch occupies
-    /// the middle (external displays), a quiet center: session phase,
-    /// the playing track, or the time.
+    /// Wings beside the notch on the built-in display; on monitors,
+    /// a compact pill that hugs exactly what is worth showing.
+    @ViewBuilder
     private var collapsedContent: some View {
-        ZStack {
-            if !model.hasPhysicalNotch {
-                middleContent
-                    .frame(maxWidth: max(
-                        60,
-                        collapsedSize.width - 2 * (statusWings + Theme.Space.wingInset + Theme.Space.m)
-                    ))
-            }
+        if model.hasPhysicalNotch {
             wingsContent
+        } else {
+            monitorPill
         }
     }
 
+    /// Bars left, middle only when it earns the space, session right.
+    private var monitorPill: some View {
+        HStack(spacing: Theme.Space.s) {
+            if monitorPlaying {
+                NowPlayingBars(accent: accent, barCount: 4, maxHeight: 11)
+            }
+            if let active = ambience.active, !monitorPlaying {
+                Image(systemName: active.symbol)
+                    .font(Theme.Fonts.icon(.xs))
+                    .foregroundStyle(accent)
+            }
+            monitorMiddle
+            if monitorSession {
+                sessionCompact
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
     @ViewBuilder
-    private var middleContent: some View {
+    private var monitorMiddle: some View {
         // The landing moment outranks everything: it is six seconds
         // long and often arrives just as a break begins.
         if let toast = model.glanceToast {
             toastGlance(toast)
-        } else if (focus.isActive || timer.isActive), glanceSession {
-            sessionHint
         } else if let next = upcomingEvent {
-            // A meeting about to start outranks the song: missing it
-            // costs more than not knowing the track name.
-            upcomingGlance(next)
-        } else if let playing = music.nowPlaying, playing.isPlaying, glanceMusic {
-            // Just the song name: the two-part line read as clutter
-            // in this little window.
-            MarqueeText(title: playing.track)
-                .id(playing.track)
+            upcomingGlance(next, width: 120)
         } else {
             idleGlance
+        }
+    }
+
+    /// The countdown at the pill's right, ring and all.
+    private var sessionCompact: some View {
+        HStack(spacing: Theme.Space.snug) {
+            ProgressRing(
+                progress: focus.isActive ? focus.progress : timer.progress,
+                size: 11,
+                lineWidth: 1.5,
+                tint: accent,
+                trackOpacity: 0.15
+            )
+            Text(focus.isActive ? focus.display : timer.display)
+                .font(Theme.Fonts.labelMono)
+                .foregroundStyle(Theme.textPrimary)
+                .opacity(focus.isActive && focus.isPaused ? 0.5 : 1)
         }
     }
 

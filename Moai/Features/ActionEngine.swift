@@ -13,7 +13,10 @@ final class ActionEngine {
         self.model = model
     }
 
-    func handle(_ text: String) async -> String? {
+    func handle(_ raw: String) async -> String? {
+        // Speech hands over sentences with trailing punctuation and
+        // doubled spaces; a period kills every exact-match verb.
+        let text = Self.sanitized(raw)
         let lower = text.lowercased().trimmingCharacters(in: .whitespaces)
 
         // Notes, fully local
@@ -418,6 +421,31 @@ final class ActionEngine {
 
     // MARK: - Parsing helpers
 
+    /// Trailing punctuation gone, runs of spaces collapsed. Dictation
+    /// writes "What's next." and exact matches must still hit.
+    static func sanitized(_ raw: String) -> String {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        while let last = text.last, ".!?,;".contains(last) {
+            text.removeLast()
+        }
+        while text.contains("  ") {
+            text = text.replacingOccurrences(of: "  ", with: " ")
+        }
+        return text
+    }
+
+    /// Spoken numbers arrive as words as often as digits.
+    private static let numberWords: [String: Int] = [
+        "a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4,
+        "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+        "ten": 10, "eleven": 11, "twelve": 12, "fifteen": 15,
+        "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60,
+    ]
+
+    private static func numberValue(_ token: String) -> Int? {
+        Int(token) ?? numberWords[token.lowercased()]
+    }
+
     private static func firstNumber(in text: String) -> Int? {
         let digits = text.split(whereSeparator: { !$0.isNumber })
         return digits.first.flatMap { Int($0) }
@@ -439,11 +467,12 @@ final class ActionEngine {
         return bareHourTime(text)
     }
 
-    /// Spoken relative times, "in 20 minutes", "in an hour", which
-    /// NSDataDetector handles unreliably.
+    /// Spoken relative times, "in 20 minutes", "in an hour", "in one
+    /// hour", which NSDataDetector handles unreliably. Speech writes
+    /// number words as often as digits.
     private static func relativeTime(_ text: String) -> (Date, NSRange)? {
         guard let regex = try? NSRegularExpression(
-            pattern: "\\bin (\\d{1,3}|a|an) ?(minutes|minute|mins|min|hours|hour|hrs|hr)\\b",
+            pattern: "\\bin (\\d{1,3}|[a-z]+) ?(minutes|minute|mins|min|hours|hour|hrs|hr)\\b",
             options: [.caseInsensitive]
         ) else { return nil }
         let nsText = text as NSString
@@ -451,30 +480,32 @@ final class ActionEngine {
             in: text, range: NSRange(location: 0, length: nsText.length)
         ) else { return nil }
         let amountText = nsText.substring(with: match.range(at: 1)).lowercased()
-        let amount = Int(amountText) ?? 1
+        guard let amount = numberValue(amountText) else { return nil }
         let unit = nsText.substring(with: match.range(at: 2)).lowercased()
         let seconds = unit.hasPrefix("h") ? amount * 3600 : amount * 60
         guard seconds > 0 else { return nil }
         return (Date().addingTimeInterval(TimeInterval(seconds)), match.range)
     }
 
-    /// NSDataDetector misses bare hours ("at 6"). Resolve them to the
-    /// next future occurrence, trying both AM and PM when unspecified.
+    /// NSDataDetector misses bare hours ("at 6", spoken "at nine").
+    /// Resolve them to the next future occurrence, trying both AM and
+    /// PM when unspecified.
     private static func bareHourTime(_ text: String) -> (Date, NSRange)? {
         guard let regex = try? NSRegularExpression(
-            pattern: "\\bat (\\d{1,2})(?::(\\d{2}))?\\s*(am|pm)?\\b",
+            pattern: "\\bat (\\d{1,2}|[a-z]+)(?::(\\d{2}))?\\s*(am|pm|a\\.m|p\\.m)?\\b",
             options: [.caseInsensitive]
         ) else { return nil }
         let nsText = text as NSString
         guard let match = regex.firstMatch(
             in: text, range: NSRange(location: 0, length: nsText.length)
-        ), let hour = Int(nsText.substring(with: match.range(at: 1))),
+        ), let hour = numberValue(nsText.substring(with: match.range(at: 1))),
            (1...23).contains(hour) else { return nil }
         let minute = match.range(at: 2).location == NSNotFound
             ? 0 : Int(nsText.substring(with: match.range(at: 2))) ?? 0
         var meridiem: String?
         if match.range(at: 3).location != NSNotFound {
             meridiem = nsText.substring(with: match.range(at: 3)).lowercased()
+                .replacingOccurrences(of: ".", with: "")
         }
 
         var hours: [Int]
