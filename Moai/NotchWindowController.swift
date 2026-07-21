@@ -201,7 +201,7 @@ final class NotchWindowController {
         hosting.onDragEntered = { [weak viewModel] in
             guard let viewModel, viewModel.state == .collapsed else { return }
             viewModel.dragExpanded = true
-            viewModel.expand()
+            viewModel.expand(takeKey: false)
         }
         hosting.onDragExited = { [weak viewModel] in
             guard let viewModel, viewModel.dragExpanded else { return }

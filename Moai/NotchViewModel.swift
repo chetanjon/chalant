@@ -187,6 +187,16 @@ final class NotchViewModel: ObservableObject {
                     }
                     return
                 }
+                // "debug droptarget" shows the drop overlay briefly;
+                // real drags cannot be synthesized.
+                if text == "debug droptarget" {
+                    self.expand(takeKey: false)
+                    self.isDropTargeted = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                        self?.isDropTargeted = false
+                    }
+                    return
+                }
                 // "debug tab focus" opens a pane for screenshots;
                 // synthetic clicks never reach the switcher.
                 if text.hasPrefix("debug tab ") {
@@ -217,10 +227,12 @@ final class NotchViewModel: ObservableObject {
         }
     }
 
-    func expand() {
+    /// `takeKey: false` for drag-driven opens: grabbing key focus in
+    /// the middle of someone's drag yanks their app around.
+    func expand(takeKey: Bool = true) {
         guard state != .expanded else { return }
         state = .expanded
-        onExpandChange?(true)
+        if takeKey { onExpandChange?(true) }
     }
 
     func collapse() {

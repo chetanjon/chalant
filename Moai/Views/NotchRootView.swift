@@ -96,9 +96,10 @@ struct NotchRootView: View {
     /// at its natural size instead of being crushed into the pill.
     private var collapsedSize: CGSize {
         if collapsedIsEmpty {
-            // A hint of a droplet; hover swells it back toward full.
+            // A sliver, not a pill: idle on a monitor the island
+            // yields the chrome entirely; hover swells it back.
             let grow: CGFloat = model.isHovering ? 1 : 0
-            return CGSize(width: 112 + 36 * grow, height: 22 + 8 * grow)
+            return CGSize(width: 84 + 64 * grow, height: 10 + 20 * grow)
         }
         let growW: CGFloat = model.isHovering ? 14 : 0
         let growH: CGFloat = model.isHovering ? 4 : 0
@@ -124,11 +125,12 @@ struct NotchRootView: View {
             // sags, a soft beat of anticipation before opening.
             let reaching = model.isHovering && Theme.Feel.current.ambient
             if collapsedIsEmpty {
-                // The hint pill is too short for the full geometry.
+                // The sliver is too short for the full geometry.
+                let grown = model.isHovering
                 return IslandShape(
-                    eave: 8 + (reaching ? 1 : 0),
-                    bottomRadius: 10,
-                    belly: reaching ? 2 : 1
+                    eave: grown ? 8 : 3,
+                    bottomRadius: grown ? 10 : 4,
+                    belly: reaching ? 1.5 : 0.5
                 )
             }
             return IslandShape(
