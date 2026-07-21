@@ -31,6 +31,7 @@ struct SettingsPane: View {
     @AppStorage("toolShelf") private var toolShelf = true
     @AppStorage("toolNotes") private var toolNotes = true
     @AppStorage("toolFocus") private var toolFocus = true
+    @AppStorage("toolChat") private var toolChat = true
 
     @AppStorage("expandOnHover") private var expandOnHover = true
     @AppStorage(HotkeySummon.settingKey) private var summonKey = "optSpace"
@@ -87,6 +88,8 @@ struct SettingsPane: View {
                     toggleRow("Notes", $toolNotes)
                     divider
                     toggleRow("Focus & timers", $toolFocus)
+                    divider
+                    toggleRow("Claude chat", $toolChat)
                 }
                 section("Island", reveal: 1) {
                     row("Summon voice") {

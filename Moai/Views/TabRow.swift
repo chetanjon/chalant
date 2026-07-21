@@ -34,6 +34,7 @@ struct Switcher: View {
         case .shelf: return "tray.full"
         case .notes: return "note.text"
         case .focus: return "timer"
+        case .chat: return "asterisk"
         }
     }
 
@@ -46,6 +47,7 @@ struct Switcher: View {
         case .shelf: return "Files"
         case .notes: return "Notes"
         case .focus: return "Focus"
+        case .chat: return "Claude"
         }
     }
 }

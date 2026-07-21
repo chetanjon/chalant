@@ -148,9 +148,11 @@ enum Theme {
         static let eaveCollapsed: CGFloat = 12
         static let eaveExpanded: CGFloat = 22
         static let radiusCollapsed: CGFloat = 16
-        static let radiusExpanded: CGFloat = 44
+        // 44/10 read as a long empty chin under the last row; the
+        // droplet keeps a hint of belly without the sag.
+        static let radiusExpanded: CGFloat = 34
         static let bellyCollapsed: CGFloat = 1.5
-        static let bellyExpanded: CGFloat = 10
+        static let bellyExpanded: CGFloat = 5
     }
 
     /// Fixed lower-panel heights, one deliberate scale instead of
@@ -162,6 +164,8 @@ enum Theme {
         /// the week of stats.
         static let focus: CGFloat = 280
         static let settings: CGFloat = 300
+        /// The Claude chat pane wants reading room.
+        static let chat: CGFloat = 380
     }
 
     /// Motion personality, user-selectable in settings. Serene is the

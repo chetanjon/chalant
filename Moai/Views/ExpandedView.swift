@@ -22,6 +22,7 @@ struct ExpandedView: View {
     @AppStorage("toolShelf") private var toolShelf = true
     @AppStorage("toolNotes") private var toolNotes = true
     @AppStorage("toolFocus") private var toolFocus = true
+    @AppStorage("toolChat") private var toolChat = true
 
     init(model: NotchViewModel) {
         self.model = model
@@ -40,6 +41,7 @@ struct ExpandedView: View {
         if toolShelf { tools.append(.shelf) }
         if toolNotes { tools.append(.notes) }
         if toolFocus { tools.append(.focus) }
+        if toolChat { tools.append(.chat) }
         return tools
     }
 
@@ -88,9 +90,7 @@ struct ExpandedView: View {
         }
         .padding(.horizontal, Theme.Space.xl)
         .padding(.top, model.notchSize.height + Theme.Space.m)
-        // The expanded shell rounds off at 44pt; the last row needs
-        // real clearance or the curve shaves its corners.
-        .padding(.bottom, Theme.Space.l)
+        .padding(.bottom, Theme.Space.m + 2)
         .foregroundStyle(.white)
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
@@ -182,6 +182,9 @@ struct ExpandedView: View {
         case .focus:
             FocusPanel(focus: focus, timer: timer, stats: model.focusStats)
                 .frame(height: Theme.Panel.focus)
+        case .chat:
+            ChatPane(chat: model.chat)
+                .frame(height: Theme.Panel.chat)
         }
     }
 

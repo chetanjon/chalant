@@ -17,6 +17,7 @@ final class NotchViewModel: ObservableObject {
         case links
         case notes
         case focus
+        case chat
     }
 
     /// Settings slides over the island body; collapsing closes it.
@@ -136,6 +137,9 @@ final class NotchViewModel: ObservableObject {
     let stats = SystemStatsController()
     let shortcuts = ShortcutStore()
     let updates = UpdateChecker()
+    /// Created on first open of the chat tab; the web view then lives
+    /// for the app's lifetime so the conversation survives collapses.
+    private(set) lazy var chat = ChatController()
     private(set) lazy var engine = ActionEngine(model: self)
 
     /// Default pill for notch-less displays, so Moai works on any Mac.
@@ -327,7 +331,8 @@ final class NotchViewModel: ObservableObject {
                     let name = String(text.dropFirst("debug tab ".count))
                     let tabs: [String: Tab] = [
                         "today": .today, "ask": .ask, "clipboard": .clipboard,
-                        "shelf": .shelf, "go": .links, "notes": .notes, "focus": .focus,
+                        "shelf": .shelf, "go": .links, "notes": .notes,
+                        "focus": .focus, "chat": .chat,
                     ]
                     if let tab = tabs[name] {
                         self.tab = tab
@@ -394,9 +399,12 @@ final class NotchViewModel: ObservableObject {
             .object(forKey: "collapseDelay") as? Double ?? 0.05
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
+            // Chat is a deliberate surface: mid-conversation with
+            // Claude, a grazing cursor must not close the island.
             guard self.state == .expanded, !self.isHovering,
                   !self.isWorking, self.draftPrompt.isEmpty,
-                  self.pendingContext == nil, self.pane == .none else { return }
+                  self.pendingContext == nil, self.pane == .none,
+                  self.tab != .chat else { return }
             self.collapse()
         }
         hoverCollapseWork = work
