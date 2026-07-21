@@ -321,6 +321,14 @@ struct AnswerView: View {
             if let context = model.pendingContext {
                 contextChip(context.name)
             }
+            // Voice answers carry their transcript, so a mishearing
+            // is visible instead of mysterious.
+            if let heard = model.lastHeard {
+                Text("heard \u{201C}\(heard)\u{201D}")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textGhost)
+                    .lineLimit(2)
+            }
             if model.isWorking, model.answer.isEmpty {
                 ThinkingDots()
                     .padding(.top, Theme.Space.xs)

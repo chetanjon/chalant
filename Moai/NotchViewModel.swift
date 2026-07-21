@@ -93,6 +93,10 @@ final class NotchViewModel: ObservableObject {
     @Published var errorText = ""
     @Published var isWorking = false
 
+    /// What the recognizer heard, echoed above voice answers so a
+    /// mistranscription is never a mystery.
+    @Published var lastHeard: String?
+
     /// Content attached to the next question (a file or a clip).
     @Published var pendingContext: (name: String, text: String)?
 
@@ -231,6 +235,24 @@ final class NotchViewModel: ObservableObject {
                         $0.name.lowercased().contains(name)
                     }) {
                         self.shelf.remove(item)
+                    }
+                    return
+                }
+                // "debug voice" reports the speech stack's health.
+                if text == "debug voice" {
+                    self.expand()
+                    self.tab = .ask
+                    self.answer = self.voice.diagnostics
+                    return
+                }
+                // "debug listen" runs a real 4-second capture through
+                // the normal deliver path; ambient audio becomes the
+                // transcript and proves the chain on real hardware.
+                if text == "debug listen" {
+                    if self.state == .expanded { self.collapse() }
+                    self.beginListening()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                        self?.endListening()
                     }
                     return
                 }
@@ -380,10 +402,12 @@ final class NotchViewModel: ObservableObject {
             self.isWorking = false
             let spoken = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if spoken.isEmpty {
+                self.lastHeard = nil
                 self.answer = self.voice.failure
                     ?? "Heard nothing. Hold a beat longer next time."
             } else {
                 self.submit(spoken)
+                self.lastHeard = spoken
             }
         }
     }
@@ -456,6 +480,9 @@ final class NotchViewModel: ObservableObject {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isWorking else { return }
         errorText = ""
+        // Typed and debug input carries no transcript; the voice path
+        // sets lastHeard right after this call.
+        lastHeard = nil
         // Answers need room, the island grows to show them.
         tab = .ask
 

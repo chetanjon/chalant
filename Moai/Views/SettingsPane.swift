@@ -33,7 +33,7 @@ struct SettingsPane: View {
     @AppStorage("motionFeel") private var motionFeel = "serene"
     @AppStorage("glowOn") private var glowOn = true
     @AppStorage("idleEdgeOn") private var idleEdgeOn = true
-    @AppStorage("accentMode") private var accentMode = "album"
+    @AppStorage("accentMode") private var accentMode = "silver"
     @AppStorage("glanceMusic") private var glanceMusic = true
     @AppStorage("glanceSession") private var glanceSession = true
     @AppStorage("glanceNextEvent") private var glanceNextEvent = true

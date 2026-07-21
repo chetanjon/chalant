@@ -18,7 +18,9 @@ struct NotchRootView: View {
     @AppStorage("motionFeel") private var motionFeel = "serene"
     @AppStorage("glowOn") private var glowOn = true
     @AppStorage("idleEdgeOn") private var idleEdgeOn = true
-    @AppStorage("accentMode") private var accentMode = "album"
+    // Silver by default: a fixed, calm accent. Album-following color
+    // is the opt-in, not the ambient condition (user call, 2026-07-21).
+    @AppStorage("accentMode") private var accentMode = "silver"
     // What the collapsed glance may show, user-tunable in Settings.
     @AppStorage("glanceMusic") private var glanceMusic = true
     @AppStorage("glanceSession") private var glanceSession = true
@@ -126,8 +128,8 @@ struct NotchRootView: View {
             }
             let grow: CGFloat = model.isHovering ? 1 : 0
             return CGSize(
-                width: monitorContentWidth + 28 + 12 * grow,
-                height: 20 + 8 * grow
+                width: monitorContentWidth + 40 + 12 * grow,
+                height: 18 + 10 * grow
             )
         }
         let growW: CGFloat = model.isHovering ? 14 : 0
@@ -166,8 +168,8 @@ struct NotchRootView: View {
                 // The compact content pill sits between sliver and
                 // notch scale; its curves scale with it.
                 return IslandShape(
-                    eave: 7,
-                    bottomRadius: 9,
+                    eave: 6,
+                    bottomRadius: 8,
                     belly: reaching ? 1.5 : 0.5
                 )
             }
@@ -369,7 +371,7 @@ struct NotchRootView: View {
     private var monitorPill: some View {
         HStack(spacing: Theme.Space.s) {
             if monitorPlaying {
-                NowPlayingBars(accent: accent, barCount: 4, maxHeight: 9)
+                NowPlayingBars(accent: accent, barCount: 4, maxHeight: 8)
             }
             if let active = ambience.active, !monitorPlaying {
                 Image(systemName: active.symbol)
