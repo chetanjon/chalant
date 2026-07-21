@@ -22,6 +22,7 @@ struct SettingsPane: View {
     @AppStorage("toolFocus") private var toolFocus = true
 
     @AppStorage("expandOnHover") private var expandOnHover = true
+    @AppStorage(HotkeySummon.settingKey) private var summonKey = "optSpace"
     @AppStorage("openDelay") private var openDelay = 0.12
     @AppStorage("collapseDelay") private var collapseDelay = 0.05
     @AppStorage("motionFeel") private var motionFeel = "serene"
@@ -59,6 +60,13 @@ struct SettingsPane: View {
                     toggleRow("Focus & timers", $toolFocus)
                 }
                 section("Island", reveal: 1) {
+                    row("Summon voice") {
+                        picker($summonKey, [
+                            ("⌥Space", "optSpace"), ("⌃Space", "ctrlSpace"),
+                            ("⇧⌘Space", "cmdShiftSpace"), ("Off", "off"),
+                        ], width: 236)
+                    }
+                    divider
                     toggleRow("Open on hover", $expandOnHover)
                     divider
                     toggleRow("Show edge when idle", $idleEdgeOn)

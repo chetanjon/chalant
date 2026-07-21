@@ -105,6 +105,7 @@ final class NotchWindowController {
     private var hoverTimer: Timer?
     private var stateSub: AnyCancellable?
     private var napActivity: NSObjectProtocol?
+    private var summon: HotkeySummon?
     private var pointerInside = false
     /// Pending open-intent check; the pointer must linger in the zone,
     /// not just cross it.
@@ -222,6 +223,12 @@ final class NotchWindowController {
         self.panel = panel
 
         viewModel.start()
+
+        // Voice from anywhere: the summon key toggles a listening
+        // session without the mouse ever visiting the notch.
+        summon = HotkeySummon { [weak self] in
+            self?.viewModel.summon()
+        }
 
         // Clicking anywhere outside the app dismisses whatever the
         // island is doing. A listening session cancels (discarded, not

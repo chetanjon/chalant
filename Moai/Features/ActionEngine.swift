@@ -121,7 +121,16 @@ final class ActionEngine {
                 let timePart = String(rest[range.upperBound...])
                 if let (date, _) = Self.extractDate(timePart)
                     ?? Self.extractDate("at \(timePart)") {
-                    return await model.events.moveEvent(title, to: date)
+                    // Saying "reminder" targets reminders; otherwise
+                    // today's events get first claim, reminders catch
+                    // the rest ("push dentist to tomorrow").
+                    if title.lowercased().contains("reminder") {
+                        return await model.events.rescheduleReminder(title, to: date)
+                    }
+                    if model.events.matchesEvent(title) {
+                        return await model.events.moveEvent(title, to: date)
+                    }
+                    return await model.events.rescheduleReminder(title, to: date)
                 }
                 return "Move it to when? Try: move \(title.isEmpty ? "the meeting" : title) to 4pm."
             }

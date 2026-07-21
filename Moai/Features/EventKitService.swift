@@ -554,6 +554,48 @@ final class EventKitService: ObservableObject {
         }.joined(separator: "\n")
     }
 
+    /// True when spoken words resolve to one of today's events, used
+    /// to route "push X to 4" between calendar and reminders. Never
+    /// prompts: without access the store just matches nothing.
+    func matchesEvent(_ query: String) -> Bool {
+        resolveEvent(query) != nil
+    }
+
+    /// Move an open reminder to a new due time, alarm included.
+    func rescheduleReminder(_ raw: String, to due: Date) async -> String {
+        guard await ensureReminders() else {
+            return "Reminders access is off. System Settings, Privacy, Reminders."
+        }
+        await reloadReminders()
+        let query = raw.lowercased()
+            .trimmingCharacters(in: .whitespaces)
+            .removingPrefixes(["my ", "the "])
+            .replacingOccurrences(of: " reminder", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return "Move which reminder?" }
+        guard let match = reminders.first(where: {
+            let title = $0.title.lowercased()
+            return title.contains(query) || query.contains(title)
+        }) else {
+            return "No open reminder matching \"\(raw)\"."
+        }
+        guard let ek = store.calendarItem(withIdentifier: match.id) as? EKReminder else {
+            return "That reminder slipped away; open Reminders once and retry."
+        }
+        ek.dueDateComponents = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute], from: due
+        )
+        ek.alarms?.forEach { ek.removeAlarm($0) }
+        ek.addAlarm(EKAlarm(absoluteDate: due))
+        do {
+            try store.save(ek, commit: true)
+        } catch {
+            return "Couldn't move that. \(error.localizedDescription)"
+        }
+        await reloadReminders()
+        return "Moved \(match.title). \(Self.formatter.string(from: due))."
+    }
+
     /// Complete the open reminder whose title best matches spoken text.
     func completeByVoice(_ query: String) async -> String {
         await reloadReminders()

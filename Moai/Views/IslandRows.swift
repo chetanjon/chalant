@@ -330,7 +330,7 @@ struct AnswerView: View {
                     .fixedSize(horizontal: false, vertical: true)
             } else if model.answer.isEmpty {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    Text("Hold the notch or tap the mic, I'm listening.")
+                    Text(idleHint)
                         .font(Theme.Fonts.reading)
                         .foregroundStyle(Theme.textHint)
                     Text("remind me to call amma at 6 · what's on today · focus 25 · note: an idea")
@@ -348,6 +348,15 @@ struct AnswerView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Name the summon key while one is set; the words track Settings.
+    private var idleHint: String {
+        let key = HotkeySummon.current
+        guard key != .off else {
+            return "Hold the notch or tap the mic, I'm listening."
+        }
+        return "Hold the notch, tap the mic, or hit \(key.display) anywhere."
     }
 
     private var answerText: some View {
