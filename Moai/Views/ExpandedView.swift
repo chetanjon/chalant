@@ -34,12 +34,12 @@ struct ExpandedView: View {
 
     private var todayEnabled: Bool { showCalendar || showReminders }
 
-    /// Chat gets a wider island: past ~768pt of page width claude.ai
-    /// serves its desktop layout, and the sidebar becomes a real
-    /// column that scrolls with an ordinary wheel instead of the
-    /// mobile drawer that refuses one.
+    /// Chat gets a wider island, but not a monument: at 680 with the
+    /// pane's 0.8 page zoom the site still measures 800+ CSS points,
+    /// keeps its desktop layout and scrollable sidebar, and the
+    /// island stays a modest resident of the screen.
     private var islandWidth: CGFloat {
-        model.tab == .chat && model.pane == .none ? 840 : 520
+        model.tab == .chat && model.pane == .none ? 680 : 520
     }
 
     private var enabledTools: [NotchViewModel.Tab] {

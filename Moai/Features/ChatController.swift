@@ -78,6 +78,10 @@ final class ChatController: NSObject, ObservableObject {
         )
         configuration.userContentController.addUserScript(styler)
         let web = WKWebView(frame: .zero, configuration: configuration)
+        // Rendered at 80 percent, the page believes it has 800+
+        // points and keeps its desktop layout (and the scrollable
+        // sidebar) while the island stays modest on screen.
+        web.pageZoom = 0.8
         // Trackpad swipes travel the chat history like a browser.
         web.allowsBackForwardNavigationGestures = true
         // Google's sign-in refuses embedded browsers by user agent;
