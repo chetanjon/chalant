@@ -4,6 +4,12 @@ The AI-native dynamic island for Mac. Incumbents treat the notch as a widget she
 
 The name: real moai are buried up to their shoulders. Ours is buried in the bezel. Only the head shows at the top of your screen, and it surfaces when you hold it. (Also: mo-AI. You heard it.)
 
+## Download
+
+[**Latest release**](https://github.com/chetanjon/moai/releases/latest). Apple Silicon, macOS 14+, free.
+
+First open: macOS will ask once. System Settings, Privacy and Security, Open Anyway. Moai is unsigned because it is free and independent. Speech recognition is on-device, keys stay in your Keychain, and nothing phones home.
+
 ## v1 feature set
 
 **Do** (the core surface)
