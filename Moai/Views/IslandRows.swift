@@ -207,6 +207,9 @@ struct NowPlayingBars: View {
         }
     }
 
+    private var barWidth: CGFloat { 2.5 }
+    private var barSpacing: CGFloat { 2 }
+
     /// Two incommensurate sines plus a slow swell per bar: loop-free,
     /// organic bounce, the way a real analyzer never quite repeats.
     private func liveHeight(t: Double, index: Int) -> CGFloat {
@@ -222,15 +225,28 @@ struct NowPlayingBars: View {
         maxHeight * [0.45, 0.8, 0.6, 0.9, 0.5][index % 5]
     }
 
+    /// Drawn in a fixed-size Canvas, not height-animated subviews: a
+    /// `.frame(height:)` that changes 30 times a second invalidates
+    /// layout of the whole island every tick (measured at ~30% of
+    /// main-thread time while collapsed). Drawing repaints only these
+    /// few points of screen and never touches layout.
     private func bars(_ height: @escaping (Int) -> CGFloat) -> some View {
-        HStack(alignment: .center, spacing: 2) {
-            ForEach(0..<barCount, id: \.self) { index in
-                Capsule()
-                    .fill(accent)
-                    .frame(width: 2.5, height: max(2.5, height(index)))
+        Canvas { context, size in
+            for index in 0..<barCount {
+                let barHeight = max(barWidth, height(index))
+                let rect = CGRect(
+                    x: CGFloat(index) * (barWidth + barSpacing),
+                    y: (size.height - barHeight) / 2,
+                    width: barWidth,
+                    height: barHeight
+                )
+                context.fill(Capsule().path(in: rect), with: .color(accent))
             }
         }
-        .frame(height: maxHeight)
+        .frame(
+            width: CGFloat(barCount) * barWidth + CGFloat(barCount - 1) * barSpacing,
+            height: maxHeight
+        )
     }
 }
 

@@ -223,12 +223,20 @@ final class NotchWindowController {
 
         viewModel.start()
 
-        // Clicking anywhere outside the app collapses the island.
+        // Clicking anywhere outside the app dismisses whatever the
+        // island is doing. A listening session cancels (discarded, not
+        // run: the click says the user left); before this, a surprise
+        // voice panel had no exit except a tap on the island itself.
         clickMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.viewModel.collapse()
+                guard let self else { return }
+                if self.viewModel.state == .listening {
+                    self.viewModel.cancelListening()
+                } else {
+                    self.viewModel.collapse()
+                }
             }
         }
 

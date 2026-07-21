@@ -63,6 +63,10 @@ final class NotchViewModel: ObservableObject {
     /// Content attached to the next question (a file or a clip).
     @Published var pendingContext: (name: String, text: String)?
 
+    /// When the last streamed delta arrived; the ask watchdog reads it
+    /// to tell a slow answer from a dead one.
+    private var lastStreamActivity = Date.distantPast
+
     // Feature stores
     let music = MusicController()
     let clipboard = ClipboardStore()
@@ -296,16 +300,43 @@ final class NotchViewModel: ObservableObject {
 
             answer = ""
             isWorking = true
-            do {
-                for try await delta in AIService.stream(
-                    prompt: fullPrompt, provider: provider, apiKey: key
-                ) {
-                    answer += delta
+            lastStreamActivity = Date()
+            let streaming = Task { [weak self] in
+                do {
+                    for try await delta in AIService.stream(
+                        prompt: fullPrompt, provider: provider, apiKey: key
+                    ) {
+                        guard let self else { return }
+                        self.answer += delta
+                        self.lastStreamActivity = Date()
+                    }
+                } catch {
+                    // Watchdog cancellation reports through its own
+                    // message; only real failures land here.
+                    if !(error is CancellationError),
+                       (error as? URLError)?.code != .cancelled {
+                        self?.errorText = error.localizedDescription
+                    }
                 }
-            } catch {
-                errorText = error.localizedDescription
+                self?.isWorking = false
             }
-            isWorking = false
+            // A stalled provider must never wedge the island: before
+            // this, isWorking stayed true forever on a hung stream,
+            // which blocked hover-collapse and every later question
+            // until relaunch. 20 quiet seconds ends the session.
+            Task { [weak self] in
+                while true {
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    guard let self, self.isWorking, !streaming.isCancelled else { return }
+                    if Date().timeIntervalSince(self.lastStreamActivity) > 20 {
+                        streaming.cancel()
+                        if self.answer.isEmpty {
+                            self.errorText = "No answer arrived. Check the network, then try again."
+                        }
+                        return
+                    }
+                }
+            }
         }
     }
 }
