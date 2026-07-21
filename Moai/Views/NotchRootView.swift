@@ -103,8 +103,12 @@ struct NotchRootView: View {
         }
         let growW: CGFloat = model.isHovering ? 14 : 0
         let growH: CGFloat = model.isHovering ? 4 : 0
+        // A toast beside busy wings needs more middle than the pill
+        // usually keeps, or it arrives pre-truncated.
+        let toastRoom: CGFloat =
+            !model.hasPhysicalNotch && model.glanceToast != nil ? 64 : 0
         return CGSize(
-            width: model.notchSize.width + statusWings + growW,
+            width: model.notchSize.width + statusWings + growW + toastRoom,
             height: model.notchSize.height + growH
         )
     }

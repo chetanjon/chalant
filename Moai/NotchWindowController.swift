@@ -434,7 +434,7 @@ final class NotchWindowController {
         }
         hosting.onDrop = { [weak self] items in
             self?.hideDropDock()
-            self?.viewModel.receiveDrop(items)
+            self?.viewModel.receiveDrop(items, quietly: true)
         }
         panel.contentView = hosting
         dropDock = panel

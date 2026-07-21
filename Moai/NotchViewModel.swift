@@ -173,6 +173,14 @@ final class NotchViewModel: ObservableObject {
                     self.receiveDrop([.text(String(text.dropFirst("debug droptext ".count)))])
                     return
                 }
+                // "debug dropquiet /path" exercises the bubble's
+                // announce-only path.
+                if text.hasPrefix("debug dropquiet ") {
+                    let path = String(text.dropFirst("debug dropquiet ".count))
+                        .trimmingCharacters(in: .whitespaces)
+                    self.receiveDrop([.file(URL(fileURLWithPath: path))], quietly: true)
+                    return
+                }
                 if text == "debug pin" {
                     if let newest = self.clipboard.clips.first(where: { !$0.pinned }) {
                         self.clipboard.togglePin(newest)
@@ -348,8 +356,11 @@ final class NotchViewModel: ObservableObject {
     /// Content dropped on the island, delivered from the panel's AppKit
     /// drag handler (SwiftUI's onDrop never fires in this panel). Files
     /// and links stash on the shelf; images and text join the clipboard,
-    /// ready to paste. The island only opens when something landed.
-    func receiveDrop(_ items: [DroppedItem]) {
+    /// ready to paste. Dropped on the island itself, the island opens to
+    /// show the catch; `quietly` (the mid-screen bubble) announces in
+    /// the glance instead, the island stays tucked away and the right
+    /// tab waits for the next open.
+    func receiveDrop(_ items: [DroppedItem], quietly: Bool = false) {
         // The hosting view already refuses drags mid-voice; belt and braces.
         guard state != .listening else { return }
         dragExpanded = false
@@ -370,7 +381,14 @@ final class NotchViewModel: ObservableObject {
         }
         guard landedShelf || landedClip else { return }
         tab = landedShelf ? .shelf : .clipboard
-        expand()
+        if quietly {
+            flashGlance(
+                landedShelf && landedClip ? "stashed"
+                    : landedShelf ? "on the shelf" : "in clips"
+            )
+        } else {
+            expand()
+        }
     }
 
     /// Attach text (from a clip or file) and jump to the Do surface.
