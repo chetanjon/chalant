@@ -83,6 +83,39 @@ final class ActionEngine {
         // the fuzzy contains() branches below can hijack them. Spoken
         // phrasing varies, "set a reminder for X" must work as well as
         // "remind me to X".
+        // The inversion: "add walking to my reminders (at 8)" puts
+        // the thing before the word reminder, and prefix matching
+        // never sees it. Longest tails first, so "reminders list"
+        // is not half-eaten by "reminders".
+        let inversionLeads = ["add ", "put ", "set ", "create ", "make "]
+        let inversionTails = [
+            "to my reminders list", "to my reminder list",
+            "on my reminders list", "in my reminders app",
+            "to my reminders app", "to my reminders",
+            "to my reminder", "on my reminders", "in my reminders",
+            "to the reminders", "to reminders", "in reminders",
+        ]
+        if let lead = inversionLeads.first(where: { lower.hasPrefix($0) }),
+           let tailRange = inversionTails
+               .compactMap({ text.range(of: $0, options: .caseInsensitive) })
+               .first {
+            let afterLead = text.index(text.startIndex, offsetBy: lead.count)
+            if afterLead <= tailRange.lowerBound {
+                let thing = String(text[afterLead..<tailRange.lowerBound])
+                let trailing = String(text[tailRange.upperBound...])
+                var rest = (thing + " " + trailing)
+                    .trimmingCharacters(in: .whitespaces)
+                var due: Date?
+                if let (date, range) = Self.extractDate(rest) {
+                    due = date
+                    rest = Self.removing(range, from: rest)
+                }
+                if !rest.isEmpty {
+                    return await model.events.addReminder(rest, due: due)
+                }
+            }
+        }
+
         let reminderPrefixes = [
             "remind me to ", "remind me ", "remind ",
             "set a reminder ", "set reminder ",
