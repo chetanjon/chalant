@@ -78,10 +78,8 @@ final class ChatController: NSObject, ObservableObject {
         )
         configuration.userContentController.addUserScript(styler)
         let web = WKWebView(frame: .zero, configuration: configuration)
-        // Rendered at 80 percent, the page believes it has 800+
-        // points and keeps its desktop layout (and the scrollable
-        // sidebar) while the island stays modest on screen.
-        web.pageZoom = 0.8
+        // Page zoom is owned by ChatPane: compact and full modes
+        // each set their own scale on attach.
         // Trackpad swipes travel the chat history like a browser.
         web.allowsBackForwardNavigationGestures = true
         // Google's sign-in refuses embedded browsers by user agent;
@@ -147,10 +145,13 @@ extension ChatController: WKUIDelegate {
 struct ChatPane: View {
     @ObservedObject var chat: ChatController
     @State private var hovered = false
+    /// Compact keeps the island at its everyday width and a single
+    /// column; full grows to the desktop layout with the sidebar.
+    @AppStorage("chatFull") private var chatFull = false
 
     var body: some View {
         ZStack {
-            ChatWebView(webView: chat.webView)
+            ChatWebView(webView: chat.webView, zoom: chatFull ? 0.8 : 0.75)
                 .clipShape(RoundedRectangle(
                     cornerRadius: Theme.Radius.card, style: .continuous
                 ))
@@ -164,7 +165,8 @@ struct ChatPane: View {
             }
         }
         // A login page can dead-end with no way out; back and home
-        // float in on hover so a stuck page is never a trap.
+        // float in on hover so a stuck page is never a trap, and the
+        // expand glyph trades footprint for the sidebar layout.
         .overlay(alignment: .topTrailing) {
             if hovered {
                 HStack(spacing: Theme.Space.xs) {
@@ -177,6 +179,15 @@ struct ChatPane: View {
                         symbol: "house", scale: .s, tint: Theme.textSecondary
                     ) {
                         chat.goHome()
+                    }
+                    HoverGlyphButton(
+                        symbol: chatFull
+                            ? "arrow.down.right.and.arrow.up.left"
+                            : "arrow.up.left.and.arrow.down.right",
+                        scale: .s,
+                        tint: Theme.textSecondary
+                    ) {
+                        chatFull.toggle()
                     }
                 }
                 .padding(Theme.Space.xs)
@@ -193,7 +204,14 @@ struct ChatPane: View {
 
 private struct ChatWebView: NSViewRepresentable {
     let webView: WKWebView
+    let zoom: CGFloat
 
-    func makeNSView(context: Context) -> WKWebView { webView }
-    func updateNSView(_ nsView: WKWebView, context: Context) {}
+    func makeNSView(context: Context) -> WKWebView {
+        webView.pageZoom = zoom
+        return webView
+    }
+
+    func updateNSView(_ nsView: WKWebView, context: Context) {
+        if nsView.pageZoom != zoom { nsView.pageZoom = zoom }
+    }
 }

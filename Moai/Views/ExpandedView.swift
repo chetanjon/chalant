@@ -23,6 +23,7 @@ struct ExpandedView: View {
     @AppStorage("toolNotes") private var toolNotes = true
     @AppStorage("toolFocus") private var toolFocus = true
     @AppStorage("toolChat") private var toolChat = true
+    @AppStorage("chatFull") private var chatFull = false
 
     init(model: NotchViewModel) {
         self.model = model
@@ -34,12 +35,12 @@ struct ExpandedView: View {
 
     private var todayEnabled: Bool { showCalendar || showReminders }
 
-    /// Chat gets a wider island, but not a monument: at 680 with the
-    /// pane's 0.8 page zoom the site still measures 800+ CSS points,
-    /// keeps its desktop layout and scrollable sidebar, and the
-    /// island stays a modest resident of the screen.
+    /// Chat costs nothing by default: compact mode keeps the island
+    /// at its everyday 520 and renders the site single-column. Full
+    /// mode (the expand glyph in the pane) grows to 680, where 0.8
+    /// zoom crosses the desktop breakpoint and the sidebar returns.
     private var islandWidth: CGFloat {
-        model.tab == .chat && model.pane == .none ? 680 : 520
+        model.tab == .chat && model.pane == .none && chatFull ? 680 : 520
     }
 
     private var enabledTools: [NotchViewModel.Tab] {
@@ -125,6 +126,7 @@ struct ExpandedView: View {
         }
         .animation(Theme.Motion.hover, value: model.isDropTargeted)
         .animation(Theme.Motion.content, value: model.tab)
+        .animation(Theme.Motion.content, value: chatFull)
         .animation(Theme.Motion.content, value: model.pane)
         .animation(Theme.Motion.content, value: music.nowPlaying != nil)
         .animation(Theme.Motion.content, value: ambience.active)
