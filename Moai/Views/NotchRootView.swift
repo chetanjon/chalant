@@ -62,10 +62,12 @@ struct NotchRootView: View {
         // Beside a physical notch the pill must widen symmetrically:
         // the camera sits at the screen's center, so each side gets
         // the larger wing's width or content slides under the notch.
+        // 54 per side is just enough for the waveform or the ring
+        // and clock; 88 read as the island eating the menu bar.
         if model.hasPhysicalNotch {
-            return 2 * max(hasLeftWing ? 88 : 0, notchSideNeed)
+            return 2 * max(hasLeftWing ? 54 : 0, notchSideNeed)
         }
-        return hasLeftWing ? 88 : 0
+        return hasLeftWing ? 54 : 0
     }
 
     /// Width the right-of-camera glance needs on notched displays.

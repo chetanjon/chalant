@@ -527,15 +527,14 @@ final class NotchWindowController {
         }
     }
 
-    /// Generous reach in both directions: skimming the top edge near
-    /// the notch is enough, and pointing at the island's visible body
-    /// or just under its lip also counts, users aim at what they see,
-    /// not at the strip above it.
+    /// Close reach only: the island opens when the cursor is on it
+    /// or a hair away, not from half a menu bar out. The old 160 of
+    /// slack opened it for passersby (user call, 2026-07-21).
     private func collapsedZone(on screen: NSScreen) -> NSRect {
         hoverZone(
             on: screen,
-            width: viewModel.notchSize.width + 160,
-            height: viewModel.notchSize.height + 26
+            width: viewModel.notchSize.width + 116,
+            height: viewModel.notchSize.height + 12
         )
     }
 

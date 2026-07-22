@@ -48,6 +48,10 @@ struct ShortcutsView: View {
                             ShortcutChip(shortcut: shortcut, store: store) {
                                 if store.open(shortcut) {
                                     model.collapse()
+                                } else {
+                                    // Silence reads as broken; say it.
+                                    model.collapse()
+                                    model.flashGlance("Couldn't open \(shortcut.title)")
                                 }
                             }
                         }

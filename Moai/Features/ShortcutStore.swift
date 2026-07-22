@@ -136,14 +136,26 @@ final class ShortcutStore: ObservableObject {
         shortcuts.removeAll { $0.id == shortcut.id }
     }
 
+    /// Bare app names ("notes", "figma") resolve like the spoken
+    /// open verb does, so a shortcut a user types by name actually
+    /// opens instead of failing as a non-URL.
+    private let apps = AppIndex()
+
     @discardableResult
     func open(_ shortcut: Shortcut) -> Bool {
         if let action = shortcut.action {
             action.run()
             return true
         }
-        guard let url = Self.resolvedURL(for: shortcut.link) else { return false }
-        return NSWorkspace.shared.open(url)
+        if let url = Self.resolvedURL(for: shortcut.link),
+           NSWorkspace.shared.open(url) {
+            return true
+        }
+        let name = shortcut.link.isEmpty ? shortcut.title : shortcut.link
+        if let appURL = apps.lookup(name) {
+            return NSWorkspace.shared.open(appURL)
+        }
+        return false
     }
 
     /// First shortcut whose title matches the spoken/typed name.
