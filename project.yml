@@ -25,13 +25,14 @@ targets:
       properties:
         # Version lives here: xcodegen regenerates Info.plist on every
         # run, so a version bumped only in the plist silently resets.
-        CFBundleShortVersionString: 1.0.65
-        CFBundleVersion: "68"
+        CFBundleShortVersionString: 1.0.66
+        CFBundleVersion: "69"
         LSUIElement: true
         NSHighResolutionCapable: true
         CFBundleIconFile: AppIcon
         CFBundleDisplayName: Moai
-        NSAppleEventsUsageDescription: Moai controls Spotify and Apple Music playback from the notch.
+        NSAppleEventsUsageDescription: Moai controls your music players and sends the Messages you dictate, nothing more.
+        NSContactsUsageDescription: Moai looks up the person you name so a message reaches the right number.
         NSMicrophoneUsageDescription: Hold the notch to talk. Audio is processed on this Mac only.
         NSSpeechRecognitionUsageDescription: Turns your words into actions, on this Mac only.
         NSRemindersFullAccessUsageDescription: Moai creates the reminders you set.

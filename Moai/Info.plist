@@ -19,15 +19,17 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.65</string>
+	<string>1.0.66</string>
 	<key>CFBundleVersion</key>
-	<string>68</string>
+	<string>69</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Moai controls Spotify and Apple Music playback from the notch.</string>
+	<string>Moai controls your music players and sends the Messages you dictate, nothing more.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Moai adds events and reads today's agenda.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Moai looks up the person you name so a message reaches the right number.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>

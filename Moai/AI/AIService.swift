@@ -54,7 +54,9 @@ struct AIService {
         open <app or folder> / quit <app> / left half / right half / fill / \
         center / note: <text> / notes / find <words> / screenshot / \
         screen record / lock screen / dark mode / light mode / \
-        run <name of one of the user's Shortcuts.app shortcuts>
+        run <name of one of the user's Shortcuts.app shortcuts> / \
+        text <person>: <their message, word for word> / send / \
+        don't send
         Reply with one command copied exactly from the list, no other \
         words, no quotes, no explanation. If nothing fits, reply NONE.
         Request: \(utterance)
@@ -109,6 +111,7 @@ struct AIService {
     private static let parameterizedPrefixes = [
         "remind", "schedule", "cancel", "move", "done with",
         "focus", "timer", "open", "quit", "note", "find", "run",
+        "text", "message", "imessage", "send",
     ]
 
     private static func rescueParaphrase(_ reply: String) -> String {

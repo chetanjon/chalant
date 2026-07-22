@@ -24,6 +24,7 @@ First open: macOS will ask once. System Settings, Privacy and Security, Open Any
 - `brown noise` / `white noise` / `pink noise`, generated live, no audio files, works offline.
 - `note: something` captures locally. `notes` lists. `clear notes` wipes.
 - `play`, `pause`, `skip`, `previous` control music.
+- `text amma: on my way` reads the message back; only the word `send` fires it, as an iMessage through Messages. Nothing ever sends unconfirmed, and any other command drops the staged text.
 - Dates parsed deterministically with NSDataDetector. Verbs by prefix. Zero network, zero key, instant.
 - Anything beyond the verbs goes to the Mac's own on-device model, keyless. Long conversations belong to the Chat tab and your own subscription.
 
@@ -56,7 +57,7 @@ First open: macOS will ask once. System Settings, Privacy and Security, Open Any
 
 ## Permission prompts, in order of appearance
 
-macOS will ask once each for: Microphone + Speech Recognition (first hold-to-talk), Reminders (first remind), Calendars (first schedule/agenda), Automation for Spotify/Music (when music first plays; asked up front if your player is already open during the welcome tour). All expected, approve them.
+macOS will ask once each for: Microphone + Speech Recognition (first hold-to-talk), Reminders (first remind), Calendars (first schedule/agenda), Contacts (first text, so the name you say finds its number), Automation for Spotify/Music (when music first plays; asked up front if your player is already open during the welcome tour), and Automation for Messages (staging your first text). All expected, approve them.
 
 ## Run it (on your Mac)
 

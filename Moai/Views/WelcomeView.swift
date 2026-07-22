@@ -58,7 +58,7 @@ struct WelcomeView: View {
                 Text("Say yes once.")
                     .font(Theme.Fonts.title)
                     .foregroundStyle(Theme.textPrimary)
-                Text("The island uses the mic and speech for talking, and Reminders and Calendar for your day. One tap asks for all four now, instead of ambushing you one feature at a time. When music first plays, macOS asks once more; that yes is for your player.")
+                Text("The island uses the mic and speech for talking, Reminders and Calendar for your day, and Contacts for the texts you send. One tap asks for all five now, instead of ambushing you one feature at a time. When music first plays or a text first sends, macOS asks once more; that yes is for the app doing the work.")
                     .font(Theme.Fonts.body)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -73,7 +73,7 @@ struct WelcomeView: View {
                 } label: {
                     Text(primed
                         ? "Asked. Anything denied lives in System Settings."
-                        : priming ? "Asking…" : "Allow mic, speech, reminders, calendar")
+                        : priming ? "Asking…" : "Allow mic, speech, reminders, calendar, contacts")
                         .font(Theme.Fonts.body)
                         .foregroundStyle(primed ? Theme.textSecondary : .black)
                         .padding(.horizontal, Theme.Space.l)

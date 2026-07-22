@@ -21,6 +21,27 @@ final class ActionEngine {
         let text = Self.strippedOfPleasantries(Self.sanitized(raw))
         let lower = text.lowercased().trimmingCharacters(in: .whitespaces)
 
+        // A staged message answers before anything else: "send" fires
+        // it, a refusal drops it, and any other command drops it on
+        // the way through. Nothing said later can become a text by
+        // accident, and nothing staged outlives the conversation.
+        if model.courier.pending != nil {
+            if ["send", "send it", "yes", "yes send", "yep", "ship it"].contains(lower) {
+                model.isWorking = true
+                let outcome = await model.courier.confirmSend()
+                model.isWorking = false
+                return outcome
+            }
+            if ["cancel", "don't send", "dont send", "no", "drop it",
+                "never mind", "nevermind"].contains(lower) {
+                model.courier.drop()
+                return "Dropped."
+            }
+            model.courier.drop()
+        } else if ["send", "send it"].contains(lower) {
+            return "Nothing staged to send."
+        }
+
         // Notes, fully local
         if lower.hasPrefix("note:") || lower.hasPrefix("note ") {
             let body = String(text.dropFirst(5))
@@ -226,6 +247,22 @@ final class ActionEngine {
             guard !name.isEmpty else { return "Run which shortcut?" }
             model.shortcuts.runAppleShortcut(name)
             return "Running \(name)."
+        }
+
+        // Texting: the one verb whose words leave the Mac, so it
+        // stages and reads back instead of firing; the send happens
+        // when the next thing said is "send".
+        for prefix in ["text ", "imessage ", "i message ", "message ",
+                       "send a message to ", "send a text to ",
+                       "send an imessage to ", "send a text message to "]
+        where lower.hasPrefix(prefix) {
+            let rest = String(text.dropFirst(prefix.count))
+                .trimmingCharacters(in: .whitespaces)
+            guard !rest.isEmpty else { return "Text who?" }
+            model.isWorking = true
+            let outcome = await model.courier.stage(freeform: rest)
+            model.isWorking = false
+            return outcome
         }
 
         // Shortcuts: prefix verb, so it can't be hijacked by the fuzzy
@@ -514,6 +551,7 @@ final class ActionEngine {
     cancel my 3pm · move standup to 4 · undo
     focus 25 · timer 10 · stop focus · rain · fire · cafe · quiet
     play · pause · next · open figma · quit slack
+    text amma: on my way, then say send to send it
     left half · right half · fill · center
     note: an idea · notes · find parcel
     screenshot · screen record · lock screen · dark mode · voice log

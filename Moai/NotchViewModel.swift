@@ -136,6 +136,7 @@ final class NotchViewModel: ObservableObject {
     let voice = VoiceController()
     let stats = SystemStatsController()
     let shortcuts = ShortcutStore()
+    let courier = MessageCourier()
     let activities = ActivityStore()
     let activityServer = ActivityServer()
     let updates = UpdateChecker()

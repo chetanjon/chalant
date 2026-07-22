@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import Contacts
 import EventKit
 import Speech
 
@@ -17,6 +18,7 @@ enum PermissionPrimer {
         let store = EKEventStore()
         _ = try? await store.requestFullAccessToReminders()
         _ = try? await store.requestFullAccessToEvents()
+        _ = try? await CNContactStore().requestAccess(for: .contacts)
         primeRunningPlayers()
     }
 
