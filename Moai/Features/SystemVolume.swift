@@ -149,6 +149,36 @@ enum SystemVolume {
         inputDevices().first(where: { $0.isBuiltInMic })?.id
     }
 
+    /// Input gain of a capture device, 0...1, nil when unsupported.
+    static func inputVolume(of device: AudioObjectID) -> Float32? {
+        var address = inputVolumeAddress()
+        guard AudioObjectHasProperty(device, &address) else { return nil }
+        var volume: Float32 = 0
+        var size = UInt32(MemoryLayout<Float32>.size)
+        guard AudioObjectGetPropertyData(
+            device, &address, 0, nil, &size, &volume
+        ) == noErr else { return nil }
+        return volume
+    }
+
+    static func setInputVolume(of device: AudioObjectID, to volume: Float32) {
+        var address = inputVolumeAddress()
+        guard AudioObjectHasProperty(device, &address) else { return }
+        var value = min(1, max(0, volume))
+        AudioObjectSetPropertyData(
+            device, &address, 0, nil,
+            UInt32(MemoryLayout<Float32>.size), &value
+        )
+    }
+
+    private static func inputVolumeAddress() -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+            mScope: kAudioDevicePropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+    }
+
     private static func stringProperty(
         _ id: AudioObjectID, _ selector: AudioObjectPropertySelector
     ) -> String? {

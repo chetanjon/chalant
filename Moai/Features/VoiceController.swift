@@ -49,6 +49,30 @@ final class VoiceController: NSObject, ObservableObject {
         candidates.indices.contains(candidateIndex) ? candidates[candidateIndex] : nil
     }
 
+    /// A session must never whisper to the recognizer: input gain
+    /// below a healthy floor rises for the capture and returns after
+    /// (found live at 17 percent, every word arriving as mush).
+    private var gainBoostDevice: AudioObjectID?
+    private var gainBoostOriginal: Float32?
+
+    private func raiseInputGainIfTimid(_ device: AudioObjectID?) {
+        guard let device,
+              let current = SystemVolume.inputVolume(of: device),
+              current < 0.8 else { return }
+        gainBoostDevice = device
+        gainBoostOriginal = current
+        SystemVolume.setInputVolume(of: device, to: 0.9)
+        deviceNote += ", gain raised from \(Int(current * 100))%"
+    }
+
+    private func restoreInputGain() {
+        if let device = gainBoostDevice, let original = gainBoostOriginal {
+            SystemVolume.setInputVolume(of: device, to: original)
+        }
+        gainBoostDevice = nil
+        gainBoostOriginal = nil
+    }
+
     /// The session's audio, mirrored to disk while streaming. On this
     /// machine the streaming recognizer returns "no speech" for audio
     /// the same on-device model transcribes perfectly from a file
@@ -281,6 +305,7 @@ final class VoiceController: NSObject, ObservableObject {
             return
         }
         activeDeviceName = currentCandidate?.name ?? SystemVolume.inputDeviceName()
+        raiseInputGainIfTimid(currentCandidate?.id ?? SystemVolume.defaultInputDevice())
         armSilenceWatchdog()
 
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
@@ -356,6 +381,7 @@ final class VoiceController: NSObject, ObservableObject {
     func end(completion: @escaping (String) -> Void) {
         watchdogWork?.cancel()
         watchdogWork = nil
+        restoreInputGain()
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
         request?.endAudio()
@@ -372,6 +398,7 @@ final class VoiceController: NSObject, ObservableObject {
     func cancel() {
         watchdogWork?.cancel()
         watchdogWork = nil
+        restoreInputGain()
         finishTimeout?.cancel()
         finishTimeout = nil
         finishCompletion = nil
@@ -399,6 +426,7 @@ final class VoiceController: NSObject, ObservableObject {
     private func restartCapture(locale: Locale? = nil, pinDeviceID: AudioObjectID? = nil) {
         watchdogWork?.cancel()
         watchdogWork = nil
+        restoreInputGain()
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
         task?.cancel()
