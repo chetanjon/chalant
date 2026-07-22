@@ -8,7 +8,7 @@ The name: real moai are buried up to their shoulders. Ours is buried in the beze
 
 [**Latest release**](https://github.com/chetanjon/moai/releases/latest). Apple Silicon, macOS 14+, free.
 
-First open: macOS will ask once. System Settings, Privacy and Security, Open Anyway. Moai is unsigned because it is free and independent. Speech recognition is on-device, keys stay in your Keychain, and the only thing Moai ever asks the internet is whether a newer version exists (a daily check against GitHub releases, switchable off in Settings).
+First open: macOS will ask once. System Settings, Privacy and Security, Open Anyway. Moai is unsigned because it is free and independent. Speech recognition is Apple standard dictation, there are no API keys anywhere, and beyond the optional Chat tab the only thing Moai asks the internet is whether a newer version exists (a daily check against GitHub releases, switchable off in Settings).
 
 ## v1 feature set
 
@@ -26,7 +26,7 @@ First open: macOS will ask once. System Settings, Privacy and Security, Open Any
 - Anything beyond the verbs goes to the Mac's own on-device model, keyless. Long conversations belong to the Chat tab and your own subscription.
 
 **Voice**
-- Hold to talk, on-device speech recognition (requiresOnDeviceRecognition), live level bars, release to run. Words never leave the Mac.
+- Hold to talk or tap the mic; recognition is Apple standard dictation, on-device when the model is warm, Apple dictation service otherwise, the same path Notes and Messages use. Your music ducks while you speak.
 
 **Music**
 - Spotify + Apple Music. Waveform wing when playing, transport on expand. Only talks to players already running.
@@ -77,11 +77,10 @@ Open this folder in Claude Code and paste:
 - `NotchViewModel`: island state, active tab, and the context handoff (`askAbout`) that lets clips and files flow into the Do surface.
 - `Features/`: MusicController (AppleScript polling), ClipboardStore (pasteboard polling, 1s), ShelfStore (drops, AirDrop, PDF/text extraction via PDFKit), NotesStore (UserDefaults).
 - `Views/`: NotchRootView (the morphing shape + drop target + wings), ExpandedView (tabs + Do), MusicStrip, ClipboardView, ShelfView.
-- `ClaudeService`: minimal messages API client.
+- `AIService`: Apple's on-device model for quick answers and verb translation, keyless.
 
 ## Known v1 trade-offs
 
-- API key in UserDefaults. Move to Keychain before sharing builds.
 - Music polling via AppleScript every 3s. Fine for v1; MediaRemote gives richer data (artwork, progress) but it's a private framework, revisit later.
 - Clipboard is text-only for now. Images later.
 - `.screenSaver` window level sits above fullscreen video. Revisit.
@@ -90,7 +89,7 @@ Open this folder in Claude Code and paste:
 
 ## Roadmap
 
-- **v1.5:** Apple Foundation Models parsing for messy phrasing (on-device LLM, still free), Messages sending, global hotkey, Keychain for the key, menu bar countdown.
+- **v1.5:** Messages sending, menu bar countdown, richer chat pane.
 - **v2:** meeting brief before your next call, screen context, image clips, artwork via MediaRemote.
 - Launch: notarized build ($99 Apple Developer), landing page with the mockup embedded, Homebrew cask.
 

@@ -240,7 +240,14 @@ final class VoiceController: NSObject, ObservableObject {
                 : nil)
 
         let request = SFSpeechAudioBufferRecognitionRequest()
-        request.requiresOnDeviceRecognition = true
+        // Standard macOS dictation, the same path Notes and Messages
+        // use: on-device when the model is warm, Apple's dictation
+        // service when it is not. The strict on-device-only mode
+        // spent a day saying "sound but no words" whenever the local
+        // model was cold (its own copy admitted it, "may still be
+        // downloading"), and a voice feature that answers sometimes
+        // is worse than none (user verdict, 2026-07-21).
+        request.requiresOnDeviceRecognition = false
         request.shouldReportPartialResults = true
         self.request = request
 
@@ -541,7 +548,7 @@ final class VoiceController: NSObject, ObservableObject {
             return
         }
         let request = SFSpeechURLRecognitionRequest(url: url)
-        request.requiresOnDeviceRecognition = true
+        request.requiresOnDeviceRecognition = false
         let timeout = DispatchWorkItem { [weak self] in
             self?.finishRescue(with: nil)
         }
@@ -624,10 +631,18 @@ final class VoiceController: NSObject, ObservableObject {
     }
 
     /// Runs the same on-device recognizer over a file, so the model
-    /// can be judged apart from the live capture chain.
-    func debugRecognizeFile(path: String, completion: @escaping (String) -> Void) {
-        guard let recognizer = SFSpeechRecognizer() else {
-            completion("no recognizer")
+    /// can be judged apart from the live capture chain; an optional
+    /// locale tests whether a different accent model hears better.
+    func debugRecognizeFile(
+        path: String,
+        locale: String? = nil,
+        completion: @escaping (String) -> Void
+    ) {
+        let recognizer = locale.flatMap {
+            SFSpeechRecognizer(locale: Locale(identifier: $0))
+        } ?? SFSpeechRecognizer()
+        guard let recognizer else {
+            completion("no recognizer for \(locale ?? "default")")
             return
         }
         let request = SFSpeechURLRecognitionRequest(url: URL(fileURLWithPath: path))

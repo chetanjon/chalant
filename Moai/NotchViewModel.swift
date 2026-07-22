@@ -288,8 +288,13 @@ final class NotchViewModel: ObservableObject {
                     }
                     return
                 }
-                if text == "debug recfile" {
-                    self.voice.debugRecognizeFile(path: "/tmp/moai-tap.caf") { [weak self] note in
+                if text.hasPrefix("debug recfile") {
+                    let tail = text.dropFirst("debug recfile".count)
+                        .trimmingCharacters(in: .whitespaces)
+                    self.voice.debugRecognizeFile(
+                        path: "/tmp/moai-tap.caf",
+                        locale: tail.isEmpty ? nil : tail
+                    ) { [weak self] note in
                         self?.expand()
                         self?.tab = .ask
                         self?.answer = note
