@@ -147,6 +147,9 @@ final class NotchViewModel: ObservableObject {
 
     /// Physical notch size measured by NotchWindowController.
     var notchSize = NotchViewModel.defaultNotchSize
+    /// Debug-driven request to open the shortcut add flow; the
+    /// Shortcuts pane consumes and resets it.
+    @Published var wantsShortcutAdd = false
 
     /// True on the built-in display where hardware occupies the middle
     /// of the island; external displays keep that space usable.
@@ -281,6 +284,14 @@ final class NotchViewModel: ObservableObject {
                     bits.append("trace=\(self.music.bridgeTrace)")
                     bits.append("snap=\(self.music.bridge.snapshotTrace)")
                     UserDefaults.standard.set(bits.joined(separator: " | "), forKey: "musicDebug")
+                    return
+                }
+                // "debug goadd" opens the shortcut add flow for
+                // screenshots; the field states are view-local.
+                if text == "debug goadd" {
+                    self.expand()
+                    self.tab = .links
+                    self.wantsShortcutAdd = true
                     return
                 }
                 // "debug listen" runs a real 4-second capture through

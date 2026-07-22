@@ -64,6 +64,20 @@ struct ShortcutsView: View {
         }
         .animation(Theme.Motion.content, value: adding)
         .animation(Theme.Motion.content, value: store.shortcuts)
+        .onChange(of: model.wantsShortcutAdd) { _, wants in
+            if wants {
+                beginAdding()
+                model.wantsShortcutAdd = false
+            }
+        }
+        // The flag can flip before this pane mounts (tab switch and
+        // request arrive together); consume it on arrival too.
+        .onAppear {
+            if model.wantsShortcutAdd {
+                beginAdding()
+                model.wantsShortcutAdd = false
+            }
+        }
     }
 
     private var addChip: some View {
@@ -92,42 +106,59 @@ struct ShortcutsView: View {
     }
 
     private var addRow: some View {
-        HStack(spacing: Theme.Space.m) {
-            TextField("Name (optional)", text: $draftTitle)
-                .textFieldStyle(.plain)
-                .font(Theme.Fonts.body)
-                .frame(width: 110)
-            TextField("notes · github.com · ~/folder", text: $draftLink)
-                .textFieldStyle(.plain)
-                .font(Theme.Fonts.body)
-                .focused($linkFieldFocused)
-                .onSubmit(commitAdd)
-            Button(action: commitAdd) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(Theme.Fonts.icon(.l))
-                    .foregroundStyle(draftLink.isEmpty ? Theme.textTertiary : accent)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(PressableStyle())
-            .disabled(draftLink.isEmpty)
-            CloseButton {
-                adding = false
-            }
-        }
-        .padding(.horizontal, Theme.Space.l)
-        .padding(.vertical, Theme.Space.s)
-        .moaiField(active: linkFieldFocused)
-    }
-
-    /// The faster paths: browse for an app, or tap a built-in action.
-    private var quickAddRow: some View {
-        HStack(spacing: Theme.Space.s) {
-            quickChip(title: "App…", symbol: "macwindow") { pickApp() }
-            ForEach(store.remainingActions, id: \.self) { action in
-                quickChip(title: action.title, symbol: action.symbol) {
-                    store.add(action: action)
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(spacing: Theme.Space.m) {
+                TextField("App, website, or folder", text: $draftLink)
+                    .textFieldStyle(.plain)
+                    .font(Theme.Fonts.body)
+                    .focused($linkFieldFocused)
+                    .onSubmit(commitAdd)
+                Rectangle()
+                    .fill(Theme.hairlineFaint)
+                    .frame(width: 1, height: 16)
+                TextField("Name", text: $draftTitle)
+                    .textFieldStyle(.plain)
+                    .font(Theme.Fonts.body)
+                    .frame(width: 92)
+                    .onSubmit(commitAdd)
+                Button(action: commitAdd) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(Theme.Fonts.icon(.l))
+                        .foregroundStyle(draftLink.isEmpty ? Theme.textTertiary : accent)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressableStyle())
+                .disabled(draftLink.isEmpty)
+                CloseButton {
                     adding = false
                 }
+            }
+            .padding(.horizontal, Theme.Space.l)
+            .padding(.vertical, Theme.Space.s)
+            .moaiField(active: linkFieldFocused)
+            Text("Try notes · github.com · ~/Documents")
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textHint)
+                .padding(.leading, Theme.Space.xs)
+        }
+    }
+
+    /// The faster paths: every built-in is one tap away, and the
+    /// caption says plainly that the tap adds it.
+    private var quickAddRow: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("One tap adds:")
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textHint)
+                .padding(.leading, Theme.Space.xs)
+            FlowLayout(spacing: Theme.Space.s) {
+                ForEach(store.remainingActions, id: \.self) { action in
+                    quickChip(title: action.title, symbol: action.symbol) {
+                        store.add(action: action)
+                        adding = false
+                    }
+                }
+                quickChip(title: "Pick an app…", symbol: "macwindow") { pickApp() }
             }
         }
     }
@@ -143,6 +174,8 @@ struct ShortcutsView: View {
                     .font(Theme.Fonts.icon(.xs))
                 Text(title)
                     .font(Theme.Fonts.caption)
+                    .lineLimit(1)
+                    .fixedSize()
             }
             .foregroundStyle(Theme.textSecondary)
             .padding(.horizontal, Theme.Space.s)
@@ -205,6 +238,9 @@ private struct ShortcutChip: View {
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(hovered ? Theme.textPrimary : Theme.textSecondary)
                     .lineLimit(1)
+                    // Long names keep both ends: the start says what
+                    // it is, the tail is where paths differ.
+                    .truncationMode(.middle)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Space.l)
