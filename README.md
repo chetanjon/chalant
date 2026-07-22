@@ -8,7 +8,7 @@ The name: real moai are buried up to their shoulders. Ours is buried in the beze
 
 ## Download
 
-[**Latest release**](https://github.com/chetanjon/moai/releases/latest). Apple Silicon, macOS 14+, free.
+[**Latest release**](https://github.com/chetanjon/moai/releases/latest). Apple Silicon, macOS 14+, free, MIT-licensed.
 
 First open: macOS will ask once. System Settings, Privacy and Security, Open Anyway. Moai is unsigned because it is free and independent. Speech recognition is Apple standard dictation, there are no API keys anywhere, and beyond the optional Chat tab, Moai asks the internet only for: whether a newer version exists (a daily check against GitHub releases, switchable off in Settings), album art for what you play, and favicons for sites you save, each fetched from its own source, never through a third-party service. The Live status API listens on localhost only; nothing it hears leaves the machine.
 
