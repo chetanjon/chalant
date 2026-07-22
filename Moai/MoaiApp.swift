@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // Stop the media bridge stream so no perl child outlives us.
         notchController?.viewModel.music.shutdown()
+        notchController?.viewModel.activityServer.stop()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

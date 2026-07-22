@@ -136,6 +136,8 @@ final class NotchViewModel: ObservableObject {
     let voice = VoiceController()
     let stats = SystemStatsController()
     let shortcuts = ShortcutStore()
+    let activities = ActivityStore()
+    let activityServer = ActivityServer()
     let updates = UpdateChecker()
     /// Created on first open of the chat tab; the web view then lives
     /// for the app's lifetime so the conversation survives collapses.
@@ -190,6 +192,7 @@ final class NotchViewModel: ObservableObject {
         shortcuts.announce = { [weak self] message in
             self?.flashGlance(message)
         }
+        activityServer.start(store: activities)
         events.startGlanceTicker()
         updates.onNewVersion = { [weak self] version in
             self?.flashGlance("\(version) is out", seconds: 8)

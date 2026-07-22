@@ -10,7 +10,7 @@ The name: real moai are buried up to their shoulders. Ours is buried in the beze
 
 [**Latest release**](https://github.com/chetanjon/moai/releases/latest). Apple Silicon, macOS 14+, free.
 
-First open: macOS will ask once. System Settings, Privacy and Security, Open Anyway. Moai is unsigned because it is free and independent. Speech recognition is Apple standard dictation, there are no API keys anywhere, and beyond the optional Chat tab, Moai asks the internet only for: whether a newer version exists (a daily check against GitHub releases, switchable off in Settings), album art for what you play, and favicons for sites you save, each fetched from its own source, never through a third-party service.
+First open: macOS will ask once. System Settings, Privacy and Security, Open Anyway. Moai is unsigned because it is free and independent. Speech recognition is Apple standard dictation, there are no API keys anywhere, and beyond the optional Chat tab, Moai asks the internet only for: whether a newer version exists (a daily check against GitHub releases, switchable off in Settings), album art for what you play, and favicons for sites you save, each fetched from its own source, never through a third-party service. The Live status API listens on localhost only; nothing it hears leaves the machine.
 
 ## v1 feature set
 
@@ -42,12 +42,16 @@ First open: macOS will ask once. System Settings, Privacy and Security, Open Any
 - Drag files onto the notch, drag out, copy, or share.
 - Brow glyph on PDFs and text files: attach contents and question them.
 
+**Live status** (the open door)
+- Anything on your Mac can put a status pill on the island: `curl localhost:4242/activity -d '{"id":"deploy","title":"Deploying","state":"working"}'`. States: `working`, `needs-input`, `done`, `failed`, `clear`; `GET /activities` lists, `DELETE /activity/<id>` clears. Loopback only, never leaves the machine.
+- Made for the things that have no home: Claude Code hooks, build scripts, deploys, renders, long downloads. Needs-input leads the island's glance and wears the accent; finished things fade on their own.
+
 **Chat** (bring your own subscription)
 - A small built-in browser under the notch pointing at Claude, ChatGPT, or Gemini; pick the service in Settings.
 - You sign in with your own account, once; nothing is scraped, proxied, or automated, and no API key is involved.
 - Moai is not affiliated with or endorsed by Anthropic, OpenAI, or Google.
 
-**Deliberately cut:** webcam mirror, notes-as-panel, wallpapers, widget packs, agent monitoring.
+**Deliberately cut:** webcam mirror, notes-as-panel, wallpapers, widget packs. (Agent monitoring was cut in v1 and un-cut in 1.0.63; the world filled with agents.)
 
 ## Permission prompts, in order of appearance
 

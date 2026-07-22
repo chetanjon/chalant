@@ -9,6 +9,7 @@ struct ExpandedView: View {
     @ObservedObject var timer: CountdownController
     @ObservedObject var focus: FocusController
     @ObservedObject var ambience: AmbienceController
+    @ObservedObject var activities: ActivityStore
 
     // Modular blocks, each shows only if the user keeps it on. Media,
     // ambience and the tools are on out of the box; your day (calendar,
@@ -31,6 +32,7 @@ struct ExpandedView: View {
         self.timer = model.timer
         self.focus = model.focus
         self.ambience = model.ambience
+        self.activities = model.activities
     }
 
     private var todayEnabled: Bool { showCalendar || showReminders }
@@ -68,6 +70,11 @@ struct ExpandedView: View {
             }
 
             topRow
+
+            if !activities.activities.isEmpty {
+                ActivitiesStrip(activities: activities)
+                    .transition(.opacity)
+            }
 
             if showAmbience {
                 AmbienceRow(ambience: ambience)
@@ -293,6 +300,65 @@ private struct JoinChip: View {
         .help("Join the call")
         .onHover { hovered = $0 }
         .animation(Theme.Motion.hover, value: hovered)
+    }
+}
+
+/// Live status pushed from outside: agents, deploys, renders, any
+/// local process that curled the island. Needs-input leads and wears
+/// the accent; finished rows fade out on their own timer.
+private struct ActivitiesStrip: View {
+    @ObservedObject var activities: ActivityStore
+    @Environment(\.moaiAccent) private var accent
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            ForEach(activities.activities) { activity in
+                HStack(spacing: Theme.Space.m) {
+                    Image(systemName: activity.state.symbol)
+                        .font(Theme.Fonts.icon(.s))
+                        .foregroundStyle(tint(for: activity.state))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(activity.title)
+                            .font(Theme.Fonts.body)
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if let detail = activity.detail, !detail.isEmpty {
+                            Text(detail)
+                                .font(Theme.Fonts.caption)
+                                .foregroundStyle(Theme.textTertiary)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    Text(Self.age(activity.updatedAt))
+                        .font(Theme.Fonts.microMono)
+                        .foregroundStyle(Theme.textGhost)
+                    IconActionButton(symbol: "xmark", dim: true) {
+                        activities.clear(id: activity.id)
+                    }
+                }
+                .rowInsets()
+                .moaiCard(radius: Theme.Radius.row)
+            }
+        }
+        .animation(Theme.Motion.content, value: activities.activities)
+    }
+
+    private func tint(for state: ActivityStore.State) -> Color {
+        switch state {
+        case .needsInput: return accent
+        case .working: return Theme.textSecondary
+        case .done: return Theme.textTertiary
+        case .failed: return Theme.textSecondary
+        }
+    }
+
+    private static func age(_ date: Date) -> String {
+        let seconds = Int(-date.timeIntervalSinceNow)
+        if seconds < 60 { return "now" }
+        if seconds < 3600 { return "\(seconds / 60)m" }
+        return "\(seconds / 3600)h"
     }
 }
 

@@ -11,6 +11,7 @@ struct NotchRootView: View {
     @ObservedObject var stats: SystemStatsController
     @ObservedObject var focusStats: FocusStatsStore
     @ObservedObject var events: EventKitService
+    @ObservedObject var activities: ActivityStore
     @State private var pressStarted: Date?
 
     // Declared so the view re-renders (and re-reads Theme.Motion) the
@@ -49,6 +50,7 @@ struct NotchRootView: View {
         self.stats = model.stats
         self.focusStats = model.focusStats
         self.events = model.events
+        self.activities = model.activities
     }
 
     /// The event about to start, if the user lets the glance carry it.
@@ -84,6 +86,7 @@ struct NotchRootView: View {
     /// Width the right-of-camera glance needs on notched displays.
     private var notchSideNeed: CGFloat {
         if model.glanceToast != nil { return 124 }
+        if activities.glanceActivity != nil { return 118 }
         // A session shows only its left-wing ring and countdown; the
         // right-side FOCUS 1 OF 4 label was width without value
         // (user call, 2026-07-21).
@@ -110,6 +113,7 @@ struct NotchRootView: View {
 
     private var monitorMiddleWidth: CGFloat {
         if model.glanceToast != nil { return 148 }
+        if activities.glanceActivity != nil { return 150 }
         if upcomingEvent != nil { return 150 }
         switch glanceIdle {
         case "day": return 84
@@ -479,6 +483,8 @@ struct NotchRootView: View {
         // long and often arrives just as a break begins.
         if let toast = model.glanceToast {
             toastGlance(toast)
+        } else if let activity = activities.glanceActivity {
+            activityGlance(activity, width: 128)
         } else if let next = upcomingEvent {
             upcomingGlance(next, width: 120)
         } else {
@@ -509,6 +515,8 @@ struct NotchRootView: View {
     private var notchSideContent: some View {
         if let toast = model.glanceToast {
             toastGlance(toast)
+        } else if let activity = activities.glanceActivity {
+            activityGlance(activity, width: 106)
         } else if let next = upcomingEvent {
             upcomingGlance(next, width: 100)
         } else if music.nowPlaying?.isPlaying == true, glanceMusic {
@@ -519,6 +527,22 @@ struct NotchRootView: View {
         } else {
             idleGlance
         }
+    }
+
+    /// A pushed activity riding the glance: state glyph and title.
+    /// Needs-input wears the accent; nothing here is tappable, the
+    /// island opens as ever and the strip has the details.
+    private func activityGlance(_ activity: ActivityStore.Activity, width: CGFloat) -> some View {
+        HStack(spacing: Theme.Space.snug) {
+            Image(systemName: activity.state.symbol)
+                .font(Theme.Fonts.icon(.xs))
+                .foregroundStyle(
+                    activity.state == .needsInput ? accent : Theme.textSecondary
+                )
+            MarqueeText(title: activity.title)
+                .frame(width: width)
+        }
+        .id(activity.id + activity.state.rawValue)
     }
 
     /// The event about to start: an accent dot (the calendar's mark in

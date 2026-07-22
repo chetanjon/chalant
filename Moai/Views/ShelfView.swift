@@ -51,8 +51,7 @@ private struct ShelfRow: View {
                 IconActionButton(symbol: "doc.on.doc") {
                     shelf.copyToPasteboard(item)
                 }
-                // The full share sheet (AirDrop, Messages, Mail...),
-                // not a one-way AirDrop jump.
+                // The full share sheet (Messages, Mail, everything).
                 ShareLink(item: item.url) {
                     Image(systemName: "square.and.arrow.up")
                         .font(Theme.Fonts.icon(.s))
@@ -60,6 +59,13 @@ private struct ShelfRow: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(PressableStyle())
+                // And the one-tap jump for the commonest case: this
+                // file, that Mac or phone, now.
+                IconActionButton(symbol: "dot.radiowaves.left.and.right") {
+                    NSSharingService(named: .sendViaAirDrop)?
+                        .perform(withItems: [item.url])
+                }
+                .help("AirDrop")
                 if shelf.canExtractText(item) {
                     IconActionButton(symbol: "sparkles", tint: accent) {
                         guard let text = shelf.extractText(item) else { return }

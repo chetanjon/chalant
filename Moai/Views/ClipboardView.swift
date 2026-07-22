@@ -92,6 +92,19 @@ private struct ClipRow: View {
                     if kept { model.flashGlance("Kept on the Shelf") }
                 }
                 .help("Keep on the Shelf")
+                // AirDrop for the clips that are things (files and
+                // screenshots); words travel better by paste.
+                if clip.isFile || clip.isImage {
+                    IconActionButton(symbol: "dot.radiowaves.left.and.right") {
+                        let items: [Any] = clip.filePaths?.map {
+                            URL(fileURLWithPath: $0)
+                        } ?? clip.imageURL.map { [$0] } ?? []
+                        guard !items.isEmpty else { return }
+                        NSSharingService(named: .sendViaAirDrop)?
+                            .perform(withItems: items)
+                    }
+                    .help("AirDrop")
+                }
                 // Text can go to the answer surface; an image can't.
                 if let text = clip.text {
                     IconActionButton(symbol: "sparkles", tint: accent) {
