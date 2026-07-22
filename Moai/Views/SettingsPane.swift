@@ -50,6 +50,7 @@ struct SettingsPane: View {
     @AppStorage("accentMode") private var accentMode = "silver"
     @AppStorage("glanceMusic") private var glanceMusic = true
     @AppStorage("playingSignal") private var playingSignal = "wave"
+    @AppStorage("glanceSession") private var glanceSession = true
     @AppStorage("glanceNextEvent") private var glanceNextEvent = true
     @AppStorage("glanceIdle") private var glanceIdle = "none"
 
@@ -182,6 +183,11 @@ struct SettingsPane: View {
                         .font(Theme.Fonts.caption)
                         .foregroundStyle(Theme.textHint)
                     divider
+                    toggleRow("Countdown beside the notch", $glanceSession)
+                    Text("Off, a running focus or timer keeps the pill bare; the rim alone says something is going.")
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textHint)
+                    divider
                     toggleRow("Clear the glance while playing", $glanceMusic)
                     divider
                     toggleRow("Event coming up", $glanceNextEvent)
@@ -223,7 +229,10 @@ struct SettingsPane: View {
                         }
                     }
                     divider
-                    toggleRow("Glow with music", $glowOn)
+                    toggleRow("Accent rim on the pill", $glowOn)
+                    Text("The colored border that breathes while music or a session runs. Off is off.")
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textHint)
                 }
                 section("Accent", reveal: 4) {
                     HStack(spacing: Theme.Space.l) {

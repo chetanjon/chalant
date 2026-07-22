@@ -32,8 +32,10 @@ First open: macOS will ask once. System Settings, Privacy and Security, Open Any
 - Hold to talk or tap the mic; recognition is Apple standard dictation, on-device when the model is warm, Apple dictation service otherwise, the same path Notes and Messages use. Your music ducks while you speak.
 
 **Music**
-- Whatever plays, anywhere: Spotify, Apple Music, YouTube in a browser, any app the system hears. While playing, the closed island stays bare and a breathing album-color rim carries the signal; expand for artwork, transport, and scrubbing.
+- Whatever plays, anywhere: Spotify, Apple Music, YouTube in a browser, any app the system hears. While playing, a small wave dances beside the notch (or nothing, in Quiet mode) and a breathing album-color rim carries the signal; expand for artwork, transport, and scrubbing. Wave, rim, and the session countdown each have their own switch in Settings, so the closed pill can be exactly as bare as you like.
+- With music and a focus session running together, the wave keeps the left wing and the countdown crosses to the right.
 - The opened island comes in two materials, ink or liquid glass, in Settings under Life. Closed, it is always ink; melting into the notch is its job.
+- On a notchless monitor the collapsed island shows nothing at all; the top edge still opens it on hover. Pixels over someone's window need a reason to exist.
 
 **Clips** (clipboard history)
 - Last 30 copies. Password-manager copies (concealed/transient) never stored.

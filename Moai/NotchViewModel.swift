@@ -150,9 +150,6 @@ final class NotchViewModel: ObservableObject {
 
     /// Physical notch size measured by NotchWindowController.
     var notchSize = NotchViewModel.defaultNotchSize
-    /// Points of camera glass past the reported safe area at the
-    /// current scaling; the pill grows exactly this much chin.
-    var notchChin: CGFloat = 0
     /// Debug-driven request to open the shortcut add flow; the
     /// Shortcuts pane consumes and resets it.
     @Published var wantsShortcutAdd = false

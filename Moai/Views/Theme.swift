@@ -133,7 +133,11 @@ enum Theme {
         /// Tight icon-to-label and dot gaps.
         static let snug: CGFloat = 5
         /// Collapsed wings sit flush against the physical notch.
-        static let wingInset: CGFloat = 11
+        // 7, not 11: the pill's 8pt width tuck (worn by the glass, not
+        // the report) took 4 from each wing; the inset gives it back
+        // so timer digits and the wave never slide under the camera
+        // (user, 2026-07-22, "the timer is cut off").
+        static let wingInset: CGFloat = 7
     }
 
     enum Radius {

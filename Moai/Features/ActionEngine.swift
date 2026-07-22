@@ -40,6 +40,10 @@ final class ActionEngine {
             model.courier.drop()
         } else if ["send", "send it"].contains(lower) {
             return "Nothing staged to send."
+        } else if ["cancel", "never mind", "nevermind"].contains(lower) {
+            // Bare refusals with nothing staged should cost nothing;
+            // they were wandering to the model and back.
+            return "Nothing to cancel."
         }
 
         // Notes, fully local

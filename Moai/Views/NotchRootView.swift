@@ -25,6 +25,7 @@ struct NotchRootView: View {
     // What the collapsed glance may show, user-tunable in Settings.
     @AppStorage("glanceMusic") private var glanceMusic = true
     @AppStorage("playingSignal") private var playingSignal = "wave"
+    @AppStorage("glanceSession") private var glanceSession = true
     @AppStorage("islandMaterial") private var islandMaterial = "ink"
     @AppStorage("glassClarity") private var glassClarity = "balanced"
     @AppStorage("glanceNextEvent") private var glanceNextEvent = true
@@ -62,14 +63,21 @@ struct NotchRootView: View {
         focus.isActive || timer.isActive
     }
 
-    /// Each wing earns exactly what its content needs: the ring and
-    /// countdown want 54, the returning wave takes 34 with room to
-    /// spare of the notch shoulders that clipped its 30pt first life.
-    /// Quiet mode keeps the bare pill and lets the rim carry it
-    /// (both moods proved real within one day, so it's a setting).
+    /// Music and a session at once: the wave keeps the left wing and
+    /// the countdown digits take the right (user, 2026-07-22).
+    private var sessionOnRight: Bool {
+        glanceSession && (focus.isActive || timer.isActive)
+            && music.nowPlaying?.isPlaying == true
+    }
+
+    /// Each wing earns exactly what its content needs: bare digits
+    /// want 44 (the ring came off, one mark of time is enough), the
+    /// slimmed wave takes 28. Quiet mode keeps the bare pill and lets
+    /// the rim carry it (both moods proved real within one day, so
+    /// it's a setting).
     private var leftWingNeed: CGFloat {
-        if focus.isActive || timer.isActive { return 54 }
-        if playingSignal == "wave", music.nowPlaying?.isPlaying == true { return 34 }
+        if playingSignal == "wave", music.nowPlaying?.isPlaying == true { return 28 }
+        if glanceSession, focus.isActive || timer.isActive, !sessionOnRight { return 44 }
         return 0
     }
 
@@ -87,6 +95,7 @@ struct NotchRootView: View {
     private var notchSideNeed: CGFloat {
         if model.glanceToast != nil { return 124 }
         if activities.glanceActivity != nil { return 118 }
+        if sessionOnRight { return 48 }
         // A session shows only its left-wing ring and countdown; the
         // right-side FOCUS 1 OF 4 label was width without value
         // (user call, 2026-07-21).
@@ -136,6 +145,16 @@ struct NotchRootView: View {
         !model.hasPhysicalNotch && monitorContentWidth == 0
     }
 
+    /// On a monitor the collapsed island shows NOTHING at all: there
+    /// is no hardware to dress and every pixel it wore sat on top of
+    /// someone's window (user, 2026-07-22, "we can't show anything on
+    /// external monitors"). The hover zone is coordinate math, not
+    /// pixels, so the top edge still summons the island; it just
+    /// keeps no body between visits.
+    private var monitorTucked: Bool {
+        !model.hasPhysicalNotch && model.state == .collapsed
+    }
+
     /// Stable per-state sizes: content is framed to its own state's
     /// size (not the live island size), so an outgoing view fades out
     /// at its natural size instead of being crushed into the pill.
@@ -157,14 +176,18 @@ struct NotchRootView: View {
         }
         let growW: CGFloat = model.isHovering ? 14 : 0
         let growH: CGFloat = model.isHovering ? 4 : 0
-        // The safe area understates the camera housing on scaled
-        // resolutions; notchChin is the computed difference, so the
-        // pill meets the glass edge exactly at any scaling (user,
-        // 2026-07-22, "it should fill exactly": guessed constants
-        // went both short and long before this).
+        // Height is the safe area plus a 3pt apron: flush-exact put
+        // the rim's bottom arc ON the glass edge and it read as the
+        // border touching the hardware (user, 2026-07-22); the apron
+        // drops the visible line just clear of the notch, the way a
+        // dynamic island wraps its cutout. Every LARGER overhang the
+        // computed-chin era added here was a bug (full story with the
+        // placement code). The width tuck: the reported gap sits a
+        // hair wider than the glass, and the pill wears the camera's
+        // clothes, not the report's ("reduced just a little bit").
         return CGSize(
-            width: model.notchSize.width + statusWings + growW,
-            height: model.notchSize.height + model.notchChin + growH
+            width: model.notchSize.width - 8 + statusWings + growW,
+            height: model.notchSize.height + 3 + growH
         )
     }
 
@@ -370,6 +393,7 @@ struct NotchRootView: View {
                 contentLayer
             }
             .frame(width: islandSize.width, height: islandSize.height)
+            .opacity(monitorTucked ? 0 : 1)
             .contentShape(Rectangle())
             // Hover is tracked by NotchWindowController against stable
             // state-based zones; tracking this animating view flickers.
@@ -518,6 +542,10 @@ struct NotchRootView: View {
             toastGlance(toast)
         } else if let activity = activities.glanceActivity {
             activityGlance(activity, width: 106)
+        } else if sessionOnRight {
+            // Music holds the left wing, so the countdown crosses
+            // over; the running session outranks quieter glances.
+            sessionDigits
         } else if let next = upcomingEvent {
             upcomingGlance(next, width: 100)
         } else if music.nowPlaying?.isPlaying == true, glanceMusic {
@@ -631,39 +659,22 @@ struct NotchRootView: View {
         }
     }
 
+    /// Bare digits, no ring: one mark of time is enough in a wing
+    /// (user, 2026-07-22, "only the timer number").
+    private var sessionDigits: some View {
+        Text(focus.isActive ? focus.display : timer.display)
+            .font(Theme.Fonts.labelMono)
+            .foregroundStyle(Theme.textPrimary)
+            .opacity(focus.isActive && focus.isPaused ? 0.5 : 1)
+    }
+
     private var wingsContent: some View {
         HStack {
-            if focus.isActive {
-                HStack(spacing: Theme.Space.snug) {
-                    ProgressRing(
-                        progress: focus.progress,
-                        size: 11,
-                        lineWidth: 1.5,
-                        tint: accent,
-                        trackOpacity: 0.15
-                    )
-                    Text(focus.display)
-                        .font(Theme.Fonts.labelMono)
-                        .foregroundStyle(Theme.textPrimary)
-                        .opacity(focus.isPaused ? 0.5 : 1)
-                }
-                .padding(.leading, Theme.Space.wingInset)
-            } else if timer.isActive {
-                HStack(spacing: Theme.Space.snug) {
-                    ProgressRing(
-                        progress: timer.progress,
-                        size: 11,
-                        lineWidth: 1.5,
-                        tint: accent,
-                        trackOpacity: 0.15
-                    )
-                    Text(timer.display)
-                        .font(Theme.Fonts.labelMono)
-                        .foregroundStyle(Theme.textPrimary)
-                }
-                .padding(.leading, Theme.Space.wingInset)
-            } else if playingSignal == "wave", music.nowPlaying?.isPlaying == true {
-                NowPlayingBars(accent: accent, barCount: 4, maxHeight: 10)
+            if playingSignal == "wave", music.nowPlaying?.isPlaying == true {
+                NowPlayingBars(accent: accent, barCount: 4, maxHeight: 7)
+                    .padding(.leading, Theme.Space.wingInset)
+            } else if glanceSession, focus.isActive || timer.isActive, !sessionOnRight {
+                sessionDigits
                     .padding(.leading, Theme.Space.wingInset)
             }
             // While music plays the glance belongs to the song and its
@@ -672,7 +683,7 @@ struct NotchRootView: View {
                 Image(systemName: active.symbol)
                     .font(Theme.Fonts.icon(.xs))
                     .foregroundStyle(accent)
-                    .padding(.leading, hasLeftWing ? 0 : Theme.Space.wingInset)
+                    .padding(.leading, leftWingNeed > 0 ? 0 : Theme.Space.wingInset)
             }
             Spacer()
             if model.hasPhysicalNotch {
