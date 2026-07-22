@@ -305,12 +305,33 @@ final class NotchWindowController {
     /// Re-measure and re-place after a display change: a notch
     /// arriving or leaving changes the pill itself, not just where
     /// the panel sits.
+    private var repositionRetry: DispatchWorkItem?
+
     private func reposition() {
-        guard let panel, let screen = notchScreen else { return }
+        guard let panel else { return }
+        repositionRetry?.cancel()
+        repositionRetry = nil
+        // Mid-transition (lid closing, display waking) the screen
+        // list can be briefly empty; bailing here once used to leave
+        // the island wearing the old display's notch forever.
+        guard let screen = notchScreen else {
+            let retry = DispatchWorkItem { [weak self] in self?.reposition() }
+            repositionRetry = retry
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: retry)
+            return
+        }
+        let hadNotch = viewModel.hasPhysicalNotch
+        let hadSize = viewModel.notchSize
         let frame = placement(on: screen)
-        guard panel.frame != frame else { return }
-        panel.setFrame(frame, display: true)
-        viewModel.objectWillChange.send()
+        let frameChanged = panel.frame != frame
+        if frameChanged {
+            panel.setFrame(frame, display: true)
+        }
+        // The frame can survive a display swap unchanged while the
+        // notch geometry does not; repaint on either difference.
+        if frameChanged || hadNotch != viewModel.hasPhysicalNotch || hadSize != viewModel.notchSize {
+            viewModel.objectWillChange.send()
+        }
     }
 
     /// Resolved fresh every time: AppKit recreates NSScreen objects at

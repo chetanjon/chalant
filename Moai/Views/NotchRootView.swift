@@ -76,7 +76,9 @@ struct NotchRootView: View {
         // right-side FOCUS 1 OF 4 label was width without value
         // (user call, 2026-07-21).
         if upcomingEvent != nil { return 112 }
-        if music.nowPlaying?.isPlaying == true, glanceMusic { return 107 }
+        // Playing needs no right-side width at all; the symmetric
+        // wing math otherwise drags both sides out to the title's.
+        if music.nowPlaying?.isPlaying == true, glanceMusic { return 0 }
         switch glanceIdle {
         case "none": return 0
         case "day": return 78
@@ -431,10 +433,11 @@ struct NotchRootView: View {
             toastGlance(toast)
         } else if let next = upcomingEvent {
             upcomingGlance(next, width: 100)
-        } else if let playing = music.nowPlaying, playing.isPlaying, glanceMusic {
-            MarqueeText(title: playing.track)
-                .id(playing.track)
-                .frame(width: 96)
+        } else if music.nowPlaying?.isPlaying == true, glanceMusic {
+            // Playing: the bars on the left carry the state. A
+            // scrolling title here was width without value, the same
+            // call that removed the session label (user, 2026-07-21).
+            EmptyView()
         } else {
             idleGlance
         }
