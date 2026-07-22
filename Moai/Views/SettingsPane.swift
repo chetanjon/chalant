@@ -40,7 +40,7 @@ struct SettingsPane: View {
 
     @AppStorage("expandOnHover") private var expandOnHover = true
     @AppStorage(VoiceController.pinnedUIDKey) private var voiceInputUID = ""
-    @AppStorage("openDelay") private var openDelay = 0.12
+    @AppStorage("openDelay") private var openDelay = 0.18
     @AppStorage("collapseDelay") private var collapseDelay = 0.05
     @AppStorage("motionFeel") private var motionFeel = "serene"
     @AppStorage("islandMaterial") private var islandMaterial = "ink"
@@ -159,8 +159,9 @@ struct SettingsPane: View {
                     divider
                     row("Open") {
                         picker($openDelay, [
-                            ("Instant", 0.0), ("Quick", 0.12), ("Relaxed", 0.3),
-                        ])
+                            ("Instant", 0.0), ("Quick", 0.12),
+                            ("Calm", 0.18), ("Relaxed", 0.3),
+                        ], width: 236)
                     }
                     divider
                     row("Close") {
