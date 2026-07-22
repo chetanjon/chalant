@@ -158,12 +158,13 @@ struct NotchRootView: View {
         let growW: CGFloat = model.isHovering ? 14 : 0
         let growH: CGFloat = model.isHovering ? 4 : 0
         // The safe area understates the camera housing on scaled
-        // resolutions (32pt reported, ~37pt of glass at More Space),
-        // so the pill wears a small chin: the hardware always sits
-        // inside it, never below it.
+        // resolutions (32pt reported, ~37pt of glass at More Space).
+        // +5 was mathematically flush and still read as short by eye
+        // (user, 2026-07-22); +8 wraps the glass with real margin at
+        // any scaling and reads as the island's chin, not a gap.
         return CGSize(
             width: model.notchSize.width + statusWings + growW,
-            height: model.notchSize.height + 5 + growH
+            height: model.notchSize.height + 8 + growH
         )
     }
 

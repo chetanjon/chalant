@@ -45,6 +45,7 @@ First open: macOS will ask once. System Settings, Privacy and Security, Open Any
 **Live status** (the open door)
 - Anything on your Mac can put a status pill on the island: `curl localhost:4242/activity -d '{"id":"deploy","title":"Deploying","state":"working"}'`. States: `working`, `needs-input`, `done`, `failed`, `clear`; `GET /activities` lists, `DELETE /activity/<id>` clears. Loopback only, never leaves the machine.
 - Made for the things that have no home: Claude Code hooks, build scripts, deploys, renders, long downloads. Needs-input leads the island's glance and wears the accent; finished things fade on their own.
+- Claude Code, for example: a Stop hook running `curl -s localhost:4242/activity -d '{"id":"claude","title":"Claude Code finished","state":"done"}'` puts the run's end on the island; a Notification hook with `"state":"needs-input"` flags it the moment it wants you.
 
 **Chat** (bring your own subscription)
 - A small built-in browser under the notch pointing at Claude, ChatGPT, or Gemini; pick the service in Settings.
