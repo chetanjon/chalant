@@ -4,6 +4,8 @@ The AI-native dynamic island for Mac. Incumbents treat the notch as a widget she
 
 The name: real moai are buried up to their shoulders. Ours is buried in the bezel. Only the head shows at the top of your screen, and it surfaces when you hold it. (Also: mo-AI. You heard it.)
 
+<p align="center"><img src="docs/assets/moai-demo.gif" width="560" alt="The island glances at what is playing, then opens into media controls, ambience, and focus."></p>
+
 ## Download
 
 [**Latest release**](https://github.com/chetanjon/moai/releases/latest). Apple Silicon, macOS 14+, free.

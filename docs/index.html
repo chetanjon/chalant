@@ -134,6 +134,20 @@
     color: var(--ink);
   }
 
+  .demo {
+    margin-top: 56px;
+    width: min(560px, 92vw);
+  }
+
+  .demo img {
+    display: block;
+    width: 100%;
+    border-radius: 18px;
+    /* The gif is the same black as the page; only a whisper of an
+       edge so it reads as a surface, not a hole. */
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07);
+  }
+
   /* ---- Download ---- */
 
   .get {
@@ -256,6 +270,10 @@
       Talk to it or type at it. Calendar, focus, music, windows, files.
       <em>The verbs run on this Mac, keyless, instant.</em>
     </p>
+    <div class="demo">
+      <img src="assets/moai-demo.gif"
+           alt="The island glances at what is playing, then opens into media controls, ambience, and focus.">
+    </div>
   </section>
 
   <section class="get">
