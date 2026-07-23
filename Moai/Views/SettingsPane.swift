@@ -13,6 +13,8 @@ struct SettingsPane: View {
     @Binding var scrollTarget: String?
     /// Reopens the first-run tour.
     var onReplayTour: (() -> Void)?
+    /// Hands the update to Sparkle: install in place, relaunch.
+    var onInstallUpdate: (() -> Void)?
 
     @AppStorage(UpdateChecker.settingKey) private var updateCheckOn = true
 
@@ -355,9 +357,13 @@ struct SettingsPane: View {
                 .foregroundStyle(Theme.textTertiary)
             if let latest = updates.latest {
                 Button {
-                    NSWorkspace.shared.open(UpdateChecker.downloadPage)
+                    if let onInstallUpdate {
+                        onInstallUpdate()
+                    } else {
+                        NSWorkspace.shared.open(UpdateChecker.downloadPage)
+                    }
                 } label: {
-                    Text("Moai \(latest) is out. Get it.")
+                    Text("Moai \(latest) is out. Install it.")
                         .font(Theme.Fonts.caption)
                         .foregroundStyle(accent)
                 }

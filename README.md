@@ -14,7 +14,7 @@ The name: real moai are buried up to their shoulders. Ours is buried in the beze
 brew install --cask chetanjon/moai/moai
 ```
 
-Unzip, drag Moai to Applications, open it. First open: macOS will ask once. System Settings, Privacy and Security, Open Anyway. Moai is unsigned because it is free and independent. Speech recognition is Apple standard dictation, there are no API keys anywhere, and beyond the optional Chat tab, Moai asks the internet only for: whether a newer version exists (a daily check against GitHub releases, switchable off in Settings), album art for what you play, and favicons for sites you save, each fetched from its own source, never through a third-party service. The Live status API listens on localhost only; nothing it hears leaves the machine.
+Unzip, drag Moai to Applications, open it. First open: macOS will ask once. System Settings, Privacy and Security, Open Anyway. Moai is unsigned because it is free and independent. After that, updates take care of themselves: the island mentions a new version once, and one click installs it in place and relaunches (Sparkle, with updates signed by the project's own key; no browser, no re-download dance). Speech recognition is Apple standard dictation, there are no API keys anywhere, and beyond the optional Chat tab, Moai asks the internet only for: whether a newer version exists (a daily check, switchable off in Settings), the update itself when you say yes, album art for what you play, and favicons for sites you save, each fetched from its own source, never through a third-party service. The Live status API listens on localhost only; nothing it hears leaves the machine.
 
 ## v1 feature set
 

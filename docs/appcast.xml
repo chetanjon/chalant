@@ -1,0 +1,14 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Moai</title>
+        <item>
+            <title>1.0.86</title>
+            <pubDate>Wed, 22 Jul 2026 22:56:07 -0700</pubDate>
+            <sparkle:version>86</sparkle:version>
+            <sparkle:shortVersionString>1.0.86</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/chetanjon/moai/releases/download/v1.0.86/Moai-1.0.86.zip" length="17005627" type="application/octet-stream" sparkle:edSignature="uVmj2dqHGDpnWBIIMrPq6xXekQCKAa0lIc4v3/IQcqoKmDeyZUX2wXMbqTOjDXPo5Sc06EZug+ddEOgQyO2zAQ=="/>
+        </item>
+    </channel>
+</rss>

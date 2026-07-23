@@ -19,9 +19,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.85</string>
+	<string>1.0.86</string>
 	<key>CFBundleVersion</key>
-	<string>85</string>
+	<string>86</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
@@ -38,5 +38,11 @@
 	<string>Moai creates the reminders you set.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Turns your words into actions, on this Mac only.</string>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
+	<key>SUFeedURL</key>
+	<string>https://chetanjon.github.io/moai/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>HS35RsdFpfDTLuf/jX4Cnv7YLzzC72iXqlyPkbYfAzE=</string>
 </dict>
 </plist>

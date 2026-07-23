@@ -1,3 +1,4 @@
+import Sparkle
 import SwiftUI
 
 @main
@@ -12,6 +13,13 @@ struct MoaiApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchController: NotchWindowController?
     private var statusItem: NSStatusItem?
+    /// Sparkle, on a leash: its own scheduler is off (Info.plist
+    /// SUEnableAutomaticChecks false; the island's quiet daily
+    /// UpdateChecker remains the only detector). It acts when the
+    /// user asks, and the app replaces itself and relaunches.
+    private let updater = SPUStandardUpdaterController(
+        startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil
+    )
 
     func applicationWillTerminate(_ notification: Notification) {
         // Stop the media bridge stream so no perl child outlives us.
@@ -30,6 +38,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = NotchWindowController()
         controller.show()
         notchController = controller
+        controller.viewModel.installUpdate = { [weak self] in
+            self?.updater.checkForUpdates(nil)
+        }
 
         // Tiny menu bar item so the agent app can be quit
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)

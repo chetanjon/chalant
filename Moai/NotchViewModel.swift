@@ -141,6 +141,9 @@ final class NotchViewModel: ObservableObject {
     let activities = ActivityStore()
     let activityServer = ActivityServer()
     let updates = UpdateChecker()
+    /// Hands the update ask to Sparkle (set by the AppDelegate, which
+    /// owns the updater): download, install, relaunch, no browser.
+    var installUpdate: (() -> Void)?
     /// Created on first open of the chat tab; the web view then lives
     /// for the app's lifetime so the conversation survives collapses.
     private(set) lazy var chat = ChatController()
@@ -339,6 +342,12 @@ final class NotchViewModel: ObservableObject {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
                         self?.endListening()
                     }
+                    return
+                }
+                // "debug update" fires the Sparkle flow itself, for
+                // rehearsing the install-and-relaunch loop.
+                if text == "debug update" {
+                    self.installUpdate?()
                     return
                 }
                 // "debug updatecheck <ver>" rehearses the stale path

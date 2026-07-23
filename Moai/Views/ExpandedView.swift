@@ -259,10 +259,12 @@ struct ExpandedView: View {
             music: music,
             updates: model.updates,
             events: model.events,
-            scrollTarget: $model.settingsScrollTarget
-        ) {
-            withAnimation(Theme.Motion.content) { model.replayWelcome() }
-        }
+            scrollTarget: $model.settingsScrollTarget,
+            onReplayTour: {
+                withAnimation(Theme.Motion.content) { model.replayWelcome() }
+            },
+            onInstallUpdate: { model.installUpdate?() }
+        )
         .frame(height: Theme.Panel.settings)
     }
 }
