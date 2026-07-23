@@ -101,40 +101,32 @@ final class ActionEngine {
 
         // The screen, read into context: one shot of the front
         // window, on-device OCR, and the words ride the same attach
-        // pipeline as a dropped file. Ask the next question against
-        // it. The heavy grant is asked in context, never awaited.
-        // One-shot forms ("summarize my screen", "translate my screen
-        // to hindi") capture, attach, and return nil so the normal
-        // fallback streams the answer against the fresh context in
-        // the same breath. Deliberate on purpose: a leading intent
-        // verb AND a word-bounded screen mention, so merely talking
-        // about screens (or screenplays) never fires a capture.
-        let screenMention = [" my screen", " the screen"].contains { phrase in
-            lower.hasSuffix(phrase) || lower.contains(phrase + " ")
-        }
+        // pipeline as a dropped file. One-shot forms ("summarize my
+        // screen", "translate my screen to hindi") attach and return
+        // nil so the normal fallback streams the answer in the same
+        // breath. Deliberate on purpose: a leading intent verb AND a
+        // screen mention that is either a suffix or the possessive
+        // "my screen" mid-utterance; "the screen recording" and
+        // screenplays never fire a capture (review-caught). One
+        // capture total: the old shape ran capture and OCR twice on
+        // any wordless window.
+        let screenMention = lower.hasSuffix(" my screen")
+            || lower.hasSuffix(" the screen")
+            || lower.contains(" my screen ")
         let screenOneShot = screenMention &&
             ["summarize ", "explain ", "translate ", "describe ", "tldr "]
                 .contains(where: lower.hasPrefix)
-        if screenOneShot {
-            if ScreenReader.preflight() {
-                model.isWorking = true
-                let outcome = await ScreenReader.readFrontWindow()
-                model.isWorking = false
-                if case .text(let app, let words) = outcome {
-                    model.pendingContext = (
-                        name: "\(app)'s window",
-                        text: String(words.prefix(6000))
-                    )
-                    return nil
-                }
+        let screenRead = ["read my screen", "read the screen", "read screen",
+                          "what's on my screen", "whats on my screen",
+                          "what's on the screen", "whats on the screen",
+                          "look at my screen", "ask about my screen"].contains(lower)
+        if screenOneShot || screenRead {
+            // The words are only ever consumed by the on-device
+            // model; capturing without it wasted seconds and then
+            // promised "ask away" into a dead end (review-caught).
+            guard AIService.localModelAvailable else {
+                return "Reading the screen needs Apple Intelligence, System Settings, Apple Intelligence and Siri. The Chat tab carries your own Claude, ChatGPT, or Gemini meanwhile."
             }
-            // No grant or no words: fall through to the plain verb's
-            // honest answers below.
-        }
-        if screenOneShot ||
-            ["read my screen", "read the screen", "read screen",
-             "what's on my screen", "whats on my screen",
-             "look at my screen", "ask about my screen"].contains(lower) {
             guard ScreenReader.preflight() else {
                 ScreenReader.requestGrant()
                 return "macOS is asking about Screen Recording. Allow it (a relaunch may be needed), then say it again. The reading stays on this Mac."
@@ -148,12 +140,21 @@ final class ActionEngine {
                     name: "\(app)'s window",
                     text: String(words.prefix(6000))
                 )
+                if screenOneShot {
+                    // The trail must say the capture happened; "no
+                    // verb matched" over a matched verb was a lie
+                    // (review-caught).
+                    model.logVoice(text, outcome: "read \(app)'s window into context")
+                    return nil
+                }
                 let count = words.split(separator: "\n").count
                 return "Read \(count) lines from \(app). Ask away; the words stay on this Mac."
             case .empty(let app):
                 return "\(app)'s window came back wordless. Text-light windows read as pictures."
             case .noWindow:
                 return "No readable window up front."
+            case .failed:
+                return "The capture didn't land. Say it again."
             case .denied, .needsGrant:
                 return "Screen Recording isn't allowed yet. System Settings, Privacy and Security, Screen Recording, then relaunch Moai."
             }

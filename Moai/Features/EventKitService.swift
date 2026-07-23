@@ -150,11 +150,15 @@ final class EventKitService: ObservableObject {
 
     // MARK: - Upcoming-event glance
 
-    /// The meeting "join" should reach for: one already running wins
-    /// (a late join is the verb's whole use), else today's next one
-    /// carrying a link. Fetches on its own, like agenda: saying
-    /// "join" IS the ask, so the Today block's privacy gate (which
-    /// governs the ambient glance cache) does not apply here.
+    /// The meeting "join" should reach for. One about to begin wins
+    /// over one running long (at 10:58 with the 11:00 on the glance,
+    /// "join" means the 11:00, not the standup's tail); otherwise a
+    /// running meeting wins (a late join is the verb's whole use);
+    /// otherwise today's next linked one. EventKit returns events
+    /// unsorted, so sort before any first-wins pick (review-caught).
+    /// Fetches on its own, like agenda: saying "join" IS the ask, so
+    /// the Today block's privacy gate (which governs the ambient
+    /// glance cache) does not apply here.
     func joinableEvent(at now: Date = Date()) async -> DayEvent? {
         guard await ensureEvents() else { return nil }
         let calendar = Calendar.current
@@ -167,10 +171,16 @@ final class EventKitService: ObservableObject {
         let linked = store.events(matching: predicate)
             .map(DayEvent.init(ek:))
             .filter { $0.joinURL != nil && !$0.isAllDay && $0.end > now }
+            .sorted { $0.start < $1.start }
+        if let imminent = linked.first(where: {
+            $0.start > now && $0.start.timeIntervalSince(now) <= 300
+        }) {
+            return imminent
+        }
         if let running = linked.first(where: { $0.start <= now }) {
             return running
         }
-        return linked.filter { $0.start > now }.min { $0.start < $1.start }
+        return linked.first { $0.start > now }
     }
 
     /// Keep `nextEvent` current: a slow timer for the passage of time,

@@ -31,7 +31,7 @@ First open: macOS will ask once. System Settings, Privacy and Security, Open Any
 - `play`, `pause`, `skip`, `previous` control music.
 - `text amma: on my way` reads the message back; only the word `send` fires it, as an iMessage through Messages. Nothing ever sends unconfirmed, and any other command drops the staged text.
 - Dates parsed deterministically with NSDataDetector. Verbs by prefix. Zero network, zero key, instant.
-- `read my screen` captures the front window, runs on-device OCR (Vision, keyless), and attaches the words as context for your next question; `summarize my screen` does it and answers in one breath, and any leading intent works: explain, describe, `translate my screen to hindi`. Nothing is stored, nothing leaves the Mac; needs one Screen Recording yes.
+- `read my screen` captures the front window, runs on-device OCR (Vision, keyless), and attaches the words as context for your next question; `summarize my screen` does it and answers in one breath; explain, describe, translate, and tldr lead the same way (`translate my screen to hindi`). Nothing is stored, nothing leaves the Mac; needs one Screen Recording yes.
 - `what's new` reads the latest release notes right in the island.
 - Anything beyond the verbs goes to the Mac's own on-device model, keyless. Long conversations belong to the Chat tab and your own subscription.
 

@@ -13,6 +13,10 @@ enum ScreenReader {
         case noWindow
         case denied
         case needsGrant
+        /// Permission is fine; the capture or the OCR itself failed.
+        /// Saying "check System Settings" over a transient flake sent
+        /// people to fix what was not broken (review-caught).
+        case failed
     }
 
     /// The Screen Recording dialog must never be awaited: ask without
@@ -31,20 +35,30 @@ enum ScreenReader {
         guard preflight() else { return .needsGrant }
         guard let content = try? await SCShareableContent
             .excludingDesktopWindows(true, onScreenWindowsOnly: true)
-        else { return .denied }
+        else { return .failed }
 
         // The frontmost app's largest on-screen window; Moai itself
-        // never counts, the island is not a document.
-        let frontApp = NSWorkspace.shared.frontmostApplication
-        let candidates = content.windows.filter { window in
+        // never counts, the island is not a document. When Moai IS
+        // the frontmost app (the shortcut picker activates it, and
+        // the user is mid-conversation with the bar), the front
+        // filter must yield or no window can ever qualify (review-
+        // caught: the two conditions were mutually unsatisfiable);
+        // the biggest visible window is then the honest guess.
+        let frontBundle = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        let selfBundle = Bundle.main.bundleIdentifier
+        let visible = content.windows.filter { window in
             guard let app = window.owningApplication else { return false }
-            guard app.bundleIdentifier != Bundle.main.bundleIdentifier else { return false }
-            guard window.isOnScreen, window.frame.width > 200,
-                  window.frame.height > 150 else { return false }
-            if let front = frontApp?.bundleIdentifier {
-                return app.bundleIdentifier == front
+            guard app.bundleIdentifier != selfBundle else { return false }
+            return window.isOnScreen && window.frame.width > 200
+                && window.frame.height > 150
+        }
+        let candidates: [SCWindow]
+        if let front = frontBundle, front != selfBundle {
+            candidates = visible.filter {
+                $0.owningApplication?.bundleIdentifier == front
             }
-            return true
+        } else {
+            candidates = visible
         }
         guard let window = candidates.max(by: {
             $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
@@ -52,28 +66,40 @@ enum ScreenReader {
 
         let appName = window.owningApplication?.applicationName ?? "the front app"
 
-        let configuration = SCStreamConfiguration()
-        configuration.width = Int(window.frame.width) * 2
-        configuration.height = Int(window.frame.height) * 2
-        configuration.showsCursor = false
+        // Scale comes from the content filter, not a guessed 2x: a
+        // 1x monitor deserves a 1x capture (computed-not-guessed,
+        // the chin's own doctrine).
         let filter = SCContentFilter(desktopIndependentWindow: window)
+        let scale = max(1, CGFloat(filter.pointPixelScale))
+        let configuration = SCStreamConfiguration()
+        configuration.width = Int(window.frame.width * scale)
+        configuration.height = Int(window.frame.height * scale)
+        configuration.showsCursor = false
         guard let image = try? await SCScreenshotManager.captureImage(
             contentFilter: filter, configuration: configuration
-        ) else { return .denied }
+        ) else { return .failed }
 
-        let words = await recognize(image)
+        guard let words = await recognize(image) else { return .failed }
         guard !words.isEmpty else { return .empty(app: appName) }
         return .text(app: appName, words: words)
     }
 
-    private static func recognize(_ image: CGImage) async -> String {
+    /// nil = Vision itself failed (distinct from a wordless window;
+    /// telling someone their document has no text over an OCR error
+    /// was a lie, review-caught).
+    private static func recognize(_ image: CGImage) async -> String? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let request = VNRecognizeTextRequest()
                 request.recognitionLevel = .accurate
                 request.usesLanguageCorrection = true
                 let handler = VNImageRequestHandler(cgImage: image, options: [:])
-                try? handler.perform([request])
+                do {
+                    try handler.perform([request])
+                } catch {
+                    continuation.resume(returning: nil)
+                    return
+                }
                 let lines = request.results?
                     .compactMap { $0.topCandidates(1).first?.string } ?? []
                 continuation.resume(returning: lines.joined(separator: "\n"))

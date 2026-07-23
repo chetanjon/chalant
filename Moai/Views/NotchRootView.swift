@@ -61,6 +61,10 @@ struct NotchRootView: View {
         glanceNextEvent ? events.nextEvent : nil
     }
 
+    /// The camera mark's earned width, one number for both pill
+    /// families (two hand-derived constants drifted apart once).
+    private static let cameraMarkWidth: CGFloat = 16
+
     /// Anything counting: a pomodoro, a plain timer, the stopwatch.
     private var sessionActive: Bool {
         focus.isActive || timer.isActive || stopwatch.isActive
@@ -106,7 +110,7 @@ struct NotchRootView: View {
         // earns its own width; stealing the marquee's sent titles
         // into perpetual scroll.
         if let next = upcomingEvent {
-            return next.joinURL != nil ? 128 : 112
+            return 112 + (next.joinURL != nil ? Self.cameraMarkWidth : 0)
         }
         // Playing needs no right-side width at all; the symmetric
         // wing math otherwise drags both sides out to the title's.
@@ -132,7 +136,7 @@ struct NotchRootView: View {
         if model.glanceToast != nil { return 148 }
         if activities.glanceActivity != nil { return 150 }
         if let next = upcomingEvent {
-            return next.joinURL != nil ? 166 : 150
+            return 150 + (next.joinURL != nil ? Self.cameraMarkWidth : 0)
         }
         switch glanceIdle {
         case "day": return 84

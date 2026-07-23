@@ -104,8 +104,14 @@ struct AIService {
     /// light mode"); the longest command found inside the reply is
     /// the intent. Parameterized commands (remind, note:, open) are
     /// left untouched, their own words are the payload.
+    // "join" and "read my screen" are deliberately NOT here: the
+    // word-set rescue below is order-blind containment, and a chatty
+    // reply that merely mentions joining or reading would snap to an
+    // action that opens meetings or captures screens unasked
+    // (review-caught). Their exact forms pass through via the prefix
+    // guard instead.
     private static let canonicalCommands = [
-        "what's next", "what's due", "what's new", "join", "read my screen",
+        "what's next", "what's due", "what's new",
         "stop focus", "stop timer",
         "stop stopwatch", "reset stopwatch", "stopwatch", "brown noise", "stop noise",
         "left half", "right half", "screen record", "lock screen",
@@ -117,7 +123,8 @@ struct AIService {
     private static let parameterizedPrefixes = [
         "remind", "schedule", "cancel", "move", "done with",
         "focus", "timer", "open", "quit", "note", "find", "run",
-        "text", "message", "imessage", "send",
+        "text", "message", "imessage", "send", "join", "read",
+        "summarize", "explain", "translate", "describe",
     ]
 
     private static func rescueParaphrase(_ reply: String) -> String {
