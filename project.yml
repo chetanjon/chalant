@@ -33,8 +33,8 @@ targets:
       properties:
         # Version lives here: xcodegen regenerates Info.plist on every
         # run, so a version bumped only in the plist silently resets.
-        CFBundleShortVersionString: 1.2.10
-        CFBundleVersion: "109"
+        CFBundleShortVersionString: 1.2.11
+        CFBundleVersion: "110"
         # Sparkle: the feed rides the Pages site; checks stay OUR quiet
         # daily UpdateChecker (Sparkle's own scheduler off, no consent
         # dialog); Sparkle acts only when the user asks to install.

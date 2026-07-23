@@ -349,31 +349,30 @@ struct PressableStyle: ButtonStyle {
 /// around the icon, a tint lift and faint halo on hover, and a press
 /// sink. Every bare-glyph control in the app routes through this.
 
-/// The house mark: a thin, quiet c. The letter of the name, drawn
-/// as an almost-circle that stays open on one side; calm that never
-/// closes itself off. One stroke, no ornament.
+/// The house mark: the island itself, distilled to one color. A
+/// soft capsule with a warm point held inside; the same silhouette
+/// the app icon renders in glass, drawn here as a single-color glyph
+/// so it can live in a menu bar or on a button. It matches the icon,
+/// not a letter.
 struct ChalantMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
         let d = min(rect.width, rect.height)
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let radius = d * 0.36
-        // Swept as explicit points: SwiftUI's arc direction flag is
-        // easy to hold backwards, and a wrong sweep draws the gap
-        // instead of the letter. A polyline cannot be wrong.
-        var arc = Path()
-        let gap = 42.0
-        let steps = 64
-        for i in 0...steps {
-            let a = Angle.degrees(gap + (360 - 2 * gap) * Double(i) / Double(steps)).radians
-            let pt = CGPoint(
-                x: center.x + radius * cos(a),
-                y: center.y + radius * sin(a)
-            )
-            if i == 0 { arc.move(to: pt) } else { arc.addLine(to: pt) }
-        }
-        return arc.strokedPath(
-            StrokeStyle(lineWidth: d * 0.14, lineCap: .round, lineJoin: .round)
+        let capsuleW = d * 0.82
+        let capsuleH = d * 0.40
+        let body = CGRect(
+            x: rect.midX - capsuleW / 2,
+            y: rect.midY - capsuleH / 2,
+            width: capsuleW, height: capsuleH
         )
+        var mark = Path(roundedRect: body, cornerRadius: capsuleH / 2)
+            .strokedPath(StrokeStyle(lineWidth: d * 0.11, lineCap: .round))
+        let dotR = d * 0.105
+        let dotX = body.maxX - capsuleH * 0.7
+        mark.addEllipse(in: CGRect(
+            x: dotX - dotR, y: rect.midY - dotR,
+            width: dotR * 2, height: dotR * 2
+        ))
+        return mark
     }
 }
 

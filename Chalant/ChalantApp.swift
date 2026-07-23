@@ -48,21 +48,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Tiny menu bar item so the agent app can be quit
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        // The house mark, drawn by hand: a thin, quiet c. The letter
-        // of the name as an almost-circle, open on one side.
+        // The house mark, drawn by hand: the island capsule with its
+        // ember, the icon's silhouette in one color. Matches the app
+        // icon, not a letter.
         let icon = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            let arc = NSBezierPath()
-            arc.appendArc(
-                withCenter: NSPoint(x: 9, y: 9),
-                radius: 6.1,
-                startAngle: 42,
-                endAngle: -42,
-                clockwise: false
-            )
-            arc.lineWidth = 2.1
-            arc.lineCapStyle = .round
+            let body = NSRect(x: 2.4, y: 6.1, width: 13.2, height: 5.8)
+            let capsule = NSBezierPath(roundedRect: body, xRadius: 2.9, yRadius: 2.9)
+            capsule.lineWidth = 1.6
             NSColor.black.setStroke()
-            arc.stroke()
+            capsule.stroke()
+            let dr = 1.7
+            let dot = NSBezierPath(ovalIn: NSRect(
+                x: body.maxX - 4.0 - dr, y: 9.0 - dr, width: dr * 2, height: dr * 2
+            ))
+            NSColor.black.setFill()
+            dot.fill()
             return true
         }
         icon.isTemplate = true
