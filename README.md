@@ -104,7 +104,7 @@ Open this folder in Claude Code and paste:
 
 - `NotchWindowController`: borderless non-activating NSPanel at status-bar level, measured against the real notch via `NSScreen.safeAreaInsets` + auxiliary top areas, re-measured through every display change. Global click monitor collapses the island.
 - `NotchViewModel`: island state, active tab, and the context handoff (`askAbout`) that lets clips and files flow into the Do surface.
-- `Features/`: MediaRemoteBridge + MusicController (system-wide now-playing via the vendored adapter, AppleScript enrichment for Spotify/Music extras), EventKitService (reminders and calendar, deterministic date parsing), ClipboardStore (pasteboard polling, 1s, text and images), ShelfStore (drops, AirDrop, PDF/text extraction via PDFKit), ActivityStore + ActivityServer (the localhost:4242 status door), MessageCourier (stage, read back, send only on "send"), NotesStore, ShortcutStore, VoiceController, FocusController.
+- `Features/`: MediaRemoteBridge + MusicController (system-wide now-playing via the vendored adapter, AppleScript enrichment for Spotify/Music extras), EventKitService (reminders and calendar, deterministic date parsing), ClipboardStore (pasteboard polling, 1s, text and images), ShelfStore (drops, AirDrop, PDF/text extraction via PDFKit), ActivityStore + ActivityServer (the localhost:4242 status door), MessageCourier (stage, read back, send only on "send"), UpdateChecker (the quiet daily version check; Sparkle does the in-place install when you say yes), NotesStore, ShortcutStore, VoiceController, FocusController.
 - `Views/`: NotchRootView (the morphing shape, ink and glass materials, drop target, wings), ExpandedView (tabs + Do), IslandRows (the media row), SettingsPane.
 - `AIService`: Apple's on-device model for quick answers and verb translation, keyless.
 
@@ -129,11 +129,13 @@ The rules every round is built under, in the order they were paid for:
 
 ## Roadmap
 
-- **v2:** meeting brief before your next call, screen context. (Messages sending shipped in 1.0.66; menu bar countdown was pruned, the island already carries the countdown on every display, and two surfaces for one number is the kind of thing this app exists to refuse.)
+- Screen context shipped in 1.0.78, Messages sending in 1.0.66, self-updates in 1.0.86. What remains from the old list: a meeting brief before your next call, still earning its shape. (The menu bar countdown was pruned; the island already carries the countdown on every display, and two surfaces for one number is the kind of thing this app exists to refuse.)
 - Distribution: the Homebrew cask is live (`brew install --cask chetanjon/plum/plum`); a notarized build if enrollment ever earns its $99. The landing page is [live](https://chetanjon.github.io/plum/).
 
-## Audio attributions
+## Attributions
 
+- Self-updates: [Sparkle](https://github.com/sparkle-project/Sparkle) (MIT), with archives signed by the project's own EdDSA key.
+- Now-playing: the vendored [mediaremote-adapter](https://github.com/ungive/mediaremote-adapter) (BSD 3-Clause).
 - Rain ambience: derived from ["Calm rain.wav"](https://commons.wikimedia.org/wiki/File:Calm_rain.wav) (Wikimedia Commons, CC BY-SA 4.0), trimmed, normalized, edge-faded.
 - Cafe ambience: derived from ["Cafe ambiance.ogg"](https://commons.wikimedia.org/wiki/File:Cafe_ambiance.ogg) (Wikimedia Commons, CC0), low-pass filtered and level-reduced for a calmer room.
 - Fire ambience: derived from ["Campfire sound ambience.ogg"](https://commons.wikimedia.org/wiki/File:Campfire_sound_ambience.ogg) by Glaneur de sons (Wikimedia Commons, CC BY 3.0), normalized, softened, edge-faded.
