@@ -349,26 +349,30 @@ struct PressableStyle: ButtonStyle {
 /// around the icon, a tint lift and faint halo on hover, and a press
 /// sink. Every bare-glyph control in the app routes through this.
 
-/// The house mark: a single soft tilde. Home to anyone who lives in
-/// a terminal, "no big deal" to everyone else, and a small wave
-/// besides; ease, home, and water in one stroke. It is the name's
-/// whole temperament drawn in one gesture.
+/// The house mark: a thin, quiet c. The letter of the name, drawn
+/// as an almost-circle that stays open on one side; calm that never
+/// closes itself off. One stroke, no ornament.
 struct ChalantMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
         let d = min(rect.width, rect.height)
-        let midY = rect.midY
-        var wave = Path()
-        wave.move(to: CGPoint(x: rect.minX + d * 0.08, y: midY + d * 0.04))
-        wave.addQuadCurve(
-            to: CGPoint(x: rect.midX, y: midY),
-            control: CGPoint(x: rect.minX + d * 0.28, y: midY - d * 0.26)
-        )
-        wave.addQuadCurve(
-            to: CGPoint(x: rect.maxX - d * 0.08, y: midY - d * 0.04),
-            control: CGPoint(x: rect.maxX - d * 0.28, y: midY + d * 0.26)
-        )
-        return wave.strokedPath(
-            StrokeStyle(lineWidth: d * 0.17, lineCap: .round, lineJoin: .round)
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = d * 0.36
+        // Swept as explicit points: SwiftUI's arc direction flag is
+        // easy to hold backwards, and a wrong sweep draws the gap
+        // instead of the letter. A polyline cannot be wrong.
+        var arc = Path()
+        let gap = 42.0
+        let steps = 64
+        for i in 0...steps {
+            let a = Angle.degrees(gap + (360 - 2 * gap) * Double(i) / Double(steps)).radians
+            let pt = CGPoint(
+                x: center.x + radius * cos(a),
+                y: center.y + radius * sin(a)
+            )
+            if i == 0 { arc.move(to: pt) } else { arc.addLine(to: pt) }
+        }
+        return arc.strokedPath(
+            StrokeStyle(lineWidth: d * 0.14, lineCap: .round, lineJoin: .round)
         )
     }
 }

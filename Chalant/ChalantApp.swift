@@ -48,25 +48,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Tiny menu bar item so the agent app can be quit
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        // The house mark, drawn by hand: a single soft tilde. Home in
-        // every terminal, ease everywhere else, and a small wave.
+        // The house mark, drawn by hand: a thin, quiet c. The letter
+        // of the name as an almost-circle, open on one side.
         let icon = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            let wave = NSBezierPath()
-            wave.move(to: NSPoint(x: 2.4, y: 8.4))
-            wave.curve(
-                to: NSPoint(x: 9.0, y: 9.0),
-                controlPoint1: NSPoint(x: 4.0, y: 11.8),
-                controlPoint2: NSPoint(x: 6.9, y: 11.3)
+            let arc = NSBezierPath()
+            arc.appendArc(
+                withCenter: NSPoint(x: 9, y: 9),
+                radius: 6.1,
+                startAngle: 42,
+                endAngle: -42,
+                clockwise: false
             )
-            wave.curve(
-                to: NSPoint(x: 15.6, y: 9.6),
-                controlPoint1: NSPoint(x: 11.1, y: 6.7),
-                controlPoint2: NSPoint(x: 14.0, y: 6.2)
-            )
-            wave.lineWidth = 2.4
-            wave.lineCapStyle = .round
+            arc.lineWidth = 2.1
+            arc.lineCapStyle = .round
             NSColor.black.setStroke()
-            wave.stroke()
+            arc.stroke()
             return true
         }
         icon.isTemplate = true
