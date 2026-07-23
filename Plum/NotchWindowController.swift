@@ -700,15 +700,46 @@ final class NotchWindowController {
 /// sliver silhouette, pure hint, no content. Hovering it (the zone,
 /// not the pixels; it ignores the mouse) summons the island over.
 private struct SliverHint: View {
-    private var shape: IslandShape {
-        IslandShape(eave: 3, bottomRadius: 4, belly: 0.5)
-    }
-
     var body: some View {
-        shape
-            .fill(Color.black)
-            .overlay(shape.strokeBorder(Theme.specularEdge, lineWidth: 1).opacity(0.75))
-            .overlay(shape.strokeBorder(Theme.lipLight, lineWidth: 1))
+        ZStack {
+            SliverBead().fill(Color.black)
+            SliverBeadEdge()
+                .stroke(Theme.lipLight, lineWidth: 1)
+                .opacity(0.9)
+        }
+    }
+}
+
+/// A shallow water bead hanging from the screen edge: flat where it
+/// meets the glass, one soft arc below. The straight-sided strip it
+/// replaces read as a hard sticker (user, 2026-07-23, "too sharp").
+private struct SliverBead: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: .zero)
+        p.addLine(to: CGPoint(x: rect.maxX, y: 0))
+        p.addCurve(
+            to: .zero,
+            control1: CGPoint(x: rect.maxX * 0.72, y: rect.maxY * 1.4),
+            control2: CGPoint(x: rect.maxX * 0.28, y: rect.maxY * 1.4)
+        )
+        p.closeSubpath()
+        return p
+    }
+}
+
+/// The bead's lit lower edge only; stroking the closed shape would
+/// draw a stray line along the screen edge itself.
+private struct SliverBeadEdge: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: rect.maxX, y: 0))
+        p.addCurve(
+            to: .zero,
+            control1: CGPoint(x: rect.maxX * 0.72, y: rect.maxY * 1.4),
+            control2: CGPoint(x: rect.maxX * 0.28, y: rect.maxY * 1.4)
+        )
+        return p
     }
 }
 
