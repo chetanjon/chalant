@@ -103,13 +103,18 @@ final class ActionEngine {
         // window, on-device OCR, and the words ride the same attach
         // pipeline as a dropped file. Ask the next question against
         // it. The heavy grant is asked in context, never awaited.
-        // One-shot forms ("summarize my screen") capture, attach,
-        // and return nil so the normal fallback streams the answer
-        // against the fresh context in the same breath.
-        let screenOneShot = ["summarize my screen", "summarize the screen",
-                             "explain my screen", "explain the screen",
-                             "summarize what's on my screen",
-                             "explain what's on my screen"].contains(lower)
+        // One-shot forms ("summarize my screen", "translate my screen
+        // to hindi") capture, attach, and return nil so the normal
+        // fallback streams the answer against the fresh context in
+        // the same breath. Deliberate on purpose: a leading intent
+        // verb AND a word-bounded screen mention, so merely talking
+        // about screens (or screenplays) never fires a capture.
+        let screenMention = [" my screen", " the screen"].contains { phrase in
+            lower.hasSuffix(phrase) || lower.contains(phrase + " ")
+        }
+        let screenOneShot = screenMention &&
+            ["summarize ", "explain ", "translate ", "describe ", "tldr "]
+                .contains(where: lower.hasPrefix)
         if screenOneShot {
             if ScreenReader.preflight() {
                 model.isWorking = true
