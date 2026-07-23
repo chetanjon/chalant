@@ -127,7 +127,7 @@ struct AIService {
         "summarize", "explain", "translate", "describe",
     ]
 
-    private static func rescueParaphrase(_ reply: String) -> String {
+    static func rescueParaphrase(_ reply: String) -> String {
         let lowered = reply.lowercased()
         guard !canonicalCommands.contains(lowered),
               !parameterizedPrefixes.contains(where: { lowered.hasPrefix($0) })

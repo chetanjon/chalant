@@ -79,7 +79,7 @@ xcodegen
 open Moai.xcodeproj
 ```
 
-In Xcode: select your personal team under Signing & Capabilities, then hit Run.
+In Xcode: select your personal team under Signing & Capabilities, then hit Run. `xcodebuild test -scheme Moai` runs the unit suite (the parsing rules, version comparator, and session grammar that were each paid for live).
 
 First music control triggers a macOS Automation permission prompt (Moai → Spotify/Music). Approve it once.
 

@@ -45,7 +45,7 @@ struct DayEvent: Identifiable, Equatable {
         "webex.com", "facetime.apple.com", "meet.jit.si",
     ]
 
-    private static func meetingURL(in event: EKEvent) -> URL? {
+    static func meetingURL(in event: EKEvent) -> URL? {
         var haystacks: [String] = []
         if let url = event.url?.absoluteString { haystacks.append(url) }
         if let location = event.location { haystacks.append(location) }

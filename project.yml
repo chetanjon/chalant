@@ -48,3 +48,31 @@ targets:
         SWIFT_VERSION: "5.9"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         ENABLE_HARDENED_RUNTIME: NO
+  MoaiTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - MoaiTests
+    dependencies:
+      - target: Moai
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cj.moai.tests
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: WV59PZX4A3
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Moai:
+    build:
+      targets:
+        Moai: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - MoaiTests
+    archive:
+      config: Release

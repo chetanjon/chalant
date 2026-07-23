@@ -287,7 +287,7 @@ final class MessageCourier {
     }
 
     /// Phone-ish or email-ish input is its own address.
-    nonisolated private static func literalHandle(_ text: String) -> String? {
+    nonisolated static func literalHandle(_ text: String) -> String? {
         if text.contains("@"), text.contains("."), !text.contains(" ") {
             return text
         }
