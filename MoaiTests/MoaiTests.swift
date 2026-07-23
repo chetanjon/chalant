@@ -341,4 +341,30 @@ final class MoaiTests: XCTestCase {
         // Chatter that merely mentions loudness stays freeform.
         XCTAssertNil(ActionEngine.volumeIntent("this cafe is too loud for calls"))
     }
+
+    // MARK: Transport articles and the tell doorway (R124)
+
+    func testTransportFormsCarryArticles() {
+        // "pause the music" once took a multi-second model round-trip
+        // to become "pause" (dogfood-caught).
+        XCTAssertTrue(ActionEngine.pauseForms.contains("pause the music"))
+        XCTAssertTrue(ActionEngine.pauseForms.contains("stop the music"))
+        XCTAssertTrue(ActionEngine.playForms.contains("play the music"))
+        XCTAssertTrue(ActionEngine.skipForms.contains("skip this song"))
+        XCTAssertTrue(ActionEngine.previousForms.contains("previous track"))
+        // Ambience keeps its own stop verb.
+        XCTAssertFalse(ActionEngine.pauseForms.contains("stop noise"))
+    }
+
+    func testTextingPrefixTellGuard() {
+        // "tell amma i am on my way" is how people say it; "tell me"
+        // stays a question, and the space keeps "tell melissa" a
+        // recipient.
+        XCTAssertEqual(ActionEngine.textingPrefix(of: "tell amma i am on my way"), "tell ")
+        XCTAssertEqual(ActionEngine.textingPrefix(of: "tell melissa the plan"), "tell ")
+        XCTAssertNil(ActionEngine.textingPrefix(of: "tell me a joke"))
+        XCTAssertNil(ActionEngine.textingPrefix(of: "tell me"))
+        XCTAssertNil(ActionEngine.textingPrefix(of: "telling stories"))
+        XCTAssertEqual(ActionEngine.textingPrefix(of: "text mom hi"), "text ")
+    }
 }

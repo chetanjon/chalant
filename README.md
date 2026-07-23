@@ -30,7 +30,7 @@ First open: macOS will ask once. System Settings, Privacy and Security, Open Any
 - `brown noise` / `white noise` / `pink noise`, generated live, no audio files, works offline.
 - `note: something` captures locally. `notes` lists. `clear notes` wipes.
 - `play`, `pause`, `skip`, `previous` control music. `what's playing` names the track and where it plays; `volume up`, `turn the volume down a bit`, or `volume 30` turn the same knob the row's slider does (the player's own volume when it has one, the Mac's otherwise).
-- `text amma: on my way` reads the message back; only the word `send` fires it, as an iMessage through Messages. Nothing ever sends unconfirmed, and any other command drops the staged text.
+- `text amma: on my way` or `tell amma i'm on my way` reads the message back; only the word `send` fires it, as an iMessage through Messages. Nothing ever sends unconfirmed, and any other command drops the staged text. (`tell me ...` stays a question.)
 - Dates parsed deterministically with NSDataDetector. Verbs by prefix. Zero network, zero key, instant.
 - `read my screen` captures the front window, runs on-device OCR (Vision, keyless), and attaches the words as context for your next question; `summarize my screen` does it and answers in one breath; explain, describe, translate, and tldr lead the same way (`translate my screen to hindi`). Nothing is stored, nothing leaves the Mac; needs one Screen Recording yes.
 - `what's new` reads the latest release notes right in the island.

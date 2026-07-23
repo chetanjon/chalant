@@ -414,15 +414,26 @@ final class EventKitService: ObservableObject {
         return store.events(matching: predicate).sorted { $0.startDate < $1.startDate }
     }
 
-    /// Resolve spoken words to one of today's events. "Next meeting"
-    /// takes the nearest one ahead; a title matches loosely in either
-    /// direction; a bare time ("the 3pm") matches by start hour.
-    /// Upcoming events win over finished ones on ties.
+    /// The week ahead, for the edit verbs: "cancel dentist" said the
+    /// moment after scheduling tomorrow's dentist must find it
+    /// (dogfood-caught; create spans any day, cancel searched today).
+    private func weekEKEvents() -> [EKEvent] {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: Date())
+        guard let end = calendar.date(byAdding: .day, value: 7, to: start) else { return [] }
+        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
+        return store.events(matching: predicate).sorted { $0.startDate < $1.startDate }
+    }
+
+    /// Resolve spoken words to an event this week, soonest first.
+    /// "Next meeting" takes the nearest one ahead; a title matches
+    /// loosely in either direction; a bare time ("the 3pm") matches
+    /// by start hour. Upcoming events win over finished ones on ties.
     private func resolveEvent(_ raw: String) -> EKEvent? {
         let query = raw.lowercased()
             .trimmingCharacters(in: .whitespaces)
             .removingPrefixes(["my ", "the "])
-        let events = todaysEKEvents()
+        let events = weekEKEvents()
         let now = Date()
         let upcoming = events.filter { $0.startDate.timeIntervalSince(now) > -120 }
 
@@ -464,7 +475,7 @@ final class EventKitService: ObservableObject {
             return "Calendar access is off. System Settings, Privacy, Calendars."
         }
         guard let event = resolveEvent(query) else {
-            return "No event today matching \"\(query)\"."
+            return "No event this week matching \"\(query)\"."
         }
         let title = event.title ?? "Untitled"
         lastEdit = .cancelled(
@@ -481,7 +492,7 @@ final class EventKitService: ObservableObject {
             return "Couldn't cancel that. \(error.localizedDescription)"
         }
         await reloadEvents()
-        let clock = Self.clockFormatter.string(from: event.startDate)
+        let clock = Self.formatter.string(from: event.startDate)
         return "Cancelled \(title), \(clock). Say undo if that was wrong."
     }
 
@@ -491,11 +502,11 @@ final class EventKitService: ObservableObject {
             return "Calendar access is off. System Settings, Privacy, Calendars."
         }
         guard let event = resolveEvent(query) else {
-            return "No event today matching \"\(query)\"."
+            return "No event this week matching \"\(query)\"."
         }
         let title = event.title ?? "Untitled"
         guard let oldStart = event.startDate else {
-            return "No event today matching \"\(query)\"."
+            return "No event this week matching \"\(query)\"."
         }
         let oldEnd = event.endDate ?? oldStart.addingTimeInterval(3600)
         let duration = oldEnd.timeIntervalSince(oldStart)
@@ -511,7 +522,7 @@ final class EventKitService: ObservableObject {
             title: title, from: oldStart, fromEnd: oldEnd
         )
         await reloadEvents()
-        return "Moved \(title) to \(Self.clockFormatter.string(from: newStart))."
+        return "Moved \(title) to \(Self.formatter.string(from: newStart))."
     }
 
     /// Nudge one of today's events by a delta ("push it by 30 minutes").
@@ -520,7 +531,7 @@ final class EventKitService: ObservableObject {
             return "Calendar access is off. System Settings, Privacy, Calendars."
         }
         guard let event = resolveEvent(query), let start = event.startDate else {
-            return "No event today matching \"\(query)\"."
+            return "No event this week matching \"\(query)\"."
         }
         return await moveEvent(query, to: start.addingTimeInterval(delta))
     }

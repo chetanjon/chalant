@@ -245,7 +245,8 @@ final class ActionEngine {
         // before the create-reminder prefixes so "complete X" and
         // "my reminders" aren't mistaken for new reminders.
         if ["reminders", "my reminders", "what are my reminders",
-            "show reminders", "show my reminders", "what's due", "whats due"].contains(lower) {
+            "show reminders", "show my reminders", "what's due", "whats due",
+            "what's due today", "whats due today"].contains(lower) {
             return await model.events.remindersSummary()
         }
         for prefix in ["done with ", "complete ", "completed ", "finish ",
@@ -414,10 +415,7 @@ final class ActionEngine {
         // message that promises word-for-word must keep its "?",
         // its comma, and its "thank you" (review-caught: "text mom:
         // thank you" used to lose its entire body).
-        for prefix in ["text ", "imessage ", "i message ", "message ",
-                       "send a message to ", "send a text to ",
-                       "send an imessage to ", "send a text message to "]
-        where lower.hasPrefix(prefix) {
+        if let prefix = Self.textingPrefix(of: lower) {
             let rawTrimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             let rest: String
             if let range = rawTrimmed.range(of: prefix, options: .caseInsensitive) {
@@ -588,20 +586,23 @@ final class ActionEngine {
             return Self.volumeLine(level: clamped, source: appName)
         }
 
-        // Music transport, explicit verbs
-        if ["play", "play music", "resume"].contains(lower) {
+        // Music transport, explicit verbs. Articles and fillers ride
+        // the fast path too: "pause the music" used to take a
+        // multi-second model round-trip to become "pause"
+        // (dogfood-caught, same disease the session stops had).
+        if Self.playForms.contains(lower) {
             model.music.play()
             return "Playing."
         }
-        if ["pause", "pause music"].contains(lower) {
+        if Self.pauseForms.contains(lower) {
             model.music.pause()
             return "Paused."
         }
-        if ["skip", "next", "next song"].contains(lower) {
+        if Self.skipForms.contains(lower) {
             model.music.next()
             return "Skipped."
         }
-        if ["previous", "back", "previous song"].contains(lower) {
+        if Self.previousForms.contains(lower) {
             model.music.previous()
             return "Back one."
         }
@@ -861,6 +862,46 @@ final class ActionEngine {
         let value = Int(level.rounded())
         if let source { return "\(source) at \(value)." }
         return "Volume \(value)."
+    }
+
+    /// Transport with its articles, matched exactly.
+    static let playForms: Set<String> = [
+        "play", "play music", "resume", "play the music",
+        "start the music", "resume music", "resume the music", "unpause",
+    ]
+
+    static let pauseForms: Set<String> = [
+        "pause", "pause music", "pause the music", "pause it",
+        "stop the music", "stop music", "stop the song",
+    ]
+
+    static let skipForms: Set<String> = [
+        "skip", "next", "next song", "skip this song", "skip song",
+        "next track", "skip this", "skip it",
+    ]
+
+    static let previousForms: Set<String> = [
+        "previous", "back", "previous song", "previous track",
+        "last song", "go back",
+    ]
+
+    /// The staging doorway. "tell amma i am on my way" is how people
+    /// actually say it (dogfood-caught); "tell me" stays a question,
+    /// and the trailing space keeps "tell melissa" a recipient.
+    static let textingPrefixes = [
+        "text ", "imessage ", "i message ", "message ",
+        "send a message to ", "send a text to ",
+        "send an imessage to ", "send a text message to ", "tell ",
+    ]
+
+    static func textingPrefix(of lower: String) -> String? {
+        guard let prefix = textingPrefixes.first(where: { lower.hasPrefix($0) })
+        else { return nil }
+        if prefix == "tell ",
+           lower == "tell me" || lower.hasPrefix("tell me ") {
+            return nil
+        }
+        return prefix
     }
 
     // MARK: - Parsing helpers
