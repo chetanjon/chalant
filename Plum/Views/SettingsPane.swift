@@ -148,6 +148,9 @@ struct SettingsPane: View {
                     toggleRow("Open on hover", $expandOnHover)
                     divider
                     toggleRow("Show edge when idle", $idleEdgeOn)
+                    Text("On a notchless display this is the resting sliver on the menu bar line. Off hides the island entirely until you hover the top edge.")
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textTertiary)
                     divider
                     toggleRow("Check for new versions", $updateCheckOn)
                     divider

@@ -152,25 +152,29 @@ struct NotchRootView: View {
             + (monitorSession ? 90 : 0)
     }
 
-    /// Nothing to say and no hardware to hug: on a monitor the
-    /// resting droplet has no business sitting on window chrome.
+    /// Collapsed on a monitor the island is a sliver and nothing
+    /// more: content states sat on top of windows (R96's complaint),
+    /// so wave, glances, and sessions never ride the notchless pill.
+    /// Only a passing toast earns the brief content shape.
     private var collapsedIsEmpty: Bool {
-        !model.hasPhysicalNotch && monitorContentWidth == 0
+        !model.hasPhysicalNotch && model.glanceToast == nil
     }
 
     /// On a monitor the collapsed island shows nothing: there is no
     /// hardware to dress and every pixel it wore sat on top of
     /// someone's window (user, 2026-07-22, "we can't show anything on
     /// external monitors"). The hover zone is coordinate math, not
-    /// pixels, so the top edge still summons the island. One
-    /// exception surfaces anyway, because it is six seconds long and
-    /// clears itself: a glance toast. Everything else, activities
-    /// included, stays hidden; the pill never grows for an outside
-    /// process (user, 2026-07-23). Idle, music, and sessions too.
+    /// pixels, so the top edge still summons the island. At rest the
+    /// island keeps a findable sliver on the menu bar line (a Mac
+    /// mini owner has no notch anywhere; fully invisible read as not
+    /// installed, user 2026-07-23). The "Show edge when idle" switch
+    /// turns even that off for the total invisibility R96 chose.
+    /// Content never rides the resting pill; a six-second toast is
+    /// the one visitor with something to say.
     private var monitorTucked: Bool {
         guard !model.hasPhysicalNotch, model.state == .collapsed else { return false }
         if model.glanceToast != nil { return false }
-        return true
+        return !idleEdgeOn
     }
 
     /// Stable per-state sizes: content is framed to its own state's
@@ -509,6 +513,9 @@ struct NotchRootView: View {
     private var collapsedContent: some View {
         if model.hasPhysicalNotch {
             wingsContent
+        } else if collapsedIsEmpty {
+            // The resting sliver is a handle, not a display.
+            Color.clear
         } else {
             monitorPill
         }

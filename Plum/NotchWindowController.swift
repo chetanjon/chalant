@@ -312,8 +312,20 @@ final class NotchWindowController {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.reposition() }
+            Task { @MainActor in
+                self?.reposition()
+                self?.rebuildSlivers()
+            }
         }
+        // The "Show edge when idle" switch governs the slivers too.
+        NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.rebuildSlivers() }
+        }
+        rebuildSlivers()
     }
 
     /// Re-measure and re-place after a display change: a notch
@@ -350,8 +362,80 @@ final class NotchWindowController {
 
     /// Resolved fresh every time: AppKit recreates NSScreen objects at
     /// will, so holding one weakly goes nil and kills hover silently.
-    private var notchScreen: NSScreen? {
+    /// The island rests on the notched display; hovering another
+    /// display's top edge summons it there (travel), and it walks
+    /// home after it collapses. Held by display id, never by object.
+    private var travelDisplayID: CGDirectDisplayID?
+
+    private var homeScreen: NSScreen? {
         NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main
+    }
+
+    private var notchScreen: NSScreen? {
+        if let id = travelDisplayID,
+           let visiting = NSScreen.screens.first(where: { $0.displayID == id }) {
+            return visiting
+        }
+        return homeScreen
+    }
+
+    private func travel(to screen: NSScreen) {
+        travelDisplayID = screen.displayID == homeScreen?.displayID
+            ? nil : screen.displayID
+        reposition()
+        rebuildSlivers()
+    }
+
+    /// Resting hints on every display the island is not dressing: a
+    /// Mac mini owner has no notch anywhere, and a fully invisible
+    /// island reads as not installed (user, 2026-07-23). The sliver
+    /// is a handle, never a display; "Show edge when idle" turns it
+    /// off for the total invisibility R96 chose.
+    private var sliverPanels: [NSPanel] = []
+    /// Defaults change constantly (the voice log alone writes every
+    /// utterance); only a real difference rebuilds the panels.
+    private var sliverSignature = ""
+
+    func rebuildSlivers() {
+        let wantsEdge = UserDefaults.standard.object(forKey: "idleEdgeOn") as? Bool ?? true
+        let islandID = notchScreen?.displayID
+        let targets = wantsEdge
+            ? NSScreen.screens.filter {
+                $0.safeAreaInsets.top == 0 && $0.displayID != islandID
+            }
+            : []
+        let signature = targets
+            .map { "\($0.displayID ?? 0)@\(Int($0.frame.midX)),\(Int($0.frame.maxY))" }
+            .joined(separator: "|")
+        guard signature != sliverSignature else { return }
+        sliverSignature = signature
+        sliverPanels.forEach { $0.orderOut(nil) }
+        sliverPanels.removeAll()
+        for screen in targets {
+            let width: CGFloat = 120, height: CGFloat = 14
+            let frame = NSRect(
+                x: screen.frame.midX - width / 2,
+                y: screen.frame.maxY - height,
+                width: width, height: height
+            )
+            let sliver = NSPanel(
+                contentRect: frame,
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            sliver.level = .statusBar
+            sliver.collectionBehavior = [
+                .canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle
+            ]
+            sliver.isOpaque = false
+            sliver.backgroundColor = .clear
+            sliver.hasShadow = false
+            sliver.ignoresMouseEvents = true
+            sliver.contentView = NSHostingView(rootView: SliverHint())
+            sliver.orderFrontRegardless()
+            sliverPanels.append(sliver)
+        }
     }
 
     private func pointerMoved() {
@@ -360,8 +444,16 @@ final class NotchWindowController {
         senseDrag(at: location, on: screen)
         switch viewModel.state {
         case .collapsed:
-            publishPointerUnit(location, zone: collapsedZone(on: screen))
-            if collapsedZone(on: screen).contains(location) {
+            // Any display's top edge is a door: hovering a screen the
+            // island is not on brings it there before the dwell runs.
+            let hit = NSScreen.screens.first {
+                collapsedZone(on: $0).contains(location)
+            }
+            publishPointerUnit(location, zone: collapsedZone(on: hit ?? screen))
+            if let hit {
+                if hit.displayID != screen.displayID {
+                    travel(to: hit)
+                }
                 // Level-triggered on entry: presence in the zone is enough.
                 // No stale-flag path may block a fresh hover from opening.
                 guard Date().timeIntervalSince(lastCollapseAt) > reopenCooldown,
@@ -545,6 +637,17 @@ final class NotchWindowController {
         case .collapsed:
             pointerInside = false
             lastCollapseAt = Date()
+            // A visiting island walks home once it has settled, unless
+            // the cursor pulls it somewhere first.
+            if travelDisplayID != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                    guard let self, self.viewModel.state == .collapsed,
+                          self.travelDisplayID != nil else { return }
+                    self.travelDisplayID = nil
+                    self.reposition()
+                    self.rebuildSlivers()
+                }
+            }
         case .expanded:
             lastOpenAt = Date()
             if let screen = notchScreen {
@@ -590,5 +693,28 @@ final class NotchWindowController {
             NSEvent.removeMonitor(clickMonitor)
         }
         hoverTimer?.invalidate()
+    }
+}
+
+/// The resting handle on displays the island is not dressing: the
+/// sliver silhouette, pure hint, no content. Hovering it (the zone,
+/// not the pixels; it ignores the mouse) summons the island over.
+private struct SliverHint: View {
+    private var shape: IslandShape {
+        IslandShape(eave: 3, bottomRadius: 4, belly: 0.5)
+    }
+
+    var body: some View {
+        shape
+            .fill(Color.black)
+            .overlay(shape.strokeBorder(Theme.specularEdge, lineWidth: 1).opacity(0.75))
+            .overlay(shape.strokeBorder(Theme.lipLight, lineWidth: 1))
+    }
+}
+
+private extension NSScreen {
+    var displayID: CGDirectDisplayID? {
+        (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
+            .uint32Value
     }
 }
