@@ -48,26 +48,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Tiny menu bar item so the agent app can be quit
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        // The house mark, drawn by hand: an arc sheltering a dot, the
-        // notch caring over its island. The plum it replaced belonged
-        // to a former name.
+        // The house mark, drawn by hand: a single soft tilde. Home in
+        // every terminal, ease everywhere else, and a small wave.
         let icon = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            let arc = NSBezierPath()
-            arc.move(to: NSPoint(x: 2.8, y: 11.6))
-            arc.curve(
-                to: NSPoint(x: 15.2, y: 11.6),
-                controlPoint1: NSPoint(x: 5.4, y: 15.6),
-                controlPoint2: NSPoint(x: 12.6, y: 15.6)
+            let wave = NSBezierPath()
+            wave.move(to: NSPoint(x: 2.4, y: 8.4))
+            wave.curve(
+                to: NSPoint(x: 9.0, y: 9.0),
+                controlPoint1: NSPoint(x: 4.0, y: 11.8),
+                controlPoint2: NSPoint(x: 6.9, y: 11.3)
             )
-            arc.lineWidth = 2.0
-            arc.lineCapStyle = .round
+            wave.curve(
+                to: NSPoint(x: 15.6, y: 9.6),
+                controlPoint1: NSPoint(x: 11.1, y: 6.7),
+                controlPoint2: NSPoint(x: 14.0, y: 6.2)
+            )
+            wave.lineWidth = 2.4
+            wave.lineCapStyle = .round
             NSColor.black.setStroke()
-            arc.stroke()
-            let dot = NSBezierPath(
-                ovalIn: NSRect(x: 6.2, y: 2.6, width: 5.6, height: 5.6)
-            )
-            NSColor.black.setFill()
-            dot.fill()
+            wave.stroke()
             return true
         }
         icon.isTemplate = true

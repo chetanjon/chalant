@@ -349,33 +349,27 @@ struct PressableStyle: ButtonStyle {
 /// around the icon, a tint lift and faint halo on hover, and a press
 /// sink. Every bare-glyph control in the app routes through this.
 
-/// The house mark: a soft arc sheltering a small dot. The arc is the
-/// notch, the dot is the island in its care; together they are the
-/// name, calm over warmth. It replaced the plum (a fruit from a
-/// former name) the day the app became Chalant.
+/// The house mark: a single soft tilde. Home to anyone who lives in
+/// a terminal, "no big deal" to everyone else, and a small wave
+/// besides; ease, home, and water in one stroke. It is the name's
+/// whole temperament drawn in one gesture.
 struct ChalantMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
-        var p = Path()
         let d = min(rect.width, rect.height)
-        let cx = rect.midX
-        let top = rect.minY
-        var band = Path()
-        band.move(to: CGPoint(x: cx - d * 0.46, y: top + d * 0.36))
-        band.addQuadCurve(
-            to: CGPoint(x: cx + d * 0.46, y: top + d * 0.36),
-            control: CGPoint(x: cx, y: top + d * 0.02)
+        let midY = rect.midY
+        var wave = Path()
+        wave.move(to: CGPoint(x: rect.minX + d * 0.08, y: midY + d * 0.04))
+        wave.addQuadCurve(
+            to: CGPoint(x: rect.midX, y: midY),
+            control: CGPoint(x: rect.minX + d * 0.28, y: midY - d * 0.26)
         )
-        band.addQuadCurve(
-            to: CGPoint(x: cx - d * 0.46, y: top + d * 0.36),
-            control: CGPoint(x: cx, y: top + d * 0.26)
+        wave.addQuadCurve(
+            to: CGPoint(x: rect.maxX - d * 0.08, y: midY - d * 0.04),
+            control: CGPoint(x: rect.maxX - d * 0.28, y: midY + d * 0.26)
         )
-        band.closeSubpath()
-        p.addPath(band)
-        p.addEllipse(in: CGRect(
-            x: cx - d * 0.155, y: top + d * 0.525,
-            width: d * 0.31, height: d * 0.31
-        ))
-        return p
+        return wave.strokedPath(
+            StrokeStyle(lineWidth: d * 0.17, lineCap: .round, lineJoin: .round)
+        )
     }
 }
 
