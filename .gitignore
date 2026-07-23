@@ -2,3 +2,4 @@ Moai.xcodeproj/
 DerivedData/
 build/
 .DS_Store
+.playwright-mcp/

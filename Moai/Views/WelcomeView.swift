@@ -45,7 +45,7 @@ struct WelcomeView: View {
                     verb("text amma: on my way")
                     verb("focus 25")
                     verb("left half")
-                    verb("cancel my 3pm")
+                    verb("summarize my screen")
                     verb("find parcel")
                 }
                 Text("Recognition is Apple's standard dictation, the same path Notes and Messages use. Your music ducks while you speak.")
