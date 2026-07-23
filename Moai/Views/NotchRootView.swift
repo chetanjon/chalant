@@ -102,8 +102,12 @@ struct NotchRootView: View {
         if sessionOnRight { return 30 }
         // A session shows only its left-wing ring and countdown; the
         // right-side FOCUS 1 OF 4 label was width without value
-        // (user call, 2026-07-21).
-        if upcomingEvent != nil { return 112 }
+        // (user call, 2026-07-21). A joinable meeting's camera mark
+        // earns its own width; stealing the marquee's sent titles
+        // into perpetual scroll.
+        if let next = upcomingEvent {
+            return next.joinURL != nil ? 128 : 112
+        }
         // Playing needs no right-side width at all; the symmetric
         // wing math otherwise drags both sides out to the title's.
         if music.nowPlaying?.isPlaying == true, glanceMusic { return 0 }
@@ -127,7 +131,9 @@ struct NotchRootView: View {
     private var monitorMiddleWidth: CGFloat {
         if model.glanceToast != nil { return 148 }
         if activities.glanceActivity != nil { return 150 }
-        if upcomingEvent != nil { return 150 }
+        if let next = upcomingEvent {
+            return next.joinURL != nil ? 166 : 150
+        }
         switch glanceIdle {
         case "day": return 84
         case "streak": return focusStats.days.isEmpty ? 60 : 136
@@ -597,7 +603,8 @@ struct NotchRootView: View {
 
     /// The event about to start: an accent dot (the calendar's mark in
     /// the Today pane too), the title, and a minute countdown that
-    /// turns into "now" as it begins.
+    /// turns into "now" as it begins. A meeting with a link wears a
+    /// small camera: the glance teaching that "join" will work.
     private func upcomingGlance(_ event: DayEvent, width: CGFloat? = nil) -> some View {
         HStack(spacing: Theme.Space.snug) {
             Circle()
@@ -610,6 +617,11 @@ struct NotchRootView: View {
                 )
             }
             .frame(width: width)
+            if event.joinURL != nil {
+                Image(systemName: "video.fill")
+                    .font(Theme.Fonts.icon(.xs))
+                    .foregroundStyle(accent)
+            }
         }
         .id(event.id)
     }
