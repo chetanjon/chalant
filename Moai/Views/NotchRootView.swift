@@ -287,6 +287,11 @@ struct NotchRootView: View {
 
     @ViewBuilder
     private var glassFill: some View {
+        // The compiler gate mirrors the runtime one: glassEffect is
+        // an Xcode 26 SDK symbol, and CI's older toolchain must
+        // still compile this file (the runtime #available alone
+        // cannot save a symbol the SDK never heard of).
+        #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             Color.clear
                 .glassEffect(.regular.tint(Color.black.opacity(glassTint)), in: islandShape)
@@ -298,6 +303,14 @@ struct NotchRootView: View {
                     .fill(Color.black.opacity(0.45))
             }
         }
+        #else
+        ZStack {
+            VisualEffectBlur()
+                .clipShape(islandShape)
+            islandShape
+                .fill(Color.black.opacity(0.45))
+        }
+        #endif
     }
 
     /// How much ink still lies over the open glass; scales with the
