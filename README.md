@@ -8,7 +8,7 @@ The name: chalant is nonchalant without the non. French chaloir meant to care; n
 
 ## Download
 
-[**Download Chalant.zip**](https://github.com/chetanjon/chalant/releases/latest/download/Chalant.zip), always the newest build. Apple Silicon, macOS 14+, free, MIT-licensed. (Release notes live on the [releases page](https://github.com/chetanjon/chalant/releases/latest).) Or through Homebrew:
+[**Download Chalant.zip**](https://github.com/chetanjon/chalant/releases/latest/download/Chalant.zip), always the newest build. Apple Silicon, macOS 14+, free. (Release notes live on the [releases page](https://github.com/chetanjon/chalant/releases/latest).) Or through Homebrew:
 
 ```bash
 brew install --cask chetanjon/chalant/chalant
@@ -125,7 +125,7 @@ The honest version, since you are running an unsigned app that can touch a lot.
 - **What does reach the internet, all over HTTPS:** the daily update check (GitHub, switchable off), the update download when you say yes (signed with the project's EdDSA key, so a forged update cannot install), album art for Apple Music tracks missing local art (the track's title and artist go to Apple's public iTunes Search API), favicons for sites you save (one request to each site), and whatever you do in the optional Chat tab under your own login. Nothing else.
 - **The Live status API** listens on loopback only and now refuses any request wearing browser headers, so a web page you visit cannot push or spoof a pill. Local processes still can, by design; that is the whole feature.
 - **Outbound messages** are never sent unheard: Chalant reads the exact words and recipient back to you and fires only when you say "send." The text is escaped before it touches AppleScript, so a message body can never become a command.
-- **No sandbox, and that is deliberate:** automating your music and Messages, reading the front window, snapping windows, and launching apps all require reaching outside a sandbox. The app runs with your privileges and no more. The trade you are making is trust, and the answer to trust is that the whole source is [right here](https://github.com/chetanjon/chalant), MIT, and the build is reproducible from it.
+- **No sandbox, and that is deliberate:** automating your music and Messages, reading the front window, snapping windows, and launching apps all require reaching outside a sandbox. The app runs with your privileges and no more. The trade you are making is trust, and the answer to trust is that the whole source is [right here](https://github.com/chetanjon/chalant), and the build is reproducible from it.
 
 ## Roadmap
 
@@ -140,3 +140,5 @@ The honest version, since you are running an unsigned app that can touch a lot.
 - Cafe ambience: derived from ["Cafe ambiance.ogg"](https://commons.wikimedia.org/wiki/File:Cafe_ambiance.ogg) (Wikimedia Commons, CC0), low-pass filtered and level-reduced for a calmer room.
 - Fire ambience: derived from ["Campfire sound ambience.ogg"](https://commons.wikimedia.org/wiki/File:Campfire_sound_ambience.ogg) by Glaneur de sons (Wikimedia Commons, CC BY 3.0), normalized, softened, edge-faded.
 - Brown/white/pink noise are synthesized in real time.
+
+Chalant is free, and its source is public so the trust above is checkable. The code is not licensed for reuse; all rights stay with the author.
