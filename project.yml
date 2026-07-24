@@ -61,7 +61,10 @@ targets:
         CODE_SIGN_IDENTITY: "Apple Development"
         SWIFT_VERSION: "5.9"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
-        ENABLE_HARDENED_RUNTIME: NO
+        # Notarization requires the hardened runtime, so the doors it
+        # closes are opened one at a time in Chalant.entitlements.
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_ENTITLEMENTS: Chalant/Chalant.entitlements
   ChalantTests:
     type: bundle.unit-test
     platform: macOS

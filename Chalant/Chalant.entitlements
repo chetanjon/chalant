@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Hardened runtime closes every door by name. These are the ones
+	     Chalant actually walks through, and nothing more. -->
+
+	<!-- Telling Music, Spotify, Messages, and Shortcuts what to do. -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+
+	<!-- Hearing you: dictation feeds every spoken verb. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+
+	<!-- The now-playing adapter is a bundled framework loaded by the
+	     system perl, which is signed by Apple, not by us. Library
+	     validation reads that as a stranger and refuses the load. -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>
