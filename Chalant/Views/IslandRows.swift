@@ -316,15 +316,22 @@ struct AmbienceRow: View {
             .frame(width: 92, alignment: .leading)
 
             // White is gone from the row: piercing, nobody's friend.
-            ForEach(NoiseEngine.NoiseColor.chipChoices, id: \.self) { color in
-                NoiseButton(
-                    color: color,
-                    selected: ambience.active == color,
-                    compact: true
-                ) {
-                    ambience.toggle(color)
+            // On one track, for the same reason the switcher below is:
+            // five loose glyphs above seven more read as one scatter of
+            // twelve, with nothing to say where one row ends.
+            HStack(spacing: Theme.Space.s) {
+                ForEach(NoiseEngine.NoiseColor.chipChoices, id: \.self) { color in
+                    NoiseButton(
+                        color: color,
+                        selected: ambience.active == color,
+                        compact: true
+                    ) {
+                        ambience.toggle(color)
+                    }
                 }
             }
+            .padding(.horizontal, Theme.Space.xs)
+            .background(Capsule().fill(Theme.surface))
             Spacer(minLength: 0)
             if ambience.active != nil {
                 Slider(value: $ambience.volume, in: 0...1)

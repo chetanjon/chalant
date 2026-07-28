@@ -98,9 +98,15 @@ struct ExpandedView: View {
                     .transition(.opacity)
             }
 
+            // Every band used to sit the same distance from its
+            // neighbour, so five rows read as five equal claims on the
+            // eye. What is playing and what is sounding belong
+            // together; the switcher and its panel are a different
+            // thing, and the gap says so before the rule does.
             Rectangle()
                 .fill(Theme.hairlineFaint)
                 .frame(height: 1)
+                .padding(.top, Theme.Space.xs)
 
             switch model.pane {
             case .settings:

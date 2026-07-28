@@ -11,12 +11,23 @@ struct Switcher: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.xs) {
-            if todayEnabled {
-                SwitcherItem(tab: .today, model: model)
+            // The tools sit on one quiet track, so the row reads as a
+            // single switcher rather than as a scatter of loose glyphs.
+            // Nothing is hidden by this: with a soundscape row directly
+            // above wearing chips of the same size and colour, twelve
+            // small symbols stacked in two rows had nothing to say
+            // which were navigation and which were controls (user,
+            // relaying "too much to see").
+            HStack(spacing: Theme.Space.xs) {
+                if todayEnabled {
+                    SwitcherItem(tab: .today, model: model)
+                }
+                ForEach(tools, id: \.self) { tab in
+                    SwitcherItem(tab: tab, model: model)
+                }
             }
-            ForEach(tools, id: \.self) { tab in
-                SwitcherItem(tab: tab, model: model)
-            }
+            .padding(.horizontal, Theme.Space.xs)
+            .background(Capsule().fill(Theme.surface))
             Spacer(minLength: 0)
             HoverGlyphButton(symbol: "gearshape", scale: .m, tint: Theme.textTertiary) {
                 withAnimation(Theme.Motion.content) { model.pane = .settings }
