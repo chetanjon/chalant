@@ -1,5 +1,47 @@
 import AppKit
 import Foundation
+import os
+
+/// Holds a continuation that two racers can reach, and lets exactly
+/// one of them answer it.
+@MainActor
+private final class FirstAnswer<T> {
+    private var waiting: CheckedContinuation<T, Never>?
+
+    init(_ continuation: CheckedContinuation<T, Never>) {
+        waiting = continuation
+    }
+
+    func settle(_ value: T) {
+        guard let continuation = waiting else { return }
+        waiting = nil
+        continuation.resume(returning: value)
+    }
+}
+
+/// Await `work` for `seconds`, then stop waiting. nil means it never
+/// answered.
+///
+/// An await with no ceiling is how the island goes deaf: the calls
+/// wrapped below reach other processes, and either can wedge there
+/// while isWorking is held, with nothing on screen to explain it.
+/// Cancelling is no help, because both are parked in a continuation
+/// that stopped listening. So the hung work is not killed here, it is
+/// simply no longer waited on: it finishes, late, into nobody's hands.
+@MainActor
+func timeboxed<T>(
+    _ seconds: Double,
+    _ work: @escaping @MainActor () async -> T
+) async -> T? {
+    await withCheckedContinuation { continuation in
+        let race = FirstAnswer<T?>(continuation)
+        Task { race.settle(await work()) }
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            race.settle(nil)
+        }
+    }
+}
 
 /// Turns plain sentences into done actions. Deterministic first:
 /// verbs by prefix, dates by NSDataDetector, zero network, zero model.
@@ -7,6 +49,9 @@ import Foundation
 /// can fall through to the optional key.
 @MainActor
 final class ActionEngine {
+    /// Verbs that gave up waiting. No message bodies, no window text.
+    static let log = Logger(subsystem: "com.cj.chalant", category: "verbs")
+
     private unowned let model: NotchViewModel
 
     init(model: NotchViewModel) {
@@ -32,8 +77,25 @@ final class ActionEngine {
             switch Self.sendVerdict(lower) {
             case .fire:
                 model.isWorking = true
-                let outcome = await model.courier.confirmSend()
+                // Messages can sit behind its own launch or beachball,
+                // and a send with no ceiling held the island deaf. This
+                // one reaches a person, though, so giving up must never
+                // invite a retry: the abandoned send may still land,
+                // and the courier's standing rule is that a staged
+                // message survives every failure so it can be said
+                // again. That rule plus a timeout is how somebody gets
+                // texted twice. So the stage is dropped instead, and
+                // the copy says plainly that the outcome is unknown.
+                let outcome = await timeboxed(20) {
+                    await self.model.courier.confirmSend()
+                }
                 model.isWorking = false
+                guard let outcome else {
+                    model.courier.drop()
+                    Self.log.notice("Messages never answered the send; stage dropped, no retry offered")
+                    return "Messages never answered, so I've let go of it."
+                        + " Check Messages to see whether it went."
+                }
                 return outcome
             case .refuseAloud:
                 model.courier.drop()
@@ -128,7 +190,12 @@ final class ActionEngine {
                 return "macOS is asking about Screen Recording. Allow it (a relaunch may be needed), then say it again. The reading stays on this Mac."
             }
             model.isWorking = true
-            let outcome = await ScreenReader.readFrontWindow()
+            // A wedged capture daemon used to hold the island open and
+            // deaf with no ceiling at all. Reading a window is a read:
+            // giving up on one costs nothing and invites a retry.
+            let outcome = await timeboxed(12) {
+                await ScreenReader.readFrontWindow()
+            } ?? .failed
             model.isWorking = false
             switch outcome {
             case .text(let app, let words):
@@ -1033,9 +1100,14 @@ final class ActionEngine {
         Int(token) ?? numberWords[token.lowercased()]
     }
 
-    private static func firstNumber(in text: String) -> Int? {
+    /// The first run of digits, held to a ceiling no session needs.
+    /// Every caller multiplies this into seconds and Swift's `*` traps
+    /// on overflow, so "timer 200000000000000000" typed into the Do
+    /// field was an eighteen-digit crash. 100,000 minutes is sixty-nine
+    /// days: past any real ask, and nowhere near the trap.
+    static func firstNumber(in text: String) -> Int? {
         let digits = text.split(whereSeparator: { !$0.isNumber })
-        return digits.first.flatMap { Int($0) }
+        return digits.first.flatMap { Int($0) }.map { min($0, 100_000) }
     }
 
     private static func extractDate(_ text: String) -> (Date, NSRange)? {

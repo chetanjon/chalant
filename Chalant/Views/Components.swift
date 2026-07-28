@@ -199,14 +199,18 @@ extension View {
     }
 }
 
-/// One line that glides when it overflows: title, a dot, subtitle.
-/// It only exists while music plays, playback feedback, so it keeps
-/// moving under the Still feel; the system Reduce Motion setting
-/// shows it statically truncated instead.
+/// One line: title, a dot, subtitle. It holds still by default.
+///
+/// The glide is off unless asked for, because the notch is the wrong
+/// stage for it: on an external display the sliver is narrow enough
+/// that a name spends most of its journey behind the edge fade, and it
+/// reads as broken text rather than as motion (user, 2026-07-28). The
+/// system Reduce Motion setting keeps it still regardless.
 struct MarqueeText: View {
     let title: String
     var subtitle = ""
 
+    @AppStorage("glideLongTitles") private var glideLongTitles = false
     @State private var contentWidth: CGFloat = 0
     @State private var appeared = Date()
 
@@ -219,10 +223,17 @@ struct MarqueeText: View {
 
     @ViewBuilder
     private func content(available: CGFloat) -> some View {
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        if glideLongTitles, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            gliding(available: available)
+        } else {
             staticLine
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if contentWidth <= available {
+        }
+    }
+
+    @ViewBuilder
+    private func gliding(available: CGFloat) -> some View {
+        if contentWidth <= available {
             line
                 .background(widthReader)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -257,12 +268,29 @@ struct MarqueeText: View {
         .fixedSize()
     }
 
+    /// The same three parts held to the width they are given. The title
+    /// yields first and from the end, so the countdown beside it always
+    /// survives whole and a name reads from its start: cutting a name
+    /// through the middle is the thing that looked broken.
     private var staticLine: some View {
-        Text(subtitle.isEmpty ? title : "\(title) · \(subtitle)")
-            .font(Theme.Fonts.caption)
-            .foregroundStyle(Theme.textSecondary)
-            .lineLimit(1)
-            .truncationMode(.middle)
+        HStack(spacing: Theme.Space.snug) {
+            Text(title)
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if !subtitle.isEmpty {
+                Text("·")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textGhost)
+                    .fixedSize()
+                Text(subtitle)
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+        }
     }
 
     /// Measured the way the island measures itself: onChange of

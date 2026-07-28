@@ -16,6 +16,12 @@ final class NoiseEngine {
         case cafe
     }
 
+    /// A sound was asked for and none could be made. Without this the
+    /// failures below were swallowed whole while the caller had already
+    /// lit the chip: it sat there playing, silently, forever, with
+    /// nothing to tell the user which layer gave up.
+    var onSilence: ((String) -> Void)?
+
     private let engine = AVAudioEngine()
     private var source: AVAudioSourceNode?
     private var current: NoiseColor = .brown
@@ -167,7 +173,13 @@ final class NoiseEngine {
             synthVol = synthLevel
             engine.mainMixerNode.outputVolume = 1
             if !engine.isRunning {
-                try? engine.start()
+                do {
+                    try engine.start()
+                } catch {
+                    isRunning = false
+                    onSilence?("the audio engine wouldn't start")
+                    return
+                }
             }
             targetGain = 1
         }
@@ -311,9 +323,15 @@ final class NoiseEngine {
             return
         }
         loadBuffer(color) { [weak self] buffer in
-            guard let self, let buffer else { return }
-            // The user may have moved on while the file decoded.
+            guard let self else { return }
+            // The user may have moved on while the file decoded. That
+            // is not a failure, so it is checked before one is called.
             guard self.isRunning, self.current == color else { return }
+            guard let buffer else {
+                self.isRunning = false
+                self.onSilence?("that sound wouldn't load")
+                return
+            }
             self.buildFileChain()
             guard let player = self.filePlayer,
                   let pitch = self.timePitch,
@@ -338,7 +356,13 @@ final class NoiseEngine {
 
             self.engine.mainMixerNode.outputVolume = 1
             if !self.engine.isRunning {
-                try? self.engine.start()
+                do {
+                    try self.engine.start()
+                } catch {
+                    self.isRunning = false
+                    self.onSilence?("the audio engine wouldn't start")
+                    return
+                }
             }
 
             player.stop()

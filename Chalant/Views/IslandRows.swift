@@ -299,6 +299,14 @@ struct AmbienceRow: View {
                     }
                     .buttonStyle(PressableStyle())
                     .help("Stop \(active.displayName)")
+                } else if let failure = ambience.failure {
+                    // The chip has already gone dark; this says why,
+                    // rather than leaving the tap looking ignored.
+                    Text("No sound")
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textHint)
+                        .lineLimit(1)
+                        .help("Tried to play, but \(failure).")
                 } else {
                     Text("Ambience")
                         .font(Theme.Fonts.caption)

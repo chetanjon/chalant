@@ -400,4 +400,111 @@ final class ChalantTests: XCTestCase {
         XCTAssertNil(ActionEngine.textingPrefix(of: "telling stories"))
         XCTAssertEqual(ActionEngine.textingPrefix(of: "text mom hi"), "text ")
     }
+
+    // MARK: Giving up on an await (the island's ceiling)
+
+    func testTimeboxedGivesUpOnWorkThatNeverAnswers() async {
+        // The screen read and the message send both reach another
+        // process and both wedged there holding the island open and
+        // deaf. A ceiling that quietly failed to fire would put that
+        // back without anyone noticing.
+        let started = Date()
+        let answer = await timeboxed(0.2) {
+            // Stands in for a continuation nobody will resume: the
+            // sleeper outlives the ceiling and lands in nobody's hands.
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            return "too late"
+        }
+        XCTAssertNil(answer)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5)
+    }
+
+    func testTimeboxedKeepsAnAnswerThatArrivesInTime() async {
+        let answer = await timeboxed(5) { "read 12 lines" }
+        XCTAssertEqual(answer, "read 12 lines")
+    }
+
+    func testTimeboxedAnswersOnlyOnce() async {
+        // Both racers reach the same continuation; resuming it twice
+        // is a crash, not a wrong answer.
+        for _ in 0..<50 {
+            _ = await timeboxed(0.01) { "fast" }
+        }
+    }
+
+    // MARK: Number parsing (every one of these becomes seconds)
+
+    func testFirstNumberClampsBeyondAnyRealSession() {
+        // "timer 200000000000000000" reached `minutes * 60`, which
+        // overflowed Int64 and trapped. The ceiling is the fix; the
+        // digits still read as a number so the verb still runs.
+        XCTAssertEqual(ActionEngine.firstNumber(in: "timer 200000000000000000"), 100_000)
+        XCTAssertEqual(ActionEngine.firstNumber(in: "focus \(Int.max)"), 100_000)
+        // Clamped values must still survive the multiply every caller does.
+        let clamped = ActionEngine.firstNumber(in: "push standup by 999999999999 hours")!
+        XCTAssertLessThan(clamped * 3600, Int.max)
+    }
+
+    func testFirstNumberLeavesOrdinaryAsksAlone() {
+        XCTAssertEqual(ActionEngine.firstNumber(in: "timer 5"), 5)
+        XCTAssertEqual(ActionEngine.firstNumber(in: "focus 25 minutes"), 25)
+        XCTAssertEqual(ActionEngine.firstNumber(in: "push standup by 30 minutes"), 30)
+        XCTAssertNil(ActionEngine.firstNumber(in: "start a focus"))
+        // Volume's own 0...100 gate still rejects a clamped number,
+        // so a huge value keeps falling through to the direction words.
+        XCTAssertEqual(ActionEngine.volumeIntent("volume up to 999999999999999999"), .up)
+    }
+
+    // MARK: The open door's request parser (any local process reaches it)
+
+    private func rawRequest(_ headers: String, body: String = "") -> Data {
+        Data("\(headers)\r\n\r\n\(body)".utf8)
+    }
+
+    func testParseRefusesNegativeContentLength() {
+        // "Content-Length: -1" parsed as a number, passed a guard
+        // written for non-negative lengths, and trapped inside
+        // Data.prefix. One line of nc took the whole app down.
+        XCTAssertNil(ActivityServer.parse(
+            rawRequest("POST /activity HTTP/1.1\r\nContent-Length: -1")))
+        XCTAssertNil(ActivityServer.parse(
+            rawRequest("POST /activity HTTP/1.1\r\nContent-Length: -999999")))
+    }
+
+    func testParseRefusesContentLengthBeyondTheReadCap() {
+        // A length no body could ever satisfy is refused outright
+        // rather than waited on until the connection deadline.
+        XCTAssertNil(ActivityServer.parse(rawRequest(
+            "POST /activity HTTP/1.1\r\nContent-Length: \(ActivityServer.maxBody + 1)")))
+    }
+
+    func testParseStillAcceptsOrdinaryRequests() {
+        // The guard must not cost the good case: absent, empty, zero,
+        // and real lengths all still parse.
+        let body = #"{"title":"build"}"#
+        let request = ActivityServer.parse(rawRequest(
+            "POST /activity HTTP/1.1\r\nContent-Length: \(body.utf8.count)", body: body))
+        XCTAssertEqual(request?.method, "POST")
+        XCTAssertEqual(request?.path, "/activity")
+        XCTAssertEqual(request?.body, Data(body.utf8))
+        XCTAssertFalse(request?.fromBrowser ?? true)
+
+        XCTAssertEqual(ActivityServer.parse(rawRequest("GET /activities HTTP/1.1"))?.path,
+                       "/activities")
+        XCTAssertEqual(ActivityServer.parse(
+            rawRequest("GET /activities HTTP/1.1\r\nContent-Length:"))?.body, Data())
+        XCTAssertEqual(ActivityServer.parse(
+            rawRequest("GET /activities HTTP/1.1\r\nContent-Length: 0"))?.body, Data())
+    }
+
+    func testParseStillFlagsBrowserRequests() {
+        // The cross-origin guard rides on this flag; the length fix
+        // must not disturb it.
+        XCTAssertTrue(ActivityServer.parse(
+            rawRequest("POST /activity HTTP/1.1\r\nOrigin: https://evil.example"))?
+            .fromBrowser ?? false)
+        XCTAssertTrue(ActivityServer.parse(
+            rawRequest("POST /activity HTTP/1.1\r\nSec-Fetch-Mode: cors"))?
+            .fromBrowser ?? false)
+    }
 }

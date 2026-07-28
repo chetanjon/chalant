@@ -42,6 +42,9 @@ final class MediaRemoteBridge: ObservableObject {
     var snapshotTrace = "never"
 
     private var stream: Process?
+    /// Held so stop() can take the readability handler off the pipe;
+    /// the termination handler cannot, because stop() removes it first.
+    private var streamOutput: Pipe?
     private var stopped = false
     private var restartDelay: TimeInterval = 2
     private var lastSpawn = Date.distantPast
@@ -123,6 +126,12 @@ final class MediaRemoteBridge: ObservableObject {
     func stop() {
         stopped = true
         stream?.terminationHandler = nil
+        // That handler was the only place the readability handler ever
+        // came off, and it has just been removed. Left installed, the
+        // handle hits EOF and the readability source fires again and
+        // again on empty data: the classic FileHandle spin.
+        streamOutput?.fileHandleForReading.readabilityHandler = nil
+        streamOutput = nil
         stream?.terminate()
         stream = nil
     }
@@ -152,6 +161,7 @@ final class MediaRemoteBridge: ObservableObject {
 
         let out = Pipe()
         process.standardOutput = out
+        streamOutput = out
         // Drained so perl can never block on a full stderr buffer.
         process.standardError = FileHandle.nullDevice
 
@@ -167,6 +177,7 @@ final class MediaRemoteBridge: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 out.fileHandleForReading.readabilityHandler = nil
+                self.streamOutput = nil
                 self.stream = nil
                 self.state = nil
                 guard !self.stopped else { return }
@@ -271,6 +282,29 @@ final class MediaRemoteBridge: ObservableObject {
                 self?.oneShots.remove(finished)
             }
         }
+        // Launched before the pipe is read, never after. Nothing but a
+        // spawned child ever closes the write end, so a run() that
+        // threw left the reader below waiting on an EOF that could not
+        // come: one global-queue thread parked for the life of the app,
+        // every time a launch failed.
+        do {
+            try process.run()
+            oneShots.insert(process)
+        } catch {
+            // No snapshot, no harm; the next track change brings art.
+            return
+        }
+        // And a perl that starts but never exits would park that thread
+        // just as well. This runs on every track change that arrives
+        // without artwork, which for browser media is most of them, so
+        // the ceiling matters: take the EOF by force if it is late.
+        // Nothing cancels this: it asks whether the child is still
+        // running before acting, so arriving after a clean exit costs
+        // one no-op. A cancellable work item would have to be captured
+        // by the reader below, and DispatchWorkItem is not Sendable.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+            if process.isRunning { process.terminate() }
+        }
         // Drained off-pipe before termination: the payload can far
         // exceed the 64KB pipe buffer, and a blocked writer never exits.
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -285,12 +319,6 @@ final class MediaRemoteBridge: ObservableObject {
                 self?.snapshotTrace = "got:\(key):art=\(art?.count ?? 0)"
                 completion(key, art)
             }
-        }
-        do {
-            try process.run()
-            oneShots.insert(process)
-        } catch {
-            // No snapshot, no harm; the next track change brings art.
         }
     }
 

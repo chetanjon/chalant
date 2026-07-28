@@ -178,9 +178,33 @@ final class NotchWindowController {
     // ever pokes out again, come back with fresh measurements, not
     // native-pixel myths.
 
+    /// Block-based observers hand back a token, and the notification
+    /// centre holds the block until that token is handed in. Kept so
+    /// deinit can, rather than leaving them registered for good.
+    private var observers: [NSObjectProtocol] = []
+    private var workspaceObservers: [NSObjectProtocol] = []
+
+    private var showRetry: DispatchWorkItem?
+
     func show() {
-        // Prefer the built-in display with a notch. Fall back to main.
-        guard let screen = notchScreen else { return }
+        // Built once. A second call would overwrite the click monitor
+        // and the hover timer without releasing either.
+        guard panel == nil else { return }
+        // Prefer the built-in display with a notch, else the primary.
+        // At login, or waking from a closed lid, the screen list can
+        // still be empty here. This used to return and never come
+        // back: no panel, no start(), no timers, no hover, and since
+        // the app has no Dock icon the only symptom was Chalant simply
+        // not being there. reposition() already knew to wait; so does
+        // this now.
+        showRetry?.cancel()
+        showRetry = nil
+        guard let screen = notchScreen else {
+            let retry = DispatchWorkItem { [weak self] in self?.show() }
+            showRetry = retry
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: retry)
+            return
+        }
         let frame = placement(on: screen)
 
         let panel = NotchPanel(
@@ -308,7 +332,7 @@ final class NotchWindowController {
 
         // Displays come and go; the island follows. Without this the
         // panel stayed on a screen layout that no longer existed.
-        NotificationCenter.default.addObserver(
+        observers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
             queue: .main
@@ -317,14 +341,36 @@ final class NotchWindowController {
                 self?.reposition()
                 self?.rebuildSlivers()
             }
-        }
+        })
         // The "Show edge when idle" switch governs the slivers too.
-        NotificationCenter.default.addObserver(
+        observers.append(NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.rebuildSlivers() }
+        })
+        // Waking is not a screen-parameters change. A display that
+        // slept, or a monitor switched off and on, often comes back
+        // without posting one at all, and the panel would wake sized
+        // for a geometry that no longer applied or ordered behind
+        // whatever came up in front of it. Nothing re-fronted it after
+        // show(), so it stayed behind.
+        for name: NSNotification.Name in [
+            NSWorkspace.didWakeNotification,
+            NSWorkspace.screensDidWakeNotification,
+        ] {
+            workspaceObservers.append(
+                NSWorkspace.shared.notificationCenter.addObserver(
+                    forName: name, object: nil, queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor in
+                        self?.reposition()
+                        self?.rebuildSlivers()
+                        self?.panel?.orderFrontRegardless()
+                    }
+                }
+            )
         }
         // A toast appearing on a notchless display must pull that
         // display's bead so the two don't overlap.
@@ -380,8 +426,16 @@ final class NotchWindowController {
     /// home after it collapses. Held by display id, never by object.
     private var travelDisplayID: CGDirectDisplayID?
 
+    /// A notched display if there is one, otherwise the primary. Never
+    /// NSScreen.main: that is the display holding the *focused window*,
+    /// so on a notchless Mac with two monitors the island's home moved
+    /// every time the user clicked something on the other screen, which
+    /// made travel clear itself and the island teleport mid-use. It can
+    /// also be nil, which is how the panel went missing at launch.
+    /// screens.first is the menu-bar display and it holds still.
     private var homeScreen: NSScreen? {
-        NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main
+        NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 })
+            ?? NSScreen.screens.first
     }
 
     private var notchScreen: NSScreen? {
@@ -778,10 +832,19 @@ final class NotchWindowController {
     }
 
     deinit {
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
+        workspaceObservers.forEach {
+            NSWorkspace.shared.notificationCenter.removeObserver($0)
+        }
         if let clickMonitor {
             NSEvent.removeMonitor(clickMonitor)
         }
         hoverTimer?.invalidate()
+        showRetry?.cancel()
+        repositionRetry?.cancel()
+        if let napActivity {
+            ProcessInfo.processInfo.endActivity(napActivity)
+        }
     }
 }
 
