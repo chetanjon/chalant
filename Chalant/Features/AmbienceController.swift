@@ -39,11 +39,25 @@ final class AmbienceController: ObservableObject {
     /// during focus breaks keep this set, the sound comes back.
     @Published private(set) var active: NoiseEngine.NoiseColor?
 
+    /// Why the last ask made no sound, held until the next one. A lit
+    /// chip over silence is a lie the user cannot debug.
+    @Published private(set) var failure: String?
+
     @Published var volume: Double = 0.7 {
         didSet { engine.setVolume(Float(volume)) }
     }
 
     let engine = NoiseEngine()
+
+    init() {
+        engine.onSilence = { [weak self] reason in
+            Task { @MainActor in
+                guard let self else { return }
+                self.active = nil
+                self.failure = reason
+            }
+        }
+    }
 
     /// Chip behavior: tap to play, tap the playing one to stop.
     func toggle(_ color: NoiseEngine.NoiseColor) {
@@ -55,11 +69,13 @@ final class AmbienceController: ObservableObject {
     }
 
     func play(_ color: NoiseEngine.NoiseColor) {
+        failure = nil
         active = color
         engine.start(color)
     }
 
     func stop() {
+        failure = nil
         active = nil
         engine.stop()
     }
