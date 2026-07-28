@@ -1,3 +1,4 @@
+import os
 import SwiftUI
 import WebKit
 
@@ -10,6 +11,9 @@ import WebKit
 /// with any of these services; this is a small site-specific browser.
 @MainActor
 final class ChatController: NSObject, ObservableObject {
+    /// Why the pane went blank. No page content, no URLs, no account.
+    static let log = Logger(subsystem: "com.cj.chalant", category: "chat")
+
     enum Service: String, CaseIterable {
         case claude, chatgpt, gemini
 
@@ -135,6 +139,29 @@ extension ChatController: WKNavigationDelegate {
         withError error: Error
     ) {
         isLoading = false
+        Self.log.notice("chat load failed before it started: \(error.localizedDescription, privacy: .public)")
+    }
+
+    /// A load that dies *after* it began, which is what a server reset
+    /// mid-body looks like on flaky wifi. Without this the shimmer sat
+    /// over a blank card forever: didFinish never comes, and the
+    /// provisional failure above never fires for this case.
+    func webView(
+        _ webView: WKWebView,
+        didFail navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        isLoading = false
+        Self.log.notice("chat load failed mid-flight: \(error.localizedDescription, privacy: .public)")
+    }
+
+    /// WebKit's content process crashed. The view is left blank and
+    /// inert, so nothing but a reload brings it back; asking for one
+    /// beats leaving the user staring at an empty panel.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        isLoading = false
+        Self.log.error("chat web content process died; reloading")
+        webView.reload()
     }
 }
 

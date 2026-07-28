@@ -813,6 +813,15 @@ final class NotchViewModel: ObservableObject {
                     guard let self, self.isWorking, !streaming.isCancelled else { return }
                     if Date().timeIntervalSince(self.lastStreamActivity) > 20 {
                         streaming.cancel()
+                        // Cancelling asks; it does not guarantee. The
+                        // stream is awaiting a reply from another
+                        // process, and if that reply never comes the
+                        // task's own tail never runs, so the hand that
+                        // gave up has to put the flag down itself.
+                        // Otherwise the watchdog returns having fixed
+                        // nothing and the island is wedged anyway.
+                        self.isWorking = false
+                        Self.log.notice("stream went quiet for 20s; cancelled and released the island")
                         if self.answer.isEmpty {
                             self.errorText = "No answer arrived. Check the network, then try again."
                         }
