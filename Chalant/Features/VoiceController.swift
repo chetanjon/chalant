@@ -90,12 +90,12 @@ final class VoiceController: NSObject, ObservableObject {
     private var fileTask: SFSpeechRecognitionTask?
     private var rescueTimeout: DispatchWorkItem?
 
-    /// Which session the user currently wants. The permission dialogs
-    /// are answered on their own schedule, and a grant that lands after
-    /// the hold was released used to walk all the way into startCapture
-    /// and leave the mic live with nobody listening. Every async hop
-    /// carries the number it started under and stands down if it moved.
-    private var sessionGeneration = 0
+    /// Which session the user currently wants, and whether one is
+    /// finalizing. Lifted out of here into a type that touches no audio
+    /// at all, because both of this month's crashes were decisions made
+    /// with these two values and neither could be reached by a test
+    /// while they were tangled up with a live microphone.
+    private var session = VoiceSession()
 
     private var configObserver: NSObjectProtocol?
 
@@ -169,7 +169,6 @@ final class VoiceController: NSObject, ObservableObject {
     /// told: it is the only thing that would have cleared their state.
     @discardableResult
     func begin() -> Bool {
-        let abandonedFinalize = finishCompletion != nil
         transcript = ""
         level = 0
         peakLevel = 0
@@ -190,8 +189,7 @@ final class VoiceController: NSObject, ObservableObject {
         finishTimeout = nil
         finishCompletion = nil
 
-        sessionGeneration += 1
-        let generation = sessionGeneration
+        let (generation, abandonedFinalize) = session.begin()
 
         // The mic first: without it the tap hears pure silence and the
         // session ends in "heard nothing" with no clue why. Ask
@@ -203,9 +201,9 @@ final class VoiceController: NSObject, ObservableObject {
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
                 Task { @MainActor in
                     guard let self else { return }
-                    guard generation == self.sessionGeneration else {
+                    guard self.session.stillWanted(generation) else {
                         Self.log.notice(
-                            "mic grant landed for session \(generation), now on \(self.sessionGeneration); standing down")
+                            "mic grant landed for session \(generation), now on \(self.session.generation); standing down")
                         return
                     }
                     if granted {
@@ -232,9 +230,9 @@ final class VoiceController: NSObject, ObservableObject {
             SFSpeechRecognizer.requestAuthorization { [weak self] status in
                 Task { @MainActor in
                     guard let self else { return }
-                    guard generation == self.sessionGeneration else {
+                    guard self.session.stillWanted(generation) else {
                         Self.log.notice(
-                            "speech grant landed for session \(generation), now on \(self.sessionGeneration); standing down")
+                            "speech grant landed for session \(generation), now on \(self.session.generation); standing down")
                         return
                     }
                     if status == .authorized {
@@ -544,7 +542,7 @@ final class VoiceController: NSObject, ObservableObject {
     func end(completion: @escaping (String) -> Void) {
         // The hold is over, so a permission grant still in flight is
         // for a session nobody is waiting on any more.
-        sessionGeneration += 1
+        session.end()
         watchdogWork?.cancel()
         watchdogWork = nil
         restoreInputGain()
@@ -562,7 +560,7 @@ final class VoiceController: NSObject, ObservableObject {
 
     /// Tear down without delivering anything, the user cancelled.
     func cancel() {
-        sessionGeneration += 1
+        session.cancel()
         watchdogWork?.cancel()
         watchdogWork = nil
         restoreInputGain()
