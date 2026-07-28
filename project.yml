@@ -65,6 +65,12 @@ targets:
         DEVELOPMENT_TEAM: WV59PZX4A3
         CODE_SIGN_IDENTITY: "Apple Development"
         SWIFT_VERSION: "5.9"
+        # The compiler had no opinion on cross-actor access before this,
+        # which is why the data race on the audio render thread sat in
+        # NoiseEngine unremarked for as long as it did. "targeted" checks
+        # the code that already opted into concurrency, which is all of
+        # this app, and the tree builds clean under it.
+        SWIFT_STRICT_CONCURRENCY: targeted
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         # Notarization requires the hardened runtime, so the doors it
         # closes are opened one at a time in Chalant.entitlements.

@@ -714,9 +714,13 @@ final class NotchWindowController {
             context.duration = 0.15
             dropDock.animator().alphaValue = 0
         }, completionHandler: { [weak dropDock] in
-            // A show may have raced the fade; only stow a faded dock.
-            if let dropDock, dropDock.alphaValue == 0 {
-                dropDock.orderOut(nil)
+            // AppKit runs this on the main thread but does not say so
+            // in its type, the same situation as the hover timer above.
+            MainActor.assumeIsolated {
+                // A show may have raced the fade; only stow a faded dock.
+                if let dropDock, dropDock.alphaValue == 0 {
+                    dropDock.orderOut(nil)
+                }
             }
         })
     }
