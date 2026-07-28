@@ -97,7 +97,13 @@ final class VoiceController: NSObject, ObservableObject {
     /// carries the number it started under and stands down if it moved.
     private var sessionGeneration = 0
 
-    func begin() {
+    /// Returns true when a previous session's finalize was still
+    /// pending and has now been abandoned. Its completion is dropped
+    /// below and will never run, so whoever handed it over has to be
+    /// told: it is the only thing that would have cleared their state.
+    @discardableResult
+    func begin() -> Bool {
+        let abandonedFinalize = finishCompletion != nil
         transcript = ""
         level = 0
         peakLevel = 0
@@ -146,6 +152,7 @@ final class VoiceController: NSObject, ObservableObject {
         default:
             failure = "Mic access is off. System Settings, Privacy, Microphone."
         }
+        return abandonedFinalize
     }
 
     /// Speech recognition consent, awaited on first run rather than

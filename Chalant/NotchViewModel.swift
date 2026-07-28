@@ -1,8 +1,13 @@
 import AppKit
+import os
 import SwiftUI
 
 @MainActor
 final class NotchViewModel: ObservableObject {
+    /// State the island got itself stuck in. Nothing the user said or
+    /// typed goes here, only the shape of the wedge.
+    static let log = Logger(subsystem: "com.cj.chalant", category: "island")
+
     enum IslandState {
         case collapsed
         case listening
@@ -544,9 +549,7 @@ final class NotchViewModel: ObservableObject {
 
     func beginListening() {
         guard state == .collapsed else { return }
-        quietTheRoom()
-        state = .listening
-        voice.begin()
+        startListening()
     }
 
     /// Mic button in the expanded island: tap to talk, tap to run.
@@ -554,9 +557,31 @@ final class NotchViewModel: ObservableObject {
         if state == .listening {
             endListening()
         } else {
-            quietTheRoom()
-            state = .listening
-            voice.begin()
+            startListening()
+        }
+    }
+
+    /// The one door into a listening session, because the invariant
+    /// below has to hold at every entrance.
+    ///
+    /// Starting a session abandons any finalize still in flight: begin()
+    /// drops the previous session's completion, and that completion is
+    /// the only thing that would ever have cleared isWorking. Left set,
+    /// it makes every later question a silent no-op (submit guards on
+    /// it) and pins the island open (hover-collapse guards on it too),
+    /// with no error and nothing on screen to explain it. Tap, tap, tap
+    /// inside 1.2 seconds and then click outside, and the app was deaf
+    /// until relaunch.
+    private func startListening() {
+        quietTheRoom()
+        state = .listening
+        // Only the orphaned case clears the flag. A typed question
+        // still streaming its answer owns isWorking too, and must keep
+        // it: clearing that one would hide the working indicator with
+        // the answer still arriving, and let a second submit through.
+        if voice.begin(), isWorking {
+            Self.log.notice("listen abandoned a finalize still in flight; clearing isWorking")
+            isWorking = false
         }
     }
 
@@ -644,6 +669,9 @@ final class NotchViewModel: ObservableObject {
     func cancelListening() {
         guard state == .listening else { return }
         voice.cancel()
+        // cancel() drops the completion too, so this is the last hand
+        // that can put the flag down.
+        isWorking = false
         state = .collapsed
         restoreTheRoom()
     }
