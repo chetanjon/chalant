@@ -153,6 +153,25 @@ final class ActionEngine {
             return "Voice trail cleared."
         }
 
+        // Why the app went down last time. Nothing here leaves the Mac:
+        // the report is read from where macOS wrote it, and only an
+        // explicit ask puts it on the pasteboard.
+        if ["crash report", "crash", "why did you crash", "why did you quit",
+            "what crashed", "last crash"].contains(lower) {
+            model.activities.clear(id: CrashWatch.activityID)
+            let answer = model.crashWatch.summary
+            model.crashWatch.acknowledge()
+            return answer
+        }
+        if ["copy crash report", "copy the crash report"].contains(lower) {
+            guard model.crashWatch.copyReportToPasteboard() else {
+                return "No crash report to copy."
+            }
+            model.activities.clear(id: CrashWatch.activityID)
+            model.crashWatch.acknowledge()
+            return "Crash report copied. It names file paths and libraries, so read it before you paste it anywhere public."
+        }
+
         // The cheat sheet, for anyone who forgets the words.
         if ["help", "commands", "what can you do", "what can i say",
             "what do you do"].contains(lower) {

@@ -401,6 +401,49 @@ final class ChalantTests: XCTestCase {
         XCTAssertEqual(ActionEngine.textingPrefix(of: "text mom hi"), "text ")
     }
 
+    // MARK: Reading why the last run died
+
+    func testCrashReasonNamesASwiftTrapOutright() {
+        // Taken from the real report this app produced: the trap message
+        // is written into the frame symbols, and it is the whole
+        // diagnosis on its own.
+        let report = """
+        {"app_name":"Chalant","timestamp":"2026-07-28 01:15:44.00 +0530"}
+        {"termination":{"indicator":"Trace\\/BPT trap: 5"},"threads":[{"frames":[
+        {"symbol":"Swift runtime failure: Can't take a prefix of negative length from a collection"},
+        {"symbol":"specialized static ActivityServer.parse(_:)"}]}]}
+        """
+        XCTAssertEqual(
+            CrashWatch.reason(inReportText: report),
+            "Swift runtime failure: Can't take a prefix of negative length from a collection")
+    }
+
+    func testCrashReasonFallsBackThroughExceptionThenSignal() {
+        // An Objective-C exception, the AVAudioEngine family, carries a
+        // reason of its own instead of a trap message.
+        let objc = #"{"exception":{"type":"EXC_CRASH","reason":"required condition is false: nullptr == Tap()"}}"#
+        XCTAssertEqual(
+            CrashWatch.reason(inReportText: objc),
+            "required condition is false: nullptr == Tap()")
+        // With neither, the signal is still worth naming.
+        let bare = #"{"termination":{"indicator":"Namespace SIGNAL, Code 11"}}"#
+        XCTAssertEqual(CrashWatch.reason(inReportText: bare), "Ended on Namespace SIGNAL, Code 11.")
+    }
+
+    func testCrashReasonNeverThrowsOnRubbish() {
+        // This runs at launch over files written by a process that was
+        // dying. Whatever it finds, it must hand back a line and never
+        // become the second crash.
+        for rubbish in ["", "not json at all", "{", String(repeating: "\u{0}", count: 64),
+                        #"{"reason":""}"#, #"{"indicator":"}"#,
+                        "Fatal error: ", String(repeating: "x", count: 100_000)] {
+            let reason = CrashWatch.reason(inReportText: rubbish)
+            XCTAssertFalse(reason.isEmpty)
+            // Nothing may hand back a screenful for a pill to render.
+            XCTAssertLessThan(reason.count, 400)
+        }
+    }
+
     // MARK: Sessions measure time, not ticks
 
     /// These timers live on the main run loop, so the run loop has to

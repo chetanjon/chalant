@@ -34,6 +34,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the bundle id, which changed the defaults domain, which
         // would have orphaned every setting, note, and focus streak.
         migrateFromMoai()
+        // Named in Console the moment it happens, which the system's own
+        // report cannot do: this runs while the process is still alive.
+        // It only ever sees Objective-C exceptions, the AVAudioEngine
+        // family; a Swift trap is a SIGTRAP and never travels through
+        // here, which is exactly why CrashWatch reads the report on the
+        // next launch instead of relying on this.
+        NSSetUncaughtExceptionHandler { exception in
+            CrashWatch.log.critical(
+                "uncaught \(exception.name.rawValue, privacy: .public): \(exception.reason ?? "no reason", privacy: .public)")
+        }
         // A crash or a force quit skips applicationWillTerminate, so
         // the last session's audio can still be on disk from before.
         VoiceController.sweepRecordings()

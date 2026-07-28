@@ -88,6 +88,25 @@ final class NotchViewModel: ObservableObject {
         }
     }
 
+    /// Say once, plainly, that the last run ended badly.
+    ///
+    /// It rides the activity list rather than a new surface: needs-input
+    /// sorts to the top and, unlike done and failed, never expires on a
+    /// timer, so a crash that happened while nobody was looking is still
+    /// there when they look. The glance line covers the closed island.
+    private func reportLastCrashIfAny() {
+        crashWatch.check()
+        guard crashWatch.unreported != nil else { return }
+        activities.push(
+            id: CrashWatch.activityID,
+            title: "Chalant quit unexpectedly last time",
+            detail: "Say \u{201C}crash report\u{201D} for the reason,"
+                + " or \u{201C}copy crash report\u{201D} to paste it somewhere.",
+            state: .needsInput
+        )
+        flashGlance("Chalant crashed last time. Say \u{201C}crash report\u{201D}.", seconds: 8)
+    }
+
     func replayWelcome() {
         welcomeStep = 0
         pane = .welcome
@@ -164,6 +183,7 @@ final class NotchViewModel: ObservableObject {
     let activities = ActivityStore()
     let activityServer = ActivityServer()
     let updates = UpdateChecker()
+    let crashWatch = CrashWatch()
     /// Hands the update ask to Sparkle (set by the AppDelegate, which
     /// owns the updater): download, install, relaunch, no browser.
     var installUpdate: (() -> Void)?
@@ -231,6 +251,7 @@ final class NotchViewModel: ObservableObject {
             self?.flashGlance("\(version) is out", seconds: 8)
         }
         updates.start()
+        reportLastCrashIfAny()
         showWelcomeIfFirstRun()
         #if DEBUG
         // Terminal-driven verb testing, Debug builds only. Keystrokes
