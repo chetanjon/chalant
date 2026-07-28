@@ -45,6 +45,7 @@ struct SettingsPane: View {
     @AppStorage("openDelay") private var openDelay = 0.18
     @AppStorage("collapseDelay") private var collapseDelay = 0.05
     @AppStorage("motionFeel") private var motionFeel = "serene"
+    @AppStorage("glideLongTitles") private var glideLongTitles = false
     @AppStorage("islandMaterial") private var islandMaterial = "ink"
     @AppStorage("glassClarity") private var glassClarity = "balanced"
     @AppStorage("glowOn") private var glowOn = true
@@ -209,6 +210,11 @@ struct SettingsPane: View {
                             ("Balanced", "balanced"), ("Lively", "lively"),
                         ], width: 236)
                     }
+                    divider
+                    toggleRow("Glide long titles", $glideLongTitles)
+                    Text("Off, a long name is trimmed at the end and holds still. On, it slides to show the rest, which is cramped in a narrow notch.")
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textHint)
                     divider
                     row("Material") {
                         picker($islandMaterial, [
