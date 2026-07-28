@@ -27,6 +27,18 @@ final class MessageCourier {
         label: "chalant.courier.script", qos: .userInitiated
     )
 
+    /// Everything to do with the automation grant, kept off the lane
+    /// above. Asking raises the modal dialog and blocks until the user
+    /// answers it, which can be minutes; it used to share the send's
+    /// serial lane, so a send said while that dialog was up queued
+    /// behind the dialog itself and never ran. The island held
+    /// isWorking and went deaf until relaunch. Concurrent, so the
+    /// non-blocking status read never queues behind a waiting ask
+    /// either.
+    private static let grantQueue = DispatchQueue(
+        label: "chalant.courier.grant", qos: .utility, attributes: .concurrent
+    )
+
     // MARK: - Staging
 
     /// "mom on my way", "john smith: running late", "5551234567 hi".
@@ -208,7 +220,7 @@ final class MessageCourier {
             return "That message went stale. Say it again."
         }
 
-        guard let grant = messagesGrantStatus() else {
+        guard let grant = await messagesGrantStatus() else {
             primeMessagesGrant()
             return "Messages is waking up. Say send again in a moment."
         }
@@ -403,9 +415,19 @@ final class MessageCourier {
     /// The grant, checked without asking: noErr means go, -1744 means
     /// the dialog hasn't been answered, -1743 means it was answered
     /// no. nil means Messages isn't running to be asked about.
-    private func messagesGrantStatus() -> OSStatus? {
+    private func messagesGrantStatus() async -> OSStatus? {
         guard let bundleID = runningMessagesBundleID else { return nil }
-        return PermissionPrimer.primeAutomation(bundleID: bundleID, askIfNeeded: false)
+        // A TCC round trip, so it does not belong on the main actor
+        // even when it is only reading. askIfNeeded is false here: this
+        // one never raises a dialog, so it never blocks its lane.
+        return await withCheckedContinuation { continuation in
+            Self.grantQueue.async {
+                continuation.resume(
+                    returning: PermissionPrimer.primeAutomation(
+                        bundleID: bundleID, askIfNeeded: false)
+                )
+            }
+        }
     }
 
     /// The automation dialog can only be raised for a running app, so
@@ -434,7 +456,7 @@ final class MessageCourier {
     }
 
     private static func primeAutomation(bundleID: String) {
-        scriptQueue.async {
+        grantQueue.async {
             PermissionPrimer.primeAutomation(bundleID: bundleID, askIfNeeded: true)
         }
     }
