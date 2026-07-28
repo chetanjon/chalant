@@ -54,8 +54,17 @@ Unzip, drag Chalant to Applications, open it. First open: macOS will ask once. S
 - Brow glyph on PDFs and text files: attach contents and question them.
 
 **Live status** (the open door)
-- Anything on your Mac can put a status pill on the island: `curl localhost:4242/activity -d '{"id":"deploy","title":"Deploying","state":"working"}'`. States: `working`, `needs-input`, `done`, `failed`, `clear`; `GET /activities` lists, `DELETE /activity/<id>` clears. Loopback only, never leaves the machine.
-- `scripts/chalant` wraps it for humans and scripts: `chalant working "Deploying"`, `chalant needs-input "Waiting on you"`, `chalant done "Build finished"`, `chalant clear`. Copy it into your PATH if you like it.
+- Anything on your Mac can put a status pill on the island, with the token Chalant mints on first launch:
+
+  ```bash
+  T=$(cat ~/Library/Application\ Support/Chalant/api-token)
+  curl localhost:4242/activity -H "X-Chalant-Token: $T" \
+       -d '{"id":"deploy","title":"Deploying","state":"working"}'
+  ```
+
+  States: `working`, `needs-input`, `done`, `failed`, `clear`; `GET /activities` lists, `DELETE /activity/<id>` clears. Loopback only, never leaves the machine.
+- **Why a token, since it is loopback only.** Loopback is not a wall: every process on the machine can knock, including other logged-in accounts. Without one, anything could push a *convincing* pill, and a `needs-input` row sorts to the top wearing the app's own chrome, which is a good place to ask somebody for a password. The token is a 0600 file, so anyone who is already you can read it and nobody else can. Delete it and relaunch to rotate.
+- `scripts/chalant` wraps it for humans and scripts and reads the token for you: `chalant working "Deploying"`, `chalant needs-input "Waiting on you"`, `chalant done "Build finished"`, `chalant clear`. Copy it into your PATH if you like it. `CHALANT_TOKEN` overrides.
 - Made for the things that have no home: build scripts, deploys, renders, long downloads. The open island lists them attention-first (needs-input wears the accent); the closed pill never grows for any of it, and finished things fade on their own. Nothing posts unless you point it here.
 
 **Chat** (bring your own subscription)

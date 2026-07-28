@@ -14,6 +14,22 @@ set -euo pipefail
 PORT="${CHALANT_PORT:-4242}"
 BASE="http://localhost:$PORT"
 
+# The door is loopback-only but loopback is not a wall: every process on
+# the machine can knock, including other accounts. Chalant mints this on
+# first launch and keeps it at 0600, so anyone who is already you can
+# read it and nobody else can. Set CHALANT_TOKEN to override.
+TOKEN_FILE="${CHALANT_TOKEN_FILE:-$HOME/Library/Application Support/Chalant/api-token}"
+TOKEN="${CHALANT_TOKEN:-}"
+if [ -z "$TOKEN" ] && [ -r "$TOKEN_FILE" ]; then
+  TOKEN="$(cat "$TOKEN_FILE")"
+fi
+if [ -z "$TOKEN" ]; then
+  echo "chalant: no token. Launch Chalant once to mint $TOKEN_FILE," >&2
+  echo "         or set CHALANT_TOKEN." >&2
+  exit 1
+fi
+AUTH=(-H "X-Chalant-Token: $TOKEN")
+
 case "${1:-}" in
   working|needs-input|done|failed)
     STATE="$1"
@@ -22,16 +38,16 @@ case "${1:-}" in
     # Escape backslashes and quotes so a title with either still forms
     # valid JSON instead of a silently-dropped 400.
     esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
-    curl -sf "$BASE/activity" -d "{\"id\":\"$(esc "$ID")\",\"title\":\"$(esc "$TITLE")\",\"state\":\"$STATE\"}" >/dev/null
+    curl -sf "${AUTH[@]}" "$BASE/activity" -d "{\"id\":\"$(esc "$ID")\",\"title\":\"$(esc "$TITLE")\",\"state\":\"$STATE\"}" >/dev/null
     echo "on the island: [$STATE] $TITLE"
     ;;
   clear)
     ID="${2:-cli}"
-    curl -sf -X DELETE "$BASE/activity/$ID" >/dev/null
+    curl -sf "${AUTH[@]}" -X DELETE "$BASE/activity/$ID" >/dev/null
     echo "cleared: $ID"
     ;;
   list)
-    curl -sf "$BASE/activities"
+    curl -sf "${AUTH[@]}" "$BASE/activities"
     echo
     ;;
   *)

@@ -572,6 +572,33 @@ final class ChalantTests: XCTestCase {
         XCTAssertNil(ActivityServer.capped(title: "x", detail: nil, id: "y").detail)
     }
 
+    func testTokenComparisonIsExactAndLengthSafe() {
+        let real = "s3cret-token-value"
+        XCTAssertTrue(ActivityServer.tokenMatches(real, real))
+        XCTAssertFalse(ActivityServer.tokenMatches("", real))
+        XCTAssertFalse(ActivityServer.tokenMatches("s3cret-token-valuX", real))
+        // A prefix must not pass, which a length-blind loop would allow.
+        XCTAssertFalse(ActivityServer.tokenMatches("s3cret", real))
+        XCTAssertFalse(ActivityServer.tokenMatches(real + "x", real))
+        // An empty expected token must never open the door.
+        XCTAssertFalse(ActivityServer.tokenMatches("", ""))
+        XCTAssertFalse(ActivityServer.tokenMatches("anything", ""))
+    }
+
+    func testParseReadsTheTokenHeaderCaseInsensitively() {
+        XCTAssertEqual(
+            ActivityServer.parse(rawRequest(
+                "GET /activities HTTP/1.1\r\nX-Chalant-Token: abc123"))?.offeredToken,
+            "abc123")
+        XCTAssertEqual(
+            ActivityServer.parse(rawRequest(
+                "GET /activities HTTP/1.1\r\nx-chalant-token:   abc123  "))?.offeredToken,
+            "abc123")
+        // Absent header reads as empty, which never matches.
+        XCTAssertEqual(
+            ActivityServer.parse(rawRequest("GET /activities HTTP/1.1"))?.offeredToken, "")
+    }
+
     func testParseStillFlagsBrowserRequests() {
         // The cross-origin guard rides on this flag; the length fix
         // must not disturb it.

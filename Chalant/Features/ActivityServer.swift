@@ -1,20 +1,29 @@
 import Foundation
 import Network
+import Security
 
 /// The open door: a tiny HTTP server on localhost that lets any local
 /// process push a status pill onto the island. Claude Code hooks,
 /// build scripts, cron jobs, download watchers; one curl and the
 /// island knows. Loopback only, nothing ever leaves the machine.
 ///
-///   curl -s localhost:4242/activity -d '{"id":"deploy",
-///        "title":"Deploying site","state":"working"}'
-///   curl -s localhost:4242/activity -d '{"id":"deploy",
-///        "title":"Deployed","state":"done"}'
-///   curl -s localhost:4242/activities        # inspect
-///   curl -s -X DELETE localhost:4242/activity/deploy
+///   T=$(cat ~/Library/Application\ Support/Chalant/api-token)
+///   curl -s localhost:4242/activity -H "X-Chalant-Token: $T" \
+///        -d '{"id":"deploy","title":"Deploying site","state":"working"}'
+///   curl -s localhost:4242/activities -H "X-Chalant-Token: $T"
+///   curl -s -X DELETE localhost:4242/activity/deploy -H "X-Chalant-Token: $T"
 ///
 /// States: working · needs-input · done · failed. Port configurable
 /// via `defaults write com.cj.chalant activityPort -int <port>`.
+///
+/// The token exists because loopback is not a wall. Every process on
+/// the machine can reach this port, including other logged-in accounts,
+/// and "anything on your Mac can put a pill on the island" also meant
+/// anything could put a convincing one there: a needs-input row sorts
+/// to the top and wears the app's own chrome, which is a good place to
+/// ask somebody for a password. Reading was worth closing too, since
+/// the list names whatever your tooling is doing. It is a file anyone
+/// who is already you can read, so it stops impersonation, not you.
 final class ActivityServer: @unchecked Sendable {
     private var listener: NWListener?
     private weak var store: ActivityStore?
@@ -25,9 +34,51 @@ final class ActivityServer: @unchecked Sendable {
         return configured > 0 ? UInt16(clamping: configured) : 4242
     }
 
+    static let tokenHeader = "x-chalant-token:"
+
+    static var tokenURL: URL {
+        let support = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first ?? FileManager.default.temporaryDirectory
+        return support.appendingPathComponent("Chalant/api-token")
+    }
+
+    /// Minted once and kept at 0600. Read fresh rather than cached so
+    /// deleting the file and relaunching is a working revoke.
+    static func loadOrCreateToken() -> String {
+        let url = tokenURL
+        if let existing = try? String(contentsOf: url, encoding: .utf8) {
+            let trimmed = existing.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        var bytes = [UInt8](repeating: 0, count: 32)
+        let minted = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess
+            ? Data(bytes).base64EncodedString()
+            : UUID().uuidString + UUID().uuidString
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? minted.write(to: url, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: url.path)
+        return minted
+    }
+
+    /// Length-first, then every byte: an early return on the first
+    /// mismatch would time the answer.
+    static func tokenMatches(_ offered: String, _ expected: String) -> Bool {
+        let a = Array(offered.utf8), b = Array(expected.utf8)
+        guard !b.isEmpty, a.count == b.count else { return false }
+        var difference: UInt8 = 0
+        for index in a.indices { difference |= a[index] ^ b[index] }
+        return difference == 0
+    }
+
+    private var token = ""
+
     @MainActor
     func start(store: ActivityStore) {
         self.store = store
+        token = Self.loadOrCreateToken()
         let parameters = NWParameters.tcp
         parameters.requiredInterfaceType = .loopback
         parameters.allowLocalEndpointReuse = true
@@ -118,6 +169,9 @@ final class ActivityServer: @unchecked Sendable {
         /// pushing pills onto the island (a site you visit could
         /// otherwise spoof one). Mutating routes refuse it.
         var fromBrowser: Bool
+        /// Whatever the caller offered, verified against the real one
+        /// by route(), which is the only place that holds it.
+        var offeredToken: String
     }
 
     static func parse(_ data: Data) -> Request? {
@@ -152,9 +206,17 @@ final class ActivityServer: @unchecked Sendable {
         guard contentLength >= 0, contentLength <= Self.maxBody else { return nil }
         let body = data[headerEnd.upperBound...]
         guard body.count >= contentLength else { return nil }
+        let offeredToken = lines
+            .first { $0.lowercased().hasPrefix(tokenHeader) }
+            .flatMap { line -> String? in
+                guard let colon = line.firstIndex(of: ":") else { return nil }
+                return line[line.index(after: colon)...]
+                    .trimmingCharacters(in: .whitespaces)
+            } ?? ""
         return Request(
             method: parts[0], path: parts[1],
-            body: Data(body.prefix(contentLength)), fromBrowser: fromBrowser
+            body: Data(body.prefix(contentLength)), fromBrowser: fromBrowser,
+            offeredToken: offeredToken
         )
     }
 
@@ -166,6 +228,14 @@ final class ActivityServer: @unchecked Sendable {
         if request.fromBrowser, request.method != "GET" {
             respond(connection, status: "403 Forbidden",
                     body: #"{"ok":false,"error":"cross-origin writes refused"}"#)
+            return
+        }
+        // Kept after the browser check so a web page still gets told it
+        // is the wrong kind of caller rather than being handed a hint
+        // about what a right one would carry.
+        guard Self.tokenMatches(request.offeredToken, token) else {
+            respond(connection, status: "401 Unauthorized",
+                    body: #"{"ok":false,"error":"send X-Chalant-Token, see ~/Library/Application Support/Chalant/api-token"}"#)
             return
         }
         switch (request.method, request.path) {
