@@ -401,6 +401,29 @@ final class ChalantTests: XCTestCase {
         XCTAssertEqual(ActionEngine.textingPrefix(of: "text mom hi"), "text ")
     }
 
+    // MARK: Number parsing (every one of these becomes seconds)
+
+    func testFirstNumberClampsBeyondAnyRealSession() {
+        // "timer 200000000000000000" reached `minutes * 60`, which
+        // overflowed Int64 and trapped. The ceiling is the fix; the
+        // digits still read as a number so the verb still runs.
+        XCTAssertEqual(ActionEngine.firstNumber(in: "timer 200000000000000000"), 100_000)
+        XCTAssertEqual(ActionEngine.firstNumber(in: "focus \(Int.max)"), 100_000)
+        // Clamped values must still survive the multiply every caller does.
+        let clamped = ActionEngine.firstNumber(in: "push standup by 999999999999 hours")!
+        XCTAssertLessThan(clamped * 3600, Int.max)
+    }
+
+    func testFirstNumberLeavesOrdinaryAsksAlone() {
+        XCTAssertEqual(ActionEngine.firstNumber(in: "timer 5"), 5)
+        XCTAssertEqual(ActionEngine.firstNumber(in: "focus 25 minutes"), 25)
+        XCTAssertEqual(ActionEngine.firstNumber(in: "push standup by 30 minutes"), 30)
+        XCTAssertNil(ActionEngine.firstNumber(in: "start a focus"))
+        // Volume's own 0...100 gate still rejects a clamped number,
+        // so a huge value keeps falling through to the direction words.
+        XCTAssertEqual(ActionEngine.volumeIntent("volume up to 999999999999999999"), .up)
+    }
+
     // MARK: The open door's request parser (any local process reaches it)
 
     private func rawRequest(_ headers: String, body: String = "") -> Data {

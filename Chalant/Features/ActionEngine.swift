@@ -1033,9 +1033,14 @@ final class ActionEngine {
         Int(token) ?? numberWords[token.lowercased()]
     }
 
-    private static func firstNumber(in text: String) -> Int? {
+    /// The first run of digits, held to a ceiling no session needs.
+    /// Every caller multiplies this into seconds and Swift's `*` traps
+    /// on overflow, so "timer 200000000000000000" typed into the Do
+    /// field was an eighteen-digit crash. 100,000 minutes is sixty-nine
+    /// days: past any real ask, and nowhere near the trap.
+    static func firstNumber(in text: String) -> Int? {
         let digits = text.split(whereSeparator: { !$0.isNumber })
-        return digits.first.flatMap { Int($0) }
+        return digits.first.flatMap { Int($0) }.map { min($0, 100_000) }
     }
 
     private static func extractDate(_ text: String) -> (Date, NSRange)? {
