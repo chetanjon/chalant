@@ -25,6 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Stop the media bridge stream so no perl child outlives us.
         notchController?.viewModel.music.shutdown()
         notchController?.viewModel.activityServer.stop()
+        // And no recording of the last thing said.
+        VoiceController.sweepRecordings()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -32,6 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the bundle id, which changed the defaults domain, which
         // would have orphaned every setting, note, and focus streak.
         migrateFromMoai()
+        // A crash or a force quit skips applicationWillTerminate, so
+        // the last session's audio can still be on disk from before.
+        VoiceController.sweepRecordings()
         // Press-and-hold accent picker is a remote-view sheet that
         // crashes when it tries to attach to the borderless notch
         // panel (ViewBridge SIGABRT, 2026-07-19). Held keys repeat

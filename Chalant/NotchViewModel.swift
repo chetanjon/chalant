@@ -629,7 +629,40 @@ final class NotchViewModel: ObservableObject {
     /// `defaults read com.cj.chalant voiceLog` from a terminal.
     private let voiceLogKey = "voiceLog"
 
+    /// The trail keeps the shape of what was said, never the sentence
+    /// itself when that sentence is bound for another person. Those
+    /// words were being written verbatim into a plist that is never
+    /// cleared, so every message dictated since install was sitting in
+    /// preferences. Who it was for survives, because that is what a
+    /// staging bug looks like; what it said does not.
+    static func redactedForLog(heard: String, outcome: String) -> (String, String) {
+        var heard = heard
+        var outcome = outcome
+        if let prefix = ActionEngine.textingPrefix(of: heard.lowercased()) {
+            let words = heard.dropFirst(prefix.count).split(separator: " ")
+            // The first word is the recipient. A multi-word name loses
+            // its tail to the redaction, which is the safe direction.
+            let who = words.first.map(String.init) ?? ""
+            heard = "\(prefix)\(who) \(heldBack(words.count - 1))"
+        }
+        // The staging read-back quotes the whole message back so the
+        // user can hear it before saying send.
+        if outcome.hasPrefix("To "),
+           let open = outcome.firstIndex(of: "\u{201C}"),
+           let close = outcome.lastIndex(of: "\u{201D}"), open < close {
+            let body = outcome[outcome.index(after: open)..<close]
+            let held = heldBack(body.split(separator: " ").count)
+            outcome.replaceSubrange(open...close, with: "\u{201C}\(held)\u{201D}")
+        }
+        return (heard, outcome)
+    }
+
+    private static func heldBack(_ words: Int) -> String {
+        "[\(max(0, words)) words held back]"
+    }
+
     func logVoice(_ heard: String, outcome: String) {
+        let (heard, outcome) = Self.redactedForLog(heard: heard, outcome: outcome)
         var lines = UserDefaults.standard.stringArray(forKey: voiceLogKey) ?? []
         lines.append("heard \u{201C}\(heard)\u{201D} → \(outcome)")
         // 40 lines: a 10-line trail rotated evidence away mid-sweep
@@ -637,6 +670,10 @@ final class NotchViewModel: ObservableObject {
         // on any voice report, so it has to hold a whole session.
         if lines.count > 40 { lines.removeFirst(lines.count - 40) }
         UserDefaults.standard.set(lines, forKey: voiceLogKey)
+    }
+
+    func clearVoiceLog() {
+        UserDefaults.standard.removeObject(forKey: voiceLogKey)
     }
 
     var voiceLogRendered: String {

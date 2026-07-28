@@ -123,6 +123,22 @@ final class VoiceController: NSObject, ObservableObject {
         }
     }
 
+    /// The session's recording, wherever it was left.
+    ///
+    /// Every utterance is mirrored to disk for the file rescue, and it
+    /// is deleted when the session delivers or is cancelled. A process
+    /// that dies in between, which until this round it regularly did,
+    /// left the full audio of the last thing said sitting there. The
+    /// temp directory is per-user and 0700, so nobody else could read
+    /// it, but it had no reason to outlive the session.
+    static func sweepRecordings() {
+        let stray = FileManager.default.temporaryDirectory
+            .appendingPathComponent(liveRecordingName)
+        try? FileManager.default.removeItem(at: stray)
+    }
+
+    static let liveRecordingName = "chalant-live-session.caf"
+
     /// The hardware moved under a live session.
     private func audioRouteChanged() {
         // This also fires while starting up and tearing down; only a
@@ -369,7 +385,7 @@ final class VoiceController: NSObject, ObservableObject {
         // Mirror the session to disk for the file rescue. Recreated on
         // every device hop; only the last ear's audio matters.
         let fileURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("chalant-live-session.caf")
+            .appendingPathComponent(Self.liveRecordingName)
         try? FileManager.default.removeItem(at: fileURL)
         liveFile = try? AVAudioFile(forWriting: fileURL, settings: format.settings)
         liveFileURL = liveFile == nil ? nil : fileURL
@@ -697,7 +713,13 @@ final class VoiceController: NSObject, ObservableObject {
             completion("zero format on \(pick?.name ?? "no device")")
             return
         }
-        let url = URL(fileURLWithPath: "/tmp/chalant-tap.caf")
+        // Not /tmp: that is 1777, and the default umask lands this file
+        // 0644, so a real recording of the microphone would be readable
+        // by every account on the machine. The temp directory is
+        // per-user and 0700. Debug-only either way, but a dev machine
+        // is still somebody's machine.
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("chalant-tap.caf")
         try? FileManager.default.removeItem(at: url)
         guard let file = try? AVAudioFile(forWriting: url, settings: format.settings) else {
             completion("could not open /tmp/chalant-tap.caf for \(format)")

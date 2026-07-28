@@ -401,6 +401,49 @@ final class ChalantTests: XCTestCase {
         XCTAssertEqual(ActionEngine.textingPrefix(of: "text mom hi"), "text ")
     }
 
+    // MARK: What the voice trail is allowed to remember
+
+    func testVoiceLogHoldsBackTheWordsOfAMessage() {
+        // The trail never emptied, so every message dictated since
+        // install was sitting verbatim in a plist.
+        let (heard, outcome) = NotchViewModel.redactedForLog(
+            heard: "text mom the wifi password is hunter2",
+            outcome: "To Mom (+15551234567): \u{201C}the wifi password is hunter2\u{201D}."
+                + " Say send, or anything else to drop it."
+        )
+        XCTAssertFalse(heard.contains("hunter2"))
+        XCTAssertFalse(outcome.contains("hunter2"))
+        // Who it was for survives: that is what a staging bug looks like.
+        XCTAssertTrue(heard.hasPrefix("text mom"))
+        XCTAssertTrue(outcome.hasPrefix("To Mom (+15551234567)"))
+        XCTAssertTrue(heard.contains("words held back"))
+    }
+
+    func testVoiceLogRedactsEveryTextingForm() {
+        for utterance in ["text sam: meet me at the bank",
+                          "tell amma i am on my way",
+                          "message dad the code is 4417",
+                          "imessage priya the door key is under the mat"] {
+            let (heard, _) = NotchViewModel.redactedForLog(heard: utterance, outcome: "")
+            XCTAssertTrue(heard.contains("words held back"), utterance)
+            for secret in ["bank", "way", "4417", "mat"] where utterance.contains(secret) {
+                XCTAssertFalse(heard.contains(secret), "\(utterance) leaked \(secret)")
+            }
+        }
+    }
+
+    func testVoiceLogLeavesOrdinaryVerbsWhole() {
+        // Redacting everything would gut the trail, which is the first
+        // thing read on any voice report.
+        let (heard, outcome) = NotchViewModel.redactedForLog(
+            heard: "timer 5", outcome: "Timer on. 5 minutes, counting in the notch.")
+        XCTAssertEqual(heard, "timer 5")
+        XCTAssertEqual(outcome, "Timer on. 5 minutes, counting in the notch.")
+        // "tell me a joke" is a question, not a message.
+        let (joke, _) = NotchViewModel.redactedForLog(heard: "tell me a joke", outcome: "")
+        XCTAssertEqual(joke, "tell me a joke")
+    }
+
     // MARK: Giving up on an await (the island's ceiling)
 
     func testTimeboxedGivesUpOnWorkThatNeverAnswers() async {
@@ -495,6 +538,38 @@ final class ChalantTests: XCTestCase {
             rawRequest("GET /activities HTTP/1.1\r\nContent-Length:"))?.body, Data())
         XCTAssertEqual(ActivityServer.parse(
             rawRequest("GET /activities HTTP/1.1\r\nContent-Length: 0"))?.body, Data())
+    }
+
+    func testActivityStringsAreCapped() {
+        // Up to half a megabyte could arrive as one unbroken line for
+        // SwiftUI to lay out inside a pill. Rows were bounded at eight
+        // and expired on a timer; the strings themselves were not.
+        let huge = String(repeating: "a", count: 400_000)
+        let capped = ActivityServer.capped(title: huge, detail: huge, id: huge)
+        XCTAssertEqual(capped.title.count, ActivityServer.maxTitle)
+        XCTAssertEqual(capped.detail?.count, ActivityServer.maxDetail)
+        XCTAssertEqual(capped.id.count, ActivityServer.maxID)
+    }
+
+    func testActivityIdFallsBackToTitleWithoutSmugglingLength() {
+        // An absent id becomes the title, which is allowed to be wider
+        // than an id: the fallback must not carry that extra width in.
+        let long = String(repeating: "b", count: 400)
+        XCTAssertEqual(
+            ActivityServer.capped(title: long, detail: nil, id: nil).id.count,
+            ActivityServer.maxID)
+        XCTAssertEqual(
+            ActivityServer.capped(title: long, detail: nil, id: "").id.count,
+            ActivityServer.maxID)
+    }
+
+    func testActivityCappingLeavesOrdinaryPillsAlone() {
+        let capped = ActivityServer.capped(
+            title: "build", detail: "42 tests green", id: "ci")
+        XCTAssertEqual(capped.title, "build")
+        XCTAssertEqual(capped.detail, "42 tests green")
+        XCTAssertEqual(capped.id, "ci")
+        XCTAssertNil(ActivityServer.capped(title: "x", detail: nil, id: "y").detail)
     }
 
     func testParseStillFlagsBrowserRequests() {

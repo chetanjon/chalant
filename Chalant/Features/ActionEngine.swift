@@ -144,6 +144,14 @@ final class ActionEngine {
             model.notes.clear()
             return "Notes cleared."
         }
+        // The voice trail rotates but never emptied, so a session's
+        // words outlived the session by default. Now they can be shown
+        // the door on request, the same way notes can.
+        if ["clear voice log", "clear the voice log", "forget what i said",
+            "clear my voice log"].contains(lower) {
+            model.clearVoiceLog()
+            return "Voice trail cleared."
+        }
 
         // The cheat sheet, for anyone who forgets the words.
         if ["help", "commands", "what can you do", "what can i say",

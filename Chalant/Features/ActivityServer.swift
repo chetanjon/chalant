@@ -88,6 +88,26 @@ final class ActivityServer: @unchecked Sendable {
     /// ceiling every declared Content-Length is measured against.
     static let maxBody = 512 * 1024
 
+    /// A pill is a glance, not a document. These are the widest a
+    /// caller's strings can be before they are cut.
+    static let maxTitle = 200
+    static let maxDetail = 400
+    static let maxID = 128
+
+    /// Hold a caller's strings to a width a pill can lay out. The body
+    /// cap is half a megabyte and all of it could arrive as one
+    /// unbroken line; the row count was bounded and the strings were
+    /// not. An absent or empty id falls back to the title, itself cut
+    /// to id width so the fallback cannot smuggle a longer key in.
+    static func capped(
+        title rawTitle: String, detail rawDetail: String?, id rawID: String?
+    ) -> (title: String, detail: String?, id: String) {
+        let title = String(rawTitle.prefix(maxTitle))
+        let id = rawID.flatMap { $0.isEmpty ? nil : String($0.prefix(maxID)) }
+            ?? String(title.prefix(maxID))
+        return (title, rawDetail.map { String($0.prefix(maxDetail)) }, id)
+    }
+
     struct Request {
         var method: String
         var path: String
@@ -151,14 +171,17 @@ final class ActivityServer: @unchecked Sendable {
         switch (request.method, request.path) {
         case ("POST", "/activity"):
             guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
-                  let title = object["title"] as? String, !title.isEmpty
+                  let rawTitle = object["title"] as? String, !rawTitle.isEmpty
             else {
                 respond(connection, status: "400 Bad Request",
                         body: #"{"ok":false,"error":"need title"}"#)
                 return
             }
-            let id = (object["id"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? title
-            let detail = object["detail"] as? String
+            let (title, detail, id) = Self.capped(
+                title: rawTitle,
+                detail: object["detail"] as? String,
+                id: object["id"] as? String
+            )
             let raw = (object["state"] as? String ?? "working").lowercased()
             if raw == "clear" {
                 Task { @MainActor in self.store?.clear(id: id) }
