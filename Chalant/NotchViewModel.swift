@@ -684,10 +684,20 @@ final class NotchViewModel: ObservableObject {
         var outcome = outcome
         if let prefix = ActionEngine.textingPrefix(of: heard.lowercased()) {
             let words = heard.dropFirst(prefix.count).split(separator: " ")
-            // The first word is the recipient. A multi-word name loses
-            // its tail to the redaction, which is the safe direction.
-            let who = words.first.map(String.init) ?? ""
-            heard = "\(prefix)\(who) \(heldBack(words.count - 1))"
+            // A recipient is only nameable when something follows it.
+            // With one token there is no telling a name from a one word
+            // message, and this used to keep it either way: "tell
+            // hunter2" logged hunter2 as the recipient. A redactor that
+            // guesses keeps the very thing it exists to hide, so the
+            // ambiguous case holds everything back and reports only the
+            // shape. Found by fuzzing, not by reading.
+            if words.count >= 2 {
+                // A multi-word name loses its tail, which is the safe
+                // direction to be wrong in.
+                heard = "\(prefix)\(words[0]) \(heldBack(words.count - 1))"
+            } else {
+                heard = "\(prefix)\(heldBack(words.count))"
+            }
         }
         // The staging read-back quotes the whole message back so the
         // user can hear it before saying send.
