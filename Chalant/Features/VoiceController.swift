@@ -97,6 +97,56 @@ final class VoiceController: NSObject, ObservableObject {
     /// carries the number it started under and stands down if it moved.
     private var sessionGeneration = 0
 
+    private var configObserver: NSObjectProtocol?
+
+    override init() {
+        super.init()
+        // The engine posts this when the hardware underneath it moves:
+        // AirPods disconnect, a USB mic is unplugged, the default input
+        // changes, a sample rate shifts. Nothing was listening, so the
+        // tap simply went quiet mid-sentence and the session ended in
+        // "the mic heard silence on <the device that had left>". The
+        // 1.6 second silence watchdog disarms long before that, so no
+        // hop ever came to the rescue.
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: audioEngine,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.audioRouteChanged() }
+        }
+    }
+
+    deinit {
+        if let configObserver {
+            NotificationCenter.default.removeObserver(configObserver)
+        }
+    }
+
+    /// The hardware moved under a live session.
+    private func audioRouteChanged() {
+        // This also fires while starting up and tearing down; only a
+        // session in flight has anything to salvage.
+        guard request != nil, finishCompletion == nil else { return }
+        // The queue was built when the session began, so it can still
+        // name an ear that has since left. Ask what is actually plugged
+        // in now. If the same device leads again, that is the right
+        // answer to a format change: restart on it with the new format
+        // rather than keep a tap the engine has already dropped.
+        let leaving = activeDeviceName
+        candidates = SystemVolume.inputDevices()
+        candidateIndex = 0
+        guard deviceSwitches < 2, let next = candidates.first else {
+            Self.log.notice("audio configuration changed and no input was left")
+            failure = "The microphone went away mid-sentence. Try again."
+            return
+        }
+        deviceSwitches += 1
+        deviceNote = "input changed on \(leaving ?? "the first ear"), moved to \(next.name)"
+        Self.log.notice("audio configuration changed mid-session; moving to another input")
+        restartCapture(pinDeviceID: next.id)
+    }
+
     /// Returns true when a previous session's finalize was still
     /// pending and has now been abandoned. Its completion is dropped
     /// below and will never run, so whoever handed it over has to be
