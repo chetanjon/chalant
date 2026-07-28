@@ -401,6 +401,37 @@ final class ChalantTests: XCTestCase {
         XCTAssertEqual(ActionEngine.textingPrefix(of: "text mom hi"), "text ")
     }
 
+    // MARK: Giving up on an await (the island's ceiling)
+
+    func testTimeboxedGivesUpOnWorkThatNeverAnswers() async {
+        // The screen read and the message send both reach another
+        // process and both wedged there holding the island open and
+        // deaf. A ceiling that quietly failed to fire would put that
+        // back without anyone noticing.
+        let started = Date()
+        let answer = await timeboxed(0.2) {
+            // Stands in for a continuation nobody will resume: the
+            // sleeper outlives the ceiling and lands in nobody's hands.
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            return "too late"
+        }
+        XCTAssertNil(answer)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5)
+    }
+
+    func testTimeboxedKeepsAnAnswerThatArrivesInTime() async {
+        let answer = await timeboxed(5) { "read 12 lines" }
+        XCTAssertEqual(answer, "read 12 lines")
+    }
+
+    func testTimeboxedAnswersOnlyOnce() async {
+        // Both racers reach the same continuation; resuming it twice
+        // is a crash, not a wrong answer.
+        for _ in 0..<50 {
+            _ = await timeboxed(0.01) { "fast" }
+        }
+    }
+
     // MARK: Number parsing (every one of these becomes seconds)
 
     func testFirstNumberClampsBeyondAnyRealSession() {
