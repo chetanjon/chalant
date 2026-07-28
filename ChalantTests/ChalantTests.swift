@@ -400,4 +400,57 @@ final class ChalantTests: XCTestCase {
         XCTAssertNil(ActionEngine.textingPrefix(of: "telling stories"))
         XCTAssertEqual(ActionEngine.textingPrefix(of: "text mom hi"), "text ")
     }
+
+    // MARK: The open door's request parser (any local process reaches it)
+
+    private func rawRequest(_ headers: String, body: String = "") -> Data {
+        Data("\(headers)\r\n\r\n\(body)".utf8)
+    }
+
+    func testParseRefusesNegativeContentLength() {
+        // "Content-Length: -1" parsed as a number, passed a guard
+        // written for non-negative lengths, and trapped inside
+        // Data.prefix. One line of nc took the whole app down.
+        XCTAssertNil(ActivityServer.parse(
+            rawRequest("POST /activity HTTP/1.1\r\nContent-Length: -1")))
+        XCTAssertNil(ActivityServer.parse(
+            rawRequest("POST /activity HTTP/1.1\r\nContent-Length: -999999")))
+    }
+
+    func testParseRefusesContentLengthBeyondTheReadCap() {
+        // A length no body could ever satisfy is refused outright
+        // rather than waited on until the connection deadline.
+        XCTAssertNil(ActivityServer.parse(rawRequest(
+            "POST /activity HTTP/1.1\r\nContent-Length: \(ActivityServer.maxBody + 1)")))
+    }
+
+    func testParseStillAcceptsOrdinaryRequests() {
+        // The guard must not cost the good case: absent, empty, zero,
+        // and real lengths all still parse.
+        let body = #"{"title":"build"}"#
+        let request = ActivityServer.parse(rawRequest(
+            "POST /activity HTTP/1.1\r\nContent-Length: \(body.utf8.count)", body: body))
+        XCTAssertEqual(request?.method, "POST")
+        XCTAssertEqual(request?.path, "/activity")
+        XCTAssertEqual(request?.body, Data(body.utf8))
+        XCTAssertFalse(request?.fromBrowser ?? true)
+
+        XCTAssertEqual(ActivityServer.parse(rawRequest("GET /activities HTTP/1.1"))?.path,
+                       "/activities")
+        XCTAssertEqual(ActivityServer.parse(
+            rawRequest("GET /activities HTTP/1.1\r\nContent-Length:"))?.body, Data())
+        XCTAssertEqual(ActivityServer.parse(
+            rawRequest("GET /activities HTTP/1.1\r\nContent-Length: 0"))?.body, Data())
+    }
+
+    func testParseStillFlagsBrowserRequests() {
+        // The cross-origin guard rides on this flag; the length fix
+        // must not disturb it.
+        XCTAssertTrue(ActivityServer.parse(
+            rawRequest("POST /activity HTTP/1.1\r\nOrigin: https://evil.example"))?
+            .fromBrowser ?? false)
+        XCTAssertTrue(ActivityServer.parse(
+            rawRequest("POST /activity HTTP/1.1\r\nSec-Fetch-Mode: cors"))?
+            .fromBrowser ?? false)
+    }
 }

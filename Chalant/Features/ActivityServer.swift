@@ -70,7 +70,7 @@ final class ActivityServer: @unchecked Sendable {
             }
             var data = buffer
             if let chunk { data.append(chunk) }
-            guard data.count <= 512 * 1024 else {
+            guard data.count <= Self.maxBody else {
                 self.respond(connection, status: "413 Payload Too Large", body: #"{"ok":false}"#)
                 return
             }
@@ -84,7 +84,11 @@ final class ActivityServer: @unchecked Sendable {
         }
     }
 
-    private struct Request {
+    /// The largest request the server will hold in memory, and the
+    /// ceiling every declared Content-Length is measured against.
+    static let maxBody = 512 * 1024
+
+    struct Request {
         var method: String
         var path: String
         var body: Data
@@ -96,7 +100,7 @@ final class ActivityServer: @unchecked Sendable {
         var fromBrowser: Bool
     }
 
-    private static func parse(_ data: Data) -> Request? {
+    static func parse(_ data: Data) -> Request? {
         guard let headerEnd = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
         guard let head = String(data: data[..<headerEnd.lowerBound], encoding: .utf8) else { return nil }
         let lines = head.components(separatedBy: "\r\n")
@@ -119,6 +123,13 @@ final class ActivityServer: @unchecked Sendable {
                     .trimmingCharacters(in: .whitespaces)
                 return Int(value)
             } ?? 0
+        // Int() accepts a sign, so "-1" parsed cleanly and then sailed
+        // past a guard written for non-negative lengths; prefix() traps
+        // on a negative, so one line of nc from any local process took
+        // the whole app down. The cap is the same one receive() holds
+        // the buffer to, so a length no body could ever satisfy is
+        // refused here rather than waited on.
+        guard contentLength >= 0, contentLength <= Self.maxBody else { return nil }
         let body = data[headerEnd.upperBound...]
         guard body.count >= contentLength else { return nil }
         return Request(
