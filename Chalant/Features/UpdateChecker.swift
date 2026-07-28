@@ -31,6 +31,7 @@ final class UpdateChecker: ObservableObject {
             try? await Task.sleep(nanoseconds: 30_000_000_000)
             await self?.check()
         }
+        self.timer?.invalidate()
         let timer = Timer.scheduledTimer(
             withTimeInterval: 24 * 3600, repeats: true
         ) { [weak self] _ in
@@ -38,6 +39,15 @@ final class UpdateChecker: ObservableObject {
         }
         timer.tolerance = 3600
         self.timer = timer
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    deinit {
+        timer?.invalidate()
     }
 
     /// One fetch for both the daily check and the "what's new" verb:

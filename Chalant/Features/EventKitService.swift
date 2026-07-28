@@ -101,6 +101,9 @@ final class EventKitService: ObservableObject {
     @Published private(set) var nextEvent: DayEvent?
 
     private var glanceTimer: Timer?
+    /// The change-notice token, kept so it can be handed back. Block
+    /// observers are retained by the centre until it is.
+    private var storeObserver: NSObjectProtocol?
 
     /// Access was asked for and refused; the glance says so instead
     /// of showing an empty day.
@@ -187,15 +190,35 @@ final class EventKitService: ObservableObject {
     /// plus the store's change notification for edits made elsewhere.
     func startGlanceTicker() {
         recomputeNext()
+        // A second call used to leak the first timer and its observer,
+        // doubling both the tick rate and the work each change notice
+        // caused, permanently and invisibly.
+        stopGlanceTicker()
         let timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.recomputeNext() }
         }
         timer.tolerance = 5
         glanceTimer = timer
-        NotificationCenter.default.addObserver(
+        storeObserver = NotificationCenter.default.addObserver(
             forName: .EKEventStoreChanged, object: store, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.recomputeNext() }
+        }
+    }
+
+    func stopGlanceTicker() {
+        glanceTimer?.invalidate()
+        glanceTimer = nil
+        if let storeObserver {
+            NotificationCenter.default.removeObserver(storeObserver)
+        }
+        storeObserver = nil
+    }
+
+    deinit {
+        glanceTimer?.invalidate()
+        if let storeObserver {
+            NotificationCenter.default.removeObserver(storeObserver)
         }
     }
 

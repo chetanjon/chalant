@@ -42,9 +42,22 @@ final class ClipboardStore: ObservableObject {
     }
 
     func start() {
+        // Called twice, this would leak the first timer to the run loop
+        // and poll the pasteboard at double the rate for the life of
+        // the app, with nothing to show that it had happened.
+        timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.poll() }
         }
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    deinit {
+        timer?.invalidate()
     }
 
     private func poll() {

@@ -49,13 +49,23 @@ final class ChatController: NSObject, ObservableObject {
 
     @Published private(set) var isLoading = true
     private var lastServiceRaw: String?
+    /// Kept so deinit can hand it back; the centre holds the block
+    /// until it is, and this one fires on every defaults write the app
+    /// makes, which is a lot of them.
+    private var serviceObserver: NSObjectProtocol?
+
+    deinit {
+        if let serviceObserver {
+            NotificationCenter.default.removeObserver(serviceObserver)
+        }
+    }
 
     override init() {
         super.init()
         lastServiceRaw = UserDefaults.standard.string(forKey: Self.serviceKey)
         // The settings picker writes a default; the pane follows
         // without a relaunch, but only if it was ever opened.
-        NotificationCenter.default.addObserver(
+        serviceObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
             object: nil,
             queue: .main

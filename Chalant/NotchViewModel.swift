@@ -8,6 +8,24 @@ final class NotchViewModel: ObservableObject {
     /// typed goes here, only the shape of the wedge.
     static let log = Logger(subsystem: "com.cj.chalant", category: "island")
 
+    /// Observer tokens, kept so deinit can hand them back. A block
+    /// observer is retained by its centre until the token returns.
+    private var motionObserver: NSObjectProtocol?
+    #if DEBUG
+    private var debugObserver: NSObjectProtocol?
+    #endif
+
+    deinit {
+        if let motionObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(motionObserver)
+        }
+        #if DEBUG
+        if let debugObserver {
+            DistributedNotificationCenter.default().removeObserver(debugObserver)
+        }
+        #endif
+    }
+
     enum IslandState {
         case collapsed
         case listening
@@ -215,7 +233,7 @@ final class NotchViewModel: ObservableObject {
         // the frontmost app), so autonomous verification posts the
         // sentence by distributed notification instead:
         //   Notification name com.cj.chalant.debug.submit, text in object.
-        DistributedNotificationCenter.default().addObserver(
+        debugObserver = DistributedNotificationCenter.default().addObserver(
             forName: Notification.Name("com.cj.chalant.debug.submit"),
             object: nil,
             queue: .main
@@ -444,7 +462,7 @@ final class NotchViewModel: ObservableObject {
         #endif
         // Theme.Feel reads the system Reduce Motion flag at render
         // time; nudge the tree when it flips so the change is live.
-        NSWorkspace.shared.notificationCenter.addObserver(
+        motionObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil,
             queue: .main

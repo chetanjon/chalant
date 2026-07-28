@@ -18,9 +18,19 @@ final class SystemStatsController: ObservableObject {
 
     func start() {
         refresh()
+        timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    deinit {
+        timer?.invalidate()
     }
 
     private func refresh() {
