@@ -187,12 +187,20 @@ enum SystemVolume {
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        var value: CFString = "" as CFString
-        var size = UInt32(MemoryLayout<CFString>.size)
+        // CoreAudio writes a +1 CFStringRef into this slot and expects
+        // the caller to release it. Handing it an ARC-managed CFString
+        // meant handing C a variable ARC also believed it owned, which
+        // is what the compiler was warning about: the retain the
+        // property handed over was never balanced, and the placeholder
+        // ARC thought was in there was released on ARC's terms.
+        // Unmanaged says who owns what, and takeRetainedValue consumes
+        // exactly the retain CoreAudio gave us.
+        var value: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
         guard AudioObjectGetPropertyData(
             id, &address, 0, nil, &size, &value
-        ) == noErr else { return nil }
-        return value as String
+        ) == noErr, let string = value?.takeRetainedValue() else { return nil }
+        return string as String
     }
 
     private static func defaultOutputDevice() -> AudioObjectID? {
