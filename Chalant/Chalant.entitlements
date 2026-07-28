@@ -13,10 +13,20 @@
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
 
-	<!-- The now-playing adapter is a bundled framework loaded by the
-	     system perl, which is signed by Apple, not by us. Library
-	     validation reads that as a stranger and refuses the load. -->
-	<key>com.apple.security.cs.disable-library-validation</key>
-	<true/>
+	<!-- Deliberately absent: com.apple.security.cs.disable-library-validation.
+	     It was here for the now-playing adapter, on the reasoning that
+	     the system perl loads a framework Apple did not sign. But
+	     library validation is enforced per process, and perl is its own
+	     process, so this app's entitlement never governed that load at
+	     all. Chalant does not link or dlopen the framework either
+	     (project.yml sets link: false, and nothing imports it).
+
+	     It was not free to keep. This app holds Apple Events, the
+	     microphone, Contacts, Calendars, Reminders, Screen Recording
+	     and Accessibility, and it signs with a pinned identity so those
+	     grants persist across builds. The entitlement would let any
+	     foreign-signed dylib dropped into the bundle inherit all of it.
+	     Verified by removing it and confirming the adapter still
+	     streams now-playing. -->
 </dict>
 </plist>
