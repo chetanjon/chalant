@@ -1,10 +1,16 @@
 import AudioToolbox
 import AVFoundation
+import os
 import Speech
 import SwiftUI
 
 @MainActor
 final class VoiceController: NSObject, ObservableObject {
+    /// The session lifecycle, and only the lifecycle. What was said
+    /// never comes near this: a transcript carries the body of every
+    /// dictated message, and Console is the wrong place for it.
+    static let log = Logger(subsystem: "com.cj.chalant", category: "voice")
+
     @Published var transcript = ""
     @Published var level: CGFloat = 0
     /// Why nothing was heard, when the answer is a permission or
@@ -84,6 +90,13 @@ final class VoiceController: NSObject, ObservableObject {
     private var fileTask: SFSpeechRecognitionTask?
     private var rescueTimeout: DispatchWorkItem?
 
+    /// Which session the user currently wants. The permission dialogs
+    /// are answered on their own schedule, and a grant that lands after
+    /// the hold was released used to walk all the way into startCapture
+    /// and leave the mic live with nobody listening. Every async hop
+    /// carries the number it started under and stands down if it moved.
+    private var sessionGeneration = 0
+
     func begin() {
         transcript = ""
         level = 0
@@ -105,18 +118,26 @@ final class VoiceController: NSObject, ObservableObject {
         finishTimeout = nil
         finishCompletion = nil
 
+        sessionGeneration += 1
+        let generation = sessionGeneration
+
         // The mic first: without it the tap hears pure silence and the
         // session ends in "heard nothing" with no clue why. Ask
         // explicitly instead of hoping the engine start triggers it.
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
-            ensureSpeechAuthorization()
+            ensureSpeechAuthorization(generation: generation)
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
                 Task { @MainActor in
                     guard let self else { return }
+                    guard generation == self.sessionGeneration else {
+                        Self.log.notice(
+                            "mic grant landed for session \(generation), now on \(self.sessionGeneration); standing down")
+                        return
+                    }
                     if granted {
-                        self.ensureSpeechAuthorization()
+                        self.ensureSpeechAuthorization(generation: generation)
                     } else {
                         self.failure = "Mic access is off. System Settings, Privacy, Microphone."
                     }
@@ -130,7 +151,7 @@ final class VoiceController: NSObject, ObservableObject {
     /// Speech recognition consent, awaited on first run rather than
     /// fired and forgotten (which let the first session start while
     /// the prompt was still on screen and hear nothing).
-    private func ensureSpeechAuthorization() {
+    private func ensureSpeechAuthorization(generation: Int) {
         switch SFSpeechRecognizer.authorizationStatus() {
         case .authorized:
             startSession()
@@ -138,6 +159,11 @@ final class VoiceController: NSObject, ObservableObject {
             SFSpeechRecognizer.requestAuthorization { [weak self] status in
                 Task { @MainActor in
                     guard let self else { return }
+                    guard generation == self.sessionGeneration else {
+                        Self.log.notice(
+                            "speech grant landed for session \(generation), now on \(self.sessionGeneration); standing down")
+                        return
+                    }
                     if status == .authorized {
                         self.startSession()
                     } else {
@@ -252,6 +278,13 @@ final class VoiceController: NSObject, ObservableObject {
         self.request = request
 
         let input = audioEngine.inputNode
+        // A tap already on the bus makes installTap raise an Objective-C
+        // exception, which Swift cannot catch: the app does not fail
+        // here, it dies. Clearing the bus unconditionally costs nothing
+        // when it is already empty and is the only thing that does not
+        // depend on every teardown path having run first.
+        audioEngine.stop()
+        input.removeTap(onBus: 0)
         if var deviceID = pinDeviceID, let unit = input.audioUnit {
             let status = AudioUnitSetProperty(
                 unit,
@@ -386,6 +419,9 @@ final class VoiceController: NSObject, ObservableObject {
     /// Stop capture, wait for the recognizer's final transcription
     /// (with a safety timeout), then hand back the words.
     func end(completion: @escaping (String) -> Void) {
+        // The hold is over, so a permission grant still in flight is
+        // for a session nobody is waiting on any more.
+        sessionGeneration += 1
         watchdogWork?.cancel()
         watchdogWork = nil
         restoreInputGain()
@@ -403,6 +439,7 @@ final class VoiceController: NSObject, ObservableObject {
 
     /// Tear down without delivering anything, the user cancelled.
     func cancel() {
+        sessionGeneration += 1
         watchdogWork?.cancel()
         watchdogWork = nil
         restoreInputGain()
