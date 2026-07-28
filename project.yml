@@ -71,6 +71,10 @@ targets:
         # the code that already opted into concurrency, which is all of
         # this app, and the tree builds clean under it.
         SWIFT_STRICT_CONCURRENCY: targeted
+        # One Objective-C file, for the one thing Swift cannot do:
+        # catch an NSException. AVAudioEngine raises rather than returns
+        # for a family of misuse, and Swift has no catch that sees it.
+        SWIFT_OBJC_BRIDGING_HEADER: Chalant/Chalant-Bridging-Header.h
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         # Notarization requires the hardened runtime, so the doors it
         # closes are opened one at a time in Chalant.entitlements.

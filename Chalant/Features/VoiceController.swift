@@ -403,7 +403,14 @@ final class VoiceController: NSObject, ObservableObject {
         // the audio thread, so they need no guarding.
         var buffersSinceHop = 0
         var batchPeak: Float = 0
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        // Guarded, not merely avoided. Clearing the bus above removes
+        // the cause we know about; this removes the whole failure mode.
+        // installTap reports every kind of misuse by raising, and a
+        // raise is not a failure Swift can see, it is the end of the
+        // process. Belt and braces on the one call that has already
+        // killed this app once.
+        let installed = AudioGuard.succeeds("installTap") {
+            input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             request.append(buffer)
             try? file?.write(from: buffer)
             guard let channel = buffer.floatChannelData?[0] else { return }
@@ -426,14 +433,38 @@ final class VoiceController: NSObject, ObservableObject {
                 self.level = live
                 if live > self.peakLevel { self.peakLevel = live }
             }
+            }
+        }
+        guard installed else {
+            // The graph is in whatever state the raise left it, so it
+            // gets torn down rather than trusted. Another ear may still
+            // work; if none does, say so instead of listening to
+            // nothing.
+            audioEngine.stop()
+            AudioGuard.succeeds("removeTap after a failed install") {
+                input.removeTap(onBus: 0)
+            }
+            if !advanceToNextCandidate(reason: "the mic refused to open") {
+                failure = "The microphone refused to open. Try again,"
+                    + " or pick another input in Chalant settings."
+            }
+            return
         }
 
         audioEngine.prepare()
         do {
-            try audioEngine.start()
+            // start() throws for the ordinary refusals and raises for a
+            // graph it cannot run, so both doors need watching.
+            try AudioGuard.attempt("engine start") {
+                try? self.audioEngine.start()
+            }
+            guard audioEngine.isRunning else { throw AudioGuard.Failure(
+                name: "NotRunning", reason: "engine did not start", during: "engine start") }
         } catch {
             failure = "Mic didn't start. System Settings, Privacy, Microphone."
-            audioEngine.inputNode.removeTap(onBus: 0)
+            AudioGuard.succeeds("removeTap after a failed start") {
+                self.audioEngine.inputNode.removeTap(onBus: 0)
+            }
             return
         }
         activeDeviceName = currentCandidate?.name ?? SystemVolume.inputDeviceName()
@@ -744,14 +775,25 @@ final class VoiceController: NSObject, ObservableObject {
             completion("could not open /tmp/chalant-tap.caf for \(format)")
             return
         }
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
-            try? file.write(from: buffer)
+        // Same bus, same raise, same dead process: this harness has no
+        // in-flight guard at all, so calling it twice inside its own
+        // 3.5 second window used to be a guaranteed crash. Guarded, it
+        // reports the clash instead, which is also how the guard itself
+        // gets proven in a running app.
+        let installed = AudioGuard.succeeds("debug installTap") {
+            input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+                try? file.write(from: buffer)
+            }
+        }
+        guard installed else {
+            completion("tap refused: the bus is already in use, and the app survived it")
+            return
         }
         audioEngine.prepare()
         do {
             try audioEngine.start()
         } catch {
-            input.removeTap(onBus: 0)
+            AudioGuard.succeeds("debug removeTap") { input.removeTap(onBus: 0) }
             completion("engine start failed: \(error.localizedDescription)")
             return
         }

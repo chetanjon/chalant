@@ -281,13 +281,24 @@ final class NoiseEngine {
         let player = AVAudioPlayerNode()
         let pitch = AVAudioUnitTimePitch()
         let eq = AVAudioUnitEQ(numberOfBands: 3)
-        engine.attach(player)
-        engine.attach(pitch)
-        engine.attach(eq)
-        // Wired once, at the one format every buffer is converted to.
-        engine.connect(player, to: pitch, format: Self.chainFormat)
-        engine.connect(pitch, to: eq, format: Self.chainFormat)
-        engine.connect(eq, to: engine.mainMixerNode, format: Self.chainFormat)
+        // connect raises rather than returns when it cannot make a
+        // graph out of what it is given, so a format the hardware will
+        // not take ends the process rather than the sound. Guarded, the
+        // chain is simply not built and the chip says so.
+        let wired = AudioGuard.succeeds("build the ambience chain") {
+            engine.attach(player)
+            engine.attach(pitch)
+            engine.attach(eq)
+            // Wired once, at the one format every buffer is converted to.
+            engine.connect(player, to: pitch, format: Self.chainFormat)
+            engine.connect(pitch, to: eq, format: Self.chainFormat)
+            engine.connect(eq, to: engine.mainMixerNode, format: Self.chainFormat)
+        }
+        guard wired else {
+            isRunning = false
+            onSilence?("the sound chain wouldn't build")
+            return
+        }
         filePlayer = player
         timePitch = pitch
         fileEQ = eq
@@ -402,10 +413,20 @@ final class NoiseEngine {
                 }
             }
 
-            player.stop()
-            player.scheduleBuffer(buffer, at: nil, options: .loops)
-            player.volume = 0
-            player.play()
+            // scheduleBuffer raises when the buffer's format does not
+            // match the chain it was wired for, which is exactly the
+            // mismatch these three recordings ship with.
+            let scheduled = AudioGuard.succeeds("schedule the loop") {
+                player.stop()
+                player.scheduleBuffer(buffer, at: nil, options: .loops)
+                player.volume = 0
+                player.play()
+            }
+            guard scheduled else {
+                self.isRunning = false
+                self.onSilence?("that sound wouldn't play")
+                return
+            }
             self.fadePlayer(to: self.fileLevel * voice.trim, duration: 0.8)
             self.playerColor = color
         }
@@ -468,8 +489,15 @@ final class NoiseEngine {
             }
             return noErr
         }
-        engine.attach(node)
-        engine.connect(node, to: engine.mainMixerNode, format: nil)
+        let attached = AudioGuard.succeeds("attach the synth") {
+            engine.attach(node)
+            engine.connect(node, to: engine.mainMixerNode, format: nil)
+        }
+        guard attached else {
+            isRunning = false
+            onSilence?("the synth wouldn't attach")
+            return
+        }
         source = node
     }
 

@@ -401,6 +401,42 @@ final class ChalantTests: XCTestCase {
         XCTAssertEqual(ActionEngine.textingPrefix(of: "text mom hi"), "text ")
     }
 
+    // MARK: Catching what Swift cannot catch
+
+    func testAudioGuardTurnsARaisedExceptionIntoAThrow() {
+        // If the shim does not work, this test does not fail. It takes
+        // the whole runner down with it, which is exactly what the app
+        // did on a second tap.
+        do {
+            try AudioGuard.attempt("deliberate raise") {
+                NSException(
+                    name: .invalidArgumentException,
+                    reason: "required condition is false: nullptr == Tap()",
+                    userInfo: nil
+                ).raise()
+            }
+            XCTFail("the raise should have arrived as a throw")
+        } catch let failure as AudioGuard.Failure {
+            XCTAssertEqual(failure.name, NSExceptionName.invalidArgumentException.rawValue)
+            XCTAssertEqual(failure.reason, "required condition is false: nullptr == Tap()")
+            // The site is carried too, so a log names the call and not
+            // just the symptom.
+            XCTAssertEqual(failure.during, "deliberate raise")
+        } catch {
+            XCTFail("wrong error type: \(error)")
+        }
+    }
+
+    func testAudioGuardLetsOrdinaryWorkThrough() {
+        var ran = false
+        XCTAssertNoThrow(try AudioGuard.attempt("ordinary") { ran = true })
+        XCTAssertTrue(ran)
+        XCTAssertTrue(AudioGuard.succeeds("ordinary") { })
+        XCTAssertFalse(AudioGuard.succeeds("raises") {
+            NSException(name: .genericException, reason: "no", userInfo: nil).raise()
+        })
+    }
+
     // MARK: Reading why the last run died
 
     func testCrashReasonNamesASwiftTrapOutright() {
