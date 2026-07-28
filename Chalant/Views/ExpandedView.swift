@@ -115,7 +115,8 @@ struct ExpandedView: View {
                 WelcomeView(model: model)
                     .transition(.opacity)
             case .none:
-                Switcher(model: model, todayEnabled: todayEnabled, tools: enabledTools)
+                Switcher(model: model, updates: model.updates,
+                         todayEnabled: todayEnabled, tools: enabledTools)
                 panel
                     .transition(.opacity)
             }

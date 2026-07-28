@@ -6,8 +6,13 @@ import SwiftUI
 /// icon.
 struct Switcher: View {
     @ObservedObject var model: NotchViewModel
+    /// Observed in its own right: a nested ObservableObject does not
+    /// republish through its owner, so watching `model` alone would
+    /// leave the mark below arriving only on the next unrelated redraw.
+    @ObservedObject var updates: UpdateChecker
     let todayEnabled: Bool
     let tools: [NotchViewModel.Tab]
+    @Environment(\.chalantAccent) private var accent
 
     var body: some View {
         HStack(spacing: Theme.Space.xs) {
@@ -29,11 +34,39 @@ struct Switcher: View {
             .padding(.horizontal, Theme.Space.xs)
             .background(Capsule().fill(Theme.surface))
             Spacer(minLength: 0)
+            // A new version announces itself once, in a glance that
+            // lives eight seconds. Miss it and nothing on screen said
+            // so any more: the button that installs it sits in the
+            // settings footer, and you would have to go looking on a
+            // hunch. This app's own owner sat on an old build that way
+            // while a newer one was out. The mark keeps the news
+            // standing without adding a surface or nagging: it is the
+            // gear already there, wearing a dot until you have looked.
             HoverGlyphButton(symbol: "gearshape", scale: .m, tint: Theme.textTertiary) {
                 withAnimation(Theme.Motion.content) { model.pane = .settings }
             }
+            .overlay(alignment: .topTrailing) {
+                if let latest = updates.latest {
+                    Circle()
+                        .fill(accent)
+                        .frame(width: 6, height: 6)
+                        // Ringed in the island's own backdrop so the
+                        // dot keeps a clean edge against the gear's
+                        // teeth rather than merging with them.
+                        .overlay(Circle().strokeBorder(Theme.backdropTop, lineWidth: 1.5))
+                        // Onto the gear's shoulder, not floating off
+                        // its corner: the button's padding puts plain
+                        // topTrailing out in empty space, where it read
+                        // as a stray pixel instead of a mark on this.
+                        .offset(x: -2, y: 4)
+                        .transition(.opacity)
+                        .help("Chalant \(latest) is out")
+                        .allowsHitTesting(false)
+                }
+            }
         }
         .animation(Theme.Motion.content, value: model.tab)
+        .animation(Theme.Motion.content, value: updates.latest)
     }
 
     static func symbol(_ tab: NotchViewModel.Tab) -> String {
