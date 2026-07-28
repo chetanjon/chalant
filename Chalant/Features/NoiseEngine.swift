@@ -1,4 +1,5 @@
 import AVFoundation
+import os
 
 /// Ambience with two engines: brown/white/pink are synthesized in real
 /// time (a source node, click-free gain ramps); rain, fire and cafe are
@@ -24,7 +25,7 @@ final class NoiseEngine {
 
     private let engine = AVAudioEngine()
     private var source: AVAudioSourceNode?
-    private var current: NoiseColor = .brown
+    private var current: NoiseColor = .brown { didSet { publishControls() } }
 
     // Recording chain: player -> time-pitch -> EQ -> mixer.
     private var filePlayer: AVAudioPlayerNode?
@@ -44,7 +45,7 @@ final class NoiseEngine {
     private var synthLevel: Float { baseSynthLevel / 0.7 * userVolume }
     /// Read on the render thread; the mixer stays at unity so it can't
     /// scale the recording chain along with the synth.
-    private var synthVol: Float = 0.35
+    private var synthVol: Float = 0.35 { didSet { publishControls() } }
 
     func setVolume(_ volume: Float) {
         userVolume = max(0, min(1, volume))
@@ -56,7 +57,43 @@ final class NoiseEngine {
 
     // Smoothed synth gain, advanced on the render thread.
     private var gain: Float = 0
-    private var targetGain: Float = 0
+    private var targetGain: Float = 0 { didSet { publishControls() } }
+
+    /// What the render thread needs from the main actor, handed across
+    /// as one snapshot instead of three properties read live.
+    ///
+    /// The three were plain vars that main wrote while the audio thread
+    /// read them mid-buffer. Nothing tore audibly, but nothing promised
+    /// not to either: this class is neither @MainActor nor Sendable and
+    /// the project builds at Swift 5.9, so the compiler had no opinion.
+    private struct Controls {
+        var target: Float = 0
+        var color: NoiseColor = .brown
+        var volume: Float = 0.35
+    }
+
+    private var controlLock = os_unfair_lock_s()
+    private var publishedControls = Controls()
+    /// The render thread's own copy. Read and written there and nowhere
+    /// else, so it needs no guarding of its own.
+    private var renderControls = Controls()
+
+    private func publishControls() {
+        os_unfair_lock_lock(&controlLock)
+        publishedControls = Controls(target: targetGain, color: current, volume: synthVol)
+        os_unfair_lock_unlock(&controlLock)
+    }
+
+    /// Take the newest controls if the lock happens to be free, and
+    /// otherwise carry on with last buffer's. A render callback that
+    /// waits on a lock held by the main thread is a dropout, and one
+    /// more buffer at the previous volume is a perfectly good answer.
+    private func refreshRenderControls() {
+        if os_unfair_lock_trylock(&controlLock) {
+            renderControls = publishedControls
+            os_unfair_lock_unlock(&controlLock)
+        }
+    }
 
     // Filter state
     private var brownLast: Float = 0
@@ -413,8 +450,13 @@ final class NoiseEngine {
     // MARK: Synthesis
 
     private func setupSynth() {
-        let node = AVAudioSourceNode { [weak self] _, _, frameCount, audioBufferList -> OSStatus in
-            guard let self else { return noErr }
+        // unowned(unsafe), not weak: the node is owned by the engine,
+        // which is owned by this object, so it cannot outlive us. A
+        // weak capture takes the runtime's side-table lock once per
+        // buffer, on the audio thread, which is the one place that must
+        // never wait on a lock the rest of the app can hold.
+        let node = AVAudioSourceNode { [unowned(unsafe) self] _, _, frameCount, audioBufferList -> OSStatus in
+            self.refreshRenderControls()
             let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
             for frame in 0..<Int(frameCount) {
                 let sample = self.nextSample()
@@ -434,12 +476,13 @@ final class NoiseEngine {
     private func nextSample() -> Float {
         // ~50ms exponential ramp at 48k, click-free starts, stops,
         // pauses, and color changes.
-        gain += (targetGain - gain) * 0.0004
-        if targetGain == 0, gain < 0.0005 { return 0 }
+        let target = renderControls.target
+        gain += (target - gain) * 0.0004
+        if target == 0, gain < 0.0005 { return 0 }
 
         let white = Float.random(in: -1...1)
         let value: Float
-        switch current {
+        switch renderControls.color {
         case .white:
             // Softened: raw full-band white is piercing.
             whiteLast += 0.45 * (white - whiteLast)
@@ -462,7 +505,7 @@ final class NoiseEngine {
         case .rain, .fire, .cafe:
             value = 0
         }
-        return max(-1, min(1, value)) * gain * synthVol
+        return max(-1, min(1, value)) * gain * renderControls.volume
     }
 
     /// The shared two-pole smoothing lowpass, cascaded one-poles.
