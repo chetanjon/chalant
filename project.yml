@@ -47,8 +47,13 @@ targets:
         CFBundleDisplayName: Chalant
         NSAppleEventsUsageDescription: Chalant controls your music players and sends the Messages you dictate, nothing more.
         NSContactsUsageDescription: Chalant looks up the person you name so a message reaches the right number.
-        NSMicrophoneUsageDescription: Hold the notch to talk. Audio is processed on this Mac only.
-        NSSpeechRecognitionUsageDescription: Turns your words into actions, on this Mac only.
+        # Dictation is macOS's own, and macOS sends it to Apple when the
+        # local speech model is not ready (VoiceController sets
+        # requiresOnDeviceRecognition false on purpose, for reliability).
+        # These two strings are the one place a user actually reads, so
+        # they say what really happens rather than what we would prefer.
+        NSMicrophoneUsageDescription: "Hold the notch to talk. macOS turns your speech into text on this Mac when its local model is ready, and through Apple's dictation service when it is not."
+        NSSpeechRecognitionUsageDescription: "Turns your words into actions. The transcription is macOS dictation, which runs on this Mac when its local model is ready and through Apple's service when it is not. The answer itself never leaves."
         NSRemindersFullAccessUsageDescription: Chalant creates the reminders you set.
         NSCalendarsFullAccessUsageDescription: Chalant adds events and reads today's agenda.
     settings:

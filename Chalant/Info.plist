@@ -33,11 +33,11 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Hold the notch to talk. Audio is processed on this Mac only.</string>
+	<string>Hold the notch to talk. macOS turns your speech into text on this Mac when its local model is ready, and through Apple's dictation service when it is not.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Chalant creates the reminders you set.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Turns your words into actions, on this Mac only.</string>
+	<string>Turns your words into actions. The transcription is macOS dictation, which runs on this Mac when its local model is ready and through Apple's service when it is not. The answer itself never leaves.</string>
 	<key>SUEnableAutomaticChecks</key>
 	<false/>
 	<key>SUFeedURL</key>

@@ -740,6 +740,10 @@ final class VoiceController: NSObject, ObservableObject {
             return
         }
         let request = SFSpeechURLRecognitionRequest(url: URL(fileURLWithPath: path))
+        // Deliberately unlike the two live paths, which allow Apple's
+        // service. This one exists to answer "does the local model work
+        // on this machine", the question that made the live paths stop
+        // insisting on it, so it must keep insisting.
         request.requiresOnDeviceRecognition = true
         recognizer.recognitionTask(with: request) { result, error in
             Task { @MainActor in
