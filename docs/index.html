@@ -375,7 +375,9 @@
   <section class="note">
     <h2>First open</h2>
     <p>
-      Homebrew works too: <code>brew install --cask chetanjon/chalant/chalant</code>.
+      Homebrew skips the ceremony entirely:
+      <code>brew install --cask chetanjon/chalant/chalant --no-quarantine</code>.
+      That flag is why: macOS only challenges apps it sees arrive from a browser.
       macOS will ask once: System Settings, Privacy and Security, Open Anyway.
       That is the only ceremony there will ever be: from then on the island
       mentions a new version once and one click installs it in place.
