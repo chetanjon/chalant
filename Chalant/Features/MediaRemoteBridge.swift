@@ -298,16 +298,17 @@ final class MediaRemoteBridge: ObservableObject {
         // just as well. This runs on every track change that arrives
         // without artwork, which for browser media is most of them, so
         // the ceiling matters: take the EOF by force if it is late.
-        let watchdog = DispatchWorkItem {
-            guard process.isRunning else { return }
-            process.terminate()
+        // Nothing cancels this: it asks whether the child is still
+        // running before acting, so arriving after a clean exit costs
+        // one no-op. A cancellable work item would have to be captured
+        // by the reader below, and DispatchWorkItem is not Sendable.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+            if process.isRunning { process.terminate() }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: watchdog)
         // Drained off-pipe before termination: the payload can far
         // exceed the 64KB pipe buffer, and a blocked writer never exits.
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let data = out.fileHandleForReading.readDataToEndOfFile()
-            watchdog.cancel()
             guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 Task { @MainActor in self?.snapshotTrace = "parse-fail:\(data.count)b" }
                 return
