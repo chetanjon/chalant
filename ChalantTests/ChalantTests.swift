@@ -401,6 +401,61 @@ final class ChalantTests: XCTestCase {
         XCTAssertEqual(ActionEngine.textingPrefix(of: "text mom hi"), "text ")
     }
 
+    // MARK: Sessions measure time, not ticks
+
+    /// These timers live on the main run loop, so the run loop has to
+    /// actually turn for them to fire. Task.sleep frees the main actor
+    /// but promises nothing about running it, which makes any assertion
+    /// after one a coin toss.
+    private func letTheClockRun(_ seconds: TimeInterval) {
+        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+    }
+
+    func testCountdownReadsTheWallClockNotTheTickCount() {
+        // Counting one second per fired tick meant a Mac that slept
+        // owed nothing for the time it was away: a 25 minute session
+        // across a closed lid came back with 25 minutes still to run.
+        let countdown = CountdownController()
+        countdown.start(minutes: 1)
+        XCTAssertEqual(countdown.remaining, 60)
+        XCTAssertTrue(countdown.isActive)
+        letTheClockRun(1.2)
+        XCTAssertLessThan(countdown.remaining, 60)
+        XCTAssertGreaterThan(countdown.remaining, 55)
+        countdown.stop()
+        XCTAssertFalse(countdown.isActive)
+        XCTAssertEqual(countdown.remaining, 0)
+    }
+
+    func testCountdownDisplayStillFormatsFromTheDerivedReading() {
+        let countdown = CountdownController()
+        countdown.start(minutes: 25)
+        XCTAssertEqual(countdown.display, "25:00")
+        XCTAssertEqual(countdown.progress, 0, accuracy: 0.01)
+        countdown.stop()
+    }
+
+    func testFocusPauseHoldsTheReadingAndResumeCarriesItOn() {
+        let focus = FocusController(ambience: AmbienceController())
+        focus.start(work: 1)
+        XCTAssertEqual(focus.remaining, 60)
+        letTheClockRun(1.2)
+        let beforePause = focus.remaining
+        XCTAssertLessThan(beforePause, 60)
+
+        focus.togglePause()
+        // Paused, the wall clock keeps moving and the reading must not.
+        letTheClockRun(1.2)
+        XCTAssertEqual(focus.remaining, beforePause)
+
+        focus.togglePause()
+        // Resumed, it owes the time since resuming and not the pause.
+        letTheClockRun(1.2)
+        XCTAssertLessThan(focus.remaining, beforePause)
+        XCTAssertGreaterThan(focus.remaining, beforePause - 5)
+        focus.stop()
+    }
+
     // MARK: What the voice trail is allowed to remember
 
     func testVoiceLogHoldsBackTheWordsOfAMessage() {

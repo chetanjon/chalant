@@ -9,6 +9,12 @@ final class CountdownController: ObservableObject {
     var onComplete: ((Int) -> Void)?
     private var timer: Timer?
     private var total = 0
+    /// When this countdown is actually due. Ticks were being counted,
+    /// one per fire, which meant a Mac that slept owed nothing for the
+    /// time it was away: a 25 minute session across a closed lid came
+    /// back with 25 minutes still to go. The stopwatch already measures
+    /// against the wall clock for the same reason; this does too now.
+    private var deadline: Date?
 
     /// 0...1 through the countdown, for the shared ring treatment.
     var progress: Double {
@@ -19,22 +25,33 @@ final class CountdownController: ObservableObject {
     func start(minutes: Int) {
         remaining = max(1, minutes) * 60
         total = remaining
+        deadline = Date().addingTimeInterval(TimeInterval(remaining))
         isActive = true
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
+        // .common, not the default mode: a menu held open or a window
+        // being resized parks a default-mode timer, and a countdown
+        // that stops counting while you look at a menu is a bug you
+        // only notice afterwards.
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     func stop() {
         timer?.invalidate()
         timer = nil
+        deadline = nil
         isActive = false
         remaining = 0
     }
 
     private func tick() {
-        remaining -= 1
+        guard let deadline else { return }
+        // Derived, never decremented, so a missed or late fire costs
+        // nothing and sleeping costs exactly what it should.
+        remaining = max(0, Int(deadline.timeIntervalSinceNow.rounded(.up)))
         if remaining <= 0 {
             let minutes = total / 60
             stop()
@@ -161,6 +178,11 @@ final class FocusController: ObservableObject {
         return 1 - Double(remaining) / Double(phaseTotal)
     }
 
+    /// When the current phase is due, nil while paused. Same lesson as
+    /// the countdown above: counting ticks meant a Mac that slept owed
+    /// nothing for the time it was away.
+    private var deadline: Date?
+
     /// Position within the 4-round pomodoro set, 1-based.
     var roundInSet: Int {
         (cycle - 1) % cyclesPerLongRest + 1
@@ -170,8 +192,7 @@ final class FocusController: ObservableObject {
         workMinutes = max(1, work)
         cycle = 1
         phase = .work
-        remaining = workMinutes * 60
-        phaseTotal = remaining
+        beginPhase(seconds: workMinutes * 60)
         isActive = true
         isPaused = false
         // A soundscape the user already chose wins over the default.
@@ -195,9 +216,13 @@ final class FocusController: ObservableObject {
         guard isActive else { return }
         isPaused.toggle()
         if isPaused {
+            // Hold the reading; the deadline stops meaning anything
+            // until the session is picked back up.
+            deadline = nil
             ambience.pause()
-        } else if phase == .work {
-            ambience.resume()
+        } else {
+            deadline = Date().addingTimeInterval(TimeInterval(remaining))
+            if phase == .work { ambience.resume() }
         }
     }
 
@@ -210,21 +235,36 @@ final class FocusController: ObservableObject {
     func stop() {
         timer?.invalidate()
         timer = nil
+        deadline = nil
         isActive = false
         isPaused = false
         ambience.stop()
     }
 
+    /// Every phase change goes through here so the reading and the
+    /// clock it is derived from can never disagree.
+    private func beginPhase(seconds: Int) {
+        remaining = seconds
+        phaseTotal = seconds
+        deadline = Date().addingTimeInterval(TimeInterval(seconds))
+    }
+
     private func run() {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
+        // .common so a held-open menu or a live resize cannot park the
+        // session, the way the default mode does.
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     private func tick() {
-        guard !isPaused else { return }
-        remaining -= 1
+        guard !isPaused, let deadline else { return }
+        // Derived, never decremented: a late or missed fire costs
+        // nothing, and time asleep costs exactly what it should.
+        remaining = max(0, Int(deadline.timeIntervalSinceNow.rounded(.up)))
         guard remaining <= 0 else { return }
         let finishedWork = phase == .work
         if finishedWork {
@@ -241,15 +281,14 @@ final class FocusController: ObservableObject {
         if phase == .work {
             phase = .rest
             let longBreak = cycle % cyclesPerLongRest == 0
-            remaining = (longBreak ? longRestMinutes : restMinutes) * 60
+            beginPhase(seconds: (longBreak ? longRestMinutes : restMinutes) * 60)
             ambience.pause()
         } else {
             cycle += 1
             phase = .work
-            remaining = workMinutes * 60
+            beginPhase(seconds: workMinutes * 60)
             if !isPaused { ambience.resume() }
         }
-        phaseTotal = remaining
     }
 
     var display: String {
