@@ -111,6 +111,7 @@ final class NotchWindowController {
     /// when a session begins anywhere in the system.
     private let dragPasteboard = NSPasteboard(name: .drag)
     private var dragBaseline = 0
+    private var lastBaselineSample = Date.distantPast
     /// Pending open-intent check; the pointer must linger in the zone,
     /// not just cross it.
     private var openIntentWork: DispatchWorkItem?
@@ -605,7 +606,17 @@ final class NotchWindowController {
         guard Date() >= dockPinnedUntil else { return }
         let buttonDown = NSEvent.pressedMouseButtons & 1 != 0
         guard buttonDown else {
-            dragBaseline = dragPasteboard.changeCount
+            // changeCount is an IPC round trip to the pasteboard
+            // server, and this branch is the one the pointer is in
+            // almost always: it ran twenty times a second for the whole
+            // life of the app, on battery, to hold a number that only
+            // matters at the instant a drag begins. Twice a second
+            // holds it just as well.
+            let now = Date()
+            if now.timeIntervalSince(lastBaselineSample) > 0.5 {
+                lastBaselineSample = now
+                dragBaseline = dragPasteboard.changeCount
+            }
             hideDropDock()
             return
         }

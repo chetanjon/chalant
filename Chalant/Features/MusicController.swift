@@ -405,11 +405,42 @@ final class MusicController: ObservableObject {
 
     // MARK: - Poll (enrichment beside the bridge, full when it is gone)
 
+    /// How many polls are still waiting on the script lane.
+    ///
+    /// The lane is serial and the tick is every second, but an
+    /// AppleScript to a beachballing player, or one sitting behind an
+    /// automation dialog, blocks for far longer than that. Every tick
+    /// meanwhile queued another, so the backlog grew without limit and
+    /// then drained all at once as a burst of answers about a track
+    /// that had long since changed. Commands are never gated this way,
+    /// only the poll: a dropped poll is corrected a second later, and a
+    /// dropped "pause" is a bug.
+    private var pollInFlight = false
+    private var pollStartedAt = Date.distantPast
+
     private func refreshTick(force: Bool = false) {
+        // A script that never comes back must only slow the polling,
+        // never end it: without this the gate below would be a permanent
+        // stop the first time a player wedged, which trades one bug for
+        // a quieter one.
+        if pollInFlight, Date().timeIntervalSince(pollStartedAt) > 10 {
+            pollInFlight = false
+        }
+        guard force || !pollInFlight else { return }
         if bridge.adapterAvailable {
             enrichmentPoll(force: force)
         } else {
             legacyFullPoll(force: force)
+        }
+    }
+
+    /// Wraps a poll's script so the gate above can see it finish.
+    private func poll(_ source: String, then completion: @escaping @MainActor @Sendable (String?) -> Void) {
+        pollInFlight = true
+        pollStartedAt = Date()
+        run(source) { [weak self] output in
+            self?.pollInFlight = false
+            completion(output)
         }
     }
 
@@ -436,7 +467,7 @@ final class MusicController: ObservableObject {
                 return (sound volume as string) & "\(separator)" & (shuf as string)
             end tell
             """
-            run(source) { [weak self] output in
+            poll(source) { [weak self] output in
                 guard let self, let output else { return }
                 guard force || Date() >= self.suppressPollUntil else { return }
                 let parts = output.components(separatedBy: self.separator)
@@ -519,7 +550,7 @@ final class MusicController: ObservableObject {
             return s & "\(separator)" & t & "\(separator)" & a & "\(separator)" & al & "\(separator)" & pos & "\(separator)" & dur & "\(separator)" & vol & "\(separator)" & shuf & "\(separator)" & art
         end tell
         """
-        run(source) { [weak self] output in
+        poll(source) { [weak self] output in
             self?.applyLegacy(output, from: app, force: force)
         }
     }

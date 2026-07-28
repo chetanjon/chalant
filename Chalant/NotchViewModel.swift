@@ -175,8 +175,12 @@ final class NotchViewModel: ObservableObject {
     /// Default pill for notch-less displays, so Chalant works on any Mac.
     static let defaultNotchSize = CGSize(width: 196, height: 34)
 
-    /// Physical notch size measured by NotchWindowController.
-    var notchSize = NotchViewModel.defaultNotchSize
+    /// Physical notch size measured by NotchWindowController. Published
+    /// because the whole collapsed geometry is derived from it; it was
+    /// a plain var, and the controller compensated with a manual
+    /// objectWillChange *after* mutating, which is the wrong order and
+    /// left any other writer silently rendering stale geometry.
+    @Published var notchSize = NotchViewModel.defaultNotchSize
     /// Debug-driven request to open the shortcut add flow; the
     /// Shortcuts pane consumes and resets it.
     @Published var wantsShortcutAdd = false
@@ -184,8 +188,9 @@ final class NotchViewModel: ObservableObject {
     @Published var wantsShortcutPick = false
 
     /// True on the built-in display where hardware occupies the middle
-    /// of the island; external displays keep that space usable.
-    var hasPhysicalNotch = false
+    /// of the island; external displays keep that space usable. Same
+    /// reason as notchSize above.
+    @Published var hasPhysicalNotch = false
 
     /// Set by the window controller so the panel can grab key focus.
     var onExpandChange: ((Bool) -> Void)?

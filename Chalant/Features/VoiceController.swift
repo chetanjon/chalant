@@ -390,6 +390,19 @@ final class VoiceController: NSObject, ObservableObject {
         liveFile = try? AVAudioFile(forWriting: fileURL, settings: format.settings)
         liveFileURL = liveFile == nil ? nil : fileURL
         let file = liveFile
+        // The tap fires about 43 times a second at 1024 frames, and
+        // each hop set a @Published that NotchRootView observes
+        // directly, so every one invalidated the whole island view
+        // tree. The bars cannot show that many frames anyway. Batching
+        // three buffers cuts it to roughly 14 without losing a peak,
+        // because the loudest of the batch is what gets carried over:
+        // the silence watchdog reads peakLevel to tell a dead mic from
+        // a quiet room, and it must not be sampled away.
+        //
+        // These two are touched only here, and the tap runs serially on
+        // the audio thread, so they need no guarding.
+        var buffersSinceHop = 0
+        var batchPeak: Float = 0
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             request.append(buffer)
             try? file?.write(from: buffer)
@@ -401,9 +414,15 @@ final class VoiceController: NSObject, ObservableObject {
                 sum += channel[index] * channel[index]
             }
             let rms = sqrt(sum / Float(frames))
+            batchPeak = max(batchPeak, rms)
+            buffersSinceHop += 1
+            guard buffersSinceHop >= 3 else { return }
+            let loudest = batchPeak
+            buffersSinceHop = 0
+            batchPeak = 0
             Task { @MainActor in
                 guard let self else { return }
-                let live = CGFloat(min(1, rms * 18))
+                let live = CGFloat(min(1, loudest * 18))
                 self.level = live
                 if live > self.peakLevel { self.peakLevel = live }
             }
