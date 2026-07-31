@@ -155,8 +155,9 @@ final class FocusController: ObservableObject {
     /// so neither ever counts.
     var onWorkPhaseComplete: ((Int) -> Void)?
 
-    /// Fires with the new round number when a break runs to zero on
-    /// its own. A skipped break stays silent: the user is present.
+    /// Fires with the round it closed when a break runs to zero on
+    /// its own, which now also ends the session. A skipped break
+    /// stays silent: the user is present.
     var onBreakComplete: ((Int) -> Void)?
 
     /// Shared ambience owner, focus drives it, never a private engine.
@@ -232,6 +233,14 @@ final class FocusController: ObservableObject {
         advance()
     }
 
+    /// Test seam: drag the deadline into the past so the next tick
+    /// sees an expired phase, without waiting out real minutes.
+    func expirePhaseNow() {
+        guard isActive else { return }
+        deadline = .distantPast
+        tick()
+    }
+
     func stop() {
         timer?.invalidate()
         timer = nil
@@ -266,17 +275,23 @@ final class FocusController: ObservableObject {
         // nothing, and time asleep costs exactly what it should.
         remaining = max(0, Int(deadline.timeIntervalSinceNow.rounded(.up)))
         guard remaining <= 0 else { return }
+        // A phase that runs all the way down ends the session. It used
+        // to roll into the next phase, then the next cycle, on its own,
+        // forever; a user who stepped away came back to a machine still
+        // grinding rounds (user, 2026-07-31). One start, one bout: the
+        // next one begins only when the user asks. Skip stays live
+        // while a session runs, the user is present when they press it.
         let finishedWork = phase == .work
+        stop()
         if finishedWork {
             onWorkPhaseComplete?(workMinutes)
-        }
-        advance()
-        if !finishedWork {
+        } else {
             onBreakComplete?(roundInSet)
         }
         NSSound.beep()
     }
 
+    /// Explicit skips only; the clock running out never lands here.
     private func advance() {
         if phase == .work {
             phase = .rest

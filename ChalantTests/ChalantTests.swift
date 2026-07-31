@@ -535,6 +535,34 @@ final class ChalantTests: XCTestCase {
         focus.stop()
     }
 
+    func testFocusSessionEndsAfterOneBout() {
+        // A phase that runs to zero ends the session. It used to roll
+        // into the break, then the next round, forever; a user who
+        // stepped away came back to a machine still grinding rounds
+        // (user, 2026-07-31).
+        let focus = FocusController(ambience: AmbienceController())
+        var banked: Int?
+        focus.onWorkPhaseComplete = { banked = $0 }
+        focus.start(work: 25)
+        focus.expirePhaseNow()
+        XCTAssertFalse(focus.isActive, "a finished work phase must end the session, not start a break")
+        XCTAssertEqual(banked, 25)
+
+        // Skip is the user's own hand; it still walks phases mid-session.
+        var breakEnded = false
+        focus.onBreakComplete = { _ in breakEnded = true }
+        focus.start(work: 25)
+        focus.skip()
+        XCTAssertTrue(focus.isActive)
+        XCTAssertEqual(focus.phase, .rest)
+
+        // And a break that runs out ends the session the same way.
+        focus.expirePhaseNow()
+        XCTAssertFalse(focus.isActive)
+        XCTAssertTrue(breakEnded)
+        focus.stop()
+    }
+
     // MARK: What the voice trail is allowed to remember
 
     func testVoiceLogHoldsBackTheWordsOfAMessage() {

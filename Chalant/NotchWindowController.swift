@@ -333,6 +333,8 @@ final class NotchWindowController {
 
         // Displays come and go; the island follows. Without this the
         // panel stayed on a screen layout that no longer existed.
+        // The immediate reposition is not enough on a hot plug: the
+        // layout settles in stages, so re-checks follow (below).
         observers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -341,7 +343,23 @@ final class NotchWindowController {
             Task { @MainActor in
                 self?.reposition()
                 self?.rebuildSlivers()
+                self?.scheduleSettleChecks()
             }
+        })
+        // The window server moves windows around during a display
+        // shuffle, sometimes after the last screen-parameters
+        // notification has already fired, which left the island
+        // sitting mid-screen on a freshly plugged monitor until some
+        // unrelated event nudged it home. The panel never moves
+        // legitimately except through placement(), so any move that
+        // leaves the frame wrong gets snapped straight back; when the
+        // frame is already right, reposition() is a no-op.
+        observers.append(NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.reposition() }
         })
         // The "Show edge when idle" switch governs the slivers too.
         observers.append(NotificationCenter.default.addObserver(
@@ -369,6 +387,7 @@ final class NotchWindowController {
                         self?.reposition()
                         self?.rebuildSlivers()
                         self?.panel?.orderFrontRegardless()
+                        self?.scheduleSettleChecks()
                     }
                 }
             )
@@ -379,6 +398,28 @@ final class NotchWindowController {
             Task { @MainActor in self?.rebuildSlivers() }
         }
         rebuildSlivers()
+    }
+
+    /// A hot plug settles in stages: a brief mirror, a mode switch,
+    /// then the saved arrangement lands, and the window server can
+    /// still be moving windows after the last notification. One
+    /// reposition at notification time reads geometry that is still
+    /// in flux, so a couple of delayed re-checks follow every display
+    /// change. The frame-compare guards make them free once nothing
+    /// is moving.
+    private var settleChecks: [DispatchWorkItem] = []
+
+    private func scheduleSettleChecks() {
+        settleChecks.forEach { $0.cancel() }
+        settleChecks.removeAll()
+        for delay: TimeInterval in [1.0, 2.5] {
+            let work = DispatchWorkItem { [weak self] in
+                self?.reposition()
+                self?.rebuildSlivers()
+            }
+            settleChecks.append(work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
     }
 
     /// Re-measure and re-place after a display change: a notch
@@ -468,6 +509,20 @@ final class NotchWindowController {
     /// utterance); only a real difference rebuilds the panels.
     private var sliverSignature = ""
 
+    /// The room is larger than the bead so IslandShape's eave flare
+    /// and belly, which draw beyond the shape's own rect, are not
+    /// clipped into a squared lozenge (review-caught; the source of
+    /// three rounds of "it looks wrong"). The bead is centered inside
+    /// this room by SliverHint.
+    private func sliverFrame(on screen: NSScreen) -> NSRect {
+        NSRect(
+            x: screen.frame.midX - Self.sliverRoom.width / 2,
+            y: screen.frame.maxY - Self.sliverRoom.height,
+            width: Self.sliverRoom.width,
+            height: Self.sliverRoom.height
+        )
+    }
+
     func rebuildSlivers() {
         let wantsEdge = UserDefaults.standard.object(forKey: "idleEdgeOn") as? Bool ?? true
         // The bead is the ONLY resting visual on a notchless display;
@@ -490,22 +545,24 @@ final class NotchWindowController {
         let signature = targets
             .map { "\($0.displayID ?? 0)@\(Int($0.frame.midX)),\(Int($0.frame.maxY))" }
             .joined(separator: "|")
-        guard signature != sliverSignature else { return }
+        guard signature != sliverSignature else {
+            // Same targets, but the window server may have dragged a
+            // bead somewhere else during a display shuffle; the
+            // signature cannot see that, so check the panels
+            // themselves and put any strays back.
+            for (sliver, screen) in zip(sliverPanels, targets) {
+                let frame = sliverFrame(on: screen)
+                if sliver.frame != frame {
+                    sliver.setFrame(frame, display: true)
+                }
+            }
+            return
+        }
         sliverSignature = signature
         sliverPanels.forEach { $0.orderOut(nil) }
         sliverPanels.removeAll()
         for screen in targets {
-            // The panel is larger than the bead so IslandShape's eave
-            // flare and belly, which draw beyond the shape's own rect,
-            // are not clipped into a squared lozenge (review-caught;
-            // the source of three rounds of "it looks wrong"). The
-            // bead is centered inside this room by SliverHint.
-            let width = Self.sliverRoom.width, height = Self.sliverRoom.height
-            let frame = NSRect(
-                x: screen.frame.midX - width / 2,
-                y: screen.frame.maxY - height,
-                width: width, height: height
-            )
+            let frame = sliverFrame(on: screen)
             let sliver = NSPanel(
                 contentRect: frame,
                 styleMask: [.borderless, .nonactivatingPanel],
@@ -857,6 +914,7 @@ final class NotchWindowController {
         hoverTimer?.invalidate()
         showRetry?.cancel()
         repositionRetry?.cancel()
+        settleChecks.forEach { $0.cancel() }
         if let napActivity {
             ProcessInfo.processInfo.endActivity(napActivity)
         }
