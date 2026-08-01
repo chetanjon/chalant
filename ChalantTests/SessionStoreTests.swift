@@ -739,6 +739,30 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(repaired.collapsed.first, .battery)
     }
 
+    func testGlancePrecedenceReordersLikeTheRowsDo() {
+        var layout = IslandLayout.standard
+        layout.collapsed = [.agents, .timers, .event, .battery]
+        // Downward: the same off-by-one both lists now share.
+        XCTAssertEqual(
+            layout.movingCollapsed(.agents, to: 3).collapsed,
+            [.timers, .event, .agents, .battery]
+        )
+        // Upward.
+        XCTAssertEqual(
+            layout.movingCollapsed(.battery, to: 0).collapsed,
+            [.battery, .agents, .timers, .event]
+        )
+    }
+
+    func testTheSharedReorderHandlesItsEdges() {
+        let items = ["a", "b", "c"]
+        XCTAssertEqual(items.movingItem(at: 0, to: 0), items)
+        // Out of range is a no-op rather than a crash: indices come
+        // from a drop, and a list can change under one.
+        XCTAssertEqual(items.movingItem(at: 9, to: 0), items)
+        XCTAssertEqual(items.movingItem(at: 2, to: 99), ["a", "b", "c"])
+    }
+
     func testLayoutsAndPresetsRoundTripThroughJSON() throws {
         let presets = LayoutPreset.defaults()
         XCTAssertEqual(presets.count, LayoutPreset.count)

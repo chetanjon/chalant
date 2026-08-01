@@ -134,23 +134,22 @@ struct IslandLayout: Codable, Equatable, Sendable {
     var placed: [IslandElement] { rows.flatMap(\.elements) }
 
     /// Moves the row holding `element` so it sits at `index`.
-    ///
-    /// The arithmetic is the whole of it: pulling the row out first
-    /// shifts everything below it up by one, so a drop *below* the
-    /// original position would otherwise land a row too far down. Off by
-    /// one here is invisible until you drag downward and the row stops
-    /// in the wrong place, which is why it lives here and not inside a
-    /// view where it cannot be tested.
     func moving(_ element: IslandElement, to index: Int) -> IslandLayout {
-        var moved = self
-        guard let from = rows.firstIndex(where: { $0.elements.contains(element) }),
-              from != index
+        guard let from = rows.firstIndex(where: { $0.elements.contains(element) })
         else { return self }
-        let row = moved.rows.remove(at: from)
-        let target = from < index ? index - 1 : index
-        moved.rows.insert(row, at: min(max(target, 0), moved.rows.count))
+        var moved = self
+        moved.rows = rows.movingItem(at: from, to: index)
         return moved
     }
+
+    /// Reorders which glance outranks which beside the notch.
+    func movingCollapsed(_ item: CollapsedItem, to index: Int) -> IslandLayout {
+        guard let from = collapsed.firstIndex(of: item) else { return self }
+        var moved = self
+        moved.collapsed = collapsed.movingItem(at: from, to: index)
+        return moved
+    }
+
 
     /// Repairs a layout so it is safe to render.
     ///
@@ -264,5 +263,24 @@ struct LayoutPreset: Codable, Equatable, Identifiable, Sendable {
         (0..<count).map {
             LayoutPreset(id: $0, name: "Preset \($0 + 1)", layout: .standard)
         }
+    }
+}
+
+extension Array {
+    /// Moves the item at `from` so it sits at `to`.
+    ///
+    /// The arithmetic is the whole of it: pulling the item out first
+    /// shifts everything below it up by one, so a drop *below* the
+    /// original position would otherwise land one place too far. Off by
+    /// one here is invisible until you drag downward and the row stops
+    /// in the wrong place — which is why both reorderable lists share
+    /// this rather than each carrying its own copy of the bug.
+    func movingItem(at from: Int, to index: Int) -> [Element] {
+        guard indices.contains(from), from != index else { return self }
+        var copy = self
+        let item = copy.remove(at: from)
+        let target = from < index ? index - 1 : index
+        copy.insert(item, at: Swift.min(Swift.max(target, 0), copy.count))
+        return copy
     }
 }

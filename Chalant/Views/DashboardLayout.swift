@@ -40,6 +40,18 @@ struct LayoutSection: View {
                 }
             }
 
+            SettingCard(title: "Beside the notch") {
+                ForEach(Array(layout.layout.collapsed.enumerated()), id: \.element.id) {
+                    index, item in
+                    if index > 0 { SettingDivider() }
+                    collapsedRow(item, at: index)
+                }
+                SettingNote(
+                    "Only one of these fits beside a shut island, so this is an order of "
+                    + "precedence: the first with something to say gets the space."
+                )
+            }
+
             presets
 
             SettingCard(title: "Start over") {
@@ -105,6 +117,42 @@ struct LayoutSection: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(row.elements.map(\.title).joined(separator: " and ")), row \(index + 1)")
+    }
+
+    /// One glance in the precedence order. Same drag as the rows above,
+    /// with its rank shown: "first with something to say" is a rule the
+    /// list has to make visible, or the order looks arbitrary.
+    private func collapsedRow(_ item: CollapsedItem, at index: Int) -> some View {
+        HStack(spacing: Theme.Space.m) {
+            Image(systemName: "line.3.horizontal")
+                .font(Theme.Fonts.icon(.s))
+                .foregroundStyle(Theme.textGhost)
+                .frame(width: 14)
+                .accessibilityHidden(true)
+            Text("\(index + 1)")
+                .font(Theme.Fonts.microMono)
+                .foregroundStyle(Theme.textTertiary)
+                .frame(width: 14, alignment: .trailing)
+            Text(item.title)
+                .font(Theme.Fonts.body)
+                .foregroundStyle(Theme.textPrimary)
+            Spacer(minLength: Theme.Space.m)
+        }
+        .contentShape(Rectangle())
+        .draggable(item.rawValue) {
+            Text(item.title)
+                .font(Theme.Fonts.body)
+                .padding(Theme.Space.m)
+                .background(Theme.surface)
+        }
+        .dropDestination(for: String.self) { items, _ in
+            guard let raw = items.first, let moved = CollapsedItem(rawValue: raw)
+            else { return false }
+            layout.apply(layout.layout.movingCollapsed(moved, to: index))
+            return true
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(item.title), priority \(index + 1)")
     }
 
     // MARK: Presets
