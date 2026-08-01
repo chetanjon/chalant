@@ -63,7 +63,10 @@ Running under `/loop-loop`: Opus architects, Sonnet composes, ponytail governs
 code and review, and no product code is written before the founder approves a
 plan doc. Artifacts live in `_bmad-output/loop-loop/`.
 
-- **Displays not applying** — approved 2026-08-01, composer running.
+- **Displays not applying** — SHIPPED 2026-08-01, `56cd56c` + `7ffcafc`.
+  Reviewed, 178 tests green. **Not yet seen on a screen** — the machine was
+  in use, so the app was never relaunched. Summary:
+  `_bmad-output/loop-loop/displays-not-applying-summary-2026-08-01.md`.
   Plan: `_bmad-output/loop-loop/displays-not-applying-plan-2026-08-01.md`.
   Three real faults: Width/Height are read by nothing in Pill mode (they feed
   `notchSize`, whose consumers are gated on `hasPhysicalNotch`, which is
@@ -72,13 +75,16 @@ plan doc. Artifacts live in `_bmad-output/loop-loop/`.
   draw" rule and the bead's "should I yield" rule are separate. Plus clamshell
   (lid shut, on power) as a first-class case: every screen resolves to pill.
 
-- **Message an agent session from the notch** — NEXT, feasibility under
-  investigation. Pick a running session in the island, speak or type, and have
+- **Message an agent session from the notch** — feasibility CONFIRMED,
+  architect drafting the plan. Pick a running session in the island, speak or type, and have
   that session act on it. The microphone moves to serve this. Whether an
   external process can put text into a *running* session is the open question;
-  the likely supported path is a Stop hook that blocks with the queued message
-  as its reason, polled from Chalant's existing local API. Nothing will be
-  built on an assumed mechanism.
+  the Stop hook carries it: `hookSpecificOutput.additionalContext` lands at
+  the end of a turn and the conversation continues so Claude acts on it
+  (verified against the hooks reference). Delivery is turn-boundary only,
+  never mid-run, which the interface has to be honest about. Session
+  discovery also gets better: `claude agents --json` and `~/.claude/sessions/`
+  give the live set with busy/idle, replacing transcript scraping.
 
 ## Phase 3 — sessions become useful
 
