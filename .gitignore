@@ -9,10 +9,11 @@ build/
 
 # Agent tooling scratch, not part of the app
 _bmad/
-_bmad-output/
+# Ignore the contents, not the directory itself: git never descends into an
+# excluded directory, so a negation under one never applies.
+_bmad-output/*
 # ...except the loop-loop record: plan docs are the approved contract
 # and summary docs are the durable history. Both belong in the repo.
 !_bmad-output/loop-loop/
-!_bmad-output/loop-loop/**
 .bmad-loop/
 .claude/
