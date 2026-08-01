@@ -418,6 +418,7 @@ struct GlanceSection: View {
     @AppStorage("glanceSession") private var glanceSession = true
     @AppStorage("glanceBattery") private var glanceBattery = false
     @AppStorage("collapsedSong") private var collapsedSong = true
+    @AppStorage("glanceAgents") private var glanceAgents = true
     @AppStorage("glanceNextEvent") private var glanceNextEvent = true
     @AppStorage("showCalendar") private var showCalendar = false
 
@@ -444,6 +445,13 @@ struct GlanceSection: View {
                 SettingNote(
                     "The song's name beside the resting island, on displays without a notch. A "
                     + "MacBook keeps the bare pill so it still matches the hardware."
+                )
+                SettingDivider()
+                SettingToggle(label: "Agents running", isOn: $glanceAgents)
+                SettingNote(
+                    "A mark beside the notch while Claude Code or Cursor sessions are going. It "
+                    + "breathes while they work and holds still, in the accent, the moment one is "
+                    + "waiting on you."
                 )
                 SettingDivider()
                 SettingToggle(label: "Battery", isOn: $glanceBattery)

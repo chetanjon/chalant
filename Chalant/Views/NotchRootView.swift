@@ -13,6 +13,7 @@ struct NotchRootView: View {
     @ObservedObject var focusStats: FocusStatsStore
     @ObservedObject var events: EventKitService
     @ObservedObject var activities: ActivityStore
+    @ObservedObject var sessions: SessionStore
     @State private var pressStarted: Date?
 
     // Declared so the view re-renders (and re-reads Theme.Motion) the
@@ -30,6 +31,7 @@ struct NotchRootView: View {
     @AppStorage("glanceSession") private var glanceSession = true
     @AppStorage("glanceBattery") private var glanceBattery = false
     @AppStorage("collapsedSong") private var collapsedSong = true
+    @AppStorage("glanceAgents") private var glanceAgents = true
     @AppStorage("islandMaterial") private var islandMaterial = "ink"
     @AppStorage("glassClarity") private var glassClarity = "balanced"
     @AppStorage("glanceNextEvent") private var glanceNextEvent = true
@@ -53,6 +55,7 @@ struct NotchRootView: View {
         self.focusStats = model.focusStats
         self.events = model.events
         self.activities = model.activities
+        self.sessions = model.sessions
     }
 
     /// The event about to start, if the user lets the glance carry it.
@@ -63,6 +66,47 @@ struct NotchRootView: View {
     /// The camera mark's earned width, one number for both pill
     /// families (two hand-derived constants drifted apart once).
     private static let cameraMarkWidth: CGFloat = 16
+
+    /// Agents running right now, and whether any wants an answer.
+    ///
+    /// `stale` is deliberately excluded: a session Chalant has only
+    /// inferred is quiet is not something to put a live mark next to.
+    private var agentGlance: (count: Int, waiting: Bool)? {
+        guard glanceAgents else { return nil }
+        let live = sessions.sessions.filter { $0.state == .working || $0.state == .needsInput }
+        guard !live.isEmpty else { return nil }
+        return (live.count, live.contains { $0.state == .needsInput })
+    }
+
+    /// The agents' mark on the resting island: their count, breathing
+    /// while they work, steady and accented the moment one wants you.
+    ///
+    /// It stops moving when a session is waiting on purpose. A pulse
+    /// says "still going"; an answer is needed now, and something that
+    /// keeps moving reads as something still busy.
+    @ViewBuilder
+    private func agentMarkGlance(_ agents: (count: Int, waiting: Bool)) -> some View {
+        let content = HStack(spacing: 3) {
+            AgentMark(agent: .claude, size: 10)
+            if agents.count > 1 {
+                Text("\(agents.count)")
+                    .font(Theme.Fonts.microMono)
+            }
+        }
+        .foregroundStyle(agents.waiting ? accent : Theme.textSecondary)
+        .help(agents.waiting
+              ? "An agent is waiting for you"
+              : "\(agents.count) agent\(agents.count == 1 ? "" : "s") running")
+
+        if agents.waiting || !Theme.Feel.current.ambient {
+            content
+        } else {
+            TimelineView(.animation(minimumInterval: 1 / 12)) { context in
+                let t = context.date.timeIntervalSinceReferenceDate
+                content.opacity(0.55 + 0.45 * (0.5 + 0.5 * sin(t / (1.1 * Theme.Motion.ambientSlow))))
+            }
+        }
+    }
 
     /// Anything counting: a pomodoro, a plain timer, the stopwatch.
     private var sessionActive: Bool {
@@ -119,6 +163,7 @@ struct NotchRootView: View {
     /// Width the right-of-camera glance needs on notched displays.
     private var notchSideNeed: CGFloat {
         if model.glanceToast != nil { return 124 }
+        if agentGlance != nil { return 44 }
         if sessionOnRight { return 30 }
         // A session shows only its left-wing ring and countdown; the
         // right-side FOCUS 1 OF 4 label was width without value
@@ -619,6 +664,8 @@ struct NotchRootView: View {
     private var notchSideContent: some View {
         if let toast = model.glanceToast {
             toastGlance(toast)
+        } else if let agents = agentGlance {
+            agentMarkGlance(agents)
         } else if sessionOnRight {
             // Music holds the left wing, so the session mark crosses
             // over; the running session outranks quieter glances.
