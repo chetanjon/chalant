@@ -251,6 +251,20 @@ final class SessionStoreTests: XCTestCase {
         )
     }
 
+    func testTheAgentBurstFillsItsFrameAndIsNotEmpty() {
+        // Hand-built from trigonometry, so it is easy to produce
+        // something empty or collapsed to a dot while still compiling.
+        let rect = CGRect(x: 0, y: 0, width: 24, height: 24)
+        let path = ClaudeBurstShape().path(in: rect)
+        XCTAssertFalse(path.isEmpty)
+        let box = path.boundingRect
+        // Rays reach the rim on both axes rather than hugging the hub.
+        XCTAssertEqual(box.width, rect.width, accuracy: 1.5)
+        XCTAssertEqual(box.height, rect.height, accuracy: 1.5)
+        XCTAssertEqual(box.midX, rect.midX, accuracy: 0.5)
+        XCTAssertEqual(box.midY, rect.midY, accuracy: 0.5)
+    }
+
     // MARK: Cursor chats
 
     func testCursorMetaYieldsAWorkingDirectoryAndATime() throws {

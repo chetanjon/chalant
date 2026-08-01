@@ -139,7 +139,7 @@ struct SessionsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xl) {
-            SettingCard(title: "Claude Code") {
+            SettingCard(title: "Running now") {
                 if sessions.sessions.isEmpty {
                     Text("No sessions found.")
                         .font(Theme.Fonts.body)
@@ -158,14 +158,20 @@ struct SessionsSection: View {
 
             SettingCard(title: "How this works") {
                 SettingNote(
-                    "Chalant reads the session files Claude Code already writes to ~/.claude/projects. "
-                    + "Nothing is sent anywhere, and sessions that were already running when Chalant "
-                    + "launched show up too."
+                    "Chalant reads what these tools already write — Claude Code under "
+                    + "~/.claude/projects, Cursor under ~/.cursor/chats. There is nothing to "
+                    + "install, nothing is sent anywhere, and sessions already running when "
+                    + "Chalant launched show up too."
                 )
                 SettingDivider()
                 SettingNote(
                     "A session that has gone quiet for five minutes reads as last seen rather than "
                     + "running: a file that stopped changing is not proof a session ended."
+                )
+                SettingDivider()
+                SettingNote(
+                    "Codex is missing because it keeps no session records on disk. It would need to "
+                    + "tell Chalant directly, the way the chalant command already does."
                 )
             }
         }
@@ -174,6 +180,8 @@ struct SessionsSection: View {
     private func row(_ session: SessionStore.Session) -> some View {
         HStack(spacing: Theme.Space.m) {
             // Glyph as well as tint, so state survives greyscale.
+            AgentMark(agent: session.agent, size: 12)
+                .foregroundStyle(Theme.textTertiary)
             Image(systemName: Self.symbol(session.state))
                 .font(Theme.Fonts.icon(.s))
                 .foregroundStyle(session.state == .needsInput ? accent : Theme.textSecondary)

@@ -57,6 +57,10 @@ struct AgentSessionsStrip: View {
 
     private func row(_ session: SessionStore.Session) -> some View {
         HStack(spacing: Theme.Space.m) {
+            // Whose session it is, then what it wants. Two rows from
+            // two different agents are otherwise identical at a glance.
+            AgentMark(agent: session.agent, size: 11)
+                .foregroundStyle(Theme.textTertiary)
             // Glyph as well as tint: a row that only changed colour
             // would say nothing to anyone reading it in greyscale.
             Image(systemName: session.state == .needsInput
@@ -93,7 +97,7 @@ struct AgentSessionsStrip: View {
         .help(session.cwd)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(session.title), \(Self.place(session)), "
+            "\(session.agent.label): \(session.title), \(Self.place(session)), "
             + (session.state == .needsInput ? "waiting for you" : "working")
         )
     }
