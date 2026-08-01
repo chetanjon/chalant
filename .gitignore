@@ -3,3 +3,12 @@ DerivedData/
 build/
 .DS_Store
 .playwright-mcp/
+.bmad-loop/runs/
+.bmad-loop/cache/
+.bmad-loop/policy.toml
+
+# Agent tooling scratch, not part of the app
+_bmad/
+_bmad-output/
+.bmad-loop/
+.claude/
