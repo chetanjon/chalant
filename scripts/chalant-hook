@@ -1,0 +1,77 @@
+#!/bin/bash
+# Claude Code hook -> the island.
+#
+# Claude Code hands a hook one JSON object on stdin and expects it to
+# be quick and quiet. This reads the session id and the message out of
+# that and pushes a pill, so a session that wants you says so on the
+# island instead of only in whatever terminal it happens to be in.
+#
+# Install by adding to ~/.claude/settings.json:
+#
+#   {
+#     "hooks": {
+#       "Notification": [
+#         { "hooks": [ { "type": "command",
+#                        "command": "/full/path/to/scripts/chalant-hook" } ] }
+#       ],
+#       "Stop": [
+#         { "hooks": [ { "type": "command",
+#                        "command": "/full/path/to/scripts/chalant-hook" } ] }
+#       ]
+#     }
+#   }
+#
+# A hook that fails must never be the reason a session stops, so every
+# path here exits 0 and stays silent. Chalant not running is the
+# ordinary case, not an error worth interrupting anybody over.
+set -uo pipefail
+
+PORT="${CHALANT_PORT:-4242}"
+BASE="http://localhost:$PORT"
+TOKEN_FILE="${CHALANT_TOKEN_FILE:-$HOME/Library/Application Support/Chalant/api-token}"
+TOKEN="${CHALANT_TOKEN:-}"
+if [ -z "$TOKEN" ] && [ -r "$TOKEN_FILE" ]; then
+  TOKEN="$(cat "$TOKEN_FILE")"
+fi
+[ -n "$TOKEN" ] || exit 0
+
+PAYLOAD="$(cat)"
+[ -n "$PAYLOAD" ] || exit 0
+
+# python3 rather than sed: this is JSON from another program, and a
+# message with a quote or a newline in it would take a regex apart.
+read -r EVENT SESSION TITLE <<EOF
+$(printf '%s' "$PAYLOAD" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+event = (d.get("hook_event_name") or "").strip() or "Notification"
+session = (d.get("session_id") or "").strip()
+# The folder is what a person recognises a session by; the raw message
+# is often "Claude needs your permission to use Bash", which says
+# nothing about which of five sessions it came from.
+cwd = (d.get("cwd") or "").rstrip("/")
+where = cwd.rsplit("/", 1)[-1] if cwd else ""
+title = where or session[:8] or "a session"
+print(event, session or "-", title.replace(" ", " "))
+' 2>/dev/null)
+EOF
+
+[ -n "${SESSION:-}" ] && [ "${SESSION:-}" != "-" ] || exit 0
+TITLE="${TITLE//$' '/ }"
+
+case "$EVENT" in
+  Notification) STATE="needs-input"; WHAT="$TITLE wants you" ;;
+  Stop)         STATE="done";        WHAT="$TITLE finished" ;;
+  *)            exit 0 ;;
+esac
+
+esc() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read())[1:-1])'; }
+
+curl -s --max-time 2 -H "X-Chalant-Token: $TOKEN" "$BASE/activity" \
+  -d "{\"id\":\"claude-$(esc "$SESSION")\",\"title\":\"$(esc "$WHAT")\",\"state\":\"$STATE\"}" \
+  >/dev/null 2>&1
+
+exit 0

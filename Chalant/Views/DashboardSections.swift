@@ -173,6 +173,12 @@ struct SessionsSection: View {
                     "Codex is missing because it keeps no session records on disk. It would need to "
                     + "tell Chalant directly, the way the chalant command already does."
                 )
+                SettingDivider()
+                SettingNote(
+                    "For a pill the moment a session wants you, point Claude Code's Notification "
+                    + "and Stop hooks at scripts/chalant-hook. Discovery alone cannot know a "
+                    + "session is waiting — only that its file went quiet."
+                )
             }
         }
     }
