@@ -9,16 +9,54 @@ struct ClipboardView: View {
         self.clipboard = model.clipboard
     }
 
+    @State private var query = ""
+    @FocusState private var searching: Bool
+    @Environment(\.chalantAccent) private var accent
+
     var body: some View {
         if clipboard.clips.isEmpty {
             EmptyPaneHint(message: "Whatever you copy lands here on its own, the last 30. Pin or shelf what should stay.")
         } else {
-            HuggingList {
-                ForEach(clipboard.clips) { clip in
-                    ClipRow(clip: clip, model: model, clipboard: clipboard)
+            let shown = ClipboardStore.filtered(clipboard.clips, query: query)
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                // Only once there is enough history to lose something
+                // in. Below that the search field is a control that
+                // costs a row and saves nothing.
+                if clipboard.clips.count > 5 { searchField }
+                if shown.isEmpty {
+                    Text("Nothing copied matches \u{201C}\(query)\u{201D}.")
+                        .font(Theme.Fonts.body)
+                        .foregroundStyle(Theme.textHint)
+                        .padding(.vertical, Theme.Space.m)
+                } else {
+                    HuggingList {
+                        ForEach(shown) { clip in
+                            ClipRow(clip: clip, model: model, clipboard: clipboard)
+                        }
+                    }
                 }
             }
+            .animation(Theme.Motion.content, value: shown.map(\.id))
         }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: Theme.Space.s) {
+            Image(systemName: "magnifyingglass")
+                .font(Theme.Fonts.icon(.xs))
+                .foregroundStyle(Theme.textTertiary)
+            TextField("Search what you copied", text: $query)
+                .textFieldStyle(.plain)
+                .font(Theme.Fonts.body)
+                .focused($searching)
+            if !query.isEmpty {
+                IconActionButton(symbol: "xmark", dim: true) { query = "" }
+                    .help("Clear the search")
+            }
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.s)
+        .chalantField()
     }
 }
 

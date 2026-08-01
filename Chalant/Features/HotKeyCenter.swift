@@ -21,6 +21,7 @@ final class HotKeyCenter {
     enum Action: String, CaseIterable, Identifiable {
         case toggleIsland
         case talk
+        case clipboard
         case openSettings
 
         var id: String { rawValue }
@@ -29,6 +30,7 @@ final class HotKeyCenter {
             switch self {
             case .toggleIsland: return "Open or close the island"
             case .talk: return "Start listening"
+            case .clipboard: return "Open the clipboard"
             case .openSettings: return "Open settings"
             }
         }

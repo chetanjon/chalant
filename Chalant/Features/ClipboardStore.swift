@@ -28,6 +28,33 @@ final class ClipboardStore: ObservableObject {
     /// by recency. Views can render straight through.
     @Published var clips: [Clip] = []
 
+    /// Whether a clip answers to a search.
+    ///
+    /// Case- and diacritic-insensitive, matched anywhere in the content:
+    /// people search for a fragment they remember, not a prefix, and
+    /// they do not remember accents. A file clip matches on its names,
+    /// which is the part a person recalls copying. An image carries no
+    /// text at all, so it can only fail — better than quietly ranking
+    /// it as a match for everything.
+    static func matches(_ clip: Clip, query: String) -> Bool {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return true }
+        let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+        if let text = clip.text, text.range(of: needle, options: options) != nil {
+            return true
+        }
+        return (clip.filePaths ?? []).contains {
+            ($0 as NSString).lastPathComponent.range(of: needle, options: options) != nil
+        }
+    }
+
+    /// The clips a search leaves, in the order they already had. Pinned
+    /// clips are not exempt: a search that still showed them would be
+    /// answering a question nobody asked.
+    static func filtered(_ clips: [Clip], query: String) -> [Clip] {
+        clips.filter { matches($0, query: query) }
+    }
+
     private var timer: Timer?
     private var lastChangeCount = NSPasteboard.general.changeCount
     private let maxClips = 30

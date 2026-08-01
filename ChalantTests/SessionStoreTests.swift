@@ -471,6 +471,55 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(SessionDiscovery.activityPhrase(forTool: "SomeNewTool"), "SomeNewTool")
     }
 
+    // MARK: Searching what you copied
+
+    private func textClip(_ text: String) -> ClipboardStore.Clip {
+        var clip = ClipboardStore.Clip()
+        clip.text = text
+        return clip
+    }
+
+    func testSearchMatchesAnywhereNotJustTheStart() {
+        // People search for the fragment they remember, not a prefix.
+        let clip = textClip("the deployment key is in 1Password")
+        XCTAssertTrue(ClipboardStore.matches(clip, query: "1Password"))
+        XCTAssertTrue(ClipboardStore.matches(clip, query: "deploy"))
+        XCTAssertFalse(ClipboardStore.matches(clip, query: "kubernetes"))
+    }
+
+    func testSearchIgnoresCaseAndAccents() {
+        let clip = textClip("Café Münster")
+        XCTAssertTrue(ClipboardStore.matches(clip, query: "cafe"))
+        XCTAssertTrue(ClipboardStore.matches(clip, query: "MUNSTER"))
+    }
+
+    func testAnEmptySearchKeepsEverything() {
+        // The field starts empty and must not hide the history behind
+        // a query nobody typed.
+        let clips = [textClip("a"), textClip("b")]
+        XCTAssertEqual(ClipboardStore.filtered(clips, query: "").count, 2)
+        XCTAssertEqual(ClipboardStore.filtered(clips, query: "   ").count, 2)
+    }
+
+    func testFilesMatchOnTheirNameNotTheirWholePath() {
+        // The name is what a person remembers copying; matching the
+        // path would make every clip answer to "Users".
+        var clip = ClipboardStore.Clip()
+        clip.filePaths = ["/Users/someone/Documents/invoice-april.pdf"]
+        XCTAssertTrue(ClipboardStore.matches(clip, query: "invoice"))
+        XCTAssertFalse(ClipboardStore.matches(clip, query: "Documents"))
+    }
+
+    func testAnImageCannotMatchASearch() {
+        // It carries no text, so it can only fail — quietly ranking it
+        // as a match for everything would be worse.
+        var clip = ClipboardStore.Clip()
+        clip.imageURL = URL(fileURLWithPath: "/tmp/shot.png")
+        XCTAssertFalse(ClipboardStore.matches(clip, query: "shot"))
+        // But an empty search still leaves it in the list.
+        XCTAssertTrue(ClipboardStore.matches(clip, query: ""))
+    }
+
     // MARK: Island layout
 
     func testTheStandardLayoutIsAlreadyValid() {

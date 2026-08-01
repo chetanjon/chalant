@@ -95,6 +95,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .talk: { [weak controller] in
                 controller?.viewModel.toggleListening()
             },
+            .clipboard: { [weak controller] in
+                guard let model = controller?.viewModel else { return }
+                // Straight to the pane, not merely open: the shortcut
+                // exists to skip the switcher, and landing on Today
+                // would leave the user one click from where they asked
+                // to be.
+                model.tab = .clipboard
+                model.expand()
+            },
             .openSettings: { [weak self] in
                 self?.showDashboard(section: nil)
             },
