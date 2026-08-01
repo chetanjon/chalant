@@ -1,0 +1,104 @@
+import SwiftUI
+
+/// Claude Code sessions running on this Mac, discovered from the
+/// metadata files Claude Code already writes. Only sessions that are
+/// actually going appear: a developer's machine carries months of
+/// history, and listing all of it would push a wall of finished work
+/// into a surface whose whole premise is calm. Nothing running, nothing
+/// rendered — the strip costs an idle island zero pixels.
+///
+/// Named for agents rather than sessions because "session" is already
+/// taken here by the focus/timer strip (`SessionStrip`); the store keeps
+/// Claude Code's own vocabulary, the surface uses the island's.
+struct AgentSessionsStrip: View {
+    @ObservedObject var sessions: SessionStore
+    @Environment(\.chalantAccent) private var accent
+
+    /// Three rows sit beside media, ambience and the switcher without
+    /// the island outgrowing its panel. Beyond that the count carries
+    /// the news, which is all a fourth row would have said anyway.
+    private static let visibleLimit = 3
+
+    /// Working or waiting only. `stale` is honest about what discovery
+    /// can know from a file alone — "last seen", not "running" — and a
+    /// last-seen row is history, not attention.
+    private var live: [SessionStore.Session] {
+        sessions.sessions.filter { $0.state == .working || $0.state == .needsInput }
+    }
+
+    var body: some View {
+        let live = live
+        // Hoisted and explicitly typed: inlined into the `.animation`
+        // below, the map sent the type checker into an expression it
+        // could not solve in reasonable time and the build hung.
+        let liveIDs: [String] = live.map(\.id)
+        if !live.isEmpty {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                ForEach(live.prefix(Self.visibleLimit)) { session in
+                    row(session)
+                }
+                if live.count > Self.visibleLimit {
+                    // The count is the whole point of this line, so it
+                    // reads at the tier for guidance rather than the one
+                    // reserved for marks that say nothing.
+                    Text("\(live.count - Self.visibleLimit) more running")
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textHint)
+                        .padding(.horizontal, Theme.Space.l)
+                }
+            }
+            // Same rule as ActivitiesStrip: the id list, not the rows.
+            // Discovery rewrites `updatedAt` on every rescan, and
+            // animating the sessions themselves re-ran the strip's
+            // animation each time for no visible change.
+            .animation(Theme.Motion.content, value: liveIDs)
+        }
+    }
+
+    private func row(_ session: SessionStore.Session) -> some View {
+        HStack(spacing: Theme.Space.m) {
+            // Glyph as well as tint: a row that only changed colour
+            // would say nothing to anyone reading it in greyscale.
+            Image(systemName: session.state == .needsInput
+                  ? "exclamationmark.circle.fill" : "circle.dashed")
+                .font(Theme.Fonts.icon(.s))
+                .foregroundStyle(session.state == .needsInput ? accent : Theme.textSecondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(session.title)
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(Self.place(session))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+            Text(RelativeAge.short(session.updatedAt))
+                .font(Theme.Fonts.microMono)
+                .foregroundStyle(Theme.textGhost)
+        }
+        .rowInsets()
+        .chalantCard(radius: Theme.Radius.row)
+        // The title is the agent's own summary; which folder it is
+        // working in is the thing a title can leave ambiguous when two
+        // checkouts of the same project are open.
+        .help(session.cwd)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(session.title), \(Self.place(session)), "
+            + (session.state == .needsInput ? "waiting for you" : "working")
+        )
+    }
+
+    /// Folder, then branch when the folder is a repo. The last path
+    /// component alone is what the eye actually matches against the
+    /// terminal it came from; the full path lives in the tooltip.
+    private static func place(_ session: SessionStore.Session) -> String {
+        let folder = session.cwd.split(separator: "/").last.map(String.init) ?? session.cwd
+        guard let branch = session.branch, !branch.isEmpty else { return folder }
+        return "\(folder) · \(branch)"
+    }
+}
