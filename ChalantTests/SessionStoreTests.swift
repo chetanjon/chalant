@@ -1005,8 +1005,13 @@ final class SessionStoreTests: XCTestCase {
             NotchWindowController.wearsBead(style: .pill, isIslandDisplay: true, islandShowing: false))
         // The island lives elsewhere: this pill display always gets
         // the bead, whether or not the island happens to be "showing".
+        // Both halves of "whether or not" are asserted, since the
+        // second is the ordinary resting state of every other monitor
+        // and the one a future rule could quietly drop.
         XCTAssertTrue(
             NotchWindowController.wearsBead(style: .pill, isIslandDisplay: false, islandShowing: true))
+        XCTAssertTrue(
+            NotchWindowController.wearsBead(style: .pill, isIslandDisplay: false, islandShowing: false))
     }
 
     func testOnlyPillDisplaysWearABead() {
