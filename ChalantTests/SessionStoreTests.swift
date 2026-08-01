@@ -880,6 +880,33 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(combo.display, "⌃⌥⇧⌘Space")
     }
 
+    func testShortcutsThatOpenAPanelNameOneThatExists() {
+        // A shortcut pointing at a tab the switcher cannot show would
+        // open a panel with no way back but Today.
+        for action in HotKeyCenter.Action.allCases {
+            guard let tab = action.tab else { continue }
+            XCTAssertTrue(
+                NotchViewModel.Tab.allCases.contains(tab),
+                "\(action.title) opens a tab that does not exist")
+        }
+    }
+
+    func testNoTwoShortcutsOpenTheSamePanel() {
+        // Two bindings for one destination is a setting nobody can
+        // reason about, and one of them would look broken.
+        let tabs = HotKeyCenter.Action.allCases.compactMap(\.tab)
+        XCTAssertEqual(Set(tabs).count, tabs.count)
+    }
+
+    func testTheIslandsOwnActionsOpenNoPanel() {
+        // Talking, toggling and settings are not destinations; giving
+        // them a tab would send the island somewhere on a keypress
+        // meant to do something else entirely.
+        XCTAssertNil(HotKeyCenter.Action.toggleIsland.tab)
+        XCTAssertNil(HotKeyCenter.Action.talk.tab)
+        XCTAssertNil(HotKeyCenter.Action.openSettings.tab)
+    }
+
     func testEveryActionHasItsOwnDefaultsKey() {
         let keys = HotKeyCenter.Action.allCases.map(\.defaultsKey)
         XCTAssertEqual(Set(keys).count, keys.count)

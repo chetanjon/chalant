@@ -21,7 +21,12 @@ final class HotKeyCenter {
     enum Action: String, CaseIterable, Identifiable {
         case toggleIsland
         case talk
+        case ask
         case clipboard
+        case shelf
+        case notes
+        case shortcuts
+        case focus
         case openSettings
 
         var id: String { rawValue }
@@ -30,12 +35,34 @@ final class HotKeyCenter {
             switch self {
             case .toggleIsland: return "Open or close the island"
             case .talk: return "Start listening"
+            case .ask: return "Ask something"
             case .clipboard: return "Open the clipboard"
+            case .shelf: return "Open the shelf"
+            case .notes: return "Open notes"
+            case .shortcuts: return "Open shortcuts"
+            case .focus: return "Open focus and timers"
             case .openSettings: return "Open settings"
             }
         }
 
         var defaultsKey: String { "hotkey.\(rawValue)" }
+
+        /// The panel this shortcut opens, for the ones that open one.
+        /// Kept here rather than as a closure each in the app delegate:
+        /// they are one behaviour with a different destination, and
+        /// spelling it out nine times invites nine slightly different
+        /// versions of it.
+        var tab: NotchViewModel.Tab? {
+            switch self {
+            case .ask: return .ask
+            case .clipboard: return .clipboard
+            case .shelf: return .shelf
+            case .notes: return .notes
+            case .shortcuts: return .links
+            case .focus: return .focus
+            case .toggleIsland, .talk, .openSettings: return nil
+            }
+        }
     }
 
     /// A combination, in Carbon's own units so nothing is converted at

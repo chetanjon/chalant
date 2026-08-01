@@ -95,19 +95,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .talk: { [weak controller] in
                 controller?.viewModel.toggleListening()
             },
-            .clipboard: { [weak controller] in
-                guard let model = controller?.viewModel else { return }
-                // Straight to the pane, not merely open: the shortcut
-                // exists to skip the switcher, and landing on Today
-                // would leave the user one click from where they asked
-                // to be.
-                model.tab = .clipboard
-                model.expand()
-            },
             .openSettings: { [weak self] in
                 self?.showDashboard(section: nil)
             },
         ]
+        // Every shortcut that opens a panel is the same behaviour with a
+        // different destination, so it is written once.
+        for action in HotKeyCenter.Action.allCases {
+            guard let tab = action.tab else { continue }
+            hotKeys.handlers[action] = { [weak controller] in
+                guard let model = controller?.viewModel else { return }
+                // A tool switched off in settings is not somewhere to
+                // land: the switcher would not show it, leaving the
+                // panel open with no way back but Today. Both choices
+                // were the user's, so this says which one won rather
+                // than silently doing nothing.
+                guard NotchViewModel.isAvailable(tab) else {
+                    model.flashGlance("\(action.title) is switched off in settings")
+                    return
+                }
+                // Straight to the panel, not merely open: the shortcut
+                // exists to skip the switcher, and landing on Today
+                // would leave the user one click from where they asked
+                // to be.
+                model.tab = tab
+                model.expand()
+            }
+        }
         hotKeys.reload()
 
         // Tiny menu bar item so the agent app can be quit
