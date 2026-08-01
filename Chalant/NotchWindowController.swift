@@ -144,12 +144,40 @@ final class NotchWindowController {
     /// costs nothing.
     private let panelSize = CGSize(width: 1000, height: 720)
 
+    /// Everything `placement(on:)` writes onto the view model, as one
+    /// comparable value. Kept together so adding a per-display setting
+    /// cannot quietly leave the repaint check behind — the failure
+    /// there is silent and looks like the setting doing nothing.
+    private var islandGeometry: [AnyHashable] {
+        [
+            viewModel.hasPhysicalNotch, viewModel.notchSize,
+            viewModel.islandStyle, viewModel.islandCornerRadius,
+            viewModel.islandContentPadding,
+        ]
+    }
+
     /// Measure the target screen and compute the panel frame; shared
     /// by first show and every display change after it.
     private func placement(on screen: NSScreen) -> NSRect {
-        viewModel.hasPhysicalNotch = screen.safeAreaInsets.top > 0
-        var notchSize = NotchViewModel.defaultNotchSize
-        if screen.safeAreaInsets.top > 0,
+        // This screen's own settings, resolved out of `.auto` against
+        // what the hardware actually reports.
+        let config = viewModel.displays.config(for: screen)
+        let style = DisplayConfigStore.resolve(
+            config.style, hasHardwareNotch: screen.safeAreaInsets.top > 0
+        )
+        viewModel.islandStyle = style
+        viewModel.islandCornerRadius = config.cornerRadius
+        viewModel.islandContentPadding = config.contentPadding
+        viewModel.hasPhysicalNotch = style == .notch
+
+        // The configured size is the starting point, so a pill — and an
+        // emulated notch on a screen with no cutout — is sizeable.
+        var notchSize = CGSize(width: config.width, height: config.height)
+        // A real notch's dimensions are the hardware's to state, not
+        // ours to invent, so measured values win wherever the island is
+        // actually wrapping one.
+        if style == .notch,
+           screen.safeAreaInsets.top > 0,
            let left = screen.auxiliaryTopLeftArea,
            let right = screen.auxiliaryTopRightArea {
             notchSize = CGSize(
@@ -406,8 +434,9 @@ final class NotchWindowController {
            !NSScreen.screens.contains(where: { $0.displayID == id }) {
             travelDisplayID = nil
         }
-        let hadNotch = viewModel.hasPhysicalNotch
-        let hadSize = viewModel.notchSize
+        // Everything placement() derives from the screen, so a swap
+        // between two displays with different settings repaints.
+        let before = islandGeometry
         let frame = placement(on: screen)
         let frameChanged = panel.frame != frame
         if frameChanged {
@@ -415,7 +444,7 @@ final class NotchWindowController {
         }
         // The frame can survive a display swap unchanged while the
         // notch geometry does not; repaint on either difference.
-        if frameChanged || hadNotch != viewModel.hasPhysicalNotch || hadSize != viewModel.notchSize {
+        if frameChanged || before != islandGeometry {
             viewModel.objectWillChange.send()
         }
     }
@@ -887,7 +916,10 @@ private struct SliverHint: View {
     }
 }
 
-private extension NSScreen {
+// Internal rather than private: DisplayConfigStore needs the same live
+// handle to look a screen up before filing its settings under the
+// stable UUID.
+extension NSScreen {
     var displayID: CGDirectDisplayID? {
         (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
             .uint32Value
