@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Claude Code sessions running on this Mac, discovered from the
@@ -91,15 +92,30 @@ struct AgentSessionsStrip: View {
         }
         .rowInsets()
         .chalantCard(radius: Theme.Radius.row)
+        .hoverHighlight(radius: Theme.Radius.row)
+        .contentShape(Rectangle())
+        .onTapGesture { Self.go(to: session) }
         // The title is the agent's own summary; which folder it is
         // working in is the thing a title can leave ambiguous when two
         // checkouts of the same project are open.
-        .help(session.cwd)
+        .help("Go to this session — \(session.cwd)")
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "\(session.agent.label): \(session.title), \(Self.place(session)), "
             + (session.state == .needsInput ? "waiting for you" : "working")
         )
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Opens the app running this session")
+    }
+
+    /// Bring up whatever is running this session.
+    ///
+    /// The folder is the fallback rather than the answer: a session
+    /// whose process has since exited still has somewhere to go, and a
+    /// row that did nothing when clicked would read as broken.
+    static func go(to session: SessionStore.Session) {
+        guard !SessionLocator.reveal(cwd: session.cwd) else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: session.cwd))
     }
 
     /// Folder, then branch when the folder is a repo. The last path

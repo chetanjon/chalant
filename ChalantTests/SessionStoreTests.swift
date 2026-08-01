@@ -265,6 +265,65 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(box.midY, rect.midY, accuracy: 0.5)
     }
 
+    // MARK: Finding the app a session runs in
+
+    private func snap(_ pid: pid_t, _ parent: pid_t, _ name: String, _ cwd: String? = nil)
+        -> SessionLocator.Snapshot {
+        SessionLocator.Snapshot(pid: pid, parent: parent, name: name, cwd: cwd)
+    }
+
+    func testTheOwningAppIsFoundThroughTheShellChain() {
+        // claude -> zsh -> pty-host -> Cursor. The point of the walk:
+        // an agent inside an IDE's terminal belongs to the IDE, not to
+        // Terminal.app, and nothing in the chain says so directly.
+        let table: [pid_t: SessionLocator.Snapshot] = [
+            100: snap(100, 90, "claude", "/w"),
+            90: snap(90, 80, "zsh"),
+            80: snap(80, 70, "Cursor Helper"),
+            70: snap(70, 1, "Cursor"),
+        ]
+        XCTAssertEqual(
+            SessionLocator.owningApplication(of: 100, in: table, applications: [70]), 70)
+    }
+
+    func testACircularParentChainDoesNotHang() {
+        // Process tables are read without a lock, so a parent can appear
+        // to be its own descendant. Left unguarded this spins forever
+        // on the main thread, on a click.
+        let table: [pid_t: SessionLocator.Snapshot] = [
+            10: snap(10, 20, "claude", "/w"),
+            20: snap(20, 10, "zsh"),
+        ]
+        XCTAssertNil(SessionLocator.owningApplication(of: 10, in: table, applications: [999]))
+    }
+
+    func testAChainThatReachesNoApplicationFindsNothing() {
+        let table: [pid_t: SessionLocator.Snapshot] = [
+            10: snap(10, 5, "claude", "/w"),
+            5: snap(5, 1, "zsh"),
+        ]
+        XCTAssertNil(SessionLocator.owningApplication(of: 10, in: table, applications: []))
+        // A broken chain — the parent already exited — is not a hang.
+        XCTAssertNil(
+            SessionLocator.owningApplication(of: 10, in: [10: snap(10, 77, "claude")],
+                                             applications: [70]))
+    }
+
+    func testTheAgentIsMatchedByNameAndWorkingDirectory() {
+        let table: [pid_t: SessionLocator.Snapshot] = [
+            1: snap(1, 0, "claude", "/other"),
+            2: snap(2, 0, "zsh", "/w"),
+            3: snap(3, 0, "claude", "/w"),
+            4: snap(4, 0, "claude", "/w"),
+        ]
+        // Newest wins: the same folder gets used again and again.
+        XCTAssertEqual(
+            SessionLocator.agentProcess(forCwd: "/w", in: table, agentNames: ["claude"]), 4)
+        // A shell sitting in that folder is not an agent.
+        XCTAssertNil(
+            SessionLocator.agentProcess(forCwd: "/nope", in: table, agentNames: ["claude"]))
+    }
+
     // MARK: Cursor chats
 
     func testCursorMetaYieldsAWorkingDirectoryAndATime() throws {
