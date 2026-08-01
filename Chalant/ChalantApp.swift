@@ -12,6 +12,10 @@ struct ChalantApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchController: NotchWindowController?
+    /// Built once on first open and kept: the window closes, the app
+    /// keeps running headless, and reopening shows this same one back
+    /// where it was left.
+    private var dashboardController: DashboardWindowController?
     private var statusItem: NSStatusItem?
     /// Sparkle, on a leash: its own scheduler is off (Info.plist
     /// SUEnableAutomaticChecks false; the island's quiet daily
@@ -53,6 +57,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // instead, the same trade VS Code makes.
         UserDefaults.standard.register(defaults: ["ApplePressAndHoldEnabled": false])
 
+        // Info.plist ships LSUIElement, so the app starts as an
+        // accessory and only takes a Dock icon if the user asked for
+        // one. Re-applied here because the policy is process state, not
+        // a stored preference the system restores on its own.
+        if UserDefaults.standard.bool(forKey: "showInDock") {
+            NSApp.setActivationPolicy(.regular)
+        }
+
         // The island itself
         let controller = NotchWindowController()
         controller.show()
@@ -60,6 +72,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.viewModel.installUpdate = { [weak self] in
             self?.updater.checkForUpdates(nil)
         }
+        controller.viewModel.openDashboard = { [weak self] section in
+            self?.showDashboard(section: section)
+        }
+
+        // System-wide shortcuts. Unbound until the user records one, so
+        // this claims no combination on a fresh install.
+        let hotKeys = HotKeyCenter.shared
+        hotKeys.handlers = [
+            .toggleIsland: { [weak controller] in
+                guard let model = controller?.viewModel else { return }
+                switch model.state {
+                case .expanded: model.collapse()
+                case .collapsed: model.expand()
+                // A hold is in progress. `expand()` would set the state
+                // straight to expanded with the microphone still
+                // capturing and the room still ducked, stranding the
+                // session — the shortcut is not a way to interrupt one.
+                case .listening: break
+                }
+            },
+            .talk: { [weak controller] in
+                controller?.viewModel.toggleListening()
+            },
+            .openSettings: { [weak self] in
+                self?.showDashboard(section: nil)
+            },
+        ]
+        hotKeys.reload()
 
         // Tiny menu bar item so the agent app can be quit
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -131,11 +171,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() {
-        Task { @MainActor in
-            guard let model = self.notchController?.viewModel else { return }
-            model.expand()
-            model.pane = .settings
-        }
+        Task { @MainActor in self.showDashboard(section: nil) }
+    }
+
+    /// Opening an already-running accessory app — double-clicking it in
+    /// Finder, hitting return on it in Spotlight — did nothing at all,
+    /// because there was no window for the system to bring forward.
+    /// Now it shows the one there is.
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication, hasVisibleWindows: Bool
+    ) -> Bool {
+        showDashboard(section: nil)
+        return true
+    }
+
+    @MainActor
+    private func showDashboard(section: DashboardSection?) {
+        guard let model = notchController?.viewModel else { return }
+        // The island is a glance surface and settings is a window; both
+        // lit at once is two places claiming the same job.
+        model.collapse()
+        let controller = dashboardController ?? DashboardWindowController(model: model)
+        dashboardController = controller
+        controller.present(section: section)
     }
 
     /// One-time inheritance from the app's earlier names. The newest
