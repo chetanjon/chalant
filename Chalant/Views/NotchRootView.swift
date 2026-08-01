@@ -160,28 +160,47 @@ struct NotchRootView: View {
         return leftWingNeed
     }
 
-    /// Width the right-of-camera glance needs on notched displays.
-    private var notchSideNeed: CGFloat {
-        if model.glanceToast != nil { return 124 }
-        if agentGlance != nil { return 44 }
-        if sessionOnRight { return 30 }
+    /// The glance that has earned the space beside the notch.
+    ///
+    /// Precedence is the user's list rather than the order these
+    /// happen to be written in, since only one of them fits and which
+    /// one matters more is a matter of taste, not of code.
+    private var winningCollapsedItem: CollapsedItem? {
+        model.layout.layout.collapsed.first { collapsedWidth($0) > 0 }
+    }
+
+    /// What a glance needs, and nothing if it has nothing to say. One
+    /// function so the width and the decision to show it can never
+    /// disagree — a glance with no width has nowhere to sit, which is
+    /// how the charge shipped invisible.
+    private func collapsedWidth(_ item: CollapsedItem) -> CGFloat {
+        switch item {
+        case .agents:
+            return agentGlance != nil ? 44 : 0
+        case .timers:
+            return sessionOnRight ? 30 : 0
         // A session shows only its left-wing ring and countdown; the
         // right-side FOCUS 1 OF 4 label was width without value
         // (user call, 2026-07-21). A joinable meeting's camera mark
         // earns its own width; stealing the marquee's sent titles
         // into perpetual scroll.
-        if let next = upcomingEvent {
+        case .event:
+            guard let next = upcomingEvent else { return 0 }
             return 112 + (next.joinURL != nil ? Self.cameraMarkWidth : 0)
+        case .battery:
+            return glanceBattery && stats.battery != nil ? 44 : 0
         }
-        // The charge was rendering with no width reserved for it, so it
-        // had nothing to sit in.
-        if glanceBattery, stats.battery != nil { return 44 }
-        // Playing or idle, no other right-side width: the day, the
-        // streak, and the clock glances all duplicated surfaces that
-        // already exist (the menu bar clock sits an inch away), and
-        // every one of them stretched the pill past the hardware
-        // (user, 2026-07-23, "it should not be too wide on the Mac").
-        return 0
+    }
+
+    /// Width the right-of-camera glance needs on notched displays.
+    private var notchSideNeed: CGFloat {
+        if model.glanceToast != nil { return 124 }
+        // Nothing beyond the user's list: the day, the streak, and the
+        // clock glances all duplicated surfaces that already exist (the
+        // menu bar clock sits an inch away), and every one of them
+        // stretched the pill past the hardware (user, 2026-07-23, "it
+        // should not be too wide on the Mac").
+        return winningCollapsedItem.map(collapsedWidth) ?? 0
     }
 
     // MARK: Notchless pill accounting
@@ -664,21 +683,26 @@ struct NotchRootView: View {
     private var notchSideContent: some View {
         if let toast = model.glanceToast {
             toastGlance(toast)
-        } else if let agents = agentGlance {
-            agentMarkGlance(agents)
-        } else if sessionOnRight {
+        } else if let item = winningCollapsedItem {
+            collapsedGlance(item)
+        }
+    }
+
+    /// One glance, drawn. The precedence is decided above; this only
+    /// knows how each looks.
+    @ViewBuilder
+    private func collapsedGlance(_ item: CollapsedItem) -> some View {
+        switch item {
+        case .agents:
+            if let agents = agentGlance { agentMarkGlance(agents) }
+        case .timers:
             // Music holds the left wing, so the session mark crosses
-            // over; the running session outranks quieter glances.
+            // over rather than fighting it for the same side.
             sessionMark
-        } else if let next = upcomingEvent {
-            upcomingGlance(next, width: 100)
-        } else if music.nowPlaying?.isPlaying == true, glanceMusic {
-            // Playing: the bars on the left carry the state. A
-            // scrolling title here was width without value, the same
-            // call that removed the session label (user, 2026-07-21).
-            EmptyView()
-        } else if glanceBattery, let battery = stats.battery {
-            batteryGlance(battery)
+        case .event:
+            if let next = upcomingEvent { upcomingGlance(next, width: 100) }
+        case .battery:
+            if let battery = stats.battery { batteryGlance(battery) }
         }
     }
 

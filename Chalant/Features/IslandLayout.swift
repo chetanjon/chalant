@@ -58,6 +58,31 @@ enum IslandElement: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// What can take the space beside the notch when the island is shut.
+///
+/// Not `IslandElement`: these are not the island's contents, they are
+/// glances. The list they come from is an order of precedence, since
+/// only one of them fits at a time — an early attempt reused the
+/// element enum and produced a setting for arranging things that could
+/// never appear there.
+enum CollapsedItem: String, Codable, CaseIterable, Identifiable, Sendable {
+    case agents
+    case timers
+    case event
+    case battery
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .agents: return "Agents running"
+        case .timers: return "Focus and timers"
+        case .event: return "Next event"
+        case .battery: return "Battery"
+        }
+    }
+}
+
 /// One row of the island, holding one element or two side by side.
 ///
 /// The island is a narrow surface — a free 2D grid would mostly produce
@@ -77,8 +102,10 @@ struct IslandRow: Codable, Equatable, Identifiable, Sendable {
 /// How one island is arranged.
 struct IslandLayout: Codable, Equatable, Sendable {
     var rows: [IslandRow]
-    /// What the resting island shows, in the order it gets the space.
-    var collapsed: [IslandElement]
+    /// What the resting island shows beside the notch, most important
+    /// first. Only one fits, so this is a precedence order rather than
+    /// a list of things that all appear.
+    var collapsed: [CollapsedItem]
 
     /// Every element the build that saved this layout could see.
     ///
@@ -101,7 +128,7 @@ struct IslandLayout: Codable, Equatable, Sendable {
             IslandRow([.switcher]),
             IslandRow([.input]),
         ],
-        collapsed: [.media, .sessions, .activities]
+        collapsed: [.agents, .timers, .event, .battery]
     )
 
     var placed: [IslandElement] { rows.flatMap(\.elements) }
@@ -158,9 +185,13 @@ struct IslandLayout: Codable, Equatable, Sendable {
             fixedRows.append(IslandRow([element]))
             seen.insert(element)
         }
-        let collapsedFixed = collapsed.reduce(into: [IslandElement]()) { result, element in
-            if !result.contains(element) { result.append(element) }
+        var collapsedFixed = collapsed.reduce(into: [CollapsedItem]()) { result, item in
+            if !result.contains(item) { result.append(item) }
         }
+        // Anything this build knows about that the stored order does
+        // not is appended, so a glance added later is reachable rather
+        // than permanently last-and-invisible.
+        collapsedFixed += CollapsedItem.allCases.filter { !collapsedFixed.contains($0) }
         return IslandLayout(
             rows: fixedRows,
             collapsed: collapsedFixed,

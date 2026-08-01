@@ -146,9 +146,6 @@ struct LayoutSection: View {
     private func remove(_ row: IslandRow) {
         var next = layout.layout
         next.rows.removeAll { $0.id == row.id }
-        // Also drop it from the resting island, or it would keep
-        // showing there after being taken out of the open one.
-        next.collapsed.removeAll { row.elements.contains($0) }
         layout.apply(next)
     }
 

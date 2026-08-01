@@ -620,11 +620,11 @@ final class SessionStoreTests: XCTestCase {
         let layout = IslandLayout(
             rows: [IslandRow([.media]), IslandRow([.media, .ambience]), IslandRow([.switcher]),
                    IslandRow([.input])],
-            collapsed: [.media, .media]
+            collapsed: [.agents, .agents]
         )
         let fixed = layout.repaired()
         XCTAssertEqual(fixed.placed.filter { $0 == .media }.count, 1)
-        XCTAssertEqual(fixed.collapsed, [.media])
+        XCTAssertEqual(fixed.collapsed.filter { $0 == .agents }.count, 1)
     }
 
     func testARowCannotHoldMoreThanTheColumnLimit() {
@@ -709,6 +709,34 @@ final class SessionStoreTests: XCTestCase {
     func testMovingSomethingNotPlacedChangesNothing() {
         let layout = IslandLayout(rows: [IslandRow([.media])], collapsed: [])
         XCTAssertEqual(layout.moving(.ambience, to: 0), layout)
+    }
+
+    func testTheCollapsedOrderKeepsEveryGlanceReachable() {
+        // Only one glance fits beside the notch, so this list is a
+        // precedence order. A glance missing from it can never win,
+        // which is indistinguishable from it not existing.
+        let repaired = IslandLayout.standard.repaired()
+        XCTAssertEqual(Set(repaired.collapsed), Set(CollapsedItem.allCases))
+    }
+
+    func testAStoredOrderGainsGlancesAddedSince() {
+        // Saved before `battery` existed. Left out it would sit
+        // permanently last and invisible, with no way to promote it.
+        var layout = IslandLayout.standard
+        layout.collapsed = [.timers, .event]
+        let repaired = layout.repaired()
+        XCTAssertEqual(Array(repaired.collapsed.prefix(2)), [.timers, .event])
+        XCTAssertTrue(repaired.collapsed.contains(.battery))
+        XCTAssertTrue(repaired.collapsed.contains(.agents))
+    }
+
+    func testTheCollapsedOrderNeverRepeatsAGlance() {
+        var layout = IslandLayout.standard
+        layout.collapsed = [.battery, .battery, .agents]
+        let repaired = layout.repaired()
+        XCTAssertEqual(repaired.collapsed.filter { $0 == .battery }.count, 1)
+        // And the user's own precedence survives the repair.
+        XCTAssertEqual(repaired.collapsed.first, .battery)
     }
 
     func testLayoutsAndPresetsRoundTripThroughJSON() throws {
