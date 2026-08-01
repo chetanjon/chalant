@@ -308,7 +308,7 @@ final class NotchViewModel: ObservableObject {
         shortcuts.announce = { [weak self] message in
             self?.flashGlance(message)
         }
-        activityServer.start(store: activities)
+        activityServer.start(store: activities, sessions: sessions)
         sessionDiscovery.start()
         cursorDiscovery.start()
         events.startGlanceTicker()

@@ -265,6 +265,80 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(box.midY, rect.midY, accuracy: 0.5)
     }
 
+    // MARK: Questions from a session
+
+    private func storeWithSession(_ id: String = "s1") -> SessionStore {
+        let store = SessionStore()
+        store.upsert(id: id, title: "t", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .working)
+        return store
+    }
+
+    func testAQuestionLiftsItsSessionToNeedsInput() {
+        let store = storeWithSession()
+        XCTAssertTrue(store.attach(
+            askID: "q1", to: "s1", header: "Pick", question: "Which one?",
+            options: ["A", "B"], multiSelect: false))
+        XCTAssertEqual(store.sessions.first?.state, .needsInput)
+        XCTAssertEqual(store.pendingAsk(sessionID: "s1")?.options, ["A", "B"])
+    }
+
+    func testAQuestionForAnUnknownSessionIsRefused() {
+        // Accepting it would leave the agent polling for an answer that
+        // can never arrive, since the row it would appear on does not
+        // exist.
+        let store = SessionStore()
+        XCTAssertFalse(store.attach(
+            askID: "q", to: "ghost", header: "h", question: "q?",
+            options: [], multiSelect: false))
+    }
+
+    func testAnEmptyQuestionIsRefused() {
+        // A row saying a session wants something without saying what is
+        // worse than no row at all.
+        let store = storeWithSession()
+        XCTAssertFalse(store.attach(
+            askID: "q", to: "s1", header: "h", question: "   ",
+            options: ["A"], multiSelect: false))
+        XCTAssertEqual(store.sessions.first?.state, .working)
+    }
+
+    func testQuestionFieldsArriveOffASocketAndAreBounded() {
+        let store = storeWithSession()
+        let long = String(repeating: "x", count: 5000)
+        store.attach(askID: "q", to: "s1", header: long, question: long,
+                     options: Array(repeating: "opt", count: 40), multiSelect: false)
+        let ask = store.pendingAsk(sessionID: "s1")
+        XCTAssertEqual(ask?.question.count, SessionStore.askFieldLimit)
+        XCTAssertEqual(ask?.header.count, SessionStore.askFieldLimit)
+        XCTAssertEqual(ask?.options.count, SessionStore.maxOptions)
+    }
+
+    func testAnsweringReturnsTheSessionToWorking() {
+        let store = storeWithSession()
+        store.attach(askID: "q", to: "s1", header: "h", question: "q?",
+                     options: ["A", "B"], multiSelect: false)
+        XCTAssertTrue(store.answer(sessionID: "s1", with: ["A"]))
+        XCTAssertEqual(store.pendingAsk(sessionID: "s1")?.answer, ["A"])
+        // Still needs-input would keep claiming the top of the list.
+        XCTAssertEqual(store.sessions.first?.state, .working)
+    }
+
+    func testAnsweringSomethingThatWasNeverAskedIsRefused() {
+        let store = storeWithSession()
+        XCTAssertFalse(store.answer(sessionID: "s1", with: ["A"]))
+        XCTAssertFalse(store.answer(sessionID: "ghost", with: ["A"]))
+    }
+
+    func testClearingTheAskStopsTheIslandOfferingAnAnsweredChoice() {
+        let store = storeWithSession()
+        store.attach(askID: "q", to: "s1", header: "h", question: "q?",
+                     options: ["A"], multiSelect: false)
+        store.answer(sessionID: "s1", with: ["A"])
+        store.clearAsk(sessionID: "s1")
+        XCTAssertNil(store.pendingAsk(sessionID: "s1"))
+    }
+
     // MARK: Finding the app a session runs in
 
     private func snap(_ pid: pid_t, _ parent: pid_t, _ name: String, _ cwd: String? = nil)

@@ -138,6 +138,77 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    // MARK: Questions
+
+    /// Longest a question, header or option may be. These arrive over
+    /// the local API from another process, so they are bounded here
+    /// rather than trusted to be sensible — an unbounded string would
+    /// push the island off the screen.
+    static let askFieldLimit = 200
+    static let maxOptions = 6
+
+    /// Attaches a question to a session and lifts it to needs-input.
+    ///
+    /// Trimmed and bounded on the way in: everything here came off a
+    /// socket. An empty question is refused outright, since a row that
+    /// says a session wants something without saying what is worse than
+    /// no row at all.
+    @discardableResult
+    func attach(
+        askID: String, to sessionID: String, header: String, question: String,
+        options: [String], multiSelect: Bool
+    ) -> Bool {
+        let question = String(question.prefix(Self.askFieldLimit))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !question.isEmpty, let index = sessions.firstIndex(where: { $0.id == sessionID })
+        else { return false }
+        sessions[index].ask = Ask(
+            id: askID,
+            header: String(header.prefix(Self.askFieldLimit)),
+            question: question,
+            options: options.prefix(Self.maxOptions)
+                .map { String($0.prefix(Self.askFieldLimit)) }
+                .filter { !$0.isEmpty },
+            multiSelect: multiSelect,
+            answer: nil,
+            askedAt: Date()
+        )
+        sessions[index].state = .needsInput
+        sessions[index].updatedAt = Date()
+        sort()
+        // A question outlives the discovery rescan that would otherwise
+        // put the row back to `working`, so the expiry timer is dropped.
+        expiryWork[sessionID]?.cancel()
+        expiryWork[sessionID] = nil
+        return true
+    }
+
+    /// Records what the user chose. The agent polls for this.
+    @discardableResult
+    func answer(sessionID: String, with choices: [String]) -> Bool {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }),
+              sessions[index].ask != nil
+        else { return false }
+        sessions[index].ask?.answer = choices
+        // Back to working: the question is answered, and leaving the row
+        // at needs-input would keep claiming the top of the list.
+        sessions[index].state = .working
+        sessions[index].updatedAt = Date()
+        sort()
+        return true
+    }
+
+    func pendingAsk(sessionID: String) -> Ask? {
+        sessions.first { $0.id == sessionID }?.ask
+    }
+
+    /// Drops the question once the agent has collected its answer, so
+    /// the island stops offering a choice that has already been made.
+    func clearAsk(sessionID: String) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        sessions[index].ask = nil
+    }
+
     func clear(id: String) {
         expiryWork[id]?.cancel()
         expiryWork[id] = nil

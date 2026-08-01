@@ -76,11 +76,16 @@ final class ActivityServer: @unchecked Sendable {
 
     private static let log = Logger(subsystem: "com.cj.chalant", category: "activityserver")
 
+    /// Held so a session's question can be answered from the island and
+    /// collected by the agent that asked it.
+    private var sessions: SessionStore?
+
     private var token = ""
 
     @MainActor
-    func start(store: ActivityStore) {
+    func start(store: ActivityStore, sessions: SessionStore? = nil) {
         self.store = store
+        self.sessions = sessions
         token = Self.loadOrCreateToken()
         let parameters = NWParameters.tcp
         parameters.requiredInterfaceType = .loopback
@@ -293,6 +298,59 @@ final class ActivityServer: @unchecked Sendable {
                 self.store?.push(id: id, title: title, detail: detail, state: state)
             }
             respond(connection, status: "200 OK", body: #"{"ok":true}"#)
+
+        // The other half of a session's question. The agent posts what
+        // it wants to know, then polls /ask/<session> until an answer
+        // appears — the island cannot reach into a running agent, so the
+        // agent has to come and collect.
+        case ("POST", "/ask"):
+            guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+                  let session = object["session"] as? String, !session.isEmpty,
+                  let question = object["question"] as? String, !question.isEmpty
+            else {
+                respond(connection, status: "400 Bad Request",
+                        body: #"{"ok":false,"error":"need session and question"}"#)
+                return
+            }
+            let askID = object["id"] as? String ?? UUID().uuidString
+            let header = object["header"] as? String ?? "Question"
+            let options = (object["options"] as? [String]) ?? []
+            let multi = object["multiSelect"] as? Bool ?? false
+            Task { @MainActor in
+                let attached = self.sessions?.attach(
+                    askID: askID, to: session, header: header, question: question,
+                    options: options, multiSelect: multi
+                ) ?? false
+                // A question for a session Chalant has never seen has
+                // nowhere to appear; saying so beats accepting it and
+                // leaving the agent polling an answer that never comes.
+                self.respond(
+                    connection,
+                    status: attached ? "200 OK" : "404 Not Found",
+                    body: attached ? #"{"ok":true}"# : #"{"ok":false,"error":"no such session"}"#
+                )
+            }
+
+        case ("GET", let path) where path.hasPrefix("/ask/"):
+            let session = String(path.dropFirst("/ask/".count)).removingPercentEncoding ?? ""
+            Task { @MainActor in
+                guard let ask = self.sessions?.pendingAsk(sessionID: session) else {
+                    self.respond(connection, status: "404 Not Found",
+                                 body: #"{"ok":false,"error":"no question outstanding"}"#)
+                    return
+                }
+                guard let answer = ask.answer else {
+                    self.respond(connection, status: "200 OK", body: #"{"ok":true,"answered":false}"#)
+                    return
+                }
+                // Handed over exactly once: the agent has it now, and a
+                // question already answered must stop being offered.
+                self.sessions?.clearAsk(sessionID: session)
+                let body = (try? JSONSerialization.data(
+                    withJSONObject: ["ok": true, "answered": true, "answer": answer]
+                )).flatMap { String(data: $0, encoding: .utf8) } ?? #"{"ok":true,"answered":false}"#
+                self.respond(connection, status: "200 OK", body: body)
+            }
 
         case ("GET", "/activities"):
             Task { @MainActor in
