@@ -57,6 +57,20 @@ struct AgentSessionsStrip: View {
     }
 
     private func row(_ session: SessionStore.Session) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            rowLine(session)
+            // Answering happens here rather than in the terminal the
+            // question came from, which is the whole point: the island
+            // already told you a session wants something.
+            if let ask = session.ask, ask.answer == nil {
+                AskCard(ask: ask) { choices in
+                    sessions.answer(sessionID: session.id, with: choices)
+                }
+            }
+        }
+    }
+
+    private func rowLine(_ session: SessionStore.Session) -> some View {
         HStack(spacing: Theme.Space.m) {
             // Whose session it is, then what it wants. Two rows from
             // two different agents are otherwise identical at a glance.
@@ -125,5 +139,73 @@ struct AgentSessionsStrip: View {
         let folder = session.cwd.split(separator: "/").last.map(String.init) ?? session.cwd
         guard let branch = session.branch, !branch.isEmpty else { return folder }
         return "\(folder) · \(branch)"
+    }
+}
+
+/// A question an agent is waiting on, answerable in place.
+///
+/// Options are buttons rather than a menu: there are at most six, and a
+/// menu would hide the choice behind a click on a surface whose whole
+/// job is to have already told you.
+private struct AskCard: View {
+    let ask: SessionStore.Ask
+    let answer: ([String]) -> Void
+
+    /// Only used when several may be picked. A single-choice question
+    /// answers on the tap and never reads this.
+    @State private var picked: Set<String> = []
+
+    @Environment(\.chalantAccent) private var accent
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text(ask.question)
+                .font(Theme.Fonts.body)
+                .foregroundStyle(Theme.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            FlowLayout(spacing: Theme.Space.s) {
+                ForEach(ask.options, id: \.self) { option in
+                    optionChip(option)
+                }
+            }
+            if ask.multiSelect {
+                Button("Send") { answer(Array(picked)) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(accent)
+                    // Nothing chosen is not an answer, and sending one
+                    // would tell the agent the user decided when they
+                    // did not.
+                    .disabled(picked.isEmpty)
+            }
+        }
+        .rowInsets()
+        .chalantCard(radius: Theme.Radius.row)
+    }
+
+    private func optionChip(_ option: String) -> some View {
+        let on = picked.contains(option)
+        return Button {
+            guard ask.multiSelect else {
+                answer([option])
+                return
+            }
+            if on { picked.remove(option) } else { picked.insert(option) }
+        } label: {
+            Text(option)
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(on ? Theme.textPrimary : Theme.textSecondary)
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule().fill(on ? accent.opacity(0.18) : Theme.surface)
+                )
+                .overlay(
+                    Capsule().strokeBorder(on ? accent.opacity(0.4) : .clear, lineWidth: 1)
+                )
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressableStyle())
+        .accessibilityAddTraits(on ? [.isSelected, .isButton] : .isButton)
     }
 }
