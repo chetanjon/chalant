@@ -16,6 +16,7 @@ enum DashboardSection: String, CaseIterable, Identifiable {
     case sessions
     case whatShows
     case island
+    case displays
     case glance
     case keyboard
     case about
@@ -28,6 +29,7 @@ enum DashboardSection: String, CaseIterable, Identifiable {
         case .sessions: return "Sessions"
         case .whatShows: return "What shows"
         case .island: return "Island"
+        case .displays: return "Displays"
         case .glance: return "Glance"
         case .keyboard: return "Keyboard"
         case .about: return "About"
@@ -40,6 +42,7 @@ enum DashboardSection: String, CaseIterable, Identifiable {
         case .sessions: return "chevron.left.forwardslash.chevron.right"
         case .whatShows: return "square.stack"
         case .island: return "macwindow"
+        case .displays: return "display.2"
         case .glance: return "eye"
         case .keyboard: return "keyboard"
         case .about: return "info.circle"
@@ -172,6 +175,8 @@ struct DashboardView: View {
                     WhatShowsSection(events: model.events)
                 case .island:
                     IslandSection(music: model.music)
+                case .displays:
+                    DisplaysSection(displays: model.displays)
                 case .glance:
                     GlanceSection()
                 case .keyboard:
@@ -199,14 +204,24 @@ struct SettingCard<Content: View>: View {
     let title: String
     @ViewBuilder let content: Content
 
+    /// One inset, read by both the title and the card's contents.
+    ///
+    /// The title names what is inside the card, so it belongs on the
+    /// same vertical line. It used to sit at 4 while the rows sat at
+    /// 12, which puts two competing left margins down a column of
+    /// stacked settings groups and makes each card read as a detached
+    /// box rather than the body of the thing above it. Held as one
+    /// value so the two cannot drift apart again.
+    private static var inset: CGFloat { Theme.Space.l }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             SectionHeader(title: title)
-                .padding(.leading, Theme.Space.xs)
+                .padding(.leading, Self.inset)
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 content
             }
-            .padding(Theme.Space.l)
+            .padding(Self.inset)
             .frame(maxWidth: .infinity, alignment: .leading)
             .chalantCard()
         }

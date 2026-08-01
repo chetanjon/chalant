@@ -139,20 +139,30 @@ final class DisplayConfigStore: ObservableObject {
     // MARK: Writing
 
     func set(_ config: Config, for screen: NSScreen) {
-        guard let key = Self.key(for: screen) else {
+        set(config, forKey: Self.key(for: screen))
+    }
+
+    func set(_ config: Config, forKey key: String?) {
+        guard let key else {
             Self.log.error("display has no stable UUID; settings for it cannot be kept")
             return
         }
         configs[key] = config.clamped
         save()
+        onChange?()
     }
 
     /// Forgets one screen's settings, so it goes back to following the
     /// hardware.
     func reset(for screen: NSScreen) {
-        guard let key = Self.key(for: screen) else { return }
+        reset(forKey: Self.key(for: screen))
+    }
+
+    func reset(forKey key: String?) {
+        guard let key else { return }
         configs[key] = nil
         save()
+        onChange?()
     }
 
     // MARK: Persistence

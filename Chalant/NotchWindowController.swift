@@ -299,6 +299,13 @@ final class NotchWindowController {
         viewModel.start()
 
         // Debug-only: surface the drop bubble for screenshots.
+        // A slider moved in settings has to reach the island now.
+        // Without this the new value sits in the store until the next
+        // display event, which reads as the control doing nothing.
+        viewModel.displays.onChange = { [weak self] in
+            self?.reposition()
+            self?.rebuildSlivers()
+        }
         viewModel.onDebugDropDock = { [weak self] in
             guard let self, let screen = self.notchScreen else { return }
             self.dockPinnedUntil = Date().addingTimeInterval(3)
