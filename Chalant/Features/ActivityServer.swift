@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import os
 import Security
 
 /// The open door: a tiny HTTP server on localhost that lets any local
@@ -73,6 +74,8 @@ final class ActivityServer: @unchecked Sendable {
         return difference == 0
     }
 
+    private static let log = Logger(subsystem: "com.cj.chalant", category: "activityserver")
+
     private var token = ""
 
     @MainActor
@@ -82,11 +85,34 @@ final class ActivityServer: @unchecked Sendable {
         let parameters = NWParameters.tcp
         parameters.requiredInterfaceType = .loopback
         parameters.allowLocalEndpointReuse = true
-        guard let port = NWEndpoint.Port(rawValue: Self.port),
-              let listener = try? NWListener(using: parameters, on: port)
-        else { return }
+        guard let port = NWEndpoint.Port(rawValue: Self.port) else { return }
+        let listener: NWListener
+        do {
+            listener = try NWListener(using: parameters, on: port)
+        } catch {
+            Self.log.error(
+                "activity door could not be opened on \(Self.port): \(error.localizedDescription, privacy: .public)")
+            return
+        }
         listener.newConnectionHandler = { [weak self] connection in
             self?.handle(connection)
+        }
+        // NWListener reports a taken port asynchronously, not from the
+        // initializer: without this a second instance left the door
+        // dead while the app looked perfectly healthy, and every
+        // `chalant` command failed with nothing anywhere saying why.
+        listener.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                Self.log.notice("activity door open on \(Self.port)")
+            case .failed(let error):
+                Self.log.error(
+                    "activity door failed on \(Self.port): \(error.localizedDescription, privacy: .public). Another Chalant is probably already running.")
+            case .cancelled:
+                Self.log.notice("activity door closed")
+            default:
+                break
+            }
         }
         listener.start(queue: queue)
         self.listener = listener

@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Live status for things with no home: agent runs, deploys, renders,
 /// long downloads. Anything local can push "working / needs input /
@@ -38,6 +39,8 @@ final class ActivityStore: ObservableObject {
     /// each newest first. Views render straight through.
     @Published private(set) var activities: [Activity] = []
 
+    private static let log = Logger(subsystem: "com.cj.chalant", category: "activities")
+
     private let maxActivities = 8
     /// Finished states linger just long enough to be seen.
     private let finishedTTL: TimeInterval = 60
@@ -57,9 +60,20 @@ final class ActivityStore: ObservableObject {
         activities.append(activity)
         sort()
         if activities.count > maxActivities {
-            // The oldest finished thing goes first; never drop live work.
-            if let victim = activities.last(where: { $0.state == .done || $0.state == .failed })
-                ?? activities.last {
+            // Finished rows go first, then the stalest working one.
+            //
+            // A needs-input row is a question waiting on the user, and
+            // nothing re-pushes it: dropping one loses something nobody
+            // can get back. The old fallback here was `activities.last`,
+            // which — because needs-input sorts FIRST — is exactly that
+            // row once every slot is a question. Nine outstanding
+            // questions and the tenth push silently ate one. The cap
+            // yields instead; a list one row long is the cheaper failure.
+            let victim = activities.last { $0.state == .done || $0.state == .failed }
+                ?? activities.last { $0.state == .working }
+            if let victim {
+                Self.log.notice(
+                    "activity list full, dropping \(victim.id, privacy: .public)")
                 clear(id: victim.id)
             }
         }

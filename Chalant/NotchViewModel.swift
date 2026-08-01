@@ -32,7 +32,9 @@ final class NotchViewModel: ObservableObject {
         case expanded
     }
 
-    enum Tab {
+    /// Raw-valued so "reopen where I left off" can survive a relaunch
+    /// without a second parallel enum to keep in step.
+    enum Tab: String, CaseIterable {
         case today
         case ask
         case clipboard
@@ -41,12 +43,28 @@ final class NotchViewModel: ObservableObject {
         case notes
         case focus
         case chat
+
+        /// The settings switch that hides this tab's tool, if it has
+        /// one. `today` and `ask` are the island itself and cannot be
+        /// switched off.
+        var toolKey: String? {
+            switch self {
+            case .today, .ask: return nil
+            case .clipboard: return "toolClips"
+            case .shelf: return "toolShelf"
+            case .links: return "toolGo"
+            case .notes: return "toolNotes"
+            case .focus: return "toolFocus"
+            case .chat: return "toolChat"
+            }
+        }
     }
 
-    /// Settings slides over the island body; collapsing closes it.
+    /// The welcome tour slides over the island body; collapsing closes
+    /// it. Settings used to live here too and now has a window of its
+    /// own — see Dashboard.swift.
     enum Pane {
         case none
-        case settings
         case welcome
     }
 
@@ -55,9 +73,6 @@ final class NotchViewModel: ObservableObject {
     /// Which lower panel the switcher is showing. `.today` is home.
     @Published var tab: Tab = .today
     @Published var pane: Pane = .none
-    /// Settings section to scroll to when the pane opens, set by the
-    /// debug harness so screenshots can reach below the fold.
-    @Published var settingsScrollTarget: String?
 
     /// The island's expanded size, measured from the content itself,
     /// the island hugs what's shown instead of reserving a fixed void.
@@ -182,11 +197,22 @@ final class NotchViewModel: ObservableObject {
     let courier = MessageCourier()
     let activities = ActivityStore()
     let activityServer = ActivityServer()
+    /// Claude Code sessions on this Mac. Discovery reads the metadata
+    /// files Claude Code already writes, so sessions show up with no
+    /// setup and no hook contract — including ones that were already
+    /// running before Chalant launched.
+    let sessions = SessionStore()
+    private lazy var sessionDiscovery = SessionDiscovery(store: sessions)
     let updates = UpdateChecker()
     let crashWatch = CrashWatch()
     /// Hands the update ask to Sparkle (set by the AppDelegate, which
     /// owns the updater): download, install, relaunch, no browser.
     var installUpdate: (() -> Void)?
+    /// Opens the settings window, optionally at a named section (set by
+    /// the AppDelegate, which owns the window). Everything that used to
+    /// set `pane = .settings` calls this instead, so the island's gear
+    /// and the menu bar item open the one same window.
+    var openDashboard: ((DashboardSection?) -> Void)?
     /// Created on first open of the chat tab; the web view then lives
     /// for the app's lifetime so the conversation survives collapses.
     private(set) lazy var chat = ChatController()
@@ -210,7 +236,40 @@ final class NotchViewModel: ObservableObject {
     /// True on the built-in display where hardware occupies the middle
     /// of the island; external displays keep that space usable. Same
     /// reason as notchSize above.
+    ///
+    /// Read as "the island wraps a notch here", not "this panel has one
+    /// in it": a screen set to Notch in settings wraps an emulated one,
+    /// and a MacBook set to Pill does not wrap its real one. Every read
+    /// site is a render decision and wants the resolved answer.
     @Published var hasPhysicalNotch = false
+
+    /// Per-display island settings. `placement(on:)` is the one place a
+    /// screen turns into island geometry, and the only reader.
+    let displays = DisplayConfigStore()
+
+    /// The shape this screen's island wears, already resolved out of
+    /// `.auto`. `hasPhysicalNotch` is its render-facing half.
+    @Published var islandStyle: DisplayConfigStore.Style = .notch
+    /// Bottom-corner radius of the collapsed island on this screen.
+    @Published var islandCornerRadius: CGFloat = Theme.Island.radiusCollapsed
+    /// Room down each side of the expanded island on this screen.
+    @Published var islandContentPadding: CGFloat = Theme.Space.xl
+
+    /// How much room island content leaves clear at the top.
+    ///
+    /// A real notch has to be cleared or the content slides under the
+    /// camera. A display without one has nothing to clear — but
+    /// `placement(on:)` still assigns the fabricated 196×34 default so
+    /// the collapsed pill has a shape, and every content site was
+    /// reserving that height as if it were hardware. The result was an
+    /// empty 34pt band across the top of the island on every external
+    /// monitor ("the blank space at the top is not quite right").
+    ///
+    /// Read by all three content sites so the rule lives in one place
+    /// rather than being re-derived from `notchSize` at each of them.
+    var contentTopReserve: CGFloat {
+        hasPhysicalNotch ? notchSize.height : Theme.Space.m
+    }
 
     /// Set by the window controller so the panel can grab key focus.
     var onExpandChange: ((Bool) -> Void)?
@@ -246,6 +305,7 @@ final class NotchViewModel: ObservableObject {
             self?.flashGlance(message)
         }
         activityServer.start(store: activities)
+        sessionDiscovery.start()
         events.startGlanceTicker()
         updates.onNewVersion = { [weak self] version in
             self?.flashGlance("\(version) is out", seconds: 8)
@@ -440,15 +500,13 @@ final class NotchViewModel: ObservableObject {
                     }
                     return
                 }
-                // "debug settings" opens the settings pane for
-                // screenshots; an optional tail scrolls to a section,
+                // "debug settings" opens the settings window for
+                // screenshots; an optional tail picks a section,
                 // "debug settings island".
                 if text.hasPrefix("debug settings") {
                     let tail = text.dropFirst("debug settings".count)
                         .trimmingCharacters(in: .whitespaces)
-                    self.settingsScrollTarget = tail.isEmpty ? nil : tail.lowercased()
-                    self.pane = .settings
-                    self.expand()
+                    self.openDashboard?(tail.isEmpty ? nil : DashboardSection.named(tail))
                     return
                 }
                 // "debug dropdock" shows the mid-screen drop bubble.
@@ -500,18 +558,58 @@ final class NotchViewModel: ObservableObject {
     /// `takeKey: false` for drag-driven opens: grabbing key focus in
     /// the middle of someone's drag yanks their app around.
     func expand(takeKey: Bool = true) {
+        // Switched off on this screen. Refused here rather than hidden
+        // in the view: hover is tracked by the window controller against
+        // screen zones, not by the island's own hit testing, so an
+        // invisible island would still open under the pointer.
+        guard islandStyle != .off else { return }
         guard state != .expanded else { return }
         state = .expanded
+        restoreLastTabIfWanted()
         music.expandedVisible = true
         if takeKey { onExpandChange?(true) }
     }
 
+    /// Reopen where the user left off, when they have asked for that.
+    /// A tool switched off in settings since is not a place to reopen
+    /// into, so a stored tab pointing at one is dropped rather than
+    /// opened onto a panel whose switcher icon is gone.
+    private func restoreLastTabIfWanted() {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: Self.rememberLastTabKey) else { return }
+        let stored = defaults.string(forKey: Self.lastTabKey).flatMap(Tab.init(rawValue:))
+        // Falls back to today rather than returning early, and that
+        // distinction is the whole bug: while remembering, `collapse()`
+        // never resets `tab`, so it still holds the closed-on value in
+        // memory. Bailing out left it there — switch a tool off while
+        // the island is shut and it reopened straight onto that tool's
+        // panel, the one case this guard exists to prevent.
+        tab = stored.flatMap { Self.isAvailable($0, in: defaults) ? $0 : nil } ?? .today
+    }
+
+    /// Whether a tab is somewhere the island can open onto right now:
+    /// its tool has not been switched off in settings.
+    static func isAvailable(_ tab: Tab, in defaults: UserDefaults = .standard) -> Bool {
+        guard let key = tab.toolKey else { return true }
+        // An unset flag means the tool ships on, matching the
+        // @AppStorage defaults the settings window declares.
+        return defaults.object(forKey: key) == nil || defaults.bool(forKey: key)
+    }
+
+    static let rememberLastTabKey = "rememberLastTab"
+    private static let lastTabKey = "lastTab"
+
     func collapse() {
         guard state == .expanded else { return }
         state = .collapsed
-        // The island always reopens small and clean.
         pane = .none
-        tab = .today
+        // The island always reopens small and clean, unless the user
+        // asked it to reopen where they left off.
+        if UserDefaults.standard.bool(forKey: Self.rememberLastTabKey) {
+            UserDefaults.standard.set(tab.rawValue, forKey: Self.lastTabKey)
+        } else {
+            tab = .today
+        }
         music.expandedVisible = false
         onExpandChange?(false)
     }
@@ -574,7 +672,12 @@ final class NotchViewModel: ObservableObject {
             duckedMusicForVoice = true
             music.pause()
         }
-        if ambience.active != nil {
+        // Only duck once. A second quietTheRoom() before the matching
+        // restore would read the already-ducked 0 as "the volume to go
+        // back to", and the chip stays lit over silence forever with no
+        // way back but the slider. Two mic taps inside the 1.2s finalize
+        // window is all it takes.
+        if ambience.active != nil, duckedAmbienceVolume == nil {
             duckedAmbienceVolume = ambience.volume
             ambience.volume = 0
         }
