@@ -57,6 +57,29 @@ and nothing is adjustable.
 9. **Resize re-flow.** Changing island size lets the user rearrange
    rather than silently reflowing.
 
+## Milestone in flight (loop-loop)
+
+Running under `/loop-loop`: Opus architects, Sonnet composes, ponytail governs
+code and review, and no product code is written before the founder approves a
+plan doc. Artifacts live in `_bmad-output/loop-loop/`.
+
+- **Displays not applying** — approved 2026-08-01, composer running.
+  Plan: `_bmad-output/loop-loop/displays-not-applying-plan-2026-08-01.md`.
+  Three real faults: Width/Height are read by nothing in Pill mode (they feed
+  `notchSize`, whose consumers are gated on `hasPhysicalNotch`, which is
+  `style == .notch`); the island lives on one display and the pane marks none;
+  and the collapsed island draws two shapes because the island's "should I
+  draw" rule and the bead's "should I yield" rule are separate. Plus clamshell
+  (lid shut, on power) as a first-class case: every screen resolves to pill.
+
+- **Message an agent session from the notch** — NEXT, feasibility under
+  investigation. Pick a running session in the island, speak or type, and have
+  that session act on it. The microphone moves to serve this. Whether an
+  external process can put text into a *running* session is the open question;
+  the likely supported path is a Stop hook that blocks with the queued message
+  as its reason, polled from Chalant's existing local API. Nothing will be
+  built on an assumed mechanism.
+
 ## Phase 3 — sessions become useful
 
 10. **Live activity per session** — what each one is doing right now,
