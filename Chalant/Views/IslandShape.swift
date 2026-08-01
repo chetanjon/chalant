@@ -18,6 +18,10 @@ struct IslandShape: InsettableShape {
     /// same deliberately. See `path(in:)` for why closing across the
     /// top is not an option.
     var topOverscan: CGFloat = 6
+    /// Radius on the two eave tips, where the shape meets the screen
+    /// edge. Clamped to `eave`, so a small island cannot round itself
+    /// inside out.
+    var tipRadius: CGFloat = 5
     var insetAmount: CGFloat = 0
 
     var animatableData: AnimatablePair<CGFloat, AnimatablePair<CGFloat, CGFloat>> {
@@ -44,9 +48,22 @@ struct IslandShape: InsettableShape {
         let x0 = rect.minX, x1 = rect.maxX
         let y0 = rect.minY, y1 = rect.maxY
 
+        // The eave tips are rounded, not pointed. Each is a 90° meeting
+        // of the meniscus (arriving horizontally) and the side running
+        // up off-screen, and it lands right on the screen edge where it
+        // reads as a sharp spike at the top-left and top-right. Real
+        // hardware turns that corner with a radius; so does this.
+        let tr = max(0, min(tipRadius, e))
+
         var p = Path()
-        // Left meniscus: from the screen edge down into the left side.
-        p.move(to: CGPoint(x: x0 - e, y: y0))
+        // Start above the frame on the left, come down to the tip.
+        p.move(to: CGPoint(x: x0 - e, y: y0 - topOverscan))
+        p.addLine(to: CGPoint(x: x0 - e, y: y0 - tr))
+        p.addQuadCurve(
+            to: CGPoint(x: x0 - e + tr, y: y0),
+            control: CGPoint(x: x0 - e, y: y0)
+        )
+        // Left meniscus: from the eave tip down into the left side.
         p.addCurve(
             to: CGPoint(x: x0, y: y0 + e),
             control1: CGPoint(x: x0 - e * (1 - kappa), y: y0),
@@ -72,11 +89,16 @@ struct IslandShape: InsettableShape {
             control2: CGPoint(x: x1, y: y1 - r * (1 - kappa))
         )
         p.addLine(to: CGPoint(x: x1, y: y0 + e))
-        // Right meniscus: back up to the screen edge.
+        // Right meniscus: back up to the eave tip, stopping short so the
+        // tip can be turned with a radius rather than a point.
         p.addCurve(
-            to: CGPoint(x: x1 + e, y: y0),
+            to: CGPoint(x: x1 + e - tr, y: y0),
             control1: CGPoint(x: x1, y: y0 + e * (1 - kappa)),
             control2: CGPoint(x: x1 + e * (1 - kappa), y: y0)
+        )
+        p.addQuadCurve(
+            to: CGPoint(x: x1 + e, y: y0 - tr),
+            control: CGPoint(x: x1 + e, y: y0)
         )
         // The top closes ABOVE the frame, never straight across it.
         //

@@ -251,6 +251,40 @@ final class SessionStoreTests: XCTestCase {
         )
     }
 
+    // MARK: Island silhouette
+
+    func testIslandPathCoversItsFrameItsEavesAndItsOverscan() {
+        // The path is hand-built from curves and is easy to break into
+        // something empty or inside out while it still compiles; on a
+        // notchless display the island is often invisible anyway, so a
+        // screenshot cannot be trusted to catch it.
+        let rect = CGRect(x: 0, y: 0, width: 200, height: 40)
+        let shape = IslandShape(eave: 12, bottomRadius: 16, belly: 3)
+        let path = shape.path(in: rect)
+        XCTAssertFalse(path.isEmpty)
+
+        let box = path.boundingRect
+        // Flares `eave` past each side.
+        XCTAssertEqual(box.minX, rect.minX - 12, accuracy: 0.5)
+        XCTAssertEqual(box.maxX, rect.maxX + 12, accuracy: 0.5)
+        // Closes above the frame so the join never lands on screen.
+        XCTAssertEqual(box.minY, rect.minY - shape.topOverscan, accuracy: 0.5)
+        // And hangs below it, by the belly.
+        XCTAssertGreaterThan(box.maxY, rect.maxY)
+    }
+
+    func testAnEaveSmallerThanTheTipRadiusDoesNotInvertTheShape() {
+        // The resting sliver runs a tiny eave; an unclamped tip radius
+        // would round straight past the tip and fold the outline.
+        let rect = CGRect(x: 0, y: 0, width: 120, height: 12)
+        var shape = IslandShape(eave: 2, bottomRadius: 4, belly: 0.5)
+        shape.tipRadius = 40
+        let box = shape.path(in: rect).boundingRect
+        XCTAssertEqual(box.minX, rect.minX - 2, accuracy: 0.5)
+        XCTAssertEqual(box.maxX, rect.maxX + 2, accuracy: 0.5)
+        XCTAssertFalse(shape.path(in: rect).isEmpty)
+    }
+
     // MARK: Per-display config
 
     func testAutomaticResolvesFromTheHardwareAndNothingElseIsTouched() {
