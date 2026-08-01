@@ -73,20 +73,69 @@ Searched for a way in, and did not find one:
   but it routes through Anthropic's bridge, not a local API a menu-bar app can
   call.
 
-### What is still open
+### The Stop hook works. Confirmed against the documentation.
 
-The leading candidate is the **Stop hook**: when a session finishes a turn, a
-hook runs, and a hook is a process we control. If a Stop hook may return a
-decision that prevents stopping and feeds text back to the model, then Chalant
-can hold a queued message and the hook can hand it over at the natural turn
-boundary. Chalant already ships `scripts/chalant-hook` and a local API, so the
-plumbing exists. **This is not yet confirmed** - the exact contract is being
-checked against documentation, and nothing will be designed until it is.
+Checked directly at `code.claude.com/docs/en/hooks` rather than taken on
+report. The hooks reference lists which events may add context for Claude, and
+where that context lands:
 
-Note the shape this implies even if confirmed: delivery at the **end of a
-turn**, not mid-run. Speaking into the notch would queue a message that the
-session picks up when it next comes to rest. That is a different product from
-"interrupt it now", and the interface has to be honest about which one it is.
+> **Stop and SubagentStop: at the end of the turn. The conversation continues
+> so Claude can act on the feedback.**
+
+So a Stop hook returning `hookSpecificOutput.additionalContext` puts text in
+front of the model and keeps the turn going. That is the injection path, and it
+is documented rather than inferred.
+
+```json
+{
+  "decision": "block",
+  "reason": "shown when blocking",
+  "hookSpecificOutput": {
+    "hookEventName": "Stop",
+    "additionalContext": "the queued message"
+  }
+}
+```
+
+Two notes on the contract, because they are easy to get backwards:
+
+- **`additionalContext` is the field that reaches the model.** `reason`
+  accompanies `decision: "block"`; the documentation separates the two, and
+  only `additionalContext` is described as feedback the conversation continues
+  on. Use `additionalContext` and do not rely on `reason` carrying the payload.
+- **Exit code 2 is the other blocking route.** For Stop it "prevents Claude
+  from stopping, continues the conversation", and on exit 2 "stderr text is fed
+  back to Claude as an error message". That works, but it arrives framed as an
+  error. A user's message is not an error, so prefer the JSON path.
+
+Chalant already ships `scripts/chalant-hook` on Notification and Stop, and a
+local HTTP API. The hook gains one call: ask the app whether anything is queued
+for this `session_id`, and hand it over if so.
+
+### The shape this forces on the product
+
+Delivery is at the **end of a turn**, never mid-run. No hook fires while the
+model is thinking. Speaking into the notch queues a message that the session
+picks up when it next comes to rest, so latency is however long the current
+turn has left - seconds if it is finishing, minutes if it is deep in a build.
+
+That is a different product from "interrupt it now", and the interface has to
+say which one it is. A message that sits silently until a long turn ends will
+read as broken. An `idle` session, by contrast, has already stopped: its Stop
+hook has been and gone, so a message queued now waits for the **next** turn,
+which may never come. Both cases need an honest answer in the design, and the
+`status` field from the registry above is what distinguishes them.
+
+### There is no official API, and the gap is known
+
+Two feature requests ask for exactly this - #27441 "Inter-agent message
+injection" and #53049 "External message injection API for active Claude Code
+sessions". Both are closed, and it is worth being precise about why, since
+"closed" could have meant "shipped": both were auto-closed by a bot as
+duplicates (of #24947 and #35072 respectively), with no implementation. The
+third-party `sstraus/claude-commander` wraps Claude Code in a socket API for
+the same purpose, which confirms the need and is not something we would adopt -
+it requires the user to launch Claude through someone else's wrapper.
 
 ### Explicitly out
 
