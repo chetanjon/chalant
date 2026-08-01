@@ -106,6 +106,25 @@ struct IslandLayout: Codable, Equatable, Sendable {
 
     var placed: [IslandElement] { rows.flatMap(\.elements) }
 
+    /// Moves the row holding `element` so it sits at `index`.
+    ///
+    /// The arithmetic is the whole of it: pulling the row out first
+    /// shifts everything below it up by one, so a drop *below* the
+    /// original position would otherwise land a row too far down. Off by
+    /// one here is invisible until you drag downward and the row stops
+    /// in the wrong place, which is why it lives here and not inside a
+    /// view where it cannot be tested.
+    func moving(_ element: IslandElement, to index: Int) -> IslandLayout {
+        var moved = self
+        guard let from = rows.firstIndex(where: { $0.elements.contains(element) }),
+              from != index
+        else { return self }
+        let row = moved.rows.remove(at: from)
+        let target = from < index ? index - 1 : index
+        moved.rows.insert(row, at: min(max(target, 0), moved.rows.count))
+        return moved
+    }
+
     /// Repairs a layout so it is safe to render.
     ///
     /// A stored layout is written by one build and read by another, so

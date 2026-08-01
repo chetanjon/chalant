@@ -319,6 +319,41 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(layout.repaired().rows.allSatisfy { !$0.elements.isEmpty })
     }
 
+    func testDraggingARowUpwardLandsWhereItWasDropped() {
+        let layout = IslandLayout(
+            rows: [IslandRow([.media]), IslandRow([.sessions]), IslandRow([.ambience])],
+            collapsed: []
+        )
+        XCTAssertEqual(
+            layout.moving(.ambience, to: 0).rows.map(\.elements),
+            [[.ambience], [.media], [.sessions]]
+        )
+    }
+
+    func testDraggingARowDownwardAccountsForItsOwnRemoval() {
+        // The off-by-one: pulling the row out first shifts everything
+        // below it up, so without the correction a downward drag
+        // overshoots by exactly one row.
+        let layout = IslandLayout(
+            rows: [IslandRow([.media]), IslandRow([.sessions]), IslandRow([.ambience])],
+            collapsed: []
+        )
+        XCTAssertEqual(
+            layout.moving(.media, to: 2).rows.map(\.elements),
+            [[.sessions], [.media], [.ambience]]
+        )
+    }
+
+    func testDroppingARowOnItselfChangesNothing() {
+        let layout = IslandLayout.standard
+        XCTAssertEqual(layout.moving(.media, to: 1), layout)
+    }
+
+    func testMovingSomethingNotPlacedChangesNothing() {
+        let layout = IslandLayout(rows: [IslandRow([.media])], collapsed: [])
+        XCTAssertEqual(layout.moving(.ambience, to: 0), layout)
+    }
+
     func testLayoutsAndPresetsRoundTripThroughJSON() throws {
         let presets = LayoutPreset.defaults()
         XCTAssertEqual(presets.count, LayoutPreset.count)
