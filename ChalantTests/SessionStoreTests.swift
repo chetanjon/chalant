@@ -305,7 +305,7 @@ final class SessionStoreTests: XCTestCase {
             rows: [IslandRow([.media]), IslandRow([.switcher]), IslandRow([.input])],
             collapsed: []
         )
-        layout.knownElements = [.media, .switcher, .input, .ambience, .activities, .today]
+        layout.knownElements = [.media, .switcher, .input, .ambience, .activities, .timers]
         XCTAssertTrue(layout.repaired().placed.contains(.sessions))
         // And the one that build did know about, and left out, stays out.
         XCTAssertFalse(layout.repaired().placed.contains(.ambience))

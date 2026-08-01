@@ -9,7 +9,7 @@ enum IslandElement: String, Codable, CaseIterable, Identifiable, Sendable {
     case sessions
     case activities
     case ambience
-    case today
+    case timers
     case switcher
     case input
 
@@ -21,7 +21,7 @@ enum IslandElement: String, Codable, CaseIterable, Identifiable, Sendable {
         case .sessions: return "Agent sessions"
         case .activities: return "Activity"
         case .ambience: return "Ambience"
-        case .today: return "Your day"
+        case .timers: return "Focus and timers"
         case .switcher: return "Tools"
         case .input: return "Ask and answer"
         }
@@ -33,7 +33,7 @@ enum IslandElement: String, Codable, CaseIterable, Identifiable, Sendable {
         case .sessions: return "chevron.left.forwardslash.chevron.right"
         case .activities: return "circle.dashed"
         case .ambience: return "waveform"
-        case .today: return "calendar"
+        case .timers: return "timer"
         case .switcher: return "square.grid.2x2"
         case .input: return "text.cursor"
         }
@@ -53,7 +53,7 @@ enum IslandElement: String, Codable, CaseIterable, Identifiable, Sendable {
     var fitsBesideAnother: Bool {
         switch self {
         case .ambience, .activities, .sessions: return true
-        case .media, .today, .switcher, .input: return false
+        case .media, .timers, .switcher, .input: return false
         }
     }
 }
@@ -93,6 +93,7 @@ struct IslandLayout: Codable, Equatable, Sendable {
     /// The arrangement the island has always shipped with.
     static let standard = IslandLayout(
         rows: [
+            IslandRow([.timers]),
             IslandRow([.media]),
             IslandRow([.activities]),
             IslandRow([.sessions]),
@@ -146,6 +147,58 @@ struct IslandLayout: Codable, Equatable, Sendable {
             collapsed: collapsedFixed,
             knownElements: IslandElement.allCases
         )
+    }
+}
+
+/// The island's arrangement, and the four presets beside it.
+@MainActor
+final class IslandLayoutStore: ObservableObject {
+    private static let layoutKey = "islandLayout"
+    private static let presetsKey = "islandPresets"
+
+    /// Always repaired on the way in and on the way out, so nothing
+    /// downstream has to wonder whether it can trust what it renders.
+    @Published private(set) var layout: IslandLayout = .standard
+    @Published private(set) var presets: [LayoutPreset] = LayoutPreset.defaults()
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        if let data = defaults.data(forKey: Self.layoutKey),
+           let stored = try? JSONDecoder().decode(IslandLayout.self, from: data) {
+            layout = stored.repaired()
+        }
+        if let data = defaults.data(forKey: Self.presetsKey),
+           let stored = try? JSONDecoder().decode([LayoutPreset].self, from: data),
+           stored.count == LayoutPreset.count {
+            presets = stored.map {
+                LayoutPreset(id: $0.id, name: $0.name, layout: $0.layout.repaired())
+            }
+        }
+    }
+
+    func apply(_ new: IslandLayout) {
+        layout = new.repaired()
+        defaults.set(try? JSONEncoder().encode(layout), forKey: Self.layoutKey)
+    }
+
+    /// Stores the arrangement on screen into one of the four slots.
+    func capture(into slot: Int, named name: String? = nil) {
+        guard presets.indices.contains(slot) else { return }
+        presets[slot] = LayoutPreset(
+            id: slot, name: name ?? presets[slot].name, layout: layout
+        )
+        defaults.set(try? JSONEncoder().encode(presets), forKey: Self.presetsKey)
+    }
+
+    func recall(_ slot: Int) {
+        guard presets.indices.contains(slot) else { return }
+        apply(presets[slot].layout)
+    }
+
+    func reset() {
+        apply(.standard)
     }
 }
 

@@ -60,80 +60,20 @@ struct ExpandedView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
-            if focus.isActive || timer.isActive || stopwatch.isActive {
-                SessionStrip(
-                    kind: focus.isActive ? .focus : timer.isActive ? .timer : .stopwatch,
-                    focus: focus,
-                    timer: timer,
-                    stopwatch: stopwatch
-                ) {
-                    withAnimation(Theme.Motion.content) { model.tab = .focus }
+            // Rows come from the layout rather than being written here,
+            // so rearranging one is data rather than a code change.
+            // Ordering, hiding and pairing all live in IslandLayout.
+            ForEach(layoutRows) { row in
+                if row.elements.count == 1 {
+                    element(row.elements[0])
+                } else {
+                    HStack(alignment: .top, spacing: Theme.Space.l) {
+                        ForEach(row.elements) { each in
+                            element(each)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
                 }
-                .transition(.opacity)
-            }
-            // A stopwatch running BESIDE a focus or timer session gets
-            // its own strip; it used to run invisibly behind their
-            // precedence with no control anywhere (review-caught).
-            if stopwatch.isActive, focus.isActive || timer.isActive {
-                SessionStrip(
-                    kind: .stopwatch,
-                    focus: focus,
-                    timer: timer,
-                    stopwatch: stopwatch
-                ) {
-                    withAnimation(Theme.Motion.content) { model.tab = .focus }
-                }
-                .transition(.opacity)
-            }
-
-            topRow
-
-            if !activities.activities.isEmpty {
-                ActivitiesStrip(activities: activities)
-                    .transition(.opacity)
-            }
-
-            AgentSessionsStrip(sessions: model.sessions)
-                .transition(.opacity)
-
-            if showAmbience {
-                AmbienceRow(ambience: ambience)
-                    .transition(.opacity)
-            }
-
-            // Every band used to sit the same distance from its
-            // neighbour, so five rows read as five equal claims on the
-            // eye. What is playing and what is sounding belong
-            // together; the switcher and its panel are a different
-            // thing, and the gap says so before the rule does.
-            Rectangle()
-                .fill(Theme.hairlineFaint)
-                .frame(height: 1)
-                .padding(.top, Theme.Space.xs)
-
-            switch model.pane {
-            case .welcome:
-                WelcomeView(model: model)
-                    .transition(.opacity)
-            case .none:
-                Switcher(model: model, updates: model.updates,
-                         todayEnabled: todayEnabled, tools: enabledTools)
-                // Identity per tab, so SwiftUI sees a swap to transition
-                // rather than one view quietly changing its contents.
-                // Without it the panels simply popped: the switch above
-                // returned a different body and nothing animated, which
-                // is what `tabSlideDirection` was declared for and never
-                // wired to.
-                panel
-                    .id(model.tab)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: model.tabSlideDirection >= 0 ? .trailing : .leading)
-                            .combined(with: .opacity),
-                        // The outgoing panel fades where it stands. Two
-                        // panels travelling at once reads as the whole
-                        // island sliding, and the island is not moving.
-                        removal: .opacity
-                    ))
             }
 
             // While a drag hovers, the body reaches further down the
@@ -229,6 +169,97 @@ struct ExpandedView: View {
         DropStashCard()
             .padding(Theme.Space.m)
             .allowsHitTesting(false)
+    }
+
+    /// The rows to draw. The welcome tour takes the island's chrome —
+    /// the switcher and the panel — and leaves the content rows above
+    /// it alone, which is how the tour has always behaved.
+    private var layoutRows: [IslandRow] {
+        let rows = model.layout.layout.rows
+        guard model.pane == .welcome else { return rows }
+        return rows.filter { row in !row.elements.contains { $0.isRequired } }
+            + [IslandRow([.input])]
+    }
+
+    /// One placeable element, drawn.
+    ///
+    /// Each case keeps the condition that used to sit around it in the
+    /// hard-coded stack: an element the user has placed still shows
+    /// nothing when it has nothing to say.
+    @ViewBuilder
+    private func element(_ element: IslandElement) -> some View {
+        switch element {
+        case .timers:
+            if focus.isActive || timer.isActive || stopwatch.isActive {
+                SessionStrip(
+                    kind: focus.isActive ? .focus : timer.isActive ? .timer : .stopwatch,
+                    focus: focus, timer: timer, stopwatch: stopwatch
+                ) {
+                    withAnimation(Theme.Motion.content) { model.tab = .focus }
+                }
+                .transition(.opacity)
+            }
+            // A stopwatch running BESIDE a focus or timer session gets
+            // its own strip; it used to run invisibly behind their
+            // precedence with no control anywhere (review-caught).
+            if stopwatch.isActive, focus.isActive || timer.isActive {
+                SessionStrip(
+                    kind: .stopwatch, focus: focus, timer: timer, stopwatch: stopwatch
+                ) {
+                    withAnimation(Theme.Motion.content) { model.tab = .focus }
+                }
+                .transition(.opacity)
+            }
+        case .media:
+            topRow
+        case .activities:
+            if !activities.activities.isEmpty {
+                ActivitiesStrip(activities: activities)
+                    .transition(.opacity)
+            }
+        case .sessions:
+            AgentSessionsStrip(sessions: model.sessions)
+                .transition(.opacity)
+        case .ambience:
+            if showAmbience {
+                AmbienceRow(ambience: ambience)
+                    .transition(.opacity)
+            }
+        case .switcher:
+            // Every band used to sit the same distance from its
+            // neighbour, so five rows read as five equal claims on the
+            // eye. What is playing and what is sounding belong
+            // together; the switcher and its panel are a different
+            // thing, and the gap says so before the rule does.
+            Rectangle()
+                .fill(Theme.hairlineFaint)
+                .frame(height: 1)
+                .padding(.top, Theme.Space.xs)
+            Switcher(model: model, updates: model.updates,
+                     todayEnabled: todayEnabled, tools: enabledTools)
+        case .input:
+            if model.pane == .welcome {
+                WelcomeView(model: model)
+                    .transition(.opacity)
+            } else {
+                // Identity per tab, so SwiftUI sees a swap to transition
+                // rather than one view quietly changing its contents.
+                // Without it the panels simply popped: the switch above
+                // returned a different body and nothing animated, which
+                // is what `tabSlideDirection` was declared for and never
+                // wired to.
+                panel
+                    .id(model.tab)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: model.tabSlideDirection >= 0 ? .trailing : .leading)
+                            .combined(with: .opacity),
+                        // The outgoing panel fades where it stands. Two
+                        // panels travelling at once reads as the whole
+                        // island sliding, and the island is not moving.
+                        removal: .opacity
+                    ))
+            }
+        }
     }
 
     /// Media (if on and something's playing) with the persistent mic,

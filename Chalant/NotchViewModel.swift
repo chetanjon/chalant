@@ -247,6 +247,9 @@ final class NotchViewModel: ObservableObject {
     /// screen turns into island geometry, and the only reader.
     let displays = DisplayConfigStore()
 
+    /// How the island's contents are arranged, and the saved presets.
+    let layout = IslandLayoutStore()
+
     /// The shape this screen's island wears, already resolved out of
     /// `.auto`. `hasPhysicalNotch` is its render-facing half.
     @Published var islandStyle: DisplayConfigStore.Style = .notch
