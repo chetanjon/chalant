@@ -203,6 +203,7 @@ final class NotchViewModel: ObservableObject {
     /// running before Chalant launched.
     let sessions = SessionStore()
     private lazy var sessionDiscovery = SessionDiscovery(store: sessions)
+    private lazy var cursorDiscovery = CursorDiscovery(store: sessions)
     let updates = UpdateChecker()
     let crashWatch = CrashWatch()
     /// Hands the update ask to Sparkle (set by the AppDelegate, which
@@ -309,6 +310,7 @@ final class NotchViewModel: ObservableObject {
         }
         activityServer.start(store: activities)
         sessionDiscovery.start()
+        cursorDiscovery.start()
         events.startGlanceTicker()
         updates.onNewVersion = { [weak self] version in
             self?.flashGlance("\(version) is out", seconds: 8)

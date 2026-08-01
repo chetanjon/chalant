@@ -12,6 +12,20 @@ import os
 /// forcing one shape into the other would bend both.
 @MainActor
 final class SessionStore: ObservableObject {
+    /// Which tool the session belongs to. Rows from different agents
+    /// sit in one list, so each has to say whose it is.
+    enum Agent: String, Codable {
+        case claude
+        case cursor
+
+        var label: String {
+            switch self {
+            case .claude: return "Claude Code"
+            case .cursor: return "Cursor"
+            }
+        }
+    }
+
     enum State: String, Codable {
         case working
         case needsInput = "needs-input"
@@ -32,6 +46,7 @@ final class SessionStore: ObservableObject {
         /// What the agent is doing right now, in the user's words.
         /// Nil while nothing has been reached for yet.
         var activity: String?
+        var agent: Agent = .claude
         var state: State          // working | needsInput | done | failed | stale
         var ask: Ask?             // present iff a question is outstanding
         var startedAt: Date
@@ -81,13 +96,13 @@ final class SessionStore: ObservableObject {
     func upsert(
         id: String, title: String, cwd: String, branch: String?,
         lastPrompt: String?, state: State, activity: String? = nil,
-        updatedAt: Date = Date()
+        agent: Agent = .claude, updatedAt: Date = Date()
     ) {
         var session = sessions.first { $0.id == id }
             ?? Session(
                 id: id, title: title, cwd: cwd, branch: branch,
-                lastPrompt: lastPrompt, activity: activity, state: state,
-                ask: nil, startedAt: Date(), updatedAt: updatedAt
+                lastPrompt: lastPrompt, activity: activity, agent: agent,
+                state: state, ask: nil, startedAt: Date(), updatedAt: updatedAt
             )
         let previousState = session.state
         session.title = title
@@ -95,6 +110,7 @@ final class SessionStore: ObservableObject {
         session.branch = branch
         session.lastPrompt = lastPrompt
         session.activity = activity
+        session.agent = agent
         session.state = state
         session.updatedAt = updatedAt
         sessions.removeAll { $0.id == id }

@@ -251,6 +251,47 @@ final class SessionStoreTests: XCTestCase {
         )
     }
 
+    // MARK: Cursor chats
+
+    func testCursorMetaYieldsAWorkingDirectoryAndATime() throws {
+        let json = """
+        {"schemaVersion":1,"createdAtMs":1785438868562,"hasConversation":true,
+         "updatedAtMs":1785438994844,"cwd":"/Users/x/github/thing"}
+        """
+        let meta = try XCTUnwrap(CursorDiscovery.parseMeta(Data(json.utf8)))
+        XCTAssertEqual(meta.cwd, "/Users/x/github/thing")
+        XCTAssertEqual(meta.updatedAt.timeIntervalSince1970, 1785438994.844, accuracy: 0.01)
+    }
+
+    func testCursorMetaFallsBackToCreatedWhenNeverUpdated() throws {
+        let json = #"{"createdAtMs":1785438868562,"cwd":"/Users/x/a"}"#
+        let meta = try XCTUnwrap(CursorDiscovery.parseMeta(Data(json.utf8)))
+        XCTAssertEqual(meta.updatedAt.timeIntervalSince1970, 1785438868.562, accuracy: 0.01)
+    }
+
+    func testCursorMetaWithoutSomewhereToPointIsNoSession() {
+        // A row has to name a place and a time. Anything else is a
+        // chat Chalant has nothing true to say about.
+        XCTAssertNil(CursorDiscovery.parseMeta(Data("not json".utf8)))
+        XCTAssertNil(CursorDiscovery.parseMeta(Data(#"{"updatedAtMs":1}"#.utf8)))
+        XCTAssertNil(CursorDiscovery.parseMeta(Data(#"{"cwd":"/a"}"#.utf8)))
+        // A relative path is not a working directory.
+        XCTAssertNil(CursorDiscovery.parseMeta(Data(#"{"cwd":"rel","updatedAtMs":1}"#.utf8)))
+        XCTAssertNil(CursorDiscovery.parseMeta(Data(#"{"cwd":"/a","updatedAtMs":0}"#.utf8)))
+    }
+
+    func testSessionsFromDifferentAgentsCoexist() {
+        // Ids are namespaced by agent, so a Cursor chat and a Claude
+        // session that happen to share a UUID stay two rows.
+        let store = SessionStore()
+        store.upsert(id: "abc", title: "claude one", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .working)
+        store.upsert(id: "cursor:abc", title: "cursor one", cwd: "/b", branch: nil,
+                     lastPrompt: nil, state: .working, agent: .cursor)
+        XCTAssertEqual(store.sessions.count, 2)
+        XCTAssertEqual(store.sessions.filter { $0.agent == .cursor }.count, 1)
+    }
+
     // MARK: What a session is doing
 
     func testTheLastToolCallIsWhatTheSessionIsDoing() {
