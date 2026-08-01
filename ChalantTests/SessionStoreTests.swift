@@ -471,6 +471,43 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(SessionDiscovery.activityPhrase(forTool: "SomeNewTool"), "SomeNewTool")
     }
 
+    // MARK: A window that comes back to a changed desk
+
+    func testARememberedFrameOnAVanishedScreenIsNotOnScreen() {
+        // The real case: saved at x=3390 on a display spanning
+        // 2560–5120, reopened after that display went away. The window
+        // opens, takes focus, and is nowhere.
+        let saved = NSRect(x: 3390, y: 568, width: 900, height: 652)
+        let screensNow = [NSRect(x: 0, y: 0, width: 2560, height: 1440)]
+        XCTAssertFalse(DashboardWindowController.isOnScreen(saved, screens: screensNow))
+    }
+
+    func testAFrameOnAScreenThatStillExistsIsLeftAlone() {
+        let frame = NSRect(x: 300, y: 200, width: 900, height: 620)
+        let screens = [NSRect(x: 0, y: 0, width: 2560, height: 1440)]
+        XCTAssertTrue(DashboardWindowController.isOnScreen(frame, screens: screens))
+    }
+
+    func testAWindowPeekingOntoAScreenCountsAsLost() {
+        // A sliver on screen puts the title bar off it, so the window
+        // cannot be dragged back. Being technically visible is not the
+        // same as being reachable.
+        let barelyThere = NSRect(x: 2520, y: 700, width: 900, height: 620)
+        let screens = [NSRect(x: 0, y: 0, width: 2560, height: 1440)]
+        XCTAssertFalse(DashboardWindowController.isOnScreen(barelyThere, screens: screens))
+    }
+
+    func testASecondScreenStillCounts() {
+        // Restoring onto a display that is still attached is correct
+        // and must not be dragged back to the main one.
+        let frame = NSRect(x: 3000, y: 300, width: 900, height: 620)
+        let screens = [
+            NSRect(x: 0, y: 0, width: 2560, height: 1440),
+            NSRect(x: 2560, y: 0, width: 2560, height: 1440),
+        ]
+        XCTAssertTrue(DashboardWindowController.isOnScreen(frame, screens: screens))
+    }
+
     // MARK: Icons
 
     /// An SF Symbol name that does not exist renders as nothing at all.

@@ -119,9 +119,29 @@ final class DashboardWindowController: NSWindowController, NSWindowDelegate {
     /// whatever they were looking at — which reads as nothing happening.
     func present(section: DashboardSection?) {
         if let section { selection.section = section }
+        // Where it was last left may no longer exist. This was found
+        // live: the saved frame was x=3390 on a screen that spanned
+        // 2560–5120, and after the displays were rearranged the window
+        // opened, took focus, and was nowhere on any of them. Nothing
+        // says it went wrong — it reads as the app ignoring the click.
+        if let window, !Self.isOnScreen(window.frame, screens: NSScreen.screens.map(\.frame)) {
+            window.center()
+        }
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Whether a remembered frame still lands somewhere reachable.
+    ///
+    /// Any intersection is not enough: a window peeking a few points
+    /// onto a screen has its title bar off it, so it cannot be dragged
+    /// back and is effectively lost. It has to be grabbable.
+    static func isOnScreen(_ frame: NSRect, screens: [NSRect]) -> Bool {
+        screens.contains { screen in
+            let shared = screen.intersection(frame)
+            return shared.width >= 120 && shared.height >= 60
+        }
     }
 }
 
