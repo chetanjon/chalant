@@ -251,6 +251,81 @@ final class SessionStoreTests: XCTestCase {
         )
     }
 
+    // MARK: Island layout
+
+    func testTheStandardLayoutIsAlreadyValid() {
+        XCTAssertEqual(IslandLayout.standard.repaired(), IslandLayout.standard)
+    }
+
+    func testADuplicatedElementIsRenderedOnlyOnce() {
+        // A bad drag can drop an element into two rows; rendering it
+        // twice would double its state and its side effects.
+        let layout = IslandLayout(
+            rows: [IslandRow([.media]), IslandRow([.media, .ambience]), IslandRow([.switcher]),
+                   IslandRow([.input])],
+            collapsed: [.media, .media]
+        )
+        let fixed = layout.repaired()
+        XCTAssertEqual(fixed.placed.filter { $0 == .media }.count, 1)
+        XCTAssertEqual(fixed.collapsed, [.media])
+    }
+
+    func testARowCannotHoldMoreThanTheColumnLimit() {
+        let layout = IslandLayout(
+            rows: [IslandRow([.media, .ambience, .sessions, .activities])],
+            collapsed: []
+        )
+        XCTAssertTrue(layout.repaired().rows.allSatisfy { $0.elements.count <= IslandRow.maxColumns })
+    }
+
+    func testARequiredElementComesBackIfItGoesMissing() {
+        // Without the switcher and the input there is no way to use the
+        // island at all, so neither can be dragged out of existence.
+        let layout = IslandLayout(rows: [IslandRow([.media])], collapsed: [])
+        let placed = layout.repaired().placed
+        XCTAssertTrue(placed.contains(.switcher))
+        XCTAssertTrue(placed.contains(.input))
+    }
+
+    func testAnElementTheUserRemovedStaysRemoved() {
+        // Known to the build that saved it and absent: a deliberate
+        // choice, not a gap to be filled.
+        var layout = IslandLayout(
+            rows: [IslandRow([.media]), IslandRow([.switcher]), IslandRow([.input])],
+            collapsed: []
+        )
+        layout.knownElements = IslandElement.allCases
+        XCTAssertFalse(layout.repaired().placed.contains(.ambience))
+    }
+
+    func testAnElementAddedInALaterBuildAppearsRatherThanStayingInvisible() {
+        // Saved before `sessions` existed: absent from the rows AND from
+        // what that build knew, so it is new rather than unwanted.
+        var layout = IslandLayout(
+            rows: [IslandRow([.media]), IslandRow([.switcher]), IslandRow([.input])],
+            collapsed: []
+        )
+        layout.knownElements = [.media, .switcher, .input, .ambience, .activities, .today]
+        XCTAssertTrue(layout.repaired().placed.contains(.sessions))
+        // And the one that build did know about, and left out, stays out.
+        XCTAssertFalse(layout.repaired().placed.contains(.ambience))
+    }
+
+    func testEmptyRowsAreDropped() {
+        let layout = IslandLayout(
+            rows: [IslandRow([]), IslandRow([.media]), IslandRow([])],
+            collapsed: []
+        )
+        XCTAssertTrue(layout.repaired().rows.allSatisfy { !$0.elements.isEmpty })
+    }
+
+    func testLayoutsAndPresetsRoundTripThroughJSON() throws {
+        let presets = LayoutPreset.defaults()
+        XCTAssertEqual(presets.count, LayoutPreset.count)
+        let data = try JSONEncoder().encode(presets)
+        XCTAssertEqual(try JSONDecoder().decode([LayoutPreset].self, from: data), presets)
+    }
+
     // MARK: Island silhouette
 
     func testIslandPathCoversItsFrameItsEavesAndItsOverscan() {
