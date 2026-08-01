@@ -111,7 +111,17 @@ final class SessionStore: ObservableObject {
         session.lastPrompt = lastPrompt
         session.activity = activity
         session.agent = agent
-        session.state = state
+        // An outstanding question outranks whatever discovery inferred.
+        //
+        // Discovery reads working-or-stale off a file's mtime every
+        // twenty seconds and has no way to know a question is waiting,
+        // so it must not be able to overwrite one. Without this the row
+        // lost its glyph, its tint, its place at the top of the list
+        // and the island's waiting mark one rescan after the question
+        // arrived — while the question itself stayed answerable, so
+        // nothing looked broken.
+        let questionOutstanding = session.ask.map { $0.answer == nil } ?? false
+        session.state = questionOutstanding ? .needsInput : state
         session.updatedAt = updatedAt
         sessions.removeAll { $0.id == id }
         sessions.append(session)

@@ -324,6 +324,39 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.sessions.first?.state, .working)
     }
 
+    func testDiscoveryCannotOverwriteAnOutstandingQuestion() {
+        // Discovery rescans every twenty seconds and pushes
+        // working-or-stale from the file's mtime. It has no way to know
+        // a question is waiting, so it must not be able to clear one:
+        // the row would lose its glyph, its tint, its place at the top
+        // and the island's waiting mark, while the question stayed
+        // answerable — nothing would look broken.
+        let store = storeWithSession()
+        store.attach(askID: "q", to: "s1", header: "h", question: "q?",
+                     options: ["A"], multiSelect: false)
+        XCTAssertEqual(store.sessions.first?.state, .needsInput)
+
+        store.upsert(id: "s1", title: "t", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .working)
+        XCTAssertEqual(store.sessions.first?.state, .needsInput)
+        // Even a session gone quiet is still waiting on an answer.
+        store.upsert(id: "s1", title: "t", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .stale)
+        XCTAssertEqual(store.sessions.first?.state, .needsInput)
+    }
+
+    func testOnceAnsweredDiscoveryTakesTheStateBack() {
+        // The override lasts exactly as long as the question does, or a
+        // finished session would sit at needs-input forever.
+        let store = storeWithSession()
+        store.attach(askID: "q", to: "s1", header: "h", question: "q?",
+                     options: ["A"], multiSelect: false)
+        store.answer(sessionID: "s1", with: ["A"])
+        store.upsert(id: "s1", title: "t", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .stale)
+        XCTAssertEqual(store.sessions.first?.state, .stale)
+    }
+
     func testAnsweringSomethingThatWasNeverAskedIsRefused() {
         let store = storeWithSession()
         XCTAssertFalse(store.answer(sessionID: "s1", with: ["A"]))
