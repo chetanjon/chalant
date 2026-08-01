@@ -29,6 +29,29 @@ final class SessionDiscovery {
         /// file itself rather than from decoding the directory name.
         var cwd: String?
         var gitBranch: String?
+        /// The last tool the agent reached for, which is the closest
+        /// thing the transcript has to "what it is doing right now".
+        var lastTool: String?
+    }
+
+    /// What a tool name means to someone glancing at a row.
+    ///
+    /// Tool names are the agent's vocabulary, not the user's: "Grep"
+    /// and "NotebookEdit" say nothing to somebody watching a strip go
+    /// by. Anything unrecognised falls through to the raw name rather
+    /// than to a shrug — a name is still more use than "working".
+    static func activityPhrase(forTool tool: String) -> String {
+        switch tool {
+        case "Edit", "Write", "NotebookEdit": return "Editing"
+        case "Read": return "Reading"
+        case "Bash", "BashOutput": return "Running a command"
+        case "Grep", "Glob": return "Searching"
+        case "Task", "Agent": return "Running an agent"
+        case "WebFetch", "WebSearch": return "Looking something up"
+        case "TodoWrite": return "Planning"
+        case "AskUserQuestion": return "Waiting on you"
+        default: return tool
+        }
     }
 
     private struct TrackedFile {
@@ -37,6 +60,7 @@ final class SessionDiscovery {
         var cwd: String
         var branch: String?
         var lastPrompt: String?
+        var activity: String?
     }
 
     /// A burst of fs events for one file (title, then prompt, then mode
@@ -162,7 +186,8 @@ final class SessionDiscovery {
             let title = Self.title(metadata: metadata, resolvedCwd: resolvedCwd, slug: slug)
             tracked[id] = TrackedFile(
                 mtime: mtime, title: title, cwd: cwd, branch: branch,
-                lastPrompt: metadata.lastPrompt
+                lastPrompt: metadata.lastPrompt,
+                activity: metadata.lastTool.map(Self.activityPhrase(forTool:))
             )
         }
         guard let entry = tracked[id] else { return }
@@ -170,7 +195,8 @@ final class SessionDiscovery {
             Date().timeIntervalSince(mtime) <= Self.staleWindow ? .working : .stale
         store.upsert(
             id: id, title: entry.title, cwd: entry.cwd, branch: entry.branch,
-            lastPrompt: entry.lastPrompt, state: state, updatedAt: mtime
+            lastPrompt: entry.lastPrompt, state: state,
+            activity: entry.activity, updatedAt: mtime
         )
     }
 
@@ -294,6 +320,19 @@ final class SessionDiscovery {
             }
             if let branch = object["gitBranch"] as? String, !branch.isEmpty {
                 metadata.gitBranch = branch
+            }
+            // Tool calls ride inside an assistant message's content
+            // blocks rather than arriving as a record type of their own,
+            // so the last one in file order is the current activity.
+            if type == "assistant",
+               let message = object["message"] as? [String: Any],
+               let blocks = message["content"] as? [[String: Any]] {
+                for block in blocks
+                where block["type"] as? String == "tool_use" {
+                    if let name = block["name"] as? String, !name.isEmpty {
+                        metadata.lastTool = name
+                    }
+                }
             }
             switch type {
             case "ai-title":

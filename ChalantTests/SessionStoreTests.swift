@@ -251,6 +251,38 @@ final class SessionStoreTests: XCTestCase {
         )
     }
 
+    // MARK: What a session is doing
+
+    func testTheLastToolCallIsWhatTheSessionIsDoing() {
+        // Tool calls ride inside an assistant message's content blocks
+        // rather than arriving as their own record type, and the last
+        // one in file order is the current activity.
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read"}]}}
+        {"type":"assistant","message":{"content":[{"type":"text","text":"thinking"},{"type":"tool_use","name":"Bash"}]}}
+        """
+        XCTAssertEqual(SessionDiscovery.parseMetadata(text, path: "t.jsonl").lastTool, "Bash")
+    }
+
+    func testAssistantRecordsWithoutToolCallsLeaveTheActivityAlone() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit"}]}}
+        {"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}
+        {"type":"assistant"}
+        {"type":"assistant","message":{"content":"not an array"}}
+        """
+        XCTAssertEqual(SessionDiscovery.parseMetadata(text, path: "t.jsonl").lastTool, "Edit")
+    }
+
+    func testToolNamesBecomeSomethingAReaderUnderstands() {
+        XCTAssertEqual(SessionDiscovery.activityPhrase(forTool: "Bash"), "Running a command")
+        XCTAssertEqual(SessionDiscovery.activityPhrase(forTool: "Edit"), "Editing")
+        XCTAssertEqual(SessionDiscovery.activityPhrase(forTool: "AskUserQuestion"), "Waiting on you")
+        // An unmapped tool keeps its name: still more use than a shrug,
+        // and new tools appear faster than this table is updated.
+        XCTAssertEqual(SessionDiscovery.activityPhrase(forTool: "SomeNewTool"), "SomeNewTool")
+    }
+
     // MARK: Island layout
 
     func testTheStandardLayoutIsAlreadyValid() {

@@ -29,6 +29,9 @@ final class SessionStore: ObservableObject {
         var cwd: String
         var branch: String?
         var lastPrompt: String?
+        /// What the agent is doing right now, in the user's words.
+        /// Nil while nothing has been reached for yet.
+        var activity: String?
         var state: State          // working | needsInput | done | failed | stale
         var ask: Ask?             // present iff a question is outstanding
         var startedAt: Date
@@ -77,19 +80,21 @@ final class SessionStore: ObservableObject {
     /// later phase) pushed moments before.
     func upsert(
         id: String, title: String, cwd: String, branch: String?,
-        lastPrompt: String?, state: State, updatedAt: Date = Date()
+        lastPrompt: String?, state: State, activity: String? = nil,
+        updatedAt: Date = Date()
     ) {
         var session = sessions.first { $0.id == id }
             ?? Session(
                 id: id, title: title, cwd: cwd, branch: branch,
-                lastPrompt: lastPrompt, state: state, ask: nil,
-                startedAt: Date(), updatedAt: updatedAt
+                lastPrompt: lastPrompt, activity: activity, state: state,
+                ask: nil, startedAt: Date(), updatedAt: updatedAt
             )
         let previousState = session.state
         session.title = title
         session.cwd = cwd
         session.branch = branch
         session.lastPrompt = lastPrompt
+        session.activity = activity
         session.state = state
         session.updatedAt = updatedAt
         sessions.removeAll { $0.id == id }

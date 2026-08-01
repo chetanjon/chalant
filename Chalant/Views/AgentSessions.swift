@@ -69,7 +69,12 @@ struct AgentSessionsStrip: View {
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(Self.place(session))
+                // What it is doing wins the subtitle while it is doing
+                // something: where a session lives changes rarely, what
+                // it is up to changes constantly, and the second is the
+                // reason to glance at all.
+                Text(session.activity.map { "\($0) · \(Self.place(session))" }
+                    ?? Self.place(session))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)
