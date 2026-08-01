@@ -199,7 +199,11 @@ struct DashboardView: View {
                 case .island:
                     IslandSection(music: model.music)
                 case .displays:
-                    DisplaysSection(displays: model.displays)
+                    DisplaysSection(
+                        displays: model.displays,
+                        islandOn: model.islandDisplayID,
+                        onTravel: { model.travelToDisplay?($0) }
+                    )
                 case .layout:
                     LayoutSection(layout: model.layout)
                 case .glance:
