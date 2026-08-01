@@ -928,6 +928,103 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertNil(defaults.data(forKey: "displayConfigs"))
     }
 
+    func testAnEmptyStoredMapIsReadAsDefaultsNotAFailure() throws {
+        // `{}` decodes cleanly to an empty map - this is not the
+        // unreadable-blob path above, and must not be treated like it.
+        // It is also the exact state `displayConfigs` was found in on
+        // 2026-08-01 (the Reset button's own footprint), and it is not
+        // itself a bug.
+        let suite = "chalant.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(Data("{}".utf8), forKey: "displayConfigs")
+
+        let store = DisplayConfigStore(defaults: defaults)
+        XCTAssertTrue(store.configs.isEmpty)
+        // Unlike the unreadable path, which scrubs the key, a valid
+        // empty map is left exactly where it was.
+        XCTAssertNotNil(defaults.data(forKey: "displayConfigs"))
+    }
+
+    func testAStoredConfigSurvivesAResetOfADifferentDisplay() throws {
+        // Locks the write/reset semantics that produced the `{}` this
+        // investigation started from: a Reset on one display's row
+        // must not be able to erase another's settings too.
+        let suite = "chalant.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = DisplayConfigStore(defaults: defaults)
+
+        var configA = DisplayConfigStore.Config()
+        configA.style = .pill
+        store.set(configA, forKey: "display-a")
+        var configB = DisplayConfigStore.Config()
+        configB.style = .notch
+        store.set(configB, forKey: "display-b")
+
+        store.reset(forKey: "display-a")
+
+        XCTAssertEqual(store.config(forKey: "display-a").style, .auto)
+        XCTAssertEqual(store.config(forKey: "display-b").style, .notch)
+    }
+
+    func testWritingOneDisplayNeverTouchesAnother() throws {
+        // The H2 invariant in code: the pane presents every attached
+        // display as an equal, and editing one must never silently
+        // move a value stored under another's key.
+        let suite = "chalant.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = DisplayConfigStore(defaults: defaults)
+
+        var configB = DisplayConfigStore.Config()
+        configB.width = 300
+        store.set(configB, forKey: "display-b")
+        var configA = DisplayConfigStore.Config()
+        configA.cornerRadius = 4
+        store.set(configA, forKey: "display-a")
+
+        // Through a fresh instance, not just the in-memory copy: this
+        // is the write path the Displays pane actually exercises.
+        let reloaded = DisplayConfigStore(defaults: defaults)
+        XCTAssertEqual(reloaded.config(forKey: "display-b").width, 300)
+        XCTAssertEqual(reloaded.config(forKey: "display-a").cornerRadius, 4)
+    }
+
+    // MARK: Bead visibility (D2: the bead and the collapsed island used
+    // to answer two different questions about the same display, so a
+    // collapsed pill with something to say drew both shapes at once)
+
+    func testABeadYieldsOnlyToAnIslandThatIsActuallyDrawing() {
+        // This is the exact case that shipped wrong.
+        XCTAssertFalse(
+            NotchWindowController.wearsBead(style: .pill, isIslandDisplay: true, islandShowing: true))
+        // The island is on this display but has nothing to say right
+        // now (idle, collapsed): the bead is the resting handle here.
+        XCTAssertTrue(
+            NotchWindowController.wearsBead(style: .pill, isIslandDisplay: true, islandShowing: false))
+        // The island lives elsewhere: this pill display always gets
+        // the bead, whether or not the island happens to be "showing".
+        XCTAssertTrue(
+            NotchWindowController.wearsBead(style: .pill, isIslandDisplay: false, islandShowing: true))
+    }
+
+    func testOnlyPillDisplaysWearABead() {
+        // Style-shaped, not hardware-shaped (2026-08-01): an emulated
+        // notch (Notch style, no real cutout) and a display switched
+        // Off never wear a bead, whatever the island is doing.
+        for isIslandDisplay in [true, false] {
+            for islandShowing in [true, false] {
+                XCTAssertFalse(
+                    NotchWindowController.wearsBead(
+                        style: .off, isIslandDisplay: isIslandDisplay, islandShowing: islandShowing))
+                XCTAssertFalse(
+                    NotchWindowController.wearsBead(
+                        style: .notch, isIslandDisplay: isIslandDisplay, islandShowing: islandShowing))
+            }
+        }
+    }
+
     // MARK: Activity eviction
 
     func testAFullListNeverDropsAQuestionWaitingOnTheUser() {

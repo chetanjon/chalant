@@ -148,9 +148,15 @@ final class NotchWindowController {
     /// comparable value. Kept together so adding a per-display setting
     /// cannot quietly leave the repaint check behind — the failure
     /// there is silent and looks like the setting doing nothing.
+    /// `hasPhysicalNotch` used to be one of these; it is now derived
+    /// from `islandStyle` (already here), so leaving it out drops
+    /// nothing. `islandDisplayID` is here instead: it is per-display
+    /// and was the one write `placement(on:)` made that this check
+    /// never covered (2026-08-01) — the Displays pane's "island here"
+    /// badge would have gone stale exactly like any other silent miss.
     private var islandGeometry: [AnyHashable] {
         [
-            viewModel.hasPhysicalNotch, viewModel.notchSize,
+            viewModel.islandDisplayID, viewModel.notchSize,
             viewModel.islandStyle, viewModel.islandCornerRadius,
             viewModel.islandContentPadding,
         ]
@@ -168,7 +174,11 @@ final class NotchWindowController {
         viewModel.islandStyle = style
         viewModel.islandCornerRadius = config.cornerRadius
         viewModel.islandContentPadding = config.contentPadding
-        viewModel.hasPhysicalNotch = style == .notch
+        viewModel.islandDisplayID = screen.displayID
+        // hasPhysicalNotch used to be written here too; it is now
+        // derived from islandStyle (NotchViewModel.hasPhysicalNotch),
+        // so a screen change can no longer update one and leave the
+        // other holding a stale answer.
 
         // The configured size is the starting point, so a pill — and an
         // emulated notch on a screen with no cutout — is sizeable.
@@ -305,6 +315,16 @@ final class NotchWindowController {
         viewModel.displays.onChange = { [weak self] in
             self?.reposition()
             self?.rebuildSlivers()
+        }
+        // The Displays pane's "Move island here" button: it holds a
+        // stable UUID key, never an NSScreen (see
+        // DisplayConfigStore.key(for:)), so resolving the key back to
+        // a live screen at click time is this controller's job.
+        viewModel.travelToDisplay = { [weak self] key in
+            guard let self,
+                  let screen = NSScreen.screens.first(where: { DisplayConfigStore.key(for: $0) == key })
+            else { return }
+            self.travel(to: screen)
         }
         viewModel.onDebugDropDock = { [weak self] in
             guard let self, let screen = self.notchScreen else { return }
@@ -463,21 +483,40 @@ final class NotchWindowController {
     /// home after it collapses. Held by display id, never by object.
     private var travelDisplayID: CGDirectDisplayID?
 
-    /// A notched display if there is one, otherwise the primary. Never
-    /// NSScreen.main: that is the display holding the *focused window*,
-    /// so on a notchless Mac with two monitors the island's home moved
-    /// every time the user clicked something on the other screen, which
-    /// made travel clear itself and the island teleport mid-use. It can
-    /// also be nil, which is how the panel went missing at launch.
-    /// screens.first is the menu-bar display and it holds still.
+    /// A notched display if there is one, otherwise a sensible one
+    /// that has not been switched off. Never NSScreen.main: that is
+    /// the display holding the *focused window*, so on a notchless
+    /// Mac with two monitors the island's home moved every time the
+    /// user clicked something on the other screen, which made travel
+    /// clear itself and the island teleport mid-use. It can also be
+    /// nil, which is how the panel went missing at launch. screens.first
+    /// is the menu-bar display and it holds still.
+    ///
+    /// With the lid shut the built-in leaves NSScreen.screens
+    /// entirely, so every remaining display has no safe-area inset
+    /// and `.auto` resolves every one of them to `.pill` — there is no
+    /// notch anywhere to prefer. A display set to Off must never be
+    /// picked as home, or the island lands somewhere it will never
+    /// draw (clamshell, 2026-08-01). If every attached display is Off,
+    /// that is a real state, not an accident: the last fallback still
+    /// returns a real screen so the panel has somewhere to sit,
+    /// invisible, rather than going homeless.
     private var homeScreen: NSScreen? {
-        NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 })
+        let notOff = NSScreen.screens.filter { viewModel.displays.resolvedStyle(for: $0) != .off }
+        return notOff.first(where: { $0.safeAreaInsets.top > 0 })
+            ?? notOff.first
             ?? NSScreen.screens.first
     }
 
     private var notchScreen: NSScreen? {
+        // A travelled-to display that was switched to Off since must
+        // not keep the island there — the door and bead this plan
+        // adds are both gone on an Off display, and the island would
+        // be reachable by nothing at all (clamshell requirement,
+        // 2026-08-01).
         if let id = travelDisplayID,
-           let visiting = NSScreen.screens.first(where: { $0.displayID == id }) {
+           let visiting = NSScreen.screens.first(where: { $0.displayID == id }),
+           viewModel.displays.resolvedStyle(for: visiting) != .off {
             return visiting
         }
         return homeScreen
@@ -499,6 +538,23 @@ final class NotchWindowController {
     /// notchless display, and, since the uninvited-bloom fix, also the
     /// exact size of that display's hover door.
     static let sliverRoom = CGSize(width: 116, height: 20)
+
+    /// Whether a display wears a resting bead. Static and screen-free
+    /// so the rule can be checked without a monitor attached.
+    ///
+    /// Style-shaped, not hardware-shaped: hardware barred a bead from
+    /// any display with a notch, which stranded a MacBook forced to
+    /// Pill with no resting handle once the island travelled away,
+    /// and let an emulated notch (Notch style, no real cutout) keep
+    /// an exemption it no longer earned.
+    static func wearsBead(
+        style: DisplayConfigStore.Style,
+        isIslandDisplay: Bool,
+        islandShowing: Bool
+    ) -> Bool {
+        style == .pill && !(isIslandDisplay && islandShowing)
+    }
+
     private var sliverPanels: [NSPanel] = []
     /// Defaults change constantly (the voice log alone writes every
     /// utterance); only a real difference rebuilds the panels.
@@ -506,21 +562,23 @@ final class NotchWindowController {
 
     func rebuildSlivers() {
         let wantsEdge = UserDefaults.standard.object(forKey: "idleEdgeOn") as? Bool ?? true
-        // The bead is the ONLY resting visual on a notchless display;
-        // the island itself stays invisible there until it blooms, so
-        // hover never jump-cuts between two shapes (user, 2026-07-23,
-        // photo of the handoff). The bead yields only while the
-        // island is actually open on that display.
-        // The island's own display yields its bead while it is showing
-        // anything there: an open island, or a six-second toast (a
-        // toast renders real content in the collapsed pill and the
-        // bead would sit over its text, review-caught).
-        let showingContent = viewModel.state != .collapsed
-            || viewModel.glanceToast != nil
-        let contentID = showingContent ? notchScreen?.displayID : nil
+        // One answer for "is the island drawing on this display right
+        // now", also read by the island's own opacity
+        // (NotchViewModel.islandIsShowing). This used to be two rules:
+        // the bead asked "collapsed with no toast" here, the island
+        // asked "nothing to say" in NotchRootView, and a collapsed
+        // island with a song playing satisfied the second without
+        // satisfying the first, so both drew on the same display
+        // (2026-08-01, photographed).
+        let showing = viewModel.islandIsShowing
+        let islandID = notchScreen?.displayID
         let targets = wantsEdge
             ? NSScreen.screens.filter {
-                $0.safeAreaInsets.top == 0 && $0.displayID != contentID
+                Self.wearsBead(
+                    style: viewModel.displays.resolvedStyle(for: $0),
+                    isIslandDisplay: $0.displayID == islandID,
+                    islandShowing: showing
+                )
             }
             : []
         let signature = targets
@@ -564,6 +622,15 @@ final class NotchWindowController {
 
     private func pointerMoved() {
         guard let screen = notchScreen else { return }
+        // ponytail: resolves a UUID per screen at 20 Hz so the bead's
+        // answer stays live when music starts or a timer finishes
+        // while collapsed - without it the bead only re-checked on
+        // the next display or state event and could sit wrong for the
+        // rest of the session (EC-11/EC-12, 2026-08-01). The signature
+        // guard inside rebuildSlivers means this is cheap until the
+        // answer actually changes; cache the resolved style on the
+        // store, keyed by UUID, if this ever shows up in a trace.
+        rebuildSlivers()
         let location = NSEvent.mouseLocation
         senseDrag(at: location, on: screen)
         switch viewModel.state {
@@ -823,39 +890,61 @@ final class NotchWindowController {
     /// or a hair away, not from half a menu bar out. The old 160 of
     /// slack opened it for passersby (user call, 2026-07-21).
     private func collapsedZone(on screen: NSScreen) -> NSRect {
-        // On a notchless display the door is exactly the bead's room:
-        // the island opens only when the cursor touches the thing the
-        // eye can see. The old notch-wide invisible strip kept catching
-        // runs at browser tabs on maximized windows and blooming
-        // uninvited (user, 2026-07-23). With the bead switched off the
-        // same small door remains, just invisible; R96's law that a
-        // door always exists survives at bead scale.
-        guard screen.safeAreaInsets.top > 0 else {
+        // Sized from the STYLE that display resolves to, not its raw
+        // hardware: the door and the shape it opens have to agree, or
+        // a door can sit under a shape too wide for it (an emulated
+        // notch on a screen with no cutout, EC-5) or a shape can draw
+        // with no door under it at all (Off, which used to still wear
+        // the hardware-shaped door and left a travelled island
+        // stranded there, EC-4, 2026-08-01).
+        switch viewModel.displays.resolvedStyle(for: screen) {
+        case .off:
+            // Every caller guards on contains() first, and
+            // CGRect.null.contains is false by definition: no caller
+            // needs to change for a display with no door at all.
+            return .null
+        case .pill:
+            // The door is exactly the bead's room: the island opens
+            // only when the cursor touches the thing the eye can see.
+            // The old notch-wide invisible strip kept catching runs at
+            // browser tabs on maximized windows and blooming uninvited
+            // (user, 2026-07-23). With the bead switched off the same
+            // small door remains, just invisible; R96's law that a
+            // door always exists survives at bead scale.
             return hoverZone(
                 on: screen,
                 width: Self.sliverRoom.width,
                 height: Self.sliverRoom.height
             )
+        case .notch, .auto:
+            // .auto never reaches here — resolvedStyle always resolves
+            // it — but the switch has to be whole. Sized from THIS
+            // screen's own notch, not the display the island currently
+            // dresses: viewModel.notchSize is the dressed display's,
+            // so every other display's door inherited the wrong width
+            // and could miss the real notch (review-caught).
+            let notch = notchMetric(of: screen)
+            return hoverZone(
+                on: screen,
+                width: notch.width + 116,
+                height: notch.height + 12
+            )
         }
-        // Sized from THIS screen's own notch, not the display the
-        // island currently dresses: viewModel.notchSize is the
-        // dressed display's, so every other display's door inherited
-        // the wrong width and could miss the real notch (review-caught).
-        let notch = notchMetric(of: screen)
-        return hoverZone(
-            on: screen,
-            width: notch.width + 116,
-            height: notch.height + 12
-        )
     }
 
-    /// A screen's own notch, or the shared default for a notchless
-    /// one, so a door is correct on whichever display it hangs from.
+    /// A screen's own notch, or — for an emulated one — the size the
+    /// pane configured for it, so a door is correct on whichever
+    /// display it hangs from. A real notch's dimensions are the
+    /// hardware's to state; falling back to the static default here
+    /// left a 420pt-wide emulated notch behind a door sized for the
+    /// old ~310pt default, and the island's own ends could not reach
+    /// it (EC-5).
     private func notchMetric(of screen: NSScreen) -> CGSize {
         guard screen.safeAreaInsets.top > 0,
               let left = screen.auxiliaryTopLeftArea,
               let right = screen.auxiliaryTopRightArea else {
-            return NotchViewModel.defaultNotchSize
+            let config = viewModel.displays.config(for: screen)
+            return CGSize(width: config.width, height: config.height)
         }
         return CGSize(
             width: screen.frame.width - left.width - right.width,

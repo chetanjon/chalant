@@ -234,16 +234,6 @@ final class NotchViewModel: ObservableObject {
     /// Same, straight into the Shortcuts.app library picker.
     @Published var wantsShortcutPick = false
 
-    /// True on the built-in display where hardware occupies the middle
-    /// of the island; external displays keep that space usable. Same
-    /// reason as notchSize above.
-    ///
-    /// Read as "the island wraps a notch here", not "this panel has one
-    /// in it": a screen set to Notch in settings wraps an emulated one,
-    /// and a MacBook set to Pill does not wrap its real one. Every read
-    /// site is a render decision and wants the resolved answer.
-    @Published var hasPhysicalNotch = false
-
     /// Per-display island settings. `placement(on:)` is the one place a
     /// screen turns into island geometry, and the only reader.
     let displays = DisplayConfigStore()
@@ -258,6 +248,39 @@ final class NotchViewModel: ObservableObject {
     @Published var islandCornerRadius: CGFloat = Theme.Island.radiusCollapsed
     /// Room down each side of the expanded island on this screen.
     @Published var islandContentPadding: CGFloat = Theme.Space.xl
+
+    /// Which display `placement(on:)` last measured. The Displays pane
+    /// lists every attached screen as an equal, and the island can
+    /// only be on one: without this, editing any display but this one
+    /// was a correct write with no visible effect and nothing on
+    /// screen saying why (2026-08-01). `placement(on:)` is its only
+    /// writer.
+    @Published var islandDisplayID: CGDirectDisplayID?
+
+    /// Set by the window controller so the Displays pane's "Move
+    /// island here" button can ask for a travel it would otherwise
+    /// have no way to trigger — the pane holds a stable UUID key,
+    /// never an `NSScreen` (see `DisplayConfigStore.key(for:)`), so
+    /// resolving the key back to a live screen is the controller's
+    /// job, not this model's.
+    var travelToDisplay: ((String) -> Void)?
+
+    /// True on the built-in display where hardware occupies the middle
+    /// of the island; external displays keep that space usable.
+    ///
+    /// Derived from `islandStyle` rather than its own stored
+    /// `@Published` bool: the stored version defaulted `false` while
+    /// `islandStyle` defaulted `.notch` — two answers to one question
+    /// that only ever agreed because `placement(on:)` runs before the
+    /// first render. Deriving it removes the second default outright;
+    /// a reader still gets a live re-render, since `islandStyle` is
+    /// the `@Published` one.
+    ///
+    /// Read as "the island wraps a notch here", not "this panel has one
+    /// in it": a screen set to Notch in settings wraps an emulated one,
+    /// and a MacBook set to Pill does not wrap its real one. Every read
+    /// site is a render decision and wants the resolved answer.
+    var hasPhysicalNotch: Bool { islandStyle == .notch }
 
     /// How much room island content leaves clear at the top.
     ///
@@ -277,6 +300,163 @@ final class NotchViewModel: ObservableObject {
 
     /// Set by the window controller so the panel can grab key focus.
     var onExpandChange: ((Bool) -> Void)?
+
+    // MARK: - What the resting island has to say
+    //
+    // Moved here from NotchRootView (2026-08-01). The bead
+    // (NotchWindowController.rebuildSlivers) and the island's own
+    // opacity used to each carry a version of "is there anything to
+    // show" — the bead asked "collapsed with no toast", the island
+    // asked "nothing to say" — and a collapsed island with music
+    // playing satisfied the second without satisfying the first, so
+    // both drew on the same display. `islandIsShowing` below is the
+    // one place either can ask it now.
+    //
+    // These read UserDefaults directly rather than through
+    // `@AppStorage`, which only works as a SwiftUI `DynamicProperty`
+    // and does nothing outside a View — the same pattern already used
+    // elsewhere on this model (`isAvailable(_:in:)`, `hoverChanged`).
+    // NotchRootView keeps its own `@AppStorage` declarations for these
+    // same keys so it still re-renders the instant a glance switch
+    // flips in Settings.
+
+    /// The camera mark's earned width, one number for both pill
+    /// families (two hand-derived constants drifted apart once).
+    private static let cameraMarkWidth: CGFloat = 16
+
+    /// Agents running right now, and whether any wants an answer.
+    ///
+    /// `stale` is deliberately excluded: a session Chalant has only
+    /// inferred is quiet is not something to put a live mark next to.
+    var agentGlance: (count: Int, waiting: Bool)? {
+        guard UserDefaults.standard.object(forKey: "glanceAgents") as? Bool ?? true else {
+            return nil
+        }
+        let live = sessions.sessions.filter { $0.state == .working || $0.state == .needsInput }
+        guard !live.isEmpty else { return nil }
+        return (live.count, live.contains { $0.state == .needsInput })
+    }
+
+    /// The event about to start, if the user lets the glance carry it.
+    var upcomingEvent: DayEvent? {
+        let glanceNextEvent = UserDefaults.standard.object(forKey: "glanceNextEvent") as? Bool ?? true
+        return glanceNextEvent ? events.nextEvent : nil
+    }
+
+    /// Anything counting: a pomodoro, a plain timer, the stopwatch.
+    var sessionActive: Bool {
+        focus.isActive || timer.isActive || stopwatch.isActive
+    }
+
+    /// Music and a session at once: the wave keeps the left wing and
+    /// the session mark takes the right (user, 2026-07-22).
+    var sessionOnRight: Bool {
+        let glanceSession = UserDefaults.standard.object(forKey: "glanceSession") as? Bool ?? true
+        return glanceSession && sessionActive && music.nowPlaying?.isPlaying == true
+    }
+
+    /// The song's name on the resting island, not just its bars.
+    ///
+    /// This reverses an earlier call. The collapsed island on a monitor
+    /// was stripped bare because content there "sat on top of someone's
+    /// window" (user, 2026-07-22) and because a wide pill did not match
+    /// the hardware (user, 2026-07-23). Both objections were about a
+    /// screen pretending to be a MacBook. Asked again for an island
+    /// rather than a notch on external displays, the user now wants the
+    /// song beside it, so this is on for pills and off for notches —
+    /// where the old reasoning still holds exactly.
+    var showsSongBeside: Bool {
+        let collapsedSong = UserDefaults.standard.object(forKey: "collapsedSong") as? Bool ?? true
+        return islandStyle == .pill
+            && collapsedSong
+            && state == .collapsed
+            && music.nowPlaying?.isPlaying == true
+    }
+
+    /// Each wing earns exactly what its content needs: the session
+    /// mark wants 26 (digits clipped at real pomodoro widths, so the
+    /// wing wears a symbol that cannot: the ring, or the stopwatch
+    /// glyph; user, 2026-07-22), the slimmed wave takes 28. Quiet
+    /// mode keeps the bare pill and lets the rim carry it (both moods
+    /// proved real within one day, so it's a setting).
+    var leftWingNeed: CGFloat {
+        if showsSongBeside { return 156 }
+        let playingSignal = UserDefaults.standard
+            .object(forKey: MusicController.playingSignalKey) as? String
+            ?? MusicController.playingSignalDefault
+        if playingSignal == "wave", music.nowPlaying?.isPlaying == true { return 28 }
+        let glanceSession = UserDefaults.standard.object(forKey: "glanceSession") as? Bool ?? true
+        if glanceSession, sessionActive, !sessionOnRight { return 26 }
+        return 0
+    }
+
+    /// The glance that has earned the space beside the notch.
+    ///
+    /// Precedence is the user's list rather than the order these
+    /// happen to be written in, since only one of them fits and which
+    /// one matters more is a matter of taste, not of code.
+    var winningCollapsedItem: CollapsedItem? {
+        layout.layout.collapsed.first { collapsedWidth($0) > 0 }
+    }
+
+    /// What a glance needs, and nothing if it has nothing to say. One
+    /// function so the width and the decision to show it can never
+    /// disagree — a glance with no width has nowhere to sit, which is
+    /// how the charge shipped invisible.
+    func collapsedWidth(_ item: CollapsedItem) -> CGFloat {
+        switch item {
+        case .agents:
+            return agentGlance != nil ? 44 : 0
+        case .timers:
+            return sessionOnRight ? 30 : 0
+        // A session shows only its left-wing ring and countdown; the
+        // right-side FOCUS 1 OF 4 label was width without value
+        // (user call, 2026-07-21). A joinable meeting's camera mark
+        // earns its own width; stealing the marquee's sent titles
+        // into perpetual scroll.
+        case .event:
+            guard let next = upcomingEvent else { return 0 }
+            return 112 + (next.joinURL != nil ? Self.cameraMarkWidth : 0)
+        case .battery:
+            let glanceBattery = UserDefaults.standard.object(forKey: "glanceBattery") as? Bool ?? false
+            return glanceBattery && stats.battery != nil ? 44 : 0
+        }
+    }
+
+    /// Width the right-of-camera glance needs on notched displays.
+    var notchSideNeed: CGFloat {
+        if glanceToast != nil { return 124 }
+        // Nothing beyond the user's list: the day, the streak, and the
+        // clock glances all duplicated surfaces that already exist (the
+        // menu bar clock sits an inch away), and every one of them
+        // stretched the pill past the hardware (user, 2026-07-23, "it
+        // should not be too wide on the Mac").
+        return winningCollapsedItem.map(collapsedWidth) ?? 0
+    }
+
+    /// Anything the resting island would actually draw.
+    var collapsedHasSomethingToSay: Bool {
+        glanceToast != nil || leftWingNeed > 0 || notchSideNeed > 0
+            || (ambience.active != nil && music.nowPlaying?.isPlaying != true)
+    }
+
+    /// The island is putting pixels on this display right now.
+    ///
+    /// One answer, read by the island's own opacity and by the bead.
+    /// They used to carry a rule each — the bead asked "collapsed
+    /// with no toast", the island asked "nothing to say" — so a
+    /// collapsed island with a song playing drew its pill AND the
+    /// bead on the same display (2026-08-01).
+    var islandIsShowing: Bool {
+        switch islandStyle {
+        case .off: return false
+        // A notch island dresses hardware; it is drawn whether or not
+        // it has anything to say. `.auto` never reaches here,
+        // `placement(on:)` resolves it, but the switch has to be whole.
+        case .auto, .notch: return true
+        case .pill: return state != .collapsed || collapsedHasSomethingToSay
+        }
+    }
 
     init() {
         focus = FocusController(ambience: ambience)

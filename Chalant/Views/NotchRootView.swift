@@ -29,12 +29,20 @@ struct NotchRootView: View {
     @AppStorage(MusicController.playingSignalKey) private var playingSignal
         = MusicController.playingSignalDefault
     @AppStorage("glanceSession") private var glanceSession = true
+    // These four are read again, directly by key, inside
+    // NotchViewModel's collapsed-glance rules now (moved there
+    // 2026-08-01); the model cannot use @AppStorage, that wrapper is a
+    // SwiftUI DynamicProperty and does nothing outside a View. They
+    // stay declared here anyway, because that is what makes this view
+    // re-render the instant one flips in Settings — delete them as
+    // "unused" and the glance freezes until some unrelated state
+    // change happens to force a redraw.
     @AppStorage("glanceBattery") private var glanceBattery = false
     @AppStorage("collapsedSong") private var collapsedSong = true
     @AppStorage("glanceAgents") private var glanceAgents = true
+    @AppStorage("glanceNextEvent") private var glanceNextEvent = true
     @AppStorage("islandMaterial") private var islandMaterial = "ink"
     @AppStorage("glassClarity") private var glassClarity = "balanced"
-    @AppStorage("glanceNextEvent") private var glanceNextEvent = true
 
     /// This view injects the accent into the environment for everything
     /// below it, so it reads the source directly rather than @Environment
@@ -56,26 +64,6 @@ struct NotchRootView: View {
         self.events = model.events
         self.activities = model.activities
         self.sessions = model.sessions
-    }
-
-    /// The event about to start, if the user lets the glance carry it.
-    private var upcomingEvent: DayEvent? {
-        glanceNextEvent ? events.nextEvent : nil
-    }
-
-    /// The camera mark's earned width, one number for both pill
-    /// families (two hand-derived constants drifted apart once).
-    private static let cameraMarkWidth: CGFloat = 16
-
-    /// Agents running right now, and whether any wants an answer.
-    ///
-    /// `stale` is deliberately excluded: a session Chalant has only
-    /// inferred is quiet is not something to put a live mark next to.
-    private var agentGlance: (count: Int, waiting: Bool)? {
-        guard glanceAgents else { return nil }
-        let live = sessions.sessions.filter { $0.state == .working || $0.state == .needsInput }
-        guard !live.isEmpty else { return nil }
-        return (live.count, live.contains { $0.state == .needsInput })
     }
 
     /// The agents' mark on the resting island: their count, breathing
@@ -108,99 +96,14 @@ struct NotchRootView: View {
         }
     }
 
-    /// Anything counting: a pomodoro, a plain timer, the stopwatch.
-    private var sessionActive: Bool {
-        focus.isActive || timer.isActive || stopwatch.isActive
-    }
-
-    /// Music and a session at once: the wave keeps the left wing and
-    /// the session mark takes the right (user, 2026-07-22).
-    private var sessionOnRight: Bool {
-        glanceSession && sessionActive
-            && music.nowPlaying?.isPlaying == true
-    }
-
-    /// The song's name on the resting island, not just its bars.
-    ///
-    /// This reverses an earlier call. The collapsed island on a monitor
-    /// was stripped bare because content there "sat on top of someone's
-    /// window" (user, 2026-07-22) and because a wide pill did not match
-    /// the hardware (user, 2026-07-23). Both objections were about a
-    /// screen pretending to be a MacBook. Asked again for an island
-    /// rather than a notch on external displays, the user now wants the
-    /// song beside it, so this is on for pills and off for notches —
-    /// where the old reasoning still holds exactly.
-    private var showsSongBeside: Bool {
-        model.islandStyle == .pill
-            && collapsedSong
-            && model.state == .collapsed
-            && music.nowPlaying?.isPlaying == true
-    }
-
-    /// Each wing earns exactly what its content needs: the session
-    /// mark wants 26 (digits clipped at real pomodoro widths, so the
-    /// wing wears a symbol that cannot: the ring, or the stopwatch
-    /// glyph; user, 2026-07-22), the slimmed wave takes 28. Quiet
-    /// mode keeps the bare pill and lets the rim carry it (both moods
-    /// proved real within one day, so it's a setting).
-    private var leftWingNeed: CGFloat {
-        if showsSongBeside { return 156 }
-        if playingSignal == "wave", music.nowPlaying?.isPlaying == true { return 28 }
-        if glanceSession, sessionActive, !sessionOnRight { return 26 }
-        return 0
-    }
-
     private var statusWings: CGFloat {
         // Beside a physical notch the pill must widen symmetrically:
         // the camera sits at the screen's center, so each side gets
         // the larger wing's width or content slides under the notch.
         if model.hasPhysicalNotch {
-            return 2 * max(leftWingNeed, notchSideNeed)
+            return 2 * max(model.leftWingNeed, model.notchSideNeed)
         }
-        return leftWingNeed
-    }
-
-    /// The glance that has earned the space beside the notch.
-    ///
-    /// Precedence is the user's list rather than the order these
-    /// happen to be written in, since only one of them fits and which
-    /// one matters more is a matter of taste, not of code.
-    private var winningCollapsedItem: CollapsedItem? {
-        model.layout.layout.collapsed.first { collapsedWidth($0) > 0 }
-    }
-
-    /// What a glance needs, and nothing if it has nothing to say. One
-    /// function so the width and the decision to show it can never
-    /// disagree — a glance with no width has nowhere to sit, which is
-    /// how the charge shipped invisible.
-    private func collapsedWidth(_ item: CollapsedItem) -> CGFloat {
-        switch item {
-        case .agents:
-            return agentGlance != nil ? 44 : 0
-        case .timers:
-            return sessionOnRight ? 30 : 0
-        // A session shows only its left-wing ring and countdown; the
-        // right-side FOCUS 1 OF 4 label was width without value
-        // (user call, 2026-07-21). A joinable meeting's camera mark
-        // earns its own width; stealing the marquee's sent titles
-        // into perpetual scroll.
-        case .event:
-            guard let next = upcomingEvent else { return 0 }
-            return 112 + (next.joinURL != nil ? Self.cameraMarkWidth : 0)
-        case .battery:
-            return glanceBattery && stats.battery != nil ? 44 : 0
-        }
-    }
-
-    /// Width the right-of-camera glance needs on notched displays.
-    private var notchSideNeed: CGFloat {
-        if model.glanceToast != nil { return 124 }
-        // Nothing beyond the user's list: the day, the streak, and the
-        // clock glances all duplicated surfaces that already exist (the
-        // menu bar clock sits an inch away), and every one of them
-        // stretched the pill past the hardware (user, 2026-07-23, "it
-        // should not be too wide on the Mac").
-        return winningCollapsedItem.map(collapsedWidth) ?? 0
+        return model.leftWingNeed
     }
 
     // MARK: Notchless pill accounting
@@ -210,7 +113,7 @@ struct NotchRootView: View {
     // not ride the middle here; they were width without value.
 
     private var monitorPlaying: Bool { music.nowPlaying?.isPlaying == true }
-    private var monitorSession: Bool { sessionActive }
+    private var monitorSession: Bool { model.sessionActive }
 
     private var monitorMiddleWidth: CGFloat {
         // The monitor pill exists only for a passing toast now.
@@ -230,42 +133,21 @@ struct NotchRootView: View {
     /// there sat on top of windows. That is now a choice rather than a
     /// rule: a monitor island shows what the user asked it to and wears
     /// the sliver only when there is nothing to show.
+    ///
+    /// Narrowed to `.pill` rather than `!hasPhysicalNotch` (which also
+    /// covers `.off`): an Off island's opacity is already 0 via
+    /// `islandIsShowing`, so what this drives no longer needs to agree
+    /// with it, and the old `monitorTucked` this replaced tested the
+    /// exact same pair of things twice under two names (2026-08-01).
     private var collapsedIsEmpty: Bool {
-        !model.hasPhysicalNotch && !collapsedHasSomethingToSay
-    }
-
-    /// On a monitor the collapsed island shows nothing: there is no
-    /// hardware to dress and every pixel it wore sat on top of
-    /// someone's window (user, 2026-07-22, "we can't show anything on
-    /// external monitors"). The hover zone is coordinate math, not
-    /// pixels, so the top edge still summons the island. At rest the
-    /// island keeps a findable sliver on the menu bar line (a Mac
-    /// mini owner has no notch anywhere; fully invisible read as not
-    /// installed, user 2026-07-23). The "Show edge when idle" switch
-    /// turns even that off for the total invisibility R96 chose.
-    /// Content never rides the resting pill; a six-second toast is
-    /// the one visitor with something to say.
-    private var monitorTucked: Bool {
-        guard !model.hasPhysicalNotch, model.state == .collapsed else { return false }
-        // Tucked only when there is genuinely nothing to say. This used
-        // to test for a toast alone, so on an external display the
-        // island was invisible at rest even with a song playing, a
-        // session running or the charge switched on — which is what
-        // made a monitor look like it had no island at all.
-        return !collapsedHasSomethingToSay
-    }
-
-    /// Anything the resting island would actually draw.
-    private var collapsedHasSomethingToSay: Bool {
-        model.glanceToast != nil || leftWingNeed > 0 || notchSideNeed > 0
-            || (ambience.active != nil && music.nowPlaying?.isPlaying != true)
+        model.islandStyle == .pill && !model.collapsedHasSomethingToSay
     }
 
     /// Stable per-state sizes: content is framed to its own state's
     /// size (not the live island size), so an outgoing view fades out
     /// at its natural size instead of being crushed into the pill.
     private var collapsedSize: CGSize {
-        if !model.hasPhysicalNotch {
+        if model.islandStyle == .pill {
             if collapsedIsEmpty {
                 // A sliver, not a pill: idle on a monitor the island
                 // yields the chrome, but stays findable. 120x14 with
@@ -327,27 +209,16 @@ struct NotchRootView: View {
             )
         }
         if model.state == .collapsed {
+            // Reaching here means islandStyle is .notch or .off (.pill
+            // returned above): .notch forces hasPhysicalNotch true, and
+            // .off draws at opacity 0 regardless (islandIsShowing),
+            // so the sliver and compact-pill branches this used to
+            // test for here were unreachable in every visible state
+            // and are gone (2026-08-01).
+            //
             // On hover the droplet "reaches", shoulders widen, belly
             // sags, a soft beat of anticipation before opening.
             let reaching = model.isHovering && Theme.Feel.current.ambient
-            if collapsedIsEmpty {
-                // The sliver is too short for the full geometry.
-                let grown = model.isHovering
-                return IslandShape(
-                    eave: grown ? 8 : 3,
-                    bottomRadius: grown ? 10 : 4,
-                    belly: reaching ? 1.5 : 0.5
-                )
-            }
-            if !model.hasPhysicalNotch {
-                // The compact content pill sits between sliver and
-                // notch scale; its curves scale with it.
-                return IslandShape(
-                    eave: 6,
-                    bottomRadius: 8,
-                    belly: reaching ? 1.5 : 0.5
-                )
-            }
             return IslandShape(
                 eave: Theme.Island.eaveCollapsed + (reaching ? 1.5 : 0),
                 bottomRadius: model.islandCornerRadius,
@@ -495,7 +366,7 @@ struct NotchRootView: View {
                     .overlay {
                         if glowOn, Theme.Feel.current.ambient,
                            model.state == .collapsed,
-                           sessionActive || music.nowPlaying?.isPlaying == true {
+                           model.sessionActive || music.nowPlaying?.isPlaying == true {
                             TimelineView(.animation(minimumInterval: 1 / 15)) { context in
                                 let t = context.date.timeIntervalSinceReferenceDate
                                 let breath = 0.5 + 0.5 * sin(t / (1.6 * Theme.Motion.ambientSlow))
@@ -528,7 +399,12 @@ struct NotchRootView: View {
                 contentLayer
             }
             .frame(width: islandSize.width, height: islandSize.height)
-            .opacity(model.islandStyle == .off || monitorTucked ? 0 : 1)
+            // One rule for "is the island drawing here", also read by
+            // the bead (NotchWindowController.rebuildSlivers): the two
+            // used to disagree exactly when collapsed with nothing to
+            // say but music playing, drawing both shapes at once
+            // (2026-08-01).
+            .opacity(model.islandIsShowing ? 1 : 0)
             .contentShape(Rectangle())
             // Hover is tracked by NotchWindowController against stable
             // state-based zones; tracking this animating view flickers.
@@ -683,7 +559,7 @@ struct NotchRootView: View {
     private var notchSideContent: some View {
         if let toast = model.glanceToast {
             toastGlance(toast)
-        } else if let item = winningCollapsedItem {
+        } else if let item = model.winningCollapsedItem {
             collapsedGlance(item)
         }
     }
@@ -694,13 +570,13 @@ struct NotchRootView: View {
     private func collapsedGlance(_ item: CollapsedItem) -> some View {
         switch item {
         case .agents:
-            if let agents = agentGlance { agentMarkGlance(agents) }
+            if let agents = model.agentGlance { agentMarkGlance(agents) }
         case .timers:
             // Music holds the left wing, so the session mark crosses
             // over rather than fighting it for the same side.
             sessionMark
         case .event:
-            if let next = upcomingEvent { upcomingGlance(next, width: 100) }
+            if let next = model.upcomingEvent { upcomingGlance(next, width: 100) }
         case .battery:
             if let battery = stats.battery { batteryGlance(battery) }
         }
@@ -789,13 +665,13 @@ struct NotchRootView: View {
 
     private var wingsContent: some View {
         HStack {
-            if showsSongBeside, let playing = music.nowPlaying {
+            if model.showsSongBeside, let playing = music.nowPlaying {
                 songBeside(playing)
                     .padding(.leading, Theme.Space.wingInset)
             } else if playingSignal == "wave", music.nowPlaying?.isPlaying == true {
                 NowPlayingBars(accent: accent, barCount: 4, maxHeight: 7)
                     .padding(.leading, Theme.Space.wingInset)
-            } else if glanceSession, sessionActive, !sessionOnRight {
+            } else if glanceSession, model.sessionActive, !model.sessionOnRight {
                 sessionMark
                     .padding(.leading, Theme.Space.wingInset)
             }
@@ -805,7 +681,7 @@ struct NotchRootView: View {
                 Image(systemName: active.symbol)
                     .font(Theme.Fonts.icon(.xs))
                     .foregroundStyle(accent)
-                    .padding(.leading, leftWingNeed > 0 ? 0 : Theme.Space.wingInset)
+                    .padding(.leading, model.leftWingNeed > 0 ? 0 : Theme.Space.wingInset)
             }
             Spacer()
             // Not gated on there being a notch any more. A pill has the
