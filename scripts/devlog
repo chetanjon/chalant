@@ -1,0 +1,13 @@
+#!/bin/bash
+# Stream Chalant's os_log output. Pass a subsystem category to narrow:
+#   ./scripts/devlog            all Chalant logs
+#   ./scripts/devlog sessions   only the sessions category
+set -euo pipefail
+
+if [ $# -gt 0 ]; then
+  PRED='subsystem == "com.cj.chalant" AND category == "'"$1"'"'
+else
+  PRED='subsystem == "com.cj.chalant"'
+fi
+
+exec log stream --style compact --level debug --predicate "$PRED"

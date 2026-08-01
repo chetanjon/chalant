@@ -28,6 +28,7 @@ struct NotchRootView: View {
     @AppStorage(MusicController.playingSignalKey) private var playingSignal
         = MusicController.playingSignalDefault
     @AppStorage("glanceSession") private var glanceSession = true
+    @AppStorage("glanceBattery") private var glanceBattery = false
     @AppStorage("islandMaterial") private var islandMaterial = "ink"
     @AppStorage("glassClarity") private var glassClarity = "balanced"
     @AppStorage("glanceNextEvent") private var glanceNextEvent = true
@@ -234,7 +235,7 @@ struct NotchRootView: View {
             }
             return IslandShape(
                 eave: Theme.Island.eaveCollapsed + (reaching ? 1.5 : 0),
-                bottomRadius: Theme.Island.radiusCollapsed,
+                bottomRadius: model.islandCornerRadius,
                 belly: reaching ? 3 : Theme.Island.bellyCollapsed
             )
         }
@@ -412,7 +413,7 @@ struct NotchRootView: View {
                 contentLayer
             }
             .frame(width: islandSize.width, height: islandSize.height)
-            .opacity(monitorTucked ? 0 : 1)
+            .opacity(model.islandStyle == .off || monitorTucked ? 0 : 1)
             .contentShape(Rectangle())
             // Hover is tracked by NotchWindowController against stable
             // state-based zones; tracking this animating view flickers.
@@ -578,7 +579,31 @@ struct NotchRootView: View {
             // scrolling title here was width without value, the same
             // call that removed the session label (user, 2026-07-21).
             EmptyView()
+        } else if glanceBattery, let battery = stats.battery {
+            batteryGlance(battery)
         }
+    }
+
+    /// The quietest glance there is, and last in this chain on purpose:
+    /// the charge only takes the wing when nothing with actual news
+    /// wants it. `SystemStatsController` had been polling for this the
+    /// whole time with no view reading it.
+    private func batteryGlance(_ battery: SystemStatsController.Battery) -> some View {
+        let low = battery.level <= 20 && !battery.charging
+        return HStack(spacing: 3) {
+            // The glyph carries charging and low on its own, so the
+            // number is never the only thing saying which it is.
+            Image(systemName: battery.charging ? "bolt.fill" : (low ? "battery.25" : "battery.100"))
+                .font(Theme.Fonts.icon(.xs))
+            Text("\(battery.level)")
+                .font(Theme.Fonts.microMono)
+        }
+        .foregroundStyle(low ? Theme.danger : Theme.textTertiary)
+        .help("Battery \(battery.level)%\(battery.charging ? ", charging" : "")")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "Battery \(battery.level) percent\(battery.charging ? ", charging" : low ? ", low" : "")"
+        )
     }
 
     /// The event about to start: an accent dot (the calendar's mark in
@@ -691,7 +716,7 @@ struct NotchRootView: View {
                     .lineLimit(1)
             }
         }
-        .padding(.top, model.notchSize.height + 6)
+        .padding(.top, model.contentTopReserve + 6)
         .contentShape(Rectangle())
         .onTapGesture {
             model.endListening()
@@ -700,7 +725,7 @@ struct NotchRootView: View {
             CloseButton {
                 model.cancelListening()
             }
-            .padding(.top, model.notchSize.height + Theme.Space.xs)
+            .padding(.top, model.contentTopReserve + Theme.Space.xs)
             .padding(.trailing, Theme.Space.m)
         }
     }

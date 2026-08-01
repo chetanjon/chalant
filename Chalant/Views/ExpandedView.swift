@@ -93,6 +93,9 @@ struct ExpandedView: View {
                     .transition(.opacity)
             }
 
+            AgentSessionsStrip(sessions: model.sessions)
+                .transition(.opacity)
+
             if showAmbience {
                 AmbienceRow(ambience: ambience)
                     .transition(.opacity)
@@ -109,16 +112,28 @@ struct ExpandedView: View {
                 .padding(.top, Theme.Space.xs)
 
             switch model.pane {
-            case .settings:
-                settingsSection
             case .welcome:
                 WelcomeView(model: model)
                     .transition(.opacity)
             case .none:
                 Switcher(model: model, updates: model.updates,
                          todayEnabled: todayEnabled, tools: enabledTools)
+                // Identity per tab, so SwiftUI sees a swap to transition
+                // rather than one view quietly changing its contents.
+                // Without it the panels simply popped: the switch above
+                // returned a different body and nothing animated, which
+                // is what `tabSlideDirection` was declared for and never
+                // wired to.
                 panel
-                    .transition(.opacity)
+                    .id(model.tab)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: model.tabSlideDirection >= 0 ? .trailing : .leading)
+                            .combined(with: .opacity),
+                        // The outgoing panel fades where it stands. Two
+                        // panels travelling at once reads as the whole
+                        // island sliding, and the island is not moving.
+                        removal: .opacity
+                    ))
             }
 
             // While a drag hovers, the body reaches further down the
@@ -128,8 +143,8 @@ struct ExpandedView: View {
                 Color.clear.frame(height: 150)
             }
         }
-        .padding(.horizontal, Theme.Space.xl)
-        .padding(.top, model.notchSize.height + Theme.Space.m)
+        .padding(.horizontal, model.islandContentPadding)
+        .padding(.top, model.contentTopReserve + Theme.Space.m)
         .padding(.bottom, Theme.Space.m + 2)
         .foregroundStyle(.white)
         .frame(width: islandWidth)
@@ -142,7 +157,27 @@ struct ExpandedView: View {
                 Color.clear
                     .onChange(of: geo.size, initial: true) { _, size in
                         guard size.height > 0 else { return }
-                        model.expandedSize = size
+                        // Animated, with the shell's own spring, and that
+                        // is the whole reason the island expands at all.
+                        //
+                        // This lands one layout pass after the state
+                        // flip, so the shell is already mid-morph toward
+                        // whatever size was measured last time. The
+                        // island's `.animation(_:value: model.state)`
+                        // does not cover this change — state did not
+                        // change — so unanimated it SNAPPED the frame to
+                        // full size on the very first frame, cancelling
+                        // the morph. All that was left to see was the
+                        // content's opacity fade: the border never grew,
+                        // an already-open panel just faded in.
+                        //
+                        // The same spring retargets the motion already
+                        // running rather than restarting it, so a stale
+                        // first target curves into the real one as one
+                        // continuous expansion.
+                        withAnimation(Theme.Motion.island) {
+                            model.expandedSize = size
+                        }
                     }
                     // A tab switch can slip past the size observer and
                     // leave the shell wearing the previous tab's
@@ -251,29 +286,6 @@ struct ExpandedView: View {
         }
     }
 
-    @ViewBuilder
-    private var settingsSection: some View {
-        HStack(spacing: Theme.Space.xs) {
-            HoverGlyphButton(symbol: "chevron.left", tint: Theme.textSecondary) {
-                withAnimation(Theme.Motion.content) { model.pane = .none }
-            }
-            Text("Settings")
-                .font(Theme.Fonts.title)
-                .foregroundStyle(Theme.textPrimary)
-            Spacer()
-        }
-        SettingsPane(
-            music: music,
-            updates: model.updates,
-            events: model.events,
-            scrollTarget: $model.settingsScrollTarget,
-            onReplayTour: {
-                withAnimation(Theme.Motion.content) { model.replayWelcome() }
-            },
-            onInstallUpdate: { model.installUpdate?() }
-        )
-        .frame(height: Theme.Panel.settings)
-    }
 }
 
 /// The dashed "Drop to stash" card: over the island body while a drag
@@ -342,7 +354,11 @@ private struct ActivitiesStrip: View {
     @Environment(\.chalantAccent) private var accent
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
+        // Explicitly typed and hoisted, for the same reason as
+        // AgentSessionsStrip: inlined in the `.animation` at the bottom
+        // this map is enough to stall the type checker.
+        let rowIDs: [String] = activities.activities.map(\.id)
+        return VStack(alignment: .leading, spacing: Theme.Space.s) {
             ForEach(activities.activities) { activity in
                 HStack(spacing: Theme.Space.m) {
                     Image(systemName: activity.state.symbol)
@@ -362,7 +378,7 @@ private struct ActivitiesStrip: View {
                         }
                     }
                     Spacer(minLength: 0)
-                    Text(Self.age(activity.updatedAt))
+                    Text(RelativeAge.short(activity.updatedAt))
                         .font(Theme.Fonts.microMono)
                         .foregroundStyle(Theme.textGhost)
                     IconActionButton(symbol: "xmark", dim: true) {
@@ -373,7 +389,14 @@ private struct ActivitiesStrip: View {
                 .chalantCard(radius: Theme.Radius.row)
             }
         }
-        .animation(Theme.Motion.content, value: activities.activities)
+        // Animate on which rows are here, not on their contents.
+        // `Activity` carries `updatedAt`, which every push rewrites, so
+        // animating the array itself restarted a 0.34s animation of the
+        // whole strip on each one — eight agents pushing at 1Hz meant
+        // eight full animations a second on a surface whose whole
+        // premise is calm. Inserts, removals and reorders all change
+        // the id list; a title changing in place needs no animation.
+        .animation(Theme.Motion.content, value: rowIDs)
     }
 
     private func tint(for state: ActivityStore.State) -> Color {
@@ -383,13 +406,6 @@ private struct ActivitiesStrip: View {
         case .done: return Theme.textTertiary
         case .failed: return Theme.textSecondary
         }
-    }
-
-    private static func age(_ date: Date) -> String {
-        let seconds = Int(-date.timeIntervalSinceNow)
-        if seconds < 60 { return "now" }
-        if seconds < 3600 { return "\(seconds / 60)m" }
-        return "\(seconds / 3600)h"
     }
 }
 

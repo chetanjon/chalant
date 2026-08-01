@@ -199,6 +199,17 @@ extension View {
     }
 }
 
+/// "now", "7m", "3h": how long ago, in the fewest characters a row can
+/// spare. Every strip that timestamps a row reads it the same way.
+enum RelativeAge {
+    static func short(_ date: Date) -> String {
+        let seconds = Int(-date.timeIntervalSinceNow)
+        if seconds < 60 { return "now" }
+        if seconds < 3600 { return "\(seconds / 60)m" }
+        return "\(seconds / 3600)h"
+    }
+}
+
 /// One line: title, a dot, subtitle. It holds still by default.
 ///
 /// The glide is off unless asked for, because the notch is the wrong

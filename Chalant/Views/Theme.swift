@@ -57,7 +57,12 @@ enum Theme {
     /// states, placeholders, footnotes. Brighter than tertiary.
     static let textHint = Color.white.opacity(0.56)
     /// Purely decorative marks, never carries information.
-    static let textGhost = Color.white.opacity(0.38)
+    // Raised 2026-07-31, the tier the 07-21 pass missed: at 0.38 this
+    // computed to roughly 3.6:1 on the backdrop, under the 4.5:1 floor,
+    // so every mark wearing it was below the bar the other quiet tiers
+    // were already lifted to meet. 0.45 clears it while staying a step
+    // under tertiary, so the hierarchy still reads.
+    static let textGhost = Color.white.opacity(0.45)
 
     static let danger = Color(red: 1.0, green: 0.45, blue: 0.45)
 
@@ -93,6 +98,10 @@ enum Theme {
         static let bodyMedium = Font.system(size: 14, weight: .medium)
         static let bodyEmphasis = Font.system(size: 14, weight: .semibold)
         static let title = Font.system(size: 15, weight: .semibold)
+        /// A window's own page title. The island has no room for this
+        /// tier; the dashboard is the first surface with the space to
+        /// say where you are before it says anything else.
+        static let heading = Font.system(size: 24, weight: .semibold)
         /// Reading text: answers and the input line. Same size as
         /// title, regular weight, long text at semibold shouts.
         static let reading = Font.system(size: 15)
@@ -169,7 +178,6 @@ enum Theme {
         /// Focus pane, sized to fit presets, the daily goal row, and
         /// the week of stats.
         static let focus: CGFloat = 280
-        static let settings: CGFloat = 300
         /// Chat pane heights. Compact trims the dead space the page's
         /// vertical centering leaves under the input; full keeps the
         /// room the sidebar layout earns.

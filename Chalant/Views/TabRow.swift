@@ -43,7 +43,11 @@ struct Switcher: View {
             // standing without adding a surface or nagging: it is the
             // gear already there, wearing a dot until you have looked.
             HoverGlyphButton(symbol: "gearshape", scale: .m, tint: Theme.textTertiary) {
-                withAnimation(Theme.Motion.content) { model.pane = .settings }
+                // Settings is a window now, so the island gets out of
+                // the way rather than sitting lit over the window that
+                // just took focus.
+                model.collapse()
+                model.openDashboard?(nil)
             }
             .overlay(alignment: .topTrailing) {
                 if let latest = updates.latest {
@@ -108,6 +112,14 @@ private struct SwitcherItem: View {
     var body: some View {
         let on = model.tab == tab
         Button {
+            // Which way the panel travels, decided before the change so
+            // the direction and the tab land in the same transaction.
+            // Moving right along the switcher brings the new panel in
+            // from the right, so the motion agrees with the tap.
+            let order = NotchViewModel.Tab.allCases
+            let from = order.firstIndex(of: model.tab) ?? 0
+            let to = order.firstIndex(of: tab) ?? 0
+            model.tabSlideDirection = to >= from ? 1 : -1
             withAnimation(Theme.Motion.content) { model.tab = tab }
         } label: {
             HStack(spacing: Theme.Space.snug) {

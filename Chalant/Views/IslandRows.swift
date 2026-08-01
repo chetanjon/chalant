@@ -88,7 +88,12 @@ struct MusicRow: View {
                     }
                 }
 
-                VStack(spacing: Theme.Space.xs) {
+                // Trailing, not centred: the transport row changes width
+                // when a player that supports shuffle takes over, and
+                // centred rows made the volume slider slide sideways
+                // underneath the pointer as it did. Both rows hang off
+                // the same right edge instead.
+                VStack(alignment: .trailing, spacing: Theme.Space.xs) {
                     HStack(spacing: Theme.Space.s) {
                         if playing.supportsShuffle {
                             HoverGlyphButton(
@@ -374,15 +379,20 @@ struct AnswerView: View {
                     .foregroundStyle(Theme.danger)
                     .fixedSize(horizontal: false, vertical: true)
             } else if model.answer.isEmpty {
-                VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    Text(idleHint)
-                        .font(Theme.Fonts.reading)
-                        .foregroundStyle(Theme.textHint)
-                    Text("remind me to call amma at 6 · focus 25 · note: an idea · say help for the rest")
-                        .font(Theme.Fonts.label)
-                        .fontWeight(.regular)
-                        .foregroundStyle(Theme.textGhost)
-                }
+                // One line, not three. "Type below, or tap the mic and
+                // say it" said what the field below and the mic above
+                // already say, and the examples said it a third time.
+                // Idle is the island's most common state, so every row
+                // it spends here is height the whole surface carries
+                // ("too overwhelming and cluttered").
+                //
+                // Hint, not ghost: this is the only place the verbs are
+                // named, so it carries information, and Theme reserves
+                // ghost for marks that carry none.
+                Text("remind me to call amma at 6 · focus 25 · note: an idea · say help")
+                    .font(Theme.Fonts.label)
+                    .fontWeight(.regular)
+                    .foregroundStyle(Theme.textHint)
             } else if model.answer.count > 900 {
                 ScrollView {
                     answerText
@@ -426,12 +436,6 @@ struct AnswerView: View {
         model.draftPrompt = ""
         guard !typed.isEmpty else { return }
         model.submit(typed)
-    }
-
-    /// Two doors, no keyboard shortcut: the summon key retired
-    /// (2026-07-21, it fought macOS and lost twice).
-    private var idleHint: String {
-        "Type below, or tap the mic and say it."
     }
 
     private var answerText: some View {
