@@ -409,6 +409,7 @@ struct GlanceSection: View {
     @AppStorage("glanceMusic") private var glanceMusic = true
     @AppStorage("glanceSession") private var glanceSession = true
     @AppStorage("glanceBattery") private var glanceBattery = false
+    @AppStorage("collapsedSong") private var collapsedSong = true
     @AppStorage("glanceNextEvent") private var glanceNextEvent = true
     @AppStorage("showCalendar") private var showCalendar = false
 
@@ -429,6 +430,12 @@ struct GlanceSection: View {
                 SettingNote(
                     "The small ring or stopwatch glyph while something runs. Off keeps the pill bare; "
                     + "the rim alone says something is going."
+                )
+                SettingDivider()
+                SettingToggle(label: "What's playing, on the island", isOn: $collapsedSong)
+                SettingNote(
+                    "The song's name beside the resting island, on displays without a notch. A "
+                    + "MacBook keeps the bare pill so it still matches the hardware."
                 )
                 SettingDivider()
                 SettingToggle(label: "Battery", isOn: $glanceBattery)

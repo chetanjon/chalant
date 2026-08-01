@@ -29,6 +29,7 @@ struct NotchRootView: View {
         = MusicController.playingSignalDefault
     @AppStorage("glanceSession") private var glanceSession = true
     @AppStorage("glanceBattery") private var glanceBattery = false
+    @AppStorage("collapsedSong") private var collapsedSong = true
     @AppStorage("islandMaterial") private var islandMaterial = "ink"
     @AppStorage("glassClarity") private var glassClarity = "balanced"
     @AppStorage("glanceNextEvent") private var glanceNextEvent = true
@@ -75,6 +76,23 @@ struct NotchRootView: View {
             && music.nowPlaying?.isPlaying == true
     }
 
+    /// The song's name on the resting island, not just its bars.
+    ///
+    /// This reverses an earlier call. The collapsed island on a monitor
+    /// was stripped bare because content there "sat on top of someone's
+    /// window" (user, 2026-07-22) and because a wide pill did not match
+    /// the hardware (user, 2026-07-23). Both objections were about a
+    /// screen pretending to be a MacBook. Asked again for an island
+    /// rather than a notch on external displays, the user now wants the
+    /// song beside it, so this is on for pills and off for notches —
+    /// where the old reasoning still holds exactly.
+    private var showsSongBeside: Bool {
+        model.islandStyle == .pill
+            && collapsedSong
+            && model.state == .collapsed
+            && music.nowPlaying?.isPlaying == true
+    }
+
     /// Each wing earns exactly what its content needs: the session
     /// mark wants 26 (digits clipped at real pomodoro widths, so the
     /// wing wears a symbol that cannot: the ring, or the stopwatch
@@ -82,6 +100,7 @@ struct NotchRootView: View {
     /// mode keeps the bare pill and lets the rim carry it (both moods
     /// proved real within one day, so it's a setting).
     private var leftWingNeed: CGFloat {
+        if showsSongBeside { return 156 }
         if playingSignal == "wave", music.nowPlaying?.isPlaying == true { return 28 }
         if glanceSession, sessionActive, !sessionOnRight { return 26 }
         return 0
@@ -109,6 +128,9 @@ struct NotchRootView: View {
         if let next = upcomingEvent {
             return 112 + (next.joinURL != nil ? Self.cameraMarkWidth : 0)
         }
+        // The charge was rendering with no width reserved for it, so it
+        // had nothing to sit in.
+        if glanceBattery, stats.battery != nil { return 44 }
         // Playing or idle, no other right-side width: the day, the
         // streak, and the clock glances all duplicated surfaces that
         // already exist (the menu bar clock sits an inch away), and
@@ -138,12 +160,14 @@ struct NotchRootView: View {
             + (monitorSession ? 90 : 0)
     }
 
-    /// Collapsed on a monitor the island is a sliver and nothing
-    /// more: content states sat on top of windows (R96's complaint),
-    /// so wave, glances, and sessions never ride the notchless pill.
-    /// Only a passing toast earns the brief content shape.
+    /// The sliver shape, for when the island has nothing to carry.
+    ///
+    /// It used to mean "collapsed on a monitor, always", because content
+    /// there sat on top of windows. That is now a choice rather than a
+    /// rule: a monitor island shows what the user asked it to and wears
+    /// the sliver only when there is nothing to show.
     private var collapsedIsEmpty: Bool {
-        !model.hasPhysicalNotch && model.glanceToast == nil
+        !model.hasPhysicalNotch && !collapsedHasSomethingToSay
     }
 
     /// On a monitor the collapsed island shows nothing: there is no
@@ -159,7 +183,18 @@ struct NotchRootView: View {
     /// the one visitor with something to say.
     private var monitorTucked: Bool {
         guard !model.hasPhysicalNotch, model.state == .collapsed else { return false }
-        return model.glanceToast == nil
+        // Tucked only when there is genuinely nothing to say. This used
+        // to test for a toast alone, so on an external display the
+        // island was invisible at rest even with a song playing, a
+        // session running or the charge switched on — which is what
+        // made a monitor look like it had no island at all.
+        return !collapsedHasSomethingToSay
+    }
+
+    /// Anything the resting island would actually draw.
+    private var collapsedHasSomethingToSay: Bool {
+        model.glanceToast != nil || leftWingNeed > 0 || notchSideNeed > 0
+            || (ambience.active != nil && music.nowPlaying?.isPlaying != true)
     }
 
     /// Stable per-state sizes: content is framed to its own state's
@@ -683,7 +718,10 @@ struct NotchRootView: View {
 
     private var wingsContent: some View {
         HStack {
-            if playingSignal == "wave", music.nowPlaying?.isPlaying == true {
+            if showsSongBeside, let playing = music.nowPlaying {
+                songBeside(playing)
+                    .padding(.leading, Theme.Space.wingInset)
+            } else if playingSignal == "wave", music.nowPlaying?.isPlaying == true {
                 NowPlayingBars(accent: accent, barCount: 4, maxHeight: 7)
                     .padding(.leading, Theme.Space.wingInset)
             } else if glanceSession, sessionActive, !sessionOnRight {
@@ -699,11 +737,29 @@ struct NotchRootView: View {
                     .padding(.leading, leftWingNeed > 0 ? 0 : Theme.Space.wingInset)
             }
             Spacer()
-            if model.hasPhysicalNotch {
-                notchSideContent
-                    .padding(.trailing, Theme.Space.wingInset)
-            }
+            // Not gated on there being a notch any more. A pill has the
+            // same right-hand room and more of it, and gating this meant
+            // the toast, the session mark, the next event and the charge
+            // were all invisible on an external display.
+            notchSideContent
+                .padding(.trailing, Theme.Space.wingInset)
         }
+    }
+
+    /// What is playing, on the resting island: the bars for life, then
+    /// the title. Artist is left out — at this size it is the first
+    /// thing to become unreadable, and the title is what identifies a
+    /// song at a glance.
+    private func songBeside(_ playing: MusicController.NowPlaying) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            NowPlayingBars(accent: accent, barCount: 3, maxHeight: 7)
+            Text(playing.track)
+                .font(Theme.Fonts.micro)
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .frame(maxWidth: 140, alignment: .leading)
     }
 
     private var listeningContent: some View {
