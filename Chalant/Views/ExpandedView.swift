@@ -145,7 +145,11 @@ struct ExpandedView: View {
         }
         .padding(.horizontal, model.islandContentPadding)
         .padding(.top, model.contentTopReserve + Theme.Space.m)
-        .padding(.bottom, Theme.Space.m + 2)
+        // The same inset as the sides, so the island reads as one box
+        // rather than three different margins. It was 10 against the
+        // sides' 16, which left the input crowded against the bottom
+        // curve — and the belly sags below this, taking some of it back.
+        .padding(.bottom, model.islandContentPadding)
         .foregroundStyle(.white)
         .frame(width: islandWidth)
         .fixedSize(horizontal: false, vertical: true)

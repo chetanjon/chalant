@@ -25,15 +25,23 @@ struct MusicRow: View {
                 .help("Open \(playing.source.displayName)")
                 .background(
                     // The album's own light spilling out from under
-                    // the chalantr: the row warms to whatever plays,
+                    // the artwork: the row warms to whatever plays,
                     // without ever drawing a box around itself.
+                    //
+                    // endRadius must not outrun the frame's shorter
+                    // half. At 190 inside a box 150 tall the gradient
+                    // was still around 60% opaque where the frame
+                    // stopped, so it ended on a hard horizontal line
+                    // under the artwork instead of fading out. Matching
+                    // the radius to the half-height lands it exactly on
+                    // clear at the edge, in every direction.
                     RadialGradient(
                         colors: [accent.opacity(playing.isPlaying ? 0.22 : 0.10), .clear],
                         center: .center,
                         startRadius: 4,
-                        endRadius: 190
+                        endRadius: 80
                     )
-                    .frame(width: 380, height: 150)
+                    .frame(width: 360, height: 160)
                     .allowsHitTesting(false)
                 )
 
