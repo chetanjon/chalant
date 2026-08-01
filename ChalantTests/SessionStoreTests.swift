@@ -471,6 +471,57 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(SessionDiscovery.activityPhrase(forTool: "SomeNewTool"), "SomeNewTool")
     }
 
+    // MARK: Icons
+
+    /// An SF Symbol name that does not exist renders as nothing at all.
+    /// There is no crash, no warning and no gap in the build log — the
+    /// icon is simply absent, which is why a typo in one can ship and
+    /// sit there. Everything the app asks for by name is checked here.
+    private func assertSymbolExists(_ name: String, _ where: String) {
+        XCTAssertNotNil(
+            NSImage(systemSymbolName: name, accessibilityDescription: nil),
+            "\(`where`) asks for SF Symbol \"\(name)\", which does not resolve"
+        )
+    }
+
+    func testEveryDashboardSectionIconResolves() {
+        for section in DashboardSection.allCases {
+            assertSymbolExists(section.symbol, "Dashboard section \(section.title)")
+        }
+    }
+
+    func testEveryPlaceableElementIconResolves() {
+        for element in IslandElement.allCases {
+            assertSymbolExists(element.symbol, "Island element \(element.title)")
+        }
+    }
+
+    func testEveryIconTheIslandAndDashboardDrawResolves() {
+        // Written out rather than grepped: these live inside switches
+        // and view bodies where no build step can find them, which is
+        // exactly why they need pinning.
+        let symbols = [
+            // Session rows and their states
+            "exclamationmark.circle.fill", "circle.dashed", "clock",
+            "checkmark.circle", "xmark.circle", "cursorarrow",
+            // Displays pane
+            "laptopcomputer", "display", "checkmark",
+            // Glances
+            "bolt.fill", "battery.25", "battery.100",
+            // Media row
+            "backward.fill", "forward.fill", "shuffle", "speaker.wave.2.fill",
+            "pause.fill", "play.fill", "mic.fill",
+            // Chrome and actions
+            "gearshape", "magnifyingglass", "xmark", "minus.circle",
+            "line.3.horizontal", "doc.on.doc", "square.and.arrow.up",
+            "dot.radiowaves.left.and.right", "arrow.up.circle.fill",
+            "chevron.left", "plus", "paperclip",
+        ]
+        for symbol in symbols {
+            assertSymbolExists(symbol, "A view")
+        }
+    }
+
     // MARK: Searching what you copied
 
     private func textClip(_ text: String) -> ClipboardStore.Clip {
