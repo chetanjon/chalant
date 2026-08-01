@@ -211,6 +211,22 @@ struct NotchRootView: View {
     }
 
     private var islandShape: IslandShape {
+        // Pill: a free-floating bar with all four corners turned and no
+        // eaves to cling with. A screen with no cutout has nothing to
+        // wrap, and wearing the notch silhouette there is what made the
+        // island read as "still a notch" on an external display.
+        if model.islandStyle == .pill {
+            let expanded = model.state != .collapsed
+            let radius = expanded
+                ? max(model.islandCornerRadius, Theme.Island.radiusCollapsed)
+                : model.islandCornerRadius
+            return IslandShape(
+                eave: 0,
+                bottomRadius: radius,
+                belly: expanded ? Theme.Island.bellyExpanded : Theme.Island.bellyCollapsed,
+                topRadius: radius
+            )
+        }
         if model.state == .collapsed {
             // On hover the droplet "reaches", shoulders widen, belly
             // sags, a soft beat of anticipation before opening.

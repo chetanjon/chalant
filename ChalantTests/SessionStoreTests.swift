@@ -285,6 +285,34 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertFalse(shape.path(in: rect).isEmpty)
     }
 
+    func testThePillIsAFloatingBarNotANotchWithItsEavesRemoved() {
+        // A notch flares past its frame to cling to the screen edge and
+        // closes above it. A pill does neither: it sits inside its own
+        // bounds with a real top edge, which is the difference between
+        // reading as an island and reading as a notch on a monitor.
+        let rect = CGRect(x: 0, y: 0, width: 200, height: 40)
+        var pill = IslandShape(eave: 0, bottomRadius: 14, belly: 3)
+        pill.topRadius = 14
+        let box = pill.path(in: rect).boundingRect
+
+        XCTAssertEqual(box.minX, rect.minX, accuracy: 0.5)
+        XCTAssertEqual(box.maxX, rect.maxX, accuracy: 0.5)
+        XCTAssertEqual(box.minY, rect.minY, accuracy: 0.5)
+        XCTAssertGreaterThan(box.maxY, rect.maxY)
+    }
+
+    func testAPillRadiusCannotExceedHalfTheShape() {
+        // A radius larger than the bar is half its height would fold the
+        // corners through each other.
+        let rect = CGRect(x: 0, y: 0, width: 120, height: 20)
+        var pill = IslandShape(eave: 0, bottomRadius: 400, belly: 0)
+        pill.topRadius = 400
+        let box = pill.path(in: rect).boundingRect
+        XCTAssertFalse(pill.path(in: rect).isEmpty)
+        XCTAssertEqual(box.width, rect.width, accuracy: 0.5)
+        XCTAssertEqual(box.height, rect.height, accuracy: 0.5)
+    }
+
     // MARK: Per-display config
 
     func testAutomaticResolvesFromTheHardwareAndNothingElseIsTouched() {

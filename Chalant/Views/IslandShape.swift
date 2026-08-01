@@ -17,6 +17,11 @@ struct IslandShape: InsettableShape {
     /// own top edge under the bezel; an emulated notch has to do the
     /// same deliberately. See `path(in:)` for why closing across the
     /// top is not an option.
+    /// Rounds the two top corners and switches the silhouette from a
+    /// notch to a free-floating pill. Zero — the default — keeps the
+    /// notch shape, which clings to the screen edge and has no top edge
+    /// of its own to round.
+    var topRadius: CGFloat = 0
     var topOverscan: CGFloat = 6
     /// Radius on the two eave tips, where the shape meets the screen
     /// edge. Clamped to `eave`, so a small island cannot round itself
@@ -33,6 +38,51 @@ struct IslandShape: InsettableShape {
         }
     }
 
+    /// The free-floating shape: a rounded bar, top corners and bottom
+    /// corners each with their own radius, keeping the belly so a pill
+    /// still hangs with the same weight the notch does.
+    private func pillPath(in rect: CGRect) -> Path {
+        let kappa: CGFloat = 0.5523
+        let half = min(rect.width, rect.height) / 2
+        let top = min(topRadius, half)
+        let bottom = min(bottomRadius, half)
+        let x0 = rect.minX, x1 = rect.maxX
+        let y0 = rect.minY, y1 = rect.maxY
+
+        var p = Path()
+        p.move(to: CGPoint(x: x0 + top, y: y0))
+        p.addLine(to: CGPoint(x: x1 - top, y: y0))
+        p.addCurve(
+            to: CGPoint(x: x1, y: y0 + top),
+            control1: CGPoint(x: x1 - top * (1 - kappa), y: y0),
+            control2: CGPoint(x: x1, y: y0 + top * (1 - kappa))
+        )
+        p.addLine(to: CGPoint(x: x1, y: y1 - bottom))
+        p.addCurve(
+            to: CGPoint(x: x1 - bottom, y: y1),
+            control1: CGPoint(x: x1, y: y1 - bottom * (1 - kappa)),
+            control2: CGPoint(x: x1 - bottom * (1 - kappa), y: y1)
+        )
+        p.addCurve(
+            to: CGPoint(x: x0 + bottom, y: y1),
+            control1: CGPoint(x: x0 + rect.width * 0.65, y: y1 + belly),
+            control2: CGPoint(x: x0 + rect.width * 0.35, y: y1 + belly)
+        )
+        p.addCurve(
+            to: CGPoint(x: x0, y: y1 - bottom),
+            control1: CGPoint(x: x0 + bottom * (1 - kappa), y: y1),
+            control2: CGPoint(x: x0, y: y1 - bottom * (1 - kappa))
+        )
+        p.addLine(to: CGPoint(x: x0, y: y0 + top))
+        p.addCurve(
+            to: CGPoint(x: x0 + top, y: y0),
+            control1: CGPoint(x: x0, y: y0 + top * (1 - kappa)),
+            control2: CGPoint(x: x0 + top * (1 - kappa), y: y0)
+        )
+        p.closeSubpath()
+        return p
+    }
+
     func inset(by amount: CGFloat) -> IslandShape {
         var shape = self
         shape.insetAmount += amount
@@ -41,6 +91,11 @@ struct IslandShape: InsettableShape {
 
     func path(in rect: CGRect) -> Path {
         let rect = rect.insetBy(dx: insetAmount, dy: insetAmount)
+        // A pill is a different object, not a notch with its eaves set
+        // to zero: it has a real top edge of its own, all four corners
+        // turned, and nothing to cling to. Zero here keeps the notch
+        // silhouette, which is what a screen with a cutout wants.
+        if topRadius > 0 { return pillPath(in: rect) }
         // Cubic control offset that approximates a circular quarter arc.
         let kappa: CGFloat = 0.5523
         let r = min(bottomRadius, min(rect.width, rect.height) / 2)
