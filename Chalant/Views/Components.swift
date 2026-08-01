@@ -377,57 +377,80 @@ struct PressableStyle: ButtonStyle {
 /// around the icon, a tint lift and faint halo on hover, and a press
 /// sink. Every bare-glyph control in the app routes through this.
 
-/// A rounded quadrilateral: each corner cut back by its own radius
-/// and bridged with a quad curve. Used for the mark's tapered body,
-/// crisp at the top, rounder at the bottom.
-private func roundedQuad(_ pts: [CGPoint], radii: [CGFloat]) -> Path {
-    var path = Path()
-    func unit(_ from: CGPoint, _ to: CGPoint) -> CGPoint {
-        let dx = to.x - from.x, dy = to.y - from.y
-        let len = max(hypot(dx, dy), 0.0001)
-        return CGPoint(x: dx / len, y: dy / len)
-    }
-    for i in 0..<4 {
-        let cur = pts[i], prev = pts[(i + 3) % 4], next = pts[(i + 1) % 4]
-        let r = radii[i]
-        let up = unit(cur, prev), un = unit(cur, next)
-        let p1 = CGPoint(x: cur.x + up.x * r, y: cur.y + up.y * r)
-        let p2 = CGPoint(x: cur.x + un.x * r, y: cur.y + un.y * r)
-        if i == 0 { path.move(to: p1) } else { path.addLine(to: p1) }
-        path.addQuadCurve(to: p2, control: cur)
-    }
-    path.closeSubpath()
-    return path
+/// Brand mark proportions, off the kit's 240 x 140 glyph. Every surface
+/// that draws the mark (this shape, the menu bar glyph, the app icon)
+/// reads from these, so the identity cannot drift between them.
+enum ChalantMark {
+    static let aspect: CGFloat = 240 / 140   // the notch is wide and short
+    static let underRadius: CGFloat = 44 / 240   // of notch width
+    static let eyeWidth: CGFloat = 52 / 240      // of notch width
+    static let eyeHeight: CGFloat = 17 / 140     // of notch height
+    static let eyeGap: CGFloat = 16 / 240        // of notch width
+    static let eyeCentreY: CGFloat = 74.5 / 140  // down the notch
+    static let lidRadius: CGFloat = 3 / 17       // of eye height
+    static let underEyeRadius: CGFloat = 9 / 17  // of eye height
 }
 
-/// The house mark: the little watcher (brand v0.3), reproduced from
-/// the brand SVG in its own 512 space and mapped into `rect`. A wide
-/// bar above a body that flares from a narrow top to a wide base
-/// (sharp top corners, rounded bottom), with one low eye. "It watches
-/// so you don't have to." Even-odd fill keeps the eye open. Identical
-/// geometry to the app icon and the menu bar glyph.
+/// The house mark: the notch, wearing two half-lidded eyes. Flat across
+/// the top and rounded underneath, the way a notch hangs off the top of
+/// a screen. Chill at rest, and the eyes are what make it a face rather
+/// than a shape. Even-odd fill keeps the eyes open. Identical geometry to
+/// the app icon and the menu bar glyph.
 struct ChalantMarkShape: Shape {
+    /// At the sizes this gets drawn in-app the brand eye proportion lands
+    /// on a sub-pixel slit, so the lids thicken and the eyes move apart.
+    /// Same reason the icon family carries separate small-size tunings.
+    var eyeBoost: CGFloat = 1.9
+    var gapBoost: CGFloat = 1.3
+
     func path(in rect: CGRect) -> Path {
-        // Emblem bbox in 512 space is 264 x 272, centered at (256,256).
-        let d = min(rect.width, rect.height)
-        let s = 0.94 * d / 272
-        func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-            CGPoint(x: rect.midX + (x - 256) * s, y: rect.midY + (y - 256) * s)
+        var w = rect.width, h = w / ChalantMark.aspect
+        if h > rect.height {
+            h = rect.height
+            w = h * ChalantMark.aspect
         }
+        let x0 = rect.midX - w / 2, y0 = rect.midY - h / 2
+        let x1 = x0 + w, y1 = y0 + h
+
         var p = Path()
-        let bar = P(148, 120)
-        p.addRoundedRect(
-            in: CGRect(x: bar.x, y: bar.y, width: 216 * s, height: 68 * s),
-            cornerSize: CGSize(width: 34 * s, height: 34 * s)
-        )
-        p.addPath(roundedQuad(
-            [P(172, 202), P(340, 202), P(387.95, 392), P(124.05, 392)],
-            radii: [0, 0, 20 * s, 20 * s]
-        ))
-        let eye = P(256, 330), er = 28 * s
-        p.addEllipse(in: CGRect(x: eye.x - er, y: eye.y - er, width: er * 2, height: er * 2))
+        let r = ChalantMark.underRadius * w
+        p.move(to: CGPoint(x: x0, y: y0))              // the flat top edge
+        p.addLine(to: CGPoint(x: x1, y: y0))
+        p.addArc(tangent1End: CGPoint(x: x1, y: y1),
+                 tangent2End: CGPoint(x: x0, y: y1), radius: r)
+        p.addArc(tangent1End: CGPoint(x: x0, y: y1),
+                 tangent2End: CGPoint(x: x0, y: y0), radius: r)
+        p.closeSubpath()
+
+        let ew = ChalantMark.eyeWidth * w
+        let eh = ChalantMark.eyeHeight * h * eyeBoost
+        let gap = ChalantMark.eyeGap * w * gapBoost
+        let cy = y0 + ChalantMark.eyeCentreY * h
+        for side in [CGFloat(-1), CGFloat(1)] {
+            let cx = rect.midX + side * (gap / 2 + ew / 2)
+            p.addPath(eyePath(cx: cx, cy: cy, w: ew, h: eh))
+        }
         return p
     }
+}
+
+/// One eye: a tight radius on the lid, a generous one underneath. That
+/// asymmetry is the whole half-lidded, unbothered look; a plain capsule
+/// reads alert instead.
+private func eyePath(cx: CGFloat, cy: CGFloat, w: CGFloat, h: CGFloat) -> Path {
+    let x0 = cx - w / 2, x1 = cx + w / 2
+    let y0 = cy - h / 2, y1 = cy + h / 2
+    let rt = min(ChalantMark.lidRadius * h, w / 2)
+    let rb = min(ChalantMark.underEyeRadius * h, w / 2)
+    var p = Path()
+    p.move(to: CGPoint(x: x0 + rt, y: y0))
+    p.addLine(to: CGPoint(x: x1 - rt, y: y0))
+    p.addArc(tangent1End: CGPoint(x: x1, y: y0), tangent2End: CGPoint(x: x1, y: y1), radius: rt)
+    p.addArc(tangent1End: CGPoint(x: x1, y: y1), tangent2End: CGPoint(x: x0, y: y1), radius: rb)
+    p.addArc(tangent1End: CGPoint(x: x0, y: y1), tangent2End: CGPoint(x: x0, y: y0), radius: rb)
+    p.addArc(tangent1End: CGPoint(x: x0, y: y0), tangent2End: CGPoint(x: x1, y: y0), radius: rt)
+    p.closeSubpath()
+    return p
 }
 
 /// Samples an SVG circular arc (rx == ry) into `path` as a polyline,

@@ -63,47 +63,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Tiny menu bar item so the agent app can be quit
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        // The house mark, drawn by hand: the little watcher. A floating
-        // bar over a tapered body with one eye, its ember punched
-        // through. Even-odd fill keeps the eye open. Matches the app
-        // icon exactly; no capsule, so it can't read as a toggle.
+        // The house mark, drawn by hand: the notch wearing two half-lidded
+        // eyes, punched through. Even-odd fill keeps the eyes open. Matches
+        // the app icon exactly; no capsule, so it can't read as a toggle.
         let icon = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            // The brand-SVG emblem (512 space) mapped into 18pt, y
-            // flipped (AppKit is y-up): the bar sits high, the flared
-            // body hangs below, eye low. Same geometry as the app icon.
-            let s = 15.6 / 272.0
-            func P(_ x: Double, _ y: Double) -> NSPoint {
-                NSPoint(x: 9.0 + (x - 256) * s, y: 9.0 + (256 - y) * s)
-            }
+            // Same 240 x 140 proportions as ChalantMarkShape, in AppKit's
+            // y-up space: the flat edge on top, the rounded corners below.
+            let w: CGFloat = 16, h = w / ChalantMark.aspect
+            let x0 = (18 - w) / 2, x1 = x0 + w
+            let yBot = (18 - h) / 2, yTop = yBot + h
             let path = NSBezierPath()
             path.windingRule = .evenOdd
-            let bar0 = P(148, 188), bar1 = P(364, 120)  // flipped: bottom-left, top-right
-            path.appendRoundedRect(
-                NSRect(x: bar0.x, y: bar0.y, width: bar1.x - bar0.x, height: bar1.y - bar0.y),
-                xRadius: 34 * s, yRadius: 34 * s
-            )
-            let corners = [P(172, 202), P(340, 202), P(387.95, 392), P(124.05, 392)]
-            let radii = [0.0, 0.0, 20 * s, 20 * s]
-            for i in 0..<4 {
-                let cur = corners[i], prev = corners[(i + 3) % 4], next = corners[(i + 1) % 4]
-                let r = radii[i]
-                if r <= 0 {
-                    if i == 0 { path.move(to: cur) } else { path.line(to: cur) }
-                    continue
-                }
-                func unit(_ f: NSPoint, _ t: NSPoint) -> (Double, Double) {
-                    let dx = t.x - f.x, dy = t.y - f.y, L = max((dx * dx + dy * dy).squareRoot(), 0.0001)
-                    return (dx / L, dy / L)
-                }
-                let up = unit(cur, prev), un = unit(cur, next)
-                let p1 = NSPoint(x: cur.x + up.0 * r, y: cur.y + up.1 * r)
-                let p2 = NSPoint(x: cur.x + un.0 * r, y: cur.y + un.1 * r)
-                path.line(to: p1)
-                path.curve(to: p2, controlPoint1: cur, controlPoint2: cur)
-            }
+            let r = ChalantMark.underRadius * w
+            path.move(to: NSPoint(x: x0, y: yTop))          // the flat top edge
+            path.line(to: NSPoint(x: x1, y: yTop))
+            path.appendArc(from: NSPoint(x: x1, y: yBot), to: NSPoint(x: x0, y: yBot), radius: r)
+            path.appendArc(from: NSPoint(x: x0, y: yBot), to: NSPoint(x: x0, y: yTop), radius: r)
             path.close()
-            let eye = P(256, 330), er = 28 * s
-            path.appendOval(in: NSRect(x: eye.x - er, y: eye.y - er, width: er * 2, height: er * 2))
+
+            // At 18pt the brand eye proportion is a sub-pixel slit, so the
+            // lids thicken and the eyes move apart, as in the small icons.
+            let ew = ChalantMark.eyeWidth * w
+            let eh = ChalantMark.eyeHeight * h * 1.9
+            let gap = ChalantMark.eyeGap * w * 1.3
+            let cy = yTop - ChalantMark.eyeCentreY * h     // y-up: measured down from the top
+            let rt = min(ChalantMark.lidRadius * eh, ew / 2)
+            let rb = min(ChalantMark.underEyeRadius * eh, ew / 2)
+            for side in [CGFloat(-1), CGFloat(1)] {
+                let cx = 9.0 + side * (gap / 2 + ew / 2)
+                let ex0 = cx - ew / 2, ex1 = cx + ew / 2
+                let ey0 = cy - eh / 2, ey1 = cy + eh / 2   // ey1 is the lid, y-up
+                path.move(to: NSPoint(x: ex0 + rt, y: ey1))
+                path.line(to: NSPoint(x: ex1 - rt, y: ey1))
+                path.appendArc(from: NSPoint(x: ex1, y: ey1), to: NSPoint(x: ex1, y: ey0), radius: rt)
+                path.appendArc(from: NSPoint(x: ex1, y: ey0), to: NSPoint(x: ex0, y: ey0), radius: rb)
+                path.appendArc(from: NSPoint(x: ex0, y: ey0), to: NSPoint(x: ex0, y: ey1), radius: rb)
+                path.appendArc(from: NSPoint(x: ex0, y: ey1), to: NSPoint(x: ex1, y: ey1), radius: rt)
+                path.close()
+            }
             NSColor.black.setFill()
             path.fill()
             return true
