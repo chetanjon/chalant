@@ -17,6 +17,11 @@ struct DisplaysSection: View {
         let pixels: String
         let hasHardwareNotch: Bool
         let isMain: Bool
+        /// The measured cutout, so "Match the notch" can seed the
+        /// sliders from what is actually there instead of jumping to
+        /// the emulated 196x38 default the moment it is turned off
+        /// (W-D, 2026-08-02).
+        let cutout: CGSize?
     }
 
     @State private var attached: [Attached] = []
@@ -134,10 +139,24 @@ struct DisplaysSection: View {
                 // sliders rather than wire them up, no migration).
                 if resolved == .notch {
                     if screen.hasHardwareNotch {
-                        SettingNote(
-                            "This display has its own notch, so Chalant measures it rather than "
-                            + "guessing."
-                        )
+                        SettingToggle(
+                            label: "Match the notch",
+                            isOn: matchesHardwareBinding(screen))
+                        if config.sizeFollowsHardware {
+                            SettingNote(
+                                "This display has its own notch, so Chalant measures it rather "
+                                + "than guessing."
+                            )
+                        } else {
+                            SettingDivider()
+                            slider(
+                                "Width", screen, \.width,
+                                range: DisplayConfigStore.Config.widthRange, unit: "pt")
+                            SettingDivider()
+                            slider(
+                                "Height", screen, \.height,
+                                range: DisplayConfigStore.Config.heightRange, unit: "pt")
+                        }
                     } else {
                         slider(
                             "Width", screen, \.width,
@@ -210,6 +229,26 @@ struct DisplaysSection: View {
         )
     }
 
+    /// "Match the notch", with one side effect a plain `binding` cannot
+    /// carry: turning it off seeds `width`/`height` from what this
+    /// screen actually measured, so the sliders that appear start at
+    /// the real size instead of jumping to the emulated 196x38 default
+    /// (W-D, 2026-08-02).
+    private func matchesHardwareBinding(_ screen: Attached) -> Binding<Bool> {
+        Binding(
+            get: { displays.config(forKey: screen.id).sizeFollowsHardware },
+            set: { newValue in
+                var config = displays.config(forKey: screen.id)
+                config.sizeFollowsHardware = newValue
+                if !newValue, let cutout = screen.cutout {
+                    config.width = cutout.width
+                    config.height = cutout.height
+                }
+                displays.set(config, forKey: screen.id)
+            }
+        )
+    }
+
     private func slider(
         _ label: String,
         _ screen: Attached,
@@ -242,7 +281,8 @@ struct DisplaysSection: View {
                 name: screen.localizedName,
                 pixels: "\(Int(screen.frame.width)) × \(Int(screen.frame.height))",
                 hasHardwareNotch: screen.safeAreaInsets.top > 0,
-                isMain: screen == NSScreen.main
+                isMain: screen == NSScreen.main,
+                cutout: screen.cutout
             )
         }
         // A display that went away must not leave the pane showing

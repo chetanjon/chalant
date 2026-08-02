@@ -165,20 +165,20 @@ struct NotchRootView: View {
                 height: 18 + 10 * grow
             )
         }
-        let growW: CGFloat = face.isHovering ? 14 : 0
-        let growH: CGFloat = face.isHovering ? 4 : 0
-        // Height is the safe area plus a 3pt apron: flush-exact put
-        // the rim's bottom arc ON the glass edge and it read as the
-        // border touching the hardware (user, 2026-07-22); the apron
-        // drops the visible line just clear of the notch, the way a
-        // dynamic island wraps its cutout. Every LARGER overhang the
-        // computed-chin era added here was a bug (full story with the
-        // placement code). The width tuck: the reported gap sits a
-        // hair wider than the glass, and the pill wears the camera's
-        // clothes, not the report's ("reduced just a little bit").
-        return CGSize(
-            width: face.notchSize.width - 8 + statusWings + growW,
-            height: face.notchSize.height + 3 + growH
+        // Flush with the cutout — exactly the hardware's own size, no
+        // apron, no tuck — whenever there is nothing to say and nobody
+        // reaching (A2): on a MacBook the cutout has no pixels, so an
+        // island exactly that size is eaten by the hardware and is
+        // invisible by construction. The 3pt height apron and the 8pt
+        // width tuck (user, 2026-07-22: flush-exact read as the
+        // border touching the hardware; the reported gap sits a hair
+        // wider than the glass) come back the moment the island has a
+        // reason to be outside the hole anyway — flush and apron
+        // cannot both be true at once (user, 2026-08-02). An emulated
+        // notch has no hardware to hide inside and keeps them
+        // unconditionally (EC-5).
+        return NotchViewModel.collapsedFrame(
+            cutout: face.cutout, base: face.notchSize, wings: statusWings, hovering: face.isHovering
         )
     }
 
@@ -243,10 +243,20 @@ struct NotchRootView: View {
             // On hover the droplet "reaches", shoulders widen, belly
             // sags, a soft beat of anticipation before opening.
             let reaching = face.isHovering && Theme.Feel.current.ambient
+            // How far the frame drawn above already overhangs the
+            // cutout: zero exactly when `collapsedSize` just returned
+            // the cutout itself (flush, A2), so the eave and belly
+            // below vanish with it too (A3's arc gone). An emulated
+            // notch has no real cutout to measure an overhang against
+            // and never hides inside one (EC-5), so it always reads as
+            // overhanging by the collapsed eave ceiling instead.
+            let overhang: CGFloat = face.cutout.map { (collapsedSize.width - $0.width) / 2 }
+                ?? Theme.Island.eaveCollapsed
+            let (eave, belly) = NotchViewModel.eaveAndBelly(overhang: overhang)
             return IslandShape(
-                eave: Theme.Island.eaveCollapsed + (reaching ? 1.5 : 0),
+                eave: eave + (reaching ? 1.5 : 0),
                 bottomRadius: face.cornerRadius,
-                belly: reaching ? 3 : Theme.Island.bellyCollapsed
+                belly: reaching ? 3 : belly
             )
         }
         return IslandShape(

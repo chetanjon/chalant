@@ -37,9 +37,22 @@ final class IslandFace: ObservableObject {
 
     /// This screen's resolved style, already turned out of `.auto`.
     @Published var style: DisplayConfigStore.Style = .notch
+    /// The hardware's own cutout, kept apart from `notchSize` below
+    /// (what gets drawn): nil on a screen with no housing at all — a
+    /// pill, or an emulated notch — non-nil wherever there is a real
+    /// one to hide inside. A2's flush test keys off this being non-nil
+    /// rather than off `style`, so an emulated notch never reads as
+    /// having hardware to disappear into (W-A/W-C, EC-5, 2026-08-02).
+    @Published var cutout: CGSize?
     /// Measured from this screen's cutout, or the configured emulated
-    /// size where it has none.
-    @Published var notchSize = NotchViewModel.defaultNotchSize
+    /// size where it has none. Initialised from a plain `Config()`
+    /// rather than a second hardcoded default (EC-12): `apply(_:to:)`
+    /// overwrites this before anything ever renders it, so the only
+    /// thing a second number here could do was disagree with the
+    /// first one.
+    @Published var notchSize = CGSize(
+        width: DisplayConfigStore.Config().width, height: DisplayConfigStore.Config().height
+    )
     /// Bottom-corner radius of the collapsed island here.
     @Published var cornerRadius: CGFloat = Theme.Island.radiusCollapsed
     /// Room down each side of the expanded island here.
@@ -90,7 +103,21 @@ final class IslandFace: ObservableObject {
     /// How much room island content leaves clear at the top, mirroring
     /// `NotchViewModel.contentTopReserve`'s old reasoning but reading
     /// this face's own geometry.
+    ///
+    /// Real hardware wins, because that is the thing content genuinely
+    /// cannot be drawn under: a user enlarging the island, or A2
+    /// shrinking it flush, must not move content further from the
+    /// housing than the housing needs (W-A, C11, 2026-08-02).
+    ///
+    /// An emulated notch has no housing and still needs the room. It
+    /// draws a notch silhouette across its own top, and content set to
+    /// clear only 8pt would ride up underneath the shape the island is
+    /// drawing. Reading `cutout` alone said an emulated notch "always
+    /// used the quiet gap", which was never true: the old test was
+    /// `style == .notch`, and that is true of an emulated one too, so
+    /// it has always reserved the drawn height. Three cases, not two.
     var contentTopReserve: CGFloat {
-        hasPhysicalNotch ? notchSize.height : Theme.Space.m
+        if let cutout { return cutout.height }
+        return style == .notch ? notchSize.height : Theme.Space.m
     }
 }

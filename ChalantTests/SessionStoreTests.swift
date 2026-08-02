@@ -1119,6 +1119,99 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(box.height, rect.height, accuracy: 0.5)
     }
 
+    // MARK: The cutout measurement (notch-geometry-plan, W-A)
+
+    func testACutoutHeightIsTakenEvenWhenTheWidthIsNot() {
+        // EC-3: a notched screen under mirroring, or a chassis that
+        // reports one aux area and not the other, still has a real
+        // cutout with a real height. Losing the whole measurement
+        // because only the width is unmeasurable would make A2 fail
+        // with no symptom anyone could name.
+        let bothMissing = NSScreen.cutout(
+            safeAreaTop: 32, left: nil, right: nil, frameWidth: 1470)
+        XCTAssertEqual(bothMissing?.height, 32)
+        XCTAssertEqual(bothMissing?.width, 1470)
+
+        let oneMissing = NSScreen.cutout(
+            safeAreaTop: 32, left: CGRect(x: 0, y: 0, width: 620, height: 32), right: nil,
+            frameWidth: 1470)
+        XCTAssertEqual(oneMissing?.height, 32)
+
+        // No safe area at all is no cutout, aux areas or not.
+        XCTAssertNil(
+            NSScreen.cutout(
+                safeAreaTop: 0,
+                left: CGRect(x: 0, y: 0, width: 620, height: 32),
+                right: CGRect(x: 850, y: 0, width: 620, height: 32),
+                frameWidth: 1470))
+    }
+
+    func testACutoutWidthIsTheGapBetweenTheAuxiliaryAreasNotTheFrameMinusThem() {
+        // EC-7: `frame.width - left.width - right.width` silently
+        // assumes both aux areas start and end at the screen edges;
+        // `right.minX - left.maxX` measures the gap directly and
+        // assumes nothing.
+        let cutout = NSScreen.cutout(
+            safeAreaTop: 32,
+            left: CGRect(x: 0, y: 0, width: 619, height: 32),
+            right: CGRect(x: 851, y: 0, width: 619, height: 32),
+            frameWidth: 1470)
+        XCTAssertEqual(cutout, CGSize(width: 232, height: 32))
+    }
+
+    // MARK: Collapsed geometry, flush at rest (notch-geometry-plan, W-C)
+
+    func testAQuietIslandOnRealHardwareIsExactlyTheCutout() {
+        // A2: at rest, nothing to say, nobody reaching, the painted
+        // frame must be exactly the cutout -- not the cutout minus the
+        // old 8pt tuck -- because only exactly-the-cutout is eaten by
+        // the hardware and invisible by construction.
+        let cutout = CGSize(width: 200, height: 32)
+        XCTAssertEqual(
+            NotchViewModel.collapsedFrame(
+                cutout: cutout, base: cutout, wings: 0, hovering: false),
+            cutout)
+        // The moment there is something to say, it is no longer flush.
+        XCTAssertNotEqual(
+            NotchViewModel.collapsedFrame(
+                cutout: cutout, base: cutout, wings: 88, hovering: false),
+            cutout)
+    }
+
+    func testAnEmulatedNotchKeepsItsApronBecauseItHasNothingToHideIn() {
+        // EC-5: no cutout means no hardware to disappear into, so the
+        // 8pt tuck and 3pt apron apply unconditionally, keyed on
+        // `cutout == nil`, never on the style.
+        let frame = NotchViewModel.collapsedFrame(
+            cutout: nil, base: CGSize(width: 196, height: 38), wings: 0, hovering: false)
+        XCTAssertEqual(frame, CGSize(width: 188, height: 41))
+    }
+
+    func testAFlushIslandHasNoArcAndNothingOutsideItsFrame() {
+        // A3: zero overhang means zero eave and zero belly, and an
+        // `IslandShape` built from them draws no arc across the bottom
+        // and nothing beyond its own rect.
+        let (eave, belly) = NotchViewModel.eaveAndBelly(overhang: 0)
+        XCTAssertEqual(eave, 0)
+        XCTAssertEqual(belly, 0)
+
+        let rect = CGRect(x: 0, y: 0, width: 200, height: 32)
+        let box = IslandShape(eave: eave, bottomRadius: 16, belly: belly).path(in: rect).boundingRect
+        XCTAssertEqual(box.maxY, rect.maxY, accuracy: 0.5)
+        XCTAssertEqual(box.width, rect.width, accuracy: 0.5)
+    }
+
+    func testTheEaveGrowsWithTheOverhangUpToItsCeiling() {
+        // Something to say grows the frame, and the eave and belly
+        // come back in step with that growth rather than snapping to a
+        // fixed constant regardless of how much actually overhangs.
+        XCTAssertEqual(NotchViewModel.eaveAndBelly(overhang: -4).eave, 0)
+        XCTAssertEqual(NotchViewModel.eaveAndBelly(overhang: 3).eave, 3)
+        XCTAssertEqual(NotchViewModel.eaveAndBelly(overhang: 3).belly, Theme.Island.bellyCollapsed)
+        // Clamped at the ceiling rather than growing without bound.
+        XCTAssertEqual(NotchViewModel.eaveAndBelly(overhang: 40).eave, Theme.Island.eaveCollapsed)
+    }
+
     // MARK: Per-display config
 
     func testAutomaticResolvesFromTheHardwareAndNothingElseIsTouched() {
@@ -1208,6 +1301,36 @@ final class SessionStoreTests: XCTestCase {
         // default stands in rather than the whole decode failing.
         XCTAssertEqual(config.expandedWidth, 520)
         XCTAssertEqual(config.expandedMinHeight, 0)
+        // `sizeFollowsHardware` is newer still and absent from this
+        // exact blob too; its default of `true` must reproduce what
+        // this same blob already did before the field existed (EC-6).
+        XCTAssertTrue(config.sizeFollowsHardware)
+    }
+
+    func testFollowingTheHardwareIsTheDefaultAndAStoredSizeStillWins() {
+        // W-D, EC-6: a blob with no `sizeFollowsHardware` key -- every
+        // blob written before this round -- reads `true`.
+        XCTAssertTrue(DisplayConfigStore.Config().sizeFollowsHardware)
+
+        // Following the hardware, the cutout wins over a stored size.
+        XCTAssertEqual(
+            NotchViewModel.notchSize(
+                cutout: CGSize(width: 200, height: 32), sizeFollowsHardware: true,
+                configWidth: 300, configHeight: 40),
+            CGSize(width: 200, height: 32))
+        // Turned off, the stored size wins even with real hardware
+        // right there to measure.
+        XCTAssertEqual(
+            NotchViewModel.notchSize(
+                cutout: CGSize(width: 200, height: 32), sizeFollowsHardware: false,
+                configWidth: 300, configHeight: 40),
+            CGSize(width: 300, height: 40))
+        // No hardware at all: nothing to follow, the stored size wins
+        // regardless of the setting, exactly as it always has.
+        XCTAssertEqual(
+            NotchViewModel.notchSize(
+                cutout: nil, sizeFollowsHardware: true, configWidth: 196, configHeight: 38),
+            CGSize(width: 196, height: 38))
     }
 
     func testUnreadableStoredSettingsAreDroppedRatherThanFailingEveryLaunch() throws {

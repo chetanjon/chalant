@@ -163,8 +163,8 @@ final class NotchWindowController {
     /// face against another's numbers.
     private func islandGeometry(of face: IslandFace) -> [AnyHashable] {
         [
-            face.displayID, face.notchSize, face.style, face.cornerRadius, face.contentPadding,
-            face.expandedWidth, face.expandedMinHeight,
+            face.displayID, face.notchSize, face.cutout, face.style, face.cornerRadius,
+            face.contentPadding, face.expandedWidth, face.expandedMinHeight,
         ]
     }
 
@@ -201,22 +201,24 @@ final class NotchWindowController {
         // change can no longer update one and leave the other holding a
         // stale answer.
 
-        // The configured size is the starting point, so a pill — and an
-        // emulated notch on a screen with no cutout — is sizeable.
-        var notchSize = CGSize(width: config.width, height: config.height)
-        // A real notch's dimensions are the hardware's to state, not
-        // ours to invent, so measured values win wherever the island is
-        // actually wrapping one.
-        if style == .notch,
-           screen.safeAreaInsets.top > 0,
-           let left = screen.auxiliaryTopLeftArea,
-           let right = screen.auxiliaryTopRightArea {
-            notchSize = CGSize(
-                width: screen.frame.width - left.width - right.width,
-                height: screen.safeAreaInsets.top
-            )
-        }
-        face.notchSize = notchSize
+        // The hardware's own size, kept apart from what gets drawn
+        // below: nil wherever there is no real housing at all (a pill,
+        // or an emulated notch), non-nil wherever there is. A2's flush
+        // test keys off this being non-nil rather than off `style`, so
+        // an emulated notch never reads as having hardware to
+        // disappear into (W-A/W-C, EC-5).
+        face.cutout = screen.cutout
+        // The hardware wins by default (A1), unless the user has
+        // turned it off — chosen so every blob written before that
+        // field existed is already correct with no migration (EC-6,
+        // W-D): on a screen with a cutout this reproduces today's
+        // measured-wins behaviour, and on one without a cutout there is
+        // nothing to follow, so the configured size wins regardless,
+        // which is also today's behaviour.
+        face.notchSize = NotchViewModel.notchSize(
+            cutout: face.cutout, sizeFollowsHardware: config.sizeFollowsHardware,
+            configWidth: config.width, configHeight: config.height
+        )
         return NSRect(
             x: screen.frame.midX - panelSize.width / 2,
             y: screen.frame.maxY - panelSize.height,
@@ -867,38 +869,25 @@ final class NotchWindowController {
         case .notch, .auto:
             // .auto never reaches here — resolvedStyle always resolves
             // it — but the switch has to be whole. Sized from THIS
-            // screen's own notch via `notchMetric(of:)`, never a
-            // single shared field: a shared "the notch size" once
-            // belonged to whichever display was measured last, so
-            // every other display's door inherited the wrong width
-            // and could miss the real notch (review-caught).
-            let notch = notchMetric(of: screen)
+            // screen's own cutout, never a single shared field: a
+            // shared "the notch size" once belonged to whichever
+            // display was measured last, so every other display's door
+            // inherited the wrong width and could miss the real notch
+            // (review-caught). And from the cutout specifically, not
+            // from whatever `IslandFace.notchSize` currently draws: a
+            // flush, quiet island shrinks to the hardware's own size
+            // (A2), and a door that shrank with it would make a flush
+            // island unreachable (C9, EC-2). Falls back to the
+            // configured emulated size only where there is no real
+            // cutout to ask.
+            let config = viewModel.displays.config(for: screen)
+            let notch = screen.cutout ?? CGSize(width: config.width, height: config.height)
             return hoverZone(
                 on: screen,
                 width: notch.width + 116,
                 height: notch.height + 12
             )
         }
-    }
-
-    /// A screen's own notch, or — for an emulated one — the size the
-    /// pane configured for it, so a door is correct on whichever
-    /// display it hangs from. A real notch's dimensions are the
-    /// hardware's to state; falling back to the static default here
-    /// left a 420pt-wide emulated notch behind a door sized for the
-    /// old ~310pt default, and the island's own ends could not reach
-    /// it (EC-5).
-    private func notchMetric(of screen: NSScreen) -> CGSize {
-        guard screen.safeAreaInsets.top > 0,
-              let left = screen.auxiliaryTopLeftArea,
-              let right = screen.auxiliaryTopRightArea else {
-            let config = viewModel.displays.config(for: screen)
-            return CGSize(width: config.width, height: config.height)
-        }
-        return CGSize(
-            width: screen.frame.width - left.width - right.width,
-            height: screen.safeAreaInsets.top
-        )
     }
 
     /// Width from the owner's own config, not the measured size: a
@@ -956,5 +945,42 @@ extension NSScreen {
     var displayID: CGDirectDisplayID? {
         (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
             .uint32Value
+    }
+
+    /// The physical camera housing this screen wraps, if it has one.
+    /// nil on a screen with no housing at all — every external
+    /// measured tonight, and any screen with `safeAreaInsets.top == 0`
+    /// (W-A). Kept apart from whatever gets drawn: a real notch's
+    /// dimensions are the hardware's to state, never ours to invent.
+    var cutout: CGSize? {
+        Self.cutout(
+            safeAreaTop: safeAreaInsets.top,
+            left: auxiliaryTopLeftArea,
+            right: auxiliaryTopRightArea,
+            frameWidth: frame.width
+        )
+    }
+
+    /// Pulled out of the property above so the derivation is checkable
+    /// with no screen attached (T-A3, W-A). Width is the gap between
+    /// the two auxiliary areas, `right.minX - left.maxX`, not
+    /// `frame.width - left.width - right.width`, which silently
+    /// assumes both start exactly at the screen edges (EC-7). Height
+    /// comes from the safe area regardless of whether the aux areas
+    /// report at all: on a mirrored screen, or a chassis that reports
+    /// one and not the others, height is still real hardware and is
+    /// the dimension A2 is most sensitive to — the full frame width
+    /// stands in for the width nothing can measure, rather than losing
+    /// the housing's presence entirely (EC-3).
+    static func cutout(
+        safeAreaTop: CGFloat, left: CGRect?, right: CGRect?, frameWidth: CGFloat
+    ) -> CGSize? {
+        guard safeAreaTop > 0 else { return nil }
+        guard let left, let right else {
+            NotchViewModel.log.info(
+                "cutout height available with no aux areas to derive its width from")
+            return CGSize(width: frameWidth, height: safeAreaTop)
+        }
+        return CGSize(width: right.minX - left.maxX, height: safeAreaTop)
     }
 }

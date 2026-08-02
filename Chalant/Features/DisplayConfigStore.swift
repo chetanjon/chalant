@@ -55,8 +55,15 @@ final class DisplayConfigStore: ObservableObject {
         /// little bit height"). Only displays with no stored height
         /// move: a screen whose slider has been touched keeps its own.
         var height: CGFloat = 38
-        /// The island's bottom corners when collapsed.
-        var cornerRadius: CGFloat = 16
+        /// The island's bottom corners when collapsed. 13, not the
+        /// notch's real radius: Apple publishes no number for it and no
+        /// API reports one, so this is an interim value, not a
+        /// calibrated one. The founder's desk was in clamshell with no
+        /// notched display attached when this shipped, so the
+        /// capture-and-fit procedure this needs (notch-geometry-plan,
+        /// W-B, 2026-08-02) could not be run. Replace this the next
+        /// time a lid is open, and attach the capture to that commit.
+        var cornerRadius: CGFloat = 13
         /// Breathing room down each side of the expanded island. 20
         /// rather than 16: the founder's complaint that content sits
         /// too close to the borders landed here as much as anywhere
@@ -70,6 +77,16 @@ final class DisplayConfigStore: ObservableObject {
         /// ceiling: content always wins over this number (EC-10). Zero
         /// is today's behaviour, purely content-measured.
         var expandedMinHeight: CGFloat = 0
+        /// Whether the collapsed size follows the hardware's own
+        /// cutout. Defaults true so every blob written before this
+        /// field existed is already correct with no migration (EC-6):
+        /// on a screen with a cutout, true reproduces today's
+        /// measured-wins behaviour; on one without a cutout there is
+        /// nothing to follow, so `width`/`height` win regardless, which
+        /// is also today's behaviour. Turning it off on a real notch is
+        /// what lets `width`/`height` be hand-set there too (A1, W-D,
+        /// 2026-08-02).
+        var sizeFollowsHardware: Bool = true
 
         /// Bounds that keep a slider (or a hand-edited defaults blob)
         /// from producing a shape that cannot be seen or dismissed.
@@ -104,7 +121,7 @@ final class DisplayConfigStore: ObservableObject {
 
         private enum CodingKeys: String, CodingKey {
             case style, width, height, cornerRadius, contentPadding
-            case expandedWidth, expandedMinHeight
+            case expandedWidth, expandedMinHeight, sizeFollowsHardware
         }
 
         /// A hand-written decode, not the synthesized one it replaces.
@@ -124,11 +141,13 @@ final class DisplayConfigStore: ObservableObject {
             style = try c.decodeIfPresent(Style.self, forKey: .style) ?? .auto
             width = try c.decodeIfPresent(CGFloat.self, forKey: .width) ?? 196
             height = try c.decodeIfPresent(CGFloat.self, forKey: .height) ?? 38
-            cornerRadius = try c.decodeIfPresent(CGFloat.self, forKey: .cornerRadius) ?? 16
+            cornerRadius = try c.decodeIfPresent(CGFloat.self, forKey: .cornerRadius) ?? 13
             contentPadding = try c.decodeIfPresent(CGFloat.self, forKey: .contentPadding) ?? 20
             expandedWidth = try c.decodeIfPresent(CGFloat.self, forKey: .expandedWidth) ?? 520
             expandedMinHeight =
                 try c.decodeIfPresent(CGFloat.self, forKey: .expandedMinHeight) ?? 0
+            sizeFollowsHardware =
+                try c.decodeIfPresent(Bool.self, forKey: .sizeFollowsHardware) ?? true
         }
     }
 
