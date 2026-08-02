@@ -10,24 +10,53 @@ import SwiftUI
 struct AgentMark: View {
     let agent: SessionStore.Agent
     var size: CGFloat = 12
-    /// Turning while the agent is mid-turn, still while it is not. A
-    /// mark that always moved would say nothing; one that only moves
-    /// while work is happening says "still going" without a word, and
-    /// is the difference between a list of sessions and a list of
-    /// names (founder, 2026-08-02).
-    var working = false
+    /// What the session is doing, which this mark now says on its own.
+    ///
+    /// Three readings, and nothing else beside it: turning while the
+    /// agent is mid-turn, coloured and still while it waits at its
+    /// prompt, drained of colour once it is gone. A pair of rings used
+    /// to sit next to this saying the same thing again, and a second
+    /// mark that restates the first is furniture (founder, 2026-08-02).
+    ///
+    /// nil where there is no session to describe, such as the glance's
+    /// standing Claude mark.
+    var state: SessionStore.State?
 
     /// Anthropic's own terracotta rather than the ambient text tint.
     /// A Claude session is the one row on the island that belongs to
     /// somebody else's brand, and it should read as theirs.
     static let claudeColour = Color(red: 0.851, green: 0.467, blue: 0.341)
 
+    /// Mid-turn, and therefore moving.
+    private var turning: Bool { state == .working }
+
+    /// Still a process somebody could reach. `needsInput` and `idle`
+    /// are both alive and both wear the colour; only the animation
+    /// tells them from a session that is working.
+    private var alive: Bool {
+        switch state {
+        case .working, .needsInput, .idle: return true
+        case .stale, .done, .failed: return false
+        case nil: return true
+        }
+    }
+
+    private var stateLabel: String {
+        switch state {
+        case .working: return "\(agent.label), working"
+        case .needsInput: return "\(agent.label), waiting for you"
+        case .idle: return "\(agent.label), waiting at its prompt"
+        case .stale, .done, .failed: return "\(agent.label), ended"
+        case nil: return agent.label
+        }
+    }
+
     var body: some View {
         Group {
             switch agent {
             case .claude:
                 Group {
-                    if working, Theme.Feel.current.ambient {
+                    if turning, Theme.Feel.current.ambient {
                         TimelineView(.animation(minimumInterval: 1 / 20)) { context in
                             let t = context.date.timeIntervalSinceReferenceDate
                             let turn = t.truncatingRemainder(dividingBy: 8) / 8
@@ -41,8 +70,10 @@ struct AgentMark: View {
                 }
                 // Only Claude's mark takes a colour of its own; Cursor's
                 // keeps whatever tint the row hands down, so a row that
-                // dims still dims.
-                .foregroundStyle(Self.claudeColour)
+                // dims still dims. A session that has gone gives its
+                // colour up: the row is history at that point, and
+                // history should not be the brightest thing on screen.
+                .foregroundStyle(alive ? Self.claudeColour : Theme.textTertiary)
             case .cursor:
                 // Cursor's own logo is a prism this has no faithful way
                 // to draw, so this is plainly a pointer rather than a
@@ -52,7 +83,7 @@ struct AgentMark: View {
             }
         }
         .frame(width: size, height: size)
-        .accessibilityLabel(working ? "\(agent.label), working" : agent.label)
+        .accessibilityLabel(stateLabel)
         .help(agent.label)
     }
 }

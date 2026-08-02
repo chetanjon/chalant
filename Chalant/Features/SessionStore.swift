@@ -57,12 +57,29 @@ final class SessionStore: ObservableObject {
     /// The mirror image of `Ask`, and deliberately the same shape: the
     /// island cannot reach into a running agent, so the agent comes and
     /// collects, exactly as it already does for an answer.
-    struct Outbox: Equatable {
+    /// One message waiting for a session, kept whole.
+    ///
+    /// Separate items rather than one joined string, because that is
+    /// how Claude Code's own terminal queue behaves: type twice while
+    /// it is busy and you get two queued messages, each editable and
+    /// cancellable on its own, each arriving as its own turn. Joining
+    /// them lost the boundary and delivered a wall (founder,
+    /// 2026-08-02, "same as sending it in the terminal").
+    struct QueuedMessage: Identifiable, Equatable {
+        let id: String
         var text: String
         var queuedAt: Date
+    }
+
+    struct Outbox: Equatable {
+        /// In order. The head is what the next turn boundary collects;
+        /// the rest wait their turn, exactly as a terminal queue does.
+        var pending: [QueuedMessage] = []
         var deliveredAt: Date?
-        /// The session went away before it read this.
-        var undelivered: Bool
+        /// The session went away before it read these.
+        var undelivered: Bool = false
+
+        var isEmpty: Bool { pending.isEmpty }
     }
 
     struct Session: Identifiable, Equatable {
@@ -351,7 +368,14 @@ final class SessionStore: ObservableObject {
 
     /// Longest message that may be queued. This becomes model context
     /// in another process, so it is bounded here rather than trusted.
+    /// Fired when a session goes away with messages still queued, so
+    /// the island can say so rather than letting them vanish quietly.
+    var onMessageUndelivered: ((String) -> Void)?
+
     static let maxMessage = 2000
+    /// A queue this deep is somebody holding the key down, not somebody
+    /// with eight things to say.
+    static let maxQueued = 8
 
     /// Queues a message for a session to collect at its next turn
     /// boundary. Validation mirrors `attach()`'s above: trimmed,
@@ -366,25 +390,35 @@ final class SessionStore: ObservableObject {
     @discardableResult
     func queue(message: String, for sessionID: String) -> Bool {
         let cleaned = Self.sanitizeMessage(message)
-        guard !cleaned.isEmpty,
+        guard !cleaned.isEmpty, cleaned.count <= Self.maxMessage,
               let index = sessions.firstIndex(where: { $0.id == sessionID }),
               sessions[index].canReceiveMessages
         else { return false }
-        // An outbox already collected leaves its text emptied rather
-        // than nil (see collectMessage), so an empty pending text —
-        // not merely a nil outbox — means "nothing to prepend".
-        let pending = sessions[index].outbox?.text ?? ""
-        let combined = pending.isEmpty ? cleaned : "\(pending)\n\n\(cleaned)"
-        guard combined.count <= Self.maxMessage else { return false }
-        sessions[index].outbox = Outbox(
-            text: combined, queuedAt: Date(), deliveredAt: nil, undelivered: false
+        var outbox = sessions[index].outbox ?? Outbox()
+        // A queue that had already been emptied by a collection is a
+        // fresh queue, not a delivered one: clearing these is what
+        // stops the next message inheriting the last one's verdict.
+        if outbox.pending.isEmpty {
+            outbox.deliveredAt = nil
+            outbox.undelivered = false
+        }
+        guard outbox.pending.count < Self.maxQueued else { return false }
+        outbox.pending.append(
+            QueuedMessage(id: UUID().uuidString, text: cleaned, queuedAt: Date())
         )
+        sessions[index].outbox = outbox
         return true
     }
 
-    /// Trims, then drops every control character except newline and
-    /// tab. A message arrives over the local API from another process,
-    /// same trust boundary as a question's fields above.
+    /// Drop one queued message without sending it.
+    func cancelMessage(id: String, for sessionID: String) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        sessions[index].outbox?.pending.removeAll { $0.id == id }
+        if sessions[index].outbox?.pending.isEmpty == true {
+            sessions[index].outbox = nil
+        }
+    }
+
     private static func sanitizeMessage(_ raw: String) -> String {
         let allowed = raw.unicodeScalars.filter {
             $0 == "\n" || $0 == "\t" || $0.properties.generalCategory != .control
@@ -398,30 +432,32 @@ final class SessionStore: ObservableObject {
     /// same ordering `ActivityServer` gives `clearAsk` — so a Stop hook
     /// that fires twice, or a retried curl, cannot deliver the same
     /// instruction twice (EC-7).
+    /// Hand over the next message, and only that one.
+    ///
+    /// One per turn boundary rather than the whole queue at once: each
+    /// queued message is its own instruction, and three of them glued
+    /// together is one confusing instruction. The rest stay queued and
+    /// arrive at the turns after this, which is what a terminal queue
+    /// does.
     func collectMessage(sessionID: String) -> String? {
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }),
-              let outbox = sessions[index].outbox, !outbox.undelivered, !outbox.text.isEmpty
+              var outbox = sessions[index].outbox,
+              !outbox.undelivered,
+              !outbox.pending.isEmpty
         else { return nil }
-        let text = outbox.text
-        sessions[index].outbox?.text = ""
-        sessions[index].outbox?.deliveredAt = Date()
-        return text
+        let next = outbox.pending.removeFirst()
+        outbox.deliveredAt = Date()
+        sessions[index].outbox = outbox
+        return next.text
     }
 
-    /// Fired the moment a queued message flips to undelivered, title of
-    /// the session it was waiting on. The store has no glance to flash
-    /// (it constructs nothing and touches no IO); `NotchViewModel` wires
-    /// this in `start()`, the same shape `ShortcutStore.announce`
-    /// already uses (EC-11, left undone by wave 1 on purpose).
-    var onMessageUndelivered: ((String) -> Void)?
-
-    /// The session went away before it read this (EC-11). Only a
-    /// message still waiting — never one already collected — flips to
-    /// undelivered, so the row can offer Copy and Dismiss on text that
-    /// really never arrived.
     func failMessage(sessionID: String) {
+        // Anything still queued is undelivered, whatever came before
+        // it: with a queue rather than one message, a session can have
+        // collected two and died holding the third, and that third is
+        // exactly as lost as a message that never went at all.
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }),
-              let outbox = sessions[index].outbox, outbox.deliveredAt == nil
+              let outbox = sessions[index].outbox, !outbox.pending.isEmpty
         else { return }
         sessions[index].outbox?.undelivered = true
         onMessageUndelivered?(sessions[index].title)

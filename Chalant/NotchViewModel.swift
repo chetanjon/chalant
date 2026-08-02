@@ -490,6 +490,21 @@ final class NotchViewModel: ObservableObject {
         return style == .notch ? 2 * max(left, right) : left + right
     }
 
+    /// Something is asking for the user, right now.
+    ///
+    /// Hiding is a preference about clutter, never about silence: a
+    /// session that has stopped and wants an answer is the one moment
+    /// the island exists for, and a hidden island that stayed hidden
+    /// through it would be worse than no island (founder, 2026-08-02).
+    /// A pill that has already been shut away comes back on its own for
+    /// this, and goes away again when the asking is over.
+    var somethingWantsYou: Bool {
+        sessions.sessions.contains { session in
+            session.state == .needsInput
+                || (session.ask.map { $0.answer == nil } ?? false)
+        } || activities.activities.contains { $0.state == .needsInput }
+    }
+
     /// Anything the resting island would actually draw.
     func collapsedHasSomethingToSay(style: DisplayConfigStore.Style, state: IslandState) -> Bool {
         let left = leftWingNeed(style: style, state: state)

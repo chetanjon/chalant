@@ -91,16 +91,21 @@ struct AgentSessionsStrip: View {
         HStack(spacing: Theme.Space.m) {
             // Whose session it is, then what it wants. Two rows from
             // two different agents are otherwise identical at a glance.
-            AgentMark(agent: session.agent, size: 11, working: session.state == .working)
-                .foregroundStyle(Theme.textTertiary)
-            // Glyph as well as tint: a row that only changed colour
-            // would say nothing to anyone reading it in greyscale. A
-            // hollow ring for idle, distinct from working's dashed
-            // circle — this is a session sitting still, not one going.
-            Image(systemName: session.state == .needsInput ? "exclamationmark.circle.fill"
-                  : session.state == .idle ? "circle" : "circle.dashed")
-                .font(Theme.Fonts.icon(.s))
-                .foregroundStyle(session.state == .needsInput ? accent : Theme.textSecondary)
+            // The mark carries the state itself: turning while the
+            // session works, still and coloured while it waits, drained
+            // of colour once it is gone. The dashed and hollow rings
+            // that used to sit beside it said the same thing a second
+            // time and were dropped (founder, 2026-08-02).
+            AgentMark(agent: session.agent, size: 11, state: session.state)
+            // The one mark that survived, because it is the only one
+            // that was not a restatement: a session asking for an
+            // answer is the whole reason to look at this list, and
+            // "coloured and still" already means idle.
+            if session.state == .needsInput {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(Theme.Fonts.icon(.s))
+                    .foregroundStyle(accent)
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(session.title)
                     .font(Theme.Fonts.body)
@@ -309,17 +314,21 @@ private struct ComposeCard: View {
     private func outboxStatus(_ outbox: SessionStore.Outbox) -> some View {
         if outbox.undelivered {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text("\(session.title) ended before reading this.")
+                Text("\(session.title) ended before reading "
+                     + (outbox.pending.count == 1 ? "this." : "these."))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
-                Text(outbox.text)
-                    .font(Theme.Fonts.body)
-                    .foregroundStyle(Theme.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(outbox.pending) { queued in
+                    Text(queued.text)
+                        .font(Theme.Fonts.body)
+                        .foregroundStyle(Theme.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 HStack(spacing: Theme.Space.m) {
                     Button("Copy") {
                         NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(outbox.text, forType: .string)
+                        NSPasteboard.general.setString(
+                            outbox.pending.map(\.text).joined(separator: "\n\n"), forType: .string)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -329,7 +338,7 @@ private struct ComposeCard: View {
                         .controlSize(.small)
                 }
             }
-        } else if outbox.deliveredAt != nil {
+        } else if outbox.pending.isEmpty, outbox.deliveredAt != nil {
             Text("Delivered.")
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(Theme.textSecondary)
@@ -344,21 +353,34 @@ private struct ComposeCard: View {
                     }
                 }
         } else {
+            // Every queued message, stacked and cancellable on its own,
+            // the way Claude Code's terminal shows a queue. One goes at
+            // each turn boundary, so the first in the list is the one
+            // leaving next and the rest are honestly behind it.
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                // The whole pending text, not just a count: a second
-                // message queued before the first is collected must
-                // never hide the first (EC-10).
-                Text(outbox.text)
-                    .font(Theme.Fonts.body)
-                    .foregroundStyle(Theme.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: Theme.Space.m) {
-                    Text("Queued.")
-                        .font(Theme.Fonts.caption)
+                ForEach(Array(outbox.pending.enumerated()), id: \.element.id) { index, queued in
+                    HStack(alignment: .top, spacing: Theme.Space.m) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(queued.text)
+                                .font(Theme.Fonts.body)
+                                .foregroundStyle(Theme.textPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(index == 0 ? "Next" : "Queued")
+                                .font(Theme.Fonts.caption)
+                                .foregroundStyle(Theme.textTertiary)
+                        }
+                        Spacer(minLength: Theme.Space.s)
+                        Button {
+                            sessions.cancelMessage(id: queued.id, for: session.id)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(Theme.Fonts.icon(.s))
+                        }
+                        .buttonStyle(.borderless)
                         .foregroundStyle(Theme.textTertiary)
-                    Button("Cancel") { sessions.clearMessage(sessionID: session.id) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .help("Cancel this message")
+                        .accessibilityLabel("Cancel this message")
+                    }
                 }
             }
         }

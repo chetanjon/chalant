@@ -458,7 +458,13 @@ final class SessionStoreTests: XCTestCase {
         // than replacing it.
         XCTAssertTrue(store.queue(message: "first", for: "s1"))
         XCTAssertTrue(store.queue(message: "second", for: "s1"))
-        XCTAssertEqual(store.collectMessage(sessionID: "s1"), "first\n\nsecond")
+        // Two queued messages stay two, and leave one turn at a time,
+        // the way a terminal queue does. Glued together they would
+        // arrive as one confusing instruction (2026-08-02).
+        XCTAssertEqual(store.sessions.first?.outbox?.pending.count, 2)
+        XCTAssertEqual(store.collectMessage(sessionID: "s1"), "first")
+        XCTAssertEqual(store.collectMessage(sessionID: "s1"), "second")
+        XCTAssertNil(store.collectMessage(sessionID: "s1"))
 
         // A Cursor session keeps no hook contract with this app.
         store.upsert(id: "cur", title: "c", cwd: "/b", branch: nil,
@@ -492,7 +498,7 @@ final class SessionStoreTests: XCTestCase {
         store.markGone(["s1"])
         XCTAssertEqual(store.sessions.first?.state, .stale)
         // The text stays, for Copy and Dismiss — it does not vanish.
-        XCTAssertEqual(store.sessions.first?.outbox?.text, "still waiting")
+        XCTAssertEqual(store.sessions.first?.outbox?.pending.map(\.text), ["still waiting"])
         XCTAssertTrue(store.sessions.first?.outbox?.undelivered ?? false)
         // The store has no glance to flash; it hands the title back and
         // the view model does the flashing (EC-11, left for W-C).

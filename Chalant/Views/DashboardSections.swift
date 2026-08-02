@@ -257,7 +257,7 @@ struct SessionsSection: View {
     private func row(_ session: SessionStore.Session) -> some View {
         HStack(spacing: Theme.Space.m) {
             // Glyph as well as tint, so state survives greyscale.
-            AgentMark(agent: session.agent, size: 12, working: session.state == .working)
+            AgentMark(agent: session.agent, size: 12, state: session.state)
                 .foregroundStyle(Theme.textTertiary)
             Image(systemName: Self.symbol(session.state))
                 .font(Theme.Fonts.icon(.s))
