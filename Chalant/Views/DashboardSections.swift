@@ -6,6 +6,7 @@ import SwiftUI
 struct GeneralSection: View {
     @ObservedObject var updates: UpdateChecker
     var onReplayTour: () -> Void
+    var onInstallUpdate: () -> Void
 
     @AppStorage(UpdateChecker.settingKey) private var updateCheckOn = true
     @AppStorage("showInDock") private var showInDock = false
@@ -39,6 +40,16 @@ struct GeneralSection: View {
                 SettingDivider()
                 SettingToggle(label: "Check for new versions", isOn: $updateCheckOn)
                 SettingNote("Once a day, quietly. Chalant never installs anything without you asking.")
+                if let latest = updates.latest {
+                    SettingDivider()
+                    // A real push button beside the state it acts on,
+                    // not tinted text: same lesson as the tour button
+                    // below (nothing said plain text could be clicked).
+                    Button("Install Chalant \(latest)", action: onInstallUpdate)
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                        .tint(accent)
+                }
                 SettingDivider()
                 SettingToggle(label: "Show in Dock", isOn: Binding(
                     get: { showInDock },
@@ -582,11 +593,6 @@ struct GlanceSection: View {
 // MARK: - About
 
 struct AboutSection: View {
-    @ObservedObject var updates: UpdateChecker
-    var onInstallUpdate: () -> Void
-
-    @Environment(\.chalantAccent) private var accent
-
     private var version: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
     }
@@ -598,15 +604,6 @@ struct AboutSection: View {
                     Text(version)
                         .font(Theme.Fonts.captionMono)
                         .foregroundStyle(Theme.textSecondary)
-                }
-                if let latest = updates.latest {
-                    SettingDivider()
-                    Button(action: onInstallUpdate) {
-                        Text("Chalant \(latest) is out. Install it.")
-                            .font(Theme.Fonts.body)
-                            .foregroundStyle(accent)
-                    }
-                    .buttonStyle(.plain)
                 }
             }
 

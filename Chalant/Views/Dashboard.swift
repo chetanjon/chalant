@@ -226,7 +226,11 @@ struct DashboardView: View {
                     .padding(.bottom, Theme.Space.xs)
                 switch selection.section {
                 case .general, nil:
-                    GeneralSection(updates: model.updates, onReplayTour: model.replayWelcome)
+                    GeneralSection(
+                        updates: model.updates,
+                        onReplayTour: model.replayWelcome,
+                        onInstallUpdate: { model.installUpdate?() }
+                    )
                 case .sessions:
                     SessionsSection(sessions: model.sessions)
                 case .whatShows:
@@ -242,10 +246,7 @@ struct DashboardView: View {
                 case .keyboard:
                     KeyboardSection()
                 case .about:
-                    AboutSection(
-                        updates: model.updates,
-                        onInstallUpdate: { model.installUpdate?() }
-                    )
+                    AboutSection()
                 }
             }
             .frame(maxWidth: 620, alignment: .leading)

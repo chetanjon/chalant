@@ -152,6 +152,13 @@ enum Theme {
         // so timer digits and the wave never slide under the camera
         // (user, 2026-07-22, "the timer is cut off").
         static let wingInset: CGFloat = 7
+        /// Room below the notch's own reserved strip, wherever content
+        /// has to clear it: the listening caption, its close button,
+        /// and the expanded island's first row each wrote their own
+        /// number for the identical job — 8, 6 and 4 — and the founder's
+        /// complaint that content sits too close to the top edge landed
+        /// on the tightest of the three (EC-14, 2026-08-02).
+        static let notchClearance: CGFloat = l
     }
 
     enum Radius {
@@ -173,6 +180,12 @@ enum Theme {
         static let radiusExpanded: CGFloat = 34
         static let bellyCollapsed: CGFloat = 1.5
         static let bellyExpanded: CGFloat = 5
+        /// The song title beside the wave on a quiet pill: one number
+        /// for how much width is reserved and how much is drawn.
+        /// `leftWingNeed` used to reserve 156 while `songBeside` drew
+        /// at most 140, leaving 16pt of the wing reserved and empty on
+        /// every display playing music (EC-13, 2026-08-02).
+        static let songGlanceWidth: CGFloat = 140
     }
 
     /// Fixed lower-panel heights, one deliberate scale instead of

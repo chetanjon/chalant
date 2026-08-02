@@ -399,7 +399,7 @@ final class NotchViewModel: ObservableObject {
     /// carry it (both moods proved real within one day, so it's a
     /// setting).
     func leftWingNeed(style: DisplayConfigStore.Style, state: IslandState) -> CGFloat {
-        if showsSongBeside(style: style, state: state) { return 156 }
+        if showsSongBeside(style: style, state: state) { return Theme.Island.songGlanceWidth }
         let playingSignal = UserDefaults.standard
             .object(forKey: MusicController.playingSignalKey) as? String
             ?? MusicController.playingSignalDefault
