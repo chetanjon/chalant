@@ -463,7 +463,7 @@ private struct ActivitiesStrip: View {
                     Text(RelativeAge.short(activity.updatedAt))
                         .font(Theme.Fonts.microMono)
                         .foregroundStyle(Theme.textGhost)
-                    IconActionButton(symbol: "xmark", dim: true) {
+                    IconActionButton(symbol: "xmark", label: "Dismiss this row", dim: true) {
                         activities.clear(id: activity.id)
                     }
                 }

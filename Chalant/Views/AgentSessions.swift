@@ -163,12 +163,11 @@ struct AgentSessionsStrip: View {
             let label = composing ? "Close the composer" : "Message this session"
             IconActionButton(
                 symbol: composing ? "text.bubble.fill" : "text.bubble",
+                label: label,
                 tint: composing ? accent : Theme.textSecondary
             ) {
                 model.composingSessionID = composing ? nil : session.id
             }
-            .help(label)
-            .accessibilityLabel(label)
         } else if session.agent == .cursor {
             // The affordance itself is absent: Cursor keeps no hook
             // contract with this app, so nothing queued here would ever
@@ -249,9 +248,10 @@ private struct ComposeCard: View {
                 model.toggleListening(to: .session(id: session.id, title: session.title))
             }
             if !draft.isEmpty {
-                HoverGlyphButton(symbol: "arrow.up.circle.fill", scale: .m, tint: accent, action: send)
-                    .accessibilityLabel("Send")
-                    .transition(.opacity)
+                HoverGlyphButton(
+                    symbol: "arrow.up.circle.fill", label: "Send", scale: .m, tint: accent, action: send
+                )
+                .transition(.opacity)
             }
         }
         .padding(Theme.Space.m)

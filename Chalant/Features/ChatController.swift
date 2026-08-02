@@ -239,12 +239,13 @@ struct ChatPane: View {
                     .buttonStyle(PressableStyle())
                     .help("Switch chat service")
                     HoverGlyphButton(
-                        symbol: "chevron.left", scale: .s, tint: Theme.textSecondary
+                        symbol: "chevron.left", label: "Back", scale: .s, tint: Theme.textSecondary
                     ) {
                         chat.goBack()
                     }
                     HoverGlyphButton(
-                        symbol: "house", scale: .s, tint: Theme.textSecondary
+                        symbol: "house", label: "Back to the start", scale: .s,
+                        tint: Theme.textSecondary
                     ) {
                         chat.goHome()
                     }
@@ -252,6 +253,7 @@ struct ChatPane: View {
                         symbol: chatFull
                             ? "arrow.down.right.and.arrow.up.left"
                             : "arrow.up.left.and.arrow.down.right",
+                        label: chatFull ? "Shrink the chat" : "Fill the island with chat",
                         scale: .s,
                         tint: Theme.textSecondary
                     ) {

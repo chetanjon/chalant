@@ -49,6 +49,7 @@ struct SessionStrip: View {
             if kind == .focus {
                 HoverGlyphButton(
                     symbol: focus.isPaused ? "play.fill" : "pause.fill",
+                    label: focus.isPaused ? "Resume focus" : "Pause focus",
                     scale: .xs,
                     tint: Theme.textSecondary
                 ) {
@@ -58,6 +59,7 @@ struct SessionStrip: View {
             if kind == .stopwatch {
                 HoverGlyphButton(
                     symbol: stopwatch.isRunning ? "pause.fill" : "play.fill",
+                    label: stopwatch.isRunning ? "Pause stopwatch" : "Start stopwatch",
                     scale: .xs,
                     tint: Theme.textSecondary
                 ) {

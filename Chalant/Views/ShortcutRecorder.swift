@@ -49,7 +49,10 @@ struct ShortcutRow: View {
                     // Only offered when there is something to clear, so
                     // the row is not permanently wearing a dead control.
                     if combo != nil, !recording {
-                        HoverGlyphButton(symbol: "xmark", scale: .xs, tint: Theme.textTertiary) {
+                        HoverGlyphButton(
+                            symbol: "xmark", label: "Clear this shortcut",
+                            scale: .xs, tint: Theme.textTertiary
+                        ) {
                             set(nil)
                         }
                         .help("Clear this shortcut")

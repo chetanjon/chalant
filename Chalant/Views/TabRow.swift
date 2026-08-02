@@ -42,7 +42,9 @@ struct Switcher: View {
             // while a newer one was out. The mark keeps the news
             // standing without adding a surface or nagging: it is the
             // gear already there, wearing a dot until you have looked.
-            HoverGlyphButton(symbol: "gearshape", scale: .m, tint: Theme.textTertiary) {
+            HoverGlyphButton(
+                symbol: "gearshape", label: "Settings", scale: .m, tint: Theme.textTertiary
+            ) {
                 // Settings is a window now, so the island gets out of
                 // the way rather than sitting lit over the window that
                 // just took focus.

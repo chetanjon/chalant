@@ -88,8 +88,7 @@ struct ClipboardView: View {
                 .font(Theme.Fonts.body)
                 .focused($searching)
             if !query.isEmpty {
-                IconActionButton(symbol: "xmark", dim: true) { query = "" }
-                    .help("Clear the search")
+                IconActionButton(symbol: "xmark", label: "Clear the search", dim: true) { query = "" }
             }
         }
         .padding(.horizontal, Theme.Space.m)
@@ -143,17 +142,21 @@ private struct ClipRow: View {
                 // and survives a relaunch.
                 IconActionButton(
                     symbol: clip.pinned ? "pin.fill" : "pin",
+                    label: clip.pinned ? "Unpin" : "Pin",
                     tint: clip.pinned ? accent : Theme.textSecondary
                 ) {
                     clipboard.togglePin(clip)
                 }
-                IconActionButton(symbol: "doc.on.doc") {
+                IconActionButton(symbol: "doc.on.doc", label: "Copy") {
                     clipboard.copyBack(clip)
                 }
                 // The bridge between the two surfaces: clips are the
                 // passing stream, the shelf is the keep, and this
                 // moves one across.
-                IconActionButton(symbol: "tray.and.arrow.down", tint: Theme.textSecondary) {
+                IconActionButton(
+                    symbol: "tray.and.arrow.down", label: "Keep on the Shelf",
+                    tint: Theme.textSecondary
+                ) {
                     let kept: Bool
                     if let paths = clip.filePaths, !paths.isEmpty {
                         // Copied files shelve as themselves, same as
@@ -167,11 +170,10 @@ private struct ClipRow: View {
                     }
                     if kept { model.flashGlance("Kept on the Shelf") }
                 }
-                .help("Keep on the Shelf")
                 // AirDrop for the clips that are things (files and
                 // screenshots); words travel better by paste.
                 if clip.isFile || clip.isImage {
-                    IconActionButton(symbol: "dot.radiowaves.left.and.right") {
+                    IconActionButton(symbol: "dot.radiowaves.left.and.right", label: "AirDrop") {
                         let items: [Any] = clip.filePaths?.map {
                             URL(fileURLWithPath: $0)
                         } ?? clip.imageURL.map { [$0] } ?? []
@@ -179,15 +181,14 @@ private struct ClipRow: View {
                         NSSharingService(named: .sendViaAirDrop)?
                             .perform(withItems: items)
                     }
-                    .help("AirDrop")
                 }
                 // Text can go to the answer surface; an image can't.
                 if let text = clip.text {
-                    IconActionButton(symbol: "chalant.mark", tint: accent) {
+                    IconActionButton(symbol: "chalant.mark", label: "Ask about this", tint: accent) {
                         model.askAbout(name: "clipboard", text: text)
                     }
                 }
-                IconActionButton(symbol: "xmark", dim: true) {
+                IconActionButton(symbol: "xmark", label: "Remove this clip", dim: true) {
                     clipboard.remove(clip)
                 }
             }

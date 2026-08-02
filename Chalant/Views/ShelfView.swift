@@ -48,7 +48,7 @@ private struct ShelfRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Group {
-                IconActionButton(symbol: "doc.on.doc") {
+                IconActionButton(symbol: "doc.on.doc", label: "Copy") {
                     shelf.copyToPasteboard(item)
                 }
                 // The full share sheet (Messages, Mail, everything).
@@ -59,20 +59,21 @@ private struct ShelfRow: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(PressableStyle())
+                .help("Share")
+                .accessibilityLabel("Share")
                 // And the one-tap jump for the commonest case: this
                 // file, that Mac or phone, now.
-                IconActionButton(symbol: "dot.radiowaves.left.and.right") {
+                IconActionButton(symbol: "dot.radiowaves.left.and.right", label: "AirDrop") {
                     NSSharingService(named: .sendViaAirDrop)?
                         .perform(withItems: [item.url])
                 }
-                .help("AirDrop")
                 if shelf.canExtractText(item) {
-                    IconActionButton(symbol: "chalant.mark", tint: accent) {
+                    IconActionButton(symbol: "chalant.mark", label: "Ask about this", tint: accent) {
                         guard let text = shelf.extractText(item) else { return }
                         model.askAbout(name: item.name, text: text)
                     }
                 }
-                IconActionButton(symbol: "xmark", dim: true) {
+                IconActionButton(symbol: "xmark", label: "Remove from the Shelf", dim: true) {
                     shelf.remove(item)
                 }
             }

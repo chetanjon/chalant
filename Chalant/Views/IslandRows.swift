@@ -106,6 +106,7 @@ struct MusicRow: View {
                         if playing.supportsShuffle {
                             HoverGlyphButton(
                                 symbol: "shuffle",
+                                label: "Shuffle",
                                 scale: .xs,
                                 tint: playing.shuffling ? accent : Theme.textTertiary
                             ) {
@@ -113,7 +114,10 @@ struct MusicRow: View {
                             }
                             .help(playing.shuffling ? "Shuffle is on" : "Shuffle")
                         }
-                        HoverGlyphButton(symbol: "backward.fill", scale: .s, tint: Theme.textPrimary) {
+                        HoverGlyphButton(
+                            symbol: "backward.fill", label: "Previous track",
+                            scale: .s, tint: Theme.textPrimary
+                        ) {
                             music.previous()
                         }
                         Button {
@@ -131,7 +135,10 @@ struct MusicRow: View {
                                 .contentShape(Circle())
                         }
                         .buttonStyle(PressableStyle())
-                        HoverGlyphButton(symbol: "forward.fill", scale: .s, tint: Theme.textPrimary) {
+                        HoverGlyphButton(
+                            symbol: "forward.fill", label: "Next track",
+                            scale: .s, tint: Theme.textPrimary
+                        ) {
                             music.next()
                         }
                     }
@@ -426,7 +433,7 @@ struct AnswerView: View {
                 .onSubmit(submitDraft)
             if !model.draftPrompt.isEmpty {
                 HoverGlyphButton(
-                    symbol: "arrow.up.circle.fill", scale: .m, tint: accent
+                    symbol: "arrow.up.circle.fill", label: "Send", scale: .m, tint: accent
                 ) {
                     submitDraft()
                 }
