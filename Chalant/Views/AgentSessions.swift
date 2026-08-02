@@ -333,20 +333,35 @@ private struct ComposeCard: View {
                         .controlSize(.small)
                 }
             }
-        } else if outbox.pending.isEmpty, outbox.deliveredAt != nil {
-            Text("Delivered.")
-                .font(Theme.Fonts.caption)
-                .foregroundStyle(Theme.textSecondary)
-                .task(id: outbox.deliveredAt) {
-                    // Seen, then gone: a delivered card left standing
-                    // would be a finished pill with no expiry of its own.
-                    try? await Task.sleep(nanoseconds: 2_500_000_000)
-                    guard !Task.isCancelled else { return }
+        } else if outbox.pending.isEmpty, let collectedAt = outbox.deliveredAt {
+            // "Collected", never "delivered": `deliveredAt` is stamped
+            // the moment a Stop hook comes and picks the message up,
+            // which is the last thing this app can observe. Whether the
+            // agent then acts on it is invisible from here, so the copy
+            // stops exactly where the knowledge does (H3, founder
+            // 2026-08-02: "how do I know if the request is being sent
+            // or not is it actually working"). This used to say
+            // "Delivered." for 2.5 seconds and take the whole card down
+            // with it when the timer fired, easy to miss entirely; now
+            // it holds, like the undelivered case above, until the user
+            // dismisses it themselves.
+            let ago = RelativeAge.short(collectedAt)
+            HStack(spacing: Theme.Space.s) {
+                Text("Collected \(ago == "now" ? "just now" : "\(ago) ago"). "
+                     + "What it does with it next isn't something Chalant can see.")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button("Dismiss") {
                     sessions.clearMessage(sessionID: session.id)
                     if model.composingSessionID == session.id {
                         model.composingSessionID = nil
                     }
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
         } else {
             // Every queued message, stacked and cancellable on its own,
             // the way Claude Code's terminal shows a queue. One goes at

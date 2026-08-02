@@ -146,6 +146,9 @@ struct GeneralSection: View {
 /// a window has the room to show the quiet ones too.
 struct SessionsSection: View {
     @ObservedObject var sessions: SessionStore
+    /// Not `@ObservedObject`: this view only calls into it (the test
+    /// button below) and never renders its published state.
+    let activities: ActivityStore
     @Environment(\.chalantAccent) private var accent
 
     var body: some View {
@@ -186,6 +189,23 @@ struct SessionsSection: View {
                 }
             }
 
+            // Real path, not a faked pill (H4, founder 2026-08-02: "I
+            // want to test the notification and everything"): posts an
+            // actual needs-input activity, the same call a stopped
+            // agent's hook makes, so it proves the door is open and the
+            // glance actually flashes rather than asserting it does.
+            SettingCard(title: "Test the notification path") {
+                SettingNote(
+                    "Fires a real needs-input pill the way a stopped agent's hook does: it "
+                    + "should flash the glance and reach the collapsed island. Clears itself "
+                    + "in a few seconds either way."
+                )
+                Button("Send a test notification") { sendTestNotification() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(accent)
+            }
+
             SettingCard(title: "How this works") {
                 SettingNote(
                     "Chalant reads what these tools already write: Claude Code under "
@@ -208,6 +228,24 @@ struct SessionsSection: View {
             if allInstalled {
                 hookCards(statuses)
             }
+        }
+    }
+
+    /// Posts, then clears itself: a founder hit two of the assistant's
+    /// own uncleaned test pills tonight, so this one takes itself down
+    /// rather than leaving a row for anyone to dismiss by hand.
+    /// `activities.resolveIfPending` (H5) never reaches this one, since
+    /// it names no session for markGone to end.
+    private func sendTestNotification() {
+        let id = "chalant-test-\(UUID().uuidString.prefix(8))"
+        activities.push(
+            id: id,
+            title: "Test notification (safe to ignore)",
+            detail: "Checking the path a real needs-input pill takes.",
+            state: .needsInput
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+            activities.clear(id: id)
         }
     }
 

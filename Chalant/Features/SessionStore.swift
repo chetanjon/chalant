@@ -377,6 +377,7 @@ final class SessionStore: ObservableObject {
             failMessage(sessionID: id)
             expiryWork[id]?.cancel()
             expiryWork[id] = nil
+            onSessionGone?(id)
         }
         sort()
     }
@@ -398,6 +399,14 @@ final class SessionStore: ObservableObject {
     /// (founder, 2026-08-02, "I didn't get a notification that it
     /// stopped working").
     var onSessionWantsYou: ((String) -> Void)?
+
+    /// Fired once per id in `markGone`, so anything keyed off the same
+    /// session (the ActivityStore pill the Claude Code hook posts) can
+    /// resolve itself instead of outliving the session it was about
+    /// (H5). This store only ever says a session went `.stale`, never
+    /// what became of whatever was waiting on it — that verdict belongs
+    /// to whoever holds the other row.
+    var onSessionGone: ((String) -> Void)?
 
     static let maxMessage = 2000
     /// A queue this deep is somebody holding the key down, not somebody

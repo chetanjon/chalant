@@ -226,7 +226,21 @@ struct ExpandedView: View {
                 .transition(.opacity)
             }
         case .media:
-            topRow
+            // The row itself vanishes once it has nothing to show: the
+            // mic that used to sit here regardless (H1, founder
+            // 2026-08-02: "for microphone 2 remove it not needed near
+            // the spotify") kept this row non-empty even with media off
+            // and nothing playing. Voice is still always reachable, via
+            // the `.talk` hotkey and the collapsed long-press; neither
+            // goes through this view.
+            if showMedia, music.nowPlaying != nil {
+                MusicRow(music: music)
+            } else if showMedia, music.preferredApp != nil {
+                // The chip only appears once a player has earned it:
+                // running now, or seen playing before. Guessing a
+                // brand for a fresh Mac presumed too much.
+                MusicLaunchChip(music: music)
+            }
         case .activities:
             if !activities.activities.isEmpty {
                 ActivitiesStrip(activities: activities) { sessionID in
@@ -287,25 +301,6 @@ struct ExpandedView: View {
                         removal: .opacity
                     ))
             }
-        }
-    }
-
-    /// Media (if on and something's playing) with the persistent mic,
-    /// the voice affordance is always reachable even when media is off.
-    private var topRow: some View {
-        HStack(spacing: Theme.Space.l) {
-            if showMedia, music.nowPlaying != nil {
-                MusicRow(music: music)
-            } else {
-                // The chip only appears once a player has earned it:
-                // running now, or seen playing before. Guessing a
-                // brand for a fresh Mac presumed too much.
-                if showMedia, music.preferredApp != nil {
-                    MusicLaunchChip(music: music)
-                }
-                Spacer(minLength: 0)
-            }
-            MicButton { model.toggleListening() }
         }
     }
 
@@ -502,7 +497,8 @@ private struct MusicLaunchChip: View {
     @State private var hovered = false
 
     private var label: String {
-        // Only rendered when a preferred app exists (see topRow).
+        // Only rendered when a preferred app exists (see the `.media`
+        // case in `element(_:)`).
         music.preferredApp.map { "Open \($0.rawValue)" } ?? "Open music"
     }
 
@@ -529,15 +525,20 @@ private struct MusicLaunchChip: View {
     }
 }
 
-/// The voice affordance: tap to talk, tap again to run, or hold the
-/// notch. Always present, whatever else the island is showing.
+/// The voice affordance for messaging a session by speaking instead of
+/// typing: lives in a session's compose card (`AgentSessions.swift`).
 ///
-/// Reused inside a session's compose card (`AgentSessions.swift`) with
-/// `destination: .session(...)`: same button, same pipeline, a
-/// different `help` string is the only thing that tells the two mics
-/// apart, so which one you are looking at is never ambiguous.
+/// The media row used to carry its own copy of this button for
+/// `.chalant` (talk to the app itself), removed per H1 (founder,
+/// 2026-08-02: "not needed near the spotify"). That voice path did not
+/// go away with it: the `.talk` global hotkey and the collapsed
+/// island's long-press both call `beginListening()`/`toggleListening()`
+/// directly and never went through this view. `destination` keeps its
+/// full type rather than narrowing to `.session` alone, since
+/// `VoiceDestination` is still a two-case enum shared with those other
+/// callers and a switch here has to stay exhaustive over it regardless.
 struct MicButton: View {
-    var destination: NotchViewModel.VoiceDestination = .chalant
+    let destination: NotchViewModel.VoiceDestination
     let action: () -> Void
     @State private var hovered = false
 

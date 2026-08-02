@@ -160,6 +160,67 @@ final class NotchViewModel: ObservableObject {
         max(measured, floor)
     }
 
+    /// The collapsed frame, in points. Flush with the cutout when
+    /// there is nothing to say and nobody reaching: on a MacBook the
+    /// cutout has no pixels, so an island exactly its size is eaten by
+    /// the hardware and is invisible by construction, which is the
+    /// whole of A2. The 8pt width tuck and the 3pt apron (founder,
+    /// 2026-07-22) are kept for every state where the island is
+    /// outside the hole anyway, and only for those: flush and apron
+    /// cannot both be true at once (founder, 2026-08-02,
+    /// notch-geometry-plan, W-C).
+    ///
+    /// `wings` is zero in exactly the states
+    /// `collapsedHasSomethingToSay` is false in too, bar one: ambience
+    /// alone, which draws with no wing width reserved for it either and
+    /// so is already tucked out of sight today regardless of whether
+    /// this frame is flush or -8. No second predicate is needed here
+    /// (C24) — `wings == 0` already is the "nothing to say" test this
+    /// frame cares about.
+    static func collapsedFrame(
+        cutout: CGSize?, base: CGSize, wings: CGFloat, hovering: Bool
+    ) -> CGSize {
+        if let cutout, wings == 0, !hovering {
+            return cutout
+        }
+        let growW: CGFloat = hovering ? 14 : 0
+        let growH: CGFloat = hovering ? 4 : 0
+        return CGSize(
+            width: base.width - 8 + wings + growW,
+            height: base.height + 3 + growH
+        )
+    }
+
+    /// The eave (meniscus flare) and belly (bottom sag) for the
+    /// collapsed `.notch` silhouette, driven by how far the frame
+    /// already overhangs the cutout rather than a fixed constant:
+    /// flush has nothing to flare over, which is A3's arc gone too,
+    /// and the shoulders grow back in step with whatever pushed the
+    /// frame past the hole. `overhang <= 0` folds in the flush case;
+    /// an emulated notch has no real cutout to measure an overhang
+    /// against and never hides inside one (EC-5), so its caller passes
+    /// a positive sentinel here instead of a computed overhang.
+    static func eaveAndBelly(overhang: CGFloat) -> (eave: CGFloat, belly: CGFloat) {
+        guard overhang > 0 else { return (0, 0) }
+        return (min(Theme.Island.eaveCollapsed, overhang), Theme.Island.bellyCollapsed)
+    }
+
+    /// The size the collapsed island draws as its base, before any of
+    /// the flush/grow arithmetic above runs: the hardware by default
+    /// (A1), unless the user has explicitly turned "follow the
+    /// hardware" off, in which case their own stored size wins.
+    /// Pulled out of `NotchWindowController.apply(_:to:)` so the rule
+    /// is checkable with no screen or face to build (W-D, EC-6): every
+    /// blob written before `sizeFollowsHardware` existed decodes to
+    /// `true`, which reproduces exactly today's behaviour on both a
+    /// real notch (measured wins) and a screen with none (nothing to
+    /// follow, the stored size wins regardless).
+    static func notchSize(
+        cutout: CGSize?, sizeFollowsHardware: Bool, configWidth: CGFloat, configHeight: CGFloat
+    ) -> CGSize {
+        (sizeFollowsHardware ? cutout : nil) ?? CGSize(width: configWidth, height: configHeight)
+    }
+
     /// Debug builds show the drop bubble on request; the window
     /// controller owns the panel, so it hangs the hook here.
     var onDebugDropDock: (() -> Void)?
@@ -300,11 +361,12 @@ final class NotchViewModel: ObservableObject {
     private(set) lazy var chat = ChatController()
     private(set) lazy var engine = ActionEngine(model: self)
 
-    /// Default pill for notch-less displays, so Chalant works on any Mac.
-    /// `IslandFace.notchSize` starts here; the model no longer keeps a
-    /// copy of its own — every display's measured size lives on that
-    /// display's own face now (island-per-display-plan, W-C, 2026-08-02).
-    static let defaultNotchSize = CGSize(width: 196, height: 34)
+    // `defaultNotchSize` used to live here as `IslandFace.notchSize`'s
+    // starting value, a second hardcoded 196x34 next to `Config`'s own
+    // 196x38 that only ever differed for the moment between `init` and
+    // the first `apply(_:to:)` (EC-12). Deleted; `IslandFace.notchSize`
+    // now initialises from a plain `Config()` instead (W-A, 2026-08-02).
+
     /// Debug-driven request to open the shortcut add flow; the
     /// Shortcuts pane consumes and resets it.
     @Published var wantsShortcutAdd = false
@@ -622,6 +684,16 @@ final class NotchViewModel: ObservableObject {
         }
         sessions.onMessageUndelivered = { [weak self] title in
             self?.flashGlance("\(title) ended before reading your message")
+        }
+        // scripts/chalant-hook posts a Claude Code session's pill as
+        // "claude-<session>" (only the pill is prefixed; the outbox and
+        // ask routes take the bare id), the same mapping
+        // ActivitiesStrip reverses to find a session for a tapped pill.
+        // Resolves a needs-input pill once its session actually ends
+        // (H5), rather than leaving it sitting there answerable to
+        // nobody.
+        sessions.onSessionGone = { [weak self] id in
+            self?.activities.resolveIfPending(id: "claude-\(id)")
         }
         events.startGlanceTicker()
         updates.onNewVersion = { [weak self] version in

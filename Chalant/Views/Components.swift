@@ -2,13 +2,19 @@ import AppKit
 import SwiftUI
 
 /// Real translucency behind the expanded island: whatever sits under
-/// the notch softly bleeds through, the way system HUDs do.
+/// the notch softly bleeds through, the way system HUDs do. Pinned to
+/// `.vibrantDark` rather than following the system appearance: the
+/// island's whole surface is built as near-black glass, and a light
+/// desktop reflected through an unpinned light-mode blur would fight
+/// `Theme.textPrimary` for contrast on the one system that has no
+/// real Liquid Glass to fall back on (pre-macOS 26).
 struct VisualEffectBlur: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.material = .hudWindow
         view.blendingMode = .behindWindow
         view.state = .active
+        view.appearance = NSAppearance(named: .vibrantDark)
         return view
     }
 
@@ -618,6 +624,15 @@ struct HuggingList<Content: View>: View {
                     content()
                 }
             }
+            // Every list in the island shares this component (sessions,
+            // clipboard, shelf, notes), and the indicator was fighting
+            // the island's own chrome on all of them, not just one (H2,
+            // founder 2026-08-02: "remove the scrollbar here its
+            // messing with the UI"). Fixed here rather than at a single
+            // call site so the fix actually reaches every list rather
+            // than the one that got reported. Scrolling itself is
+            // untouched, only the indicator is gone.
+            .scrollIndicators(.hidden)
         }
     }
 }

@@ -456,6 +456,22 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertNil(store.sessions.first?.pid)
     }
 
+    func testMarkGoneFiresOnSessionGoneOncePerId() {
+        // H5: whatever else is keyed off this session's id (the
+        // ActivityStore pill the Claude Code hook posted) needs to hear
+        // that it ended, so it can resolve instead of outliving it.
+        let store = storeWithSession()
+        var gone: [String] = []
+        store.onSessionGone = { gone.append($0) }
+        store.markGone([])
+        XCTAssertEqual(gone, [], "an empty set is not the registry saying something ended")
+        store.markGone(["s1"])
+        XCTAssertEqual(gone, ["s1"])
+        // An id the store never held is not a session that ended.
+        store.markGone(["never-seen"])
+        XCTAssertEqual(gone, ["s1"])
+    }
+
     func testAnOutstandingQuestionStillOutranksTheRegistry() {
         let store = storeWithSession()
         store.attach(askID: "q", to: "s1", header: "h", question: "q?",
@@ -1488,6 +1504,32 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.activities.count, 8)
         XCTAssertFalse(store.activities.contains { $0.id == "w0" })
         XCTAssertTrue(store.activities.contains { $0.id == "w9" })
+    }
+
+    // MARK: A session ending resolves its pill (H5)
+
+    func testResolveIfPendingRetiresAStaleNeedsInputPill() {
+        let store = ActivityStore()
+        store.push(id: "claude-s1", title: "wants you", detail: nil, state: .needsInput)
+        store.resolveIfPending(id: "claude-s1")
+        // Demoted off the top and carrying a detail that says why,
+        // rather than still claiming to be waiting on someone who is
+        // no longer there to answer.
+        XCTAssertEqual(store.activities.first?.state, .failed)
+        XCTAssertNotNil(store.activities.first?.detail)
+    }
+
+    func testResolveIfPendingLeavesAnAnsweredOrAbsentPillAlone() {
+        let store = ActivityStore()
+        // Nothing posted under this id: a no-op, not a crash.
+        store.resolveIfPending(id: "claude-nobody")
+        XCTAssertTrue(store.activities.isEmpty)
+
+        // Already resolved (or never needs-input to begin with): a
+        // second call changes nothing further.
+        store.push(id: "claude-s2", title: "building", detail: nil, state: .working)
+        store.resolveIfPending(id: "claude-s2")
+        XCTAssertEqual(store.activities.first?.state, .working)
     }
 
     // MARK: Global shortcuts

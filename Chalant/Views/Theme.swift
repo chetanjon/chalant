@@ -159,7 +159,11 @@ enum Theme {
         // 7, not 11: the pill's 8pt width tuck (worn by the glass, not
         // the report) took 4 from each wing; the inset gives it back
         // so timer digits and the wave never slide under the camera
-        // (user, 2026-07-22, "the timer is cut off").
+        // (user, 2026-07-22, "the timer is cut off"). The tuck itself
+        // is no longer unconditional — a flush, quiet island on real
+        // hardware carries neither it nor this inset (W-C, 2026-08-02)
+        // — but wherever the tuck still applies, this is still its
+        // remainder.
         static let wingInset: CGFloat = 7
         /// Room below the notch's own reserved strip, wherever content
         /// has to clear it: the listening caption, its close button,
@@ -278,6 +282,33 @@ enum Theme {
 
     /// Holding the notch this long starts listening; shorter is a tap.
     static let pressToTalkDelay: TimeInterval = 0.32
+
+    // MARK: Liquid glass (the material/clarity dial)
+
+    /// How see-through the shell's real Liquid Glass reads (the
+    /// user's own clarity dial), and how much ink still sits over it
+    /// once bloomed open. Both floor above true zero on purpose: at
+    /// full "clear," a bright desktop behind the island can push the
+    /// island's own text under a readable contrast, and the glance is
+    /// the one surface here that can never lose that fight (founder:
+    /// "a material that makes text harder to read has failed no
+    /// matter how good the still frame looks"). The one place both
+    /// numbers live, so nothing computes its own competing floor.
+    static func glassTint(for clarity: String) -> Double {
+        switch clarity {
+        case "veiled": return 0.35
+        case "clear": return 0.10
+        default: return 0.18
+        }
+    }
+
+    static func glassSmoke(for clarity: String) -> Double {
+        switch clarity {
+        case "veiled": return 0.12
+        case "clear": return 0.04
+        default: return 0.06
+        }
+    }
 }
 
 // MARK: - Adaptive accent environment

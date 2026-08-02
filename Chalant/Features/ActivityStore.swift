@@ -107,6 +107,30 @@ final class ActivityStore: ObservableObject {
         activities.removeAll { $0.id == id }
     }
 
+    /// Resolves a needs-input pill whose session has since ended,
+    /// rather than leaving it looking actionable forever (H5, founder
+    /// 2026-08-02: pills from sessions long gone, clickable only into
+    /// "that session is no longer running").
+    ///
+    /// Reuses `.failed` instead of clearing outright: an unanswered
+    /// question is information, not nothing, so it gets to be seen once
+    /// more, no longer claiming to be at the top of the list, before it
+    /// clears itself on the same timer every other finished row uses.
+    /// Silent deletion was the other option and was rejected for the
+    /// same reason `SessionStore` never claims `.done` for a session it
+    /// only knows stopped reporting — this store cannot claim the
+    /// question was answered either, only that it no longer can be.
+    /// A no-op for anything not currently asking, so a late call after
+    /// the row already resolved or expired changes nothing.
+    func resolveIfPending(id: String) {
+        guard let index = activities.firstIndex(where: { $0.id == id }),
+              activities[index].state == .needsInput
+        else { return }
+        push(id: id, title: activities[index].title,
+             detail: "The session behind this ended before it was answered.",
+             state: .failed)
+    }
+
     func clearAll() {
         activities.map(\.id).forEach { clear(id: $0) }
     }

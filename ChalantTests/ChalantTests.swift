@@ -815,4 +815,32 @@ final class ChalantTests: XCTestCase {
         XCTAssertTrue(ClipboardStore.isSensitive([.string, concealed]))
         XCTAssertFalse(ClipboardStore.isSensitive([.string]))
     }
+
+    // MARK: Calendar permission state (a grant should never need a relaunch)
+
+    func testPermissionDecisionMapsFullAccessToGranted() {
+        XCTAssertEqual(EventKitService.decision(for: .fullAccess), .granted)
+    }
+
+    func testPermissionDecisionMapsNotDeterminedToAsk() {
+        // Still worth a "ask again" button: the system will prompt.
+        XCTAssertEqual(EventKitService.decision(for: .notDetermined), .ask)
+    }
+
+    func testPermissionDecisionMapsDeniedAndRestrictedToDenied() {
+        // Neither ever re-prompts; only System Settings can change these.
+        XCTAssertEqual(EventKitService.decision(for: .denied), .denied)
+        XCTAssertEqual(EventKitService.decision(for: .restricted), .denied)
+    }
+
+    // MARK: Glass clarity contrast floor (no dial reaches true zero)
+
+    func testGlassClarityNeverReachesZeroAtAnyClarity() {
+        // "clear" is the risky end of the dial; unrecognized values
+        // fall through the same `default` branch as "balanced".
+        for clarity in ["veiled", "balanced", "clear", "unrecognized"] {
+            XCTAssertGreaterThan(Theme.glassTint(for: clarity), 0)
+            XCTAssertGreaterThan(Theme.glassSmoke(for: clarity), 0)
+        }
+    }
 }
