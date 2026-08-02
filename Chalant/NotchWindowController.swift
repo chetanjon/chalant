@@ -575,17 +575,27 @@ final class NotchWindowController {
             if let hit, let hitID, let hitFace = faces[hitID] {
                 publishPointerUnit(location, zone: collapsedZone(on: hit), face: hitFace)
             }
+            // Reaching is its own question, on its own zone: the
+            // reveal door is wide and shallow where the open door is
+            // narrow and sits under the visible shape. A hidden island
+            // has no visible shape to aim at, so the two cannot be the
+            // same rectangle (2026-08-02).
+            let reaching = NSScreen.screens.first { revealZone(on: $0).contains(location) }
+            let reachingID = reaching?.displayID
             // The light and the hover follow the hit as it moves; every
             // other face's must clear.
             for (id, face) in faces where id != hitID {
                 if face.pointerUnit != nil { face.pointerUnit = nil }
-                if face.pointerNear { face.pointerNear = false }
             }
             // Set before the dwell, not after: a hidden island has to
             // arrive as someone reaches for it, or they reach for
             // nothing and it opens under a pointer that had given up.
-            if let hitID, let hitFace = faces[hitID], !hitFace.pointerNear {
-                hitFace.pointerNear = true
+            // A pointer already inside the open door is also reaching,
+            // so the island stays out once it has arrived rather than
+            // blinking away as the hand travels the last few points.
+            for (id, face) in faces {
+                let near = id == reachingID || id == hitID
+                if face.pointerNear != near { face.pointerNear = near }
             }
             if let hitID {
                 guard Date().timeIntervalSince(lastCollapseAt) > reopenCooldown,
@@ -912,6 +922,38 @@ final class NotchWindowController {
     /// top edge: a cursor pinned to the top reports y == maxY exactly,
     /// and NSRect.contains excludes its max edge, without the overhang,
     /// hovering the notch itself counts as "outside".
+    /// Where reaching for a hidden island counts, which is a different
+    /// question from where hovering opens one.
+    ///
+    /// `collapsedZone` is deliberately tight on a pill: it sits exactly
+    /// under the shape the eye can see, because a notch-wide invisible
+    /// strip kept blooming at browser tabs (user, 2026-07-23). That
+    /// reasoning depends entirely on there being something to see, and
+    /// under "hide until I reach for it" there is nothing: the founder
+    /// turned it on and could not find the island at all
+    /// (2026-08-02). Hunting a 116pt invisible target on a 2560pt
+    /// screen is not a gesture, it is a guess.
+    ///
+    /// So this one is wide and very shallow. Wide, because the island
+    /// lives at the top centre and that is where a hand goes. Shallow,
+    /// because the top four points are somewhere a pointer only ends up
+    /// when it was thrown there on purpose, while tabs and toolbars sit
+    /// below the menu bar line where the old complaint came from.
+    /// Revealing is also cheaper than opening: it costs a shape
+    /// appearing, not a panel taking over, so it can afford to be
+    /// generous where opening cannot.
+    static let revealDoorWidth: CGFloat = 420
+
+    private func revealZone(on screen: NSScreen) -> NSRect {
+        guard viewModel.displays.resolvedStyle(for: screen) != .off else { return .null }
+        return NSRect(
+            x: screen.frame.midX - Self.revealDoorWidth / 2,
+            y: screen.frame.maxY - 4,
+            width: Self.revealDoorWidth,
+            height: 4
+        )
+    }
+
     private func hoverZone(on screen: NSScreen, width: CGFloat, height: CGFloat) -> NSRect {
         NSRect(
             x: screen.frame.midX - width / 2,
