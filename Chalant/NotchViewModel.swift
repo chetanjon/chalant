@@ -588,6 +588,9 @@ final class NotchViewModel: ObservableObject {
         // EC-11: a session can exit with a message still queued while
         // nobody has the composer open to see the row flip. The store
         // has no glance to flash, so it hands the moment back here.
+        activities.onNeedsInput = { [weak self] title in
+            self?.flashGlance(title, seconds: 8)
+        }
         sessions.onSessionWantsYou = { [weak self] title in
             self?.flashGlance("\(title) wants you", seconds: 8)
         }

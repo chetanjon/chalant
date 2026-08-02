@@ -46,7 +46,19 @@ final class ActivityStore: ObservableObject {
     private let finishedTTL: TimeInterval = 60
     private var expiryWork: [String: DispatchWorkItem] = [:]
 
+    /// Fired when a row arrives, or turns, into needs-input.
+    ///
+    /// This is the path the Claude Code hook actually uses. A stopping
+    /// session posts an activity, not a question, so wiring the
+    /// announcement only to `SessionStore.attach` left the common case
+    /// silent: the pill appeared in the open island and the collapsed
+    /// one said nothing at all (founder, 2026-08-02, "I didn't get a
+    /// notification that it stopped working" - verified by pushing one
+    /// from the CLI and watching the island not react).
+    var onNeedsInput: ((String) -> Void)?
+
     func push(id: String, title: String, detail: String?, state: State) {
+        let wasAlreadyAsking = activities.first { $0.id == id }?.state == .needsInput
         var activity = activities.first { $0.id == id }
             ?? Activity(
                 id: id, title: title, detail: detail,
@@ -59,6 +71,10 @@ final class ActivityStore: ObservableObject {
         activities.removeAll { $0.id == id }
         activities.append(activity)
         sort()
+        // Only on the way in, for the same reason the session path is:
+        // a row re-pushed while already asking is the same ask, and
+        // announcing it on every poll would train anyone to ignore it.
+        if state == .needsInput, !wasAlreadyAsking { onNeedsInput?(title) }
         if activities.count > maxActivities {
             // Finished rows go first, then the stalest working one.
             //
