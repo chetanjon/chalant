@@ -334,8 +334,8 @@ final class NotchViewModel: ObservableObject {
     // MARK: - What the resting island has to say
     //
     // Moved here from NotchRootView (2026-08-01). The bead
-    // (NotchWindowController.rebuildSlivers) and the island's own
-    // opacity used to each carry a version of "is there anything to
+    // (`NotchWindowController.rebuildSlivers`, now deleted) and the
+    // island's own opacity used to each carry a version of "is there anything to
     // show" — the bead asked "collapsed with no toast", the island
     // asked "nothing to say" — and a collapsed island with music
     // playing satisfied the second without satisfying the first, so

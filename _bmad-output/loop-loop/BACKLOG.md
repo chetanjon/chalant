@@ -24,9 +24,9 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
   MacBook the collapsed island should be indistinguishable from the cutout.
 - [ ] **A3. Remove the arc at the bottom edge.** Use the MacBook notch's own
   corner radius. "make it clean and proper."
-- [ ] **A4. Padding, margins and type inside the island.** Content sits too
+- [!] **A4. Padding, margins and type inside the island.** Content sits too
   close to the borders. Needs a proper spacing pass, not a nudge.
-- [ ] **A5. Expanded size is adjustable from the dashboard.** Separate from the
+- [!] **A5. Expanded size is adjustable from the dashboard.** Separate from the
   collapsed size: a pill's collapsed shape is dynamic, but the opened panel
   should be sizeable so it can be given more room.
 
@@ -71,8 +71,14 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
 - [!] **D3. Arrangement drag is broken** - dragging a row moves the whole
   window. Mark the feature "coming soon" for users for now, then build the
   real thing (see F1).
-- [ ] **D4. Update button** that downloads, installs and relaunches. GitHub
-  Releases is the source of truth; the daily check already exists.
+- [!] **D4. Update button** that downloads, installs and relaunches.
+  **The premise was wrong and worth recording.** Sparkle has been fully
+  wired since 1.2.13 - signed appcast on Pages, real key, six shipped
+  releases. Only the button's location was wrong: it sat in About as plain
+  tinted text rather than in General beside the update switch. Moved and
+  made a real button. `docs/RELEASING.md` records the step nobody had
+  written down: appcast.xml must reach `main`, because Pages serves `main`
+  whichever branch cut the release.
 
 ## E. Media (2026-08-02)
 
