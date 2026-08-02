@@ -21,38 +21,62 @@ struct ClipboardView: View {
     private let pageSize = 20
 
     var body: some View {
-        if clipboard.clips.isEmpty {
-            EmptyPaneHint(message: "Whatever you copy lands here on its own, all of it. Pin or shelf what should stay.")
-        } else {
-            let shown = ClipboardStore.filtered(clipboard.clips, query: query)
-            let pageCount = max(1, (shown.count + pageSize - 1) / pageSize)
-            let currentPage = min(page, pageCount - 1)
-            let pageStart = currentPage * pageSize
-            let pageEnd = min(pageStart + pageSize, shown.count)
-            let pageClips = Array(shown[pageStart..<pageEnd])
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                // Only once there is enough history to lose something
-                // in. Below that the search field is a control that
-                // costs a row and saves nothing.
-                if clipboard.clips.count > 5 { searchField }
-                if shown.isEmpty {
-                    Text("Nothing copied matches \u{201C}\(query)\u{201D}.")
-                        .font(Theme.Fonts.body)
-                        .foregroundStyle(Theme.textHint)
-                        .padding(.vertical, Theme.Space.m)
-                } else {
-                    HuggingList {
-                        ForEach(pageClips) { clip in
-                            ClipRow(clip: clip, model: model, clipboard: clipboard)
+        Group {
+            if clipboard.clips.isEmpty {
+                EmptyPaneHint(message: "Whatever you copy lands here on its own, all of it. Pin or shelf what should stay.")
+            } else {
+                let shown = ClipboardStore.filtered(clipboard.clips, query: query)
+                let pageCount = max(1, (shown.count + pageSize - 1) / pageSize)
+                let currentPage = min(page, pageCount - 1)
+                let pageStart = currentPage * pageSize
+                let pageEnd = min(pageStart + pageSize, shown.count)
+                let pageClips = Array(shown[pageStart..<pageEnd])
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    // Only once there is enough history to lose something
+                    // in. Below that the search field is a control that
+                    // costs a row and saves nothing.
+                    if clipboard.clips.count > 5 { searchField }
+                    if shown.isEmpty {
+                        Text("Nothing copied matches \u{201C}\(query)\u{201D}.")
+                            .font(Theme.Fonts.body)
+                            .foregroundStyle(Theme.textHint)
+                            .padding(.vertical, Theme.Space.m)
+                    } else {
+                        HuggingList {
+                            ForEach(pageClips) { clip in
+                                ClipRow(clip: clip, model: model, clipboard: clipboard)
+                            }
+                        }
+                        if pageCount > 1 {
+                            pageControls(current: currentPage, count: pageCount)
                         }
                     }
-                    if pageCount > 1 {
-                        pageControls(current: currentPage, count: pageCount)
-                    }
                 }
+                .animation(Theme.Motion.content, value: pageClips.map(\.id))
+                .onChange(of: query) { _, _ in page = 0 }
             }
-            .animation(Theme.Motion.content, value: pageClips.map(\.id))
-            .onChange(of: query) { _, _ in page = 0 }
+        }
+        // The clipboard hotkey's second half: jump straight to the
+        // search field rather than merely opening the pane. Handled
+        // outside the empty/non-empty branches above so a request that
+        // arrives before there is anything copied yet is still cleared
+        // rather than firing stale the moment something is.
+        .onChange(of: model.wantsClipboardSearch) { _, wants in
+            if wants {
+                searching = true
+                model.wantsClipboardSearch = false
+            }
+        }
+        // The tab switch and the request can arrive in the same
+        // transaction (the hotkey sets both before this view mounts),
+        // and `onChange` only fires on a change after that point, so
+        // the flag would otherwise already read true on arrival and go
+        // unseen. Same race `ShortcutsView` guards against.
+        .onAppear {
+            if model.wantsClipboardSearch {
+                searching = true
+                model.wantsClipboardSearch = false
+            }
         }
     }
 

@@ -120,6 +120,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // to be.
                 model.tab = tab
                 model.expand()
+                // The clipboard's own binding covers both halves the
+                // founder asked for: opening it, and searching within
+                // it once open. A second destination just for search
+                // would be two bindings pointed at the same panel,
+                // which the one-binding-per-tab rule below exists to
+                // rule out; firing the same shortcut again instead
+                // moves focus straight to the search field.
+                if action == .clipboard { model.wantsClipboardSearch = true }
             }
         }
         hotKeys.reload()

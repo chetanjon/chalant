@@ -27,6 +27,8 @@ final class HotKeyCenter {
         case notes
         case shortcuts
         case focus
+        case chat
+        case sessions
         case openSettings
 
         var id: String { rawValue }
@@ -41,6 +43,8 @@ final class HotKeyCenter {
             case .notes: return "Open notes"
             case .shortcuts: return "Open shortcuts"
             case .focus: return "Open focus and timers"
+            case .chat: return "Open chat"
+            case .sessions: return "Open sessions"
             case .openSettings: return "Open settings"
             }
         }
@@ -60,6 +64,8 @@ final class HotKeyCenter {
             case .notes: return .notes
             case .shortcuts: return .links
             case .focus: return .focus
+            case .chat: return .chat
+            case .sessions: return .sessions
             case .toggleIsland, .talk, .openSettings: return nil
             }
         }

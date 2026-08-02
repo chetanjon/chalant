@@ -199,6 +199,7 @@ struct DashboardView: View {
                             #selector(NSSplitViewController.toggleSidebar(_:)), with: nil)
                     } label: {
                         Image(systemName: "sidebar.leading")
+                            .font(Theme.Fonts.icon(.m))
                     }
                     .help("Hide or show the sidebar")
                     .accessibilityLabel("Toggle sidebar")

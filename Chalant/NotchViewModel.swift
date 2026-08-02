@@ -372,6 +372,9 @@ final class NotchViewModel: ObservableObject {
     @Published var wantsShortcutAdd = false
     /// Same, straight into the Shortcuts.app library picker.
     @Published var wantsShortcutPick = false
+    /// The clipboard hotkey's second half: focus the search field once
+    /// the panel is open. The Clipboard pane consumes and resets it.
+    @Published var wantsClipboardSearch = false
 
     /// Per-display island settings. `apply(_:to:)` is the one place a
     /// screen turns into island geometry, and the only reader.
