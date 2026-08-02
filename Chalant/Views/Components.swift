@@ -377,82 +377,6 @@ struct PressableStyle: ButtonStyle {
 /// around the icon, a tint lift and faint halo on hover, and a press
 /// sink. Every bare-glyph control in the app routes through this.
 
-/// Brand mark proportions, off the kit's 240 x 140 glyph. Every surface
-/// that draws the mark (this shape, the menu bar glyph, the app icon)
-/// reads from these, so the identity cannot drift between them.
-enum ChalantMark {
-    static let aspect: CGFloat = 240 / 140   // the notch is wide and short
-    static let underRadius: CGFloat = 44 / 240   // of notch width
-    static let eyeWidth: CGFloat = 52 / 240      // of notch width
-    static let eyeHeight: CGFloat = 17 / 140     // of notch height
-    static let eyeGap: CGFloat = 16 / 240        // of notch width
-    static let eyeCentreY: CGFloat = 74.5 / 140  // down the notch
-    static let lidRadius: CGFloat = 3 / 17       // of eye height
-    static let underEyeRadius: CGFloat = 9 / 17  // of eye height
-}
-
-/// The house mark: the notch, wearing two half-lidded eyes. Flat across
-/// the top and rounded underneath, the way a notch hangs off the top of
-/// a screen. Chill at rest, and the eyes are what make it a face rather
-/// than a shape. Even-odd fill keeps the eyes open. Identical geometry to
-/// the app icon and the menu bar glyph.
-struct ChalantMarkShape: Shape {
-    /// At the sizes this gets drawn in-app the brand eye proportion lands
-    /// on a sub-pixel slit, so the lids thicken and the eyes move apart.
-    /// Same reason the icon family carries separate small-size tunings.
-    var eyeBoost: CGFloat = 1.9
-    var gapBoost: CGFloat = 1.3
-
-    func path(in rect: CGRect) -> Path {
-        var w = rect.width, h = w / ChalantMark.aspect
-        if h > rect.height {
-            h = rect.height
-            w = h * ChalantMark.aspect
-        }
-        let x0 = rect.midX - w / 2, y0 = rect.midY - h / 2
-        let x1 = x0 + w, y1 = y0 + h
-
-        var p = Path()
-        let r = ChalantMark.underRadius * w
-        p.move(to: CGPoint(x: x0, y: y0))              // the flat top edge
-        p.addLine(to: CGPoint(x: x1, y: y0))
-        p.addArc(tangent1End: CGPoint(x: x1, y: y1),
-                 tangent2End: CGPoint(x: x0, y: y1), radius: r)
-        p.addArc(tangent1End: CGPoint(x: x0, y: y1),
-                 tangent2End: CGPoint(x: x0, y: y0), radius: r)
-        p.closeSubpath()
-
-        let ew = ChalantMark.eyeWidth * w
-        let eh = ChalantMark.eyeHeight * h * eyeBoost
-        let gap = ChalantMark.eyeGap * w * gapBoost
-        let cy = y0 + ChalantMark.eyeCentreY * h
-        for side in [CGFloat(-1), CGFloat(1)] {
-            let cx = rect.midX + side * (gap / 2 + ew / 2)
-            p.addPath(eyePath(cx: cx, cy: cy, w: ew, h: eh))
-        }
-        return p
-    }
-}
-
-/// One eye: a tight radius on the lid, a generous one underneath. That
-/// asymmetry is the whole half-lidded, unbothered look; a plain capsule
-/// reads alert instead.
-private func eyePath(cx: CGFloat, cy: CGFloat, w: CGFloat, h: CGFloat) -> Path {
-    let x0 = cx - w / 2, x1 = cx + w / 2
-    let y0 = cy - h / 2, y1 = cy + h / 2
-    let rt = min(ChalantMark.lidRadius * h, w / 2)
-    let rb = min(ChalantMark.underEyeRadius * h, w / 2)
-    var p = Path()
-    p.move(to: CGPoint(x: x0 + rt, y: y0))
-    p.addLine(to: CGPoint(x: x1 - rt, y: y0))
-    p.addArc(tangent1End: CGPoint(x: x1, y: y0), tangent2End: CGPoint(x: x1, y: y1), radius: rt)
-    p.addArc(tangent1End: CGPoint(x: x1, y: y1), tangent2End: CGPoint(x: x0, y: y1), radius: rb)
-    p.addArc(tangent1End: CGPoint(x: x0, y: y1), tangent2End: CGPoint(x: x0, y: y0), radius: rb)
-    p.addArc(tangent1End: CGPoint(x: x0, y: y0), tangent2End: CGPoint(x: x1, y: y0), radius: rt)
-    p.closeSubpath()
-    return p
-}
-
 /// Samples an SVG circular arc (rx == ry) into `path` as a polyline,
 /// via the standard endpoint-to-center parameterization. Kept as an
 /// explicit sample so arc direction can never be held backwards the
@@ -544,8 +468,7 @@ struct GlyphImage: View {
                 .font(Theme.Fonts.icon(scale, weight: weight))
                 .hidden()
                 .overlay(
-                    ChalantMarkShape()
-                        .fill(style: FillStyle(eoFill: true))
+                    ChalantMarkView()
                         .frame(width: scale.rawValue + 2, height: scale.rawValue + 2)
                 )
         } else {

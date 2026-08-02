@@ -63,46 +63,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Tiny menu bar item so the agent app can be quit
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        // The house mark, drawn by hand: the notch wearing two half-lidded
-        // eyes, punched through. Even-odd fill keeps the eyes open. Matches
-        // the app icon exactly; no capsule, so it can't read as a toggle.
-        let icon = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            // Same 240 x 140 proportions as ChalantMarkShape, in AppKit's
-            // y-up space: the flat edge on top, the rounded corners below.
-            let w: CGFloat = 16, h = w / ChalantMark.aspect
-            let x0 = (18 - w) / 2, x1 = x0 + w
-            let yBot = (18 - h) / 2, yTop = yBot + h
-            let path = NSBezierPath()
-            path.windingRule = .evenOdd
-            let r = ChalantMark.underRadius * w
-            path.move(to: NSPoint(x: x0, y: yTop))          // the flat top edge
-            path.line(to: NSPoint(x: x1, y: yTop))
-            path.appendArc(from: NSPoint(x: x1, y: yBot), to: NSPoint(x: x0, y: yBot), radius: r)
-            path.appendArc(from: NSPoint(x: x0, y: yBot), to: NSPoint(x: x0, y: yTop), radius: r)
-            path.close()
-
-            // At 18pt the brand eye proportion is a sub-pixel slit, so the
-            // lids thicken and the eyes move apart, as in the small icons.
-            let ew = ChalantMark.eyeWidth * w
-            let eh = ChalantMark.eyeHeight * h * 1.9
-            let gap = ChalantMark.eyeGap * w * 1.3
-            let cy = yTop - ChalantMark.eyeCentreY * h     // y-up: measured down from the top
-            let rt = min(ChalantMark.lidRadius * eh, ew / 2)
-            let rb = min(ChalantMark.underEyeRadius * eh, ew / 2)
-            for side in [CGFloat(-1), CGFloat(1)] {
-                let cx = 9.0 + side * (gap / 2 + ew / 2)
-                let ex0 = cx - ew / 2, ex1 = cx + ew / 2
-                let ey0 = cy - eh / 2, ey1 = cy + eh / 2   // ey1 is the lid, y-up
-                path.move(to: NSPoint(x: ex0 + rt, y: ey1))
-                path.line(to: NSPoint(x: ex1 - rt, y: ey1))
-                path.appendArc(from: NSPoint(x: ex1, y: ey1), to: NSPoint(x: ex1, y: ey0), radius: rt)
-                path.appendArc(from: NSPoint(x: ex1, y: ey0), to: NSPoint(x: ex0, y: ey0), radius: rb)
-                path.appendArc(from: NSPoint(x: ex0, y: ey0), to: NSPoint(x: ex0, y: ey1), radius: rb)
-                path.appendArc(from: NSPoint(x: ex0, y: ey1), to: NSPoint(x: ex1, y: ey1), radius: rt)
-                path.close()
+        // The house mark: the island with an echo around it, in the same
+        // bold cut the in-app glyph uses and off the same constants, so
+        // the two can never drift. Two fills rather than one, because the
+        // echo is half opaque and the island is solid. A template image
+        // keeps its alpha, so the half stays half.
+        let icon = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { bounds in
+            let rect = CGRect(x: 0, y: 0, width: 18, height: 18)
+            // AppKit counts y upward and the artwork counts it downward,
+            // so every rect is flipped about the frame's middle.
+            func placed(_ item: CGRect) -> NSRect {
+                let fitted = ChalantMark.fitted(item, in: rect)
+                return NSRect(
+                    x: fitted.minX, y: rect.height - fitted.maxY,
+                    width: fitted.width, height: fitted.height
+                )
             }
+            _ = bounds
+
+            let ring = placed(ChalantMark.ring)
+            let echo = NSBezierPath(roundedRect: ring, xRadius: ring.height / 2,
+                                    yRadius: ring.height / 2)
+            echo.lineWidth = ChalantMark.scaled(ChalantMark.ringStroke, in: rect)
+            NSColor.black.withAlphaComponent(ChalantMark.ringOpacity).setStroke()
+            echo.stroke()
+
+            let pillRect = placed(ChalantMark.pill)
             NSColor.black.setFill()
-            path.fill()
+            NSBezierPath(roundedRect: pillRect, xRadius: pillRect.height / 2,
+                         yRadius: pillRect.height / 2).fill()
             return true
         }
         icon.isTemplate = true
