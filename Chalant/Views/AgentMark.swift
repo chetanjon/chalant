@@ -10,12 +10,39 @@ import SwiftUI
 struct AgentMark: View {
     let agent: SessionStore.Agent
     var size: CGFloat = 12
+    /// Turning while the agent is mid-turn, still while it is not. A
+    /// mark that always moved would say nothing; one that only moves
+    /// while work is happening says "still going" without a word, and
+    /// is the difference between a list of sessions and a list of
+    /// names (founder, 2026-08-02).
+    var working = false
+
+    /// Anthropic's own terracotta rather than the ambient text tint.
+    /// A Claude session is the one row on the island that belongs to
+    /// somebody else's brand, and it should read as theirs.
+    static let claudeColour = Color(red: 0.851, green: 0.467, blue: 0.341)
 
     var body: some View {
         Group {
             switch agent {
             case .claude:
-                ClaudeBurstShape()
+                Group {
+                    if working, Theme.Feel.current.ambient {
+                        TimelineView(.animation(minimumInterval: 1 / 20)) { context in
+                            let t = context.date.timeIntervalSinceReferenceDate
+                            let turn = t.truncatingRemainder(dividingBy: 8) / 8
+                            ClaudeBurstShape()
+                                .rotationEffect(.degrees(turn * 360))
+                                .scaleEffect(0.9 + 0.1 * (0.5 + 0.5 * sin(t / 0.7)))
+                        }
+                    } else {
+                        ClaudeBurstShape()
+                    }
+                }
+                // Only Claude's mark takes a colour of its own; Cursor's
+                // keeps whatever tint the row hands down, so a row that
+                // dims still dims.
+                .foregroundStyle(Self.claudeColour)
             case .cursor:
                 // Cursor's own logo is a prism this has no faithful way
                 // to draw, so this is plainly a pointer rather than a
@@ -25,7 +52,7 @@ struct AgentMark: View {
             }
         }
         .frame(width: size, height: size)
-        .accessibilityLabel(agent.label)
+        .accessibilityLabel(working ? "\(agent.label), working" : agent.label)
         .help(agent.label)
     }
 }

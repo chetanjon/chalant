@@ -85,7 +85,7 @@ struct NotchRootView: View {
     @ViewBuilder
     private func agentMarkGlance(_ agents: (count: Int, waiting: Bool)) -> some View {
         let content = HStack(spacing: 3) {
-            AgentMark(agent: .claude, size: 10)
+            AgentMark(agent: .claude, size: 10, working: !agents.waiting)
             if agents.count > 1 {
                 Text("\(agents.count)")
                     .font(Theme.Fonts.microMono)

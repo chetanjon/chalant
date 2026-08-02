@@ -91,7 +91,7 @@ struct AgentSessionsStrip: View {
         HStack(spacing: Theme.Space.m) {
             // Whose session it is, then what it wants. Two rows from
             // two different agents are otherwise identical at a glance.
-            AgentMark(agent: session.agent, size: 11)
+            AgentMark(agent: session.agent, size: 11, working: session.state == .working)
                 .foregroundStyle(Theme.textTertiary)
             // Glyph as well as tint: a row that only changed colour
             // would say nothing to anyone reading it in greyscale. A
@@ -128,11 +128,20 @@ struct AgentSessionsStrip: View {
         .chalantCard(radius: Theme.Radius.row)
         .hoverHighlight(radius: Theme.Radius.row)
         .contentShape(Rectangle())
-        .onTapGesture { Self.go(to: session) }
-        // The title is the agent's own summary; which folder it is
-        // working in is the thing a title can leave ambiguous when two
-        // checkouts of the same project are open.
-        .help("Go to this session — \(session.cwd)")
+        // Opens the composer rather than going anywhere. Clicking a
+        // row used to try to raise the terminal it came from and, when
+        // it could not find one, fall back to opening the folder in
+        // Finder, so the common outcome of clicking a session was a
+        // Finder window (founder, 2026-08-02). Reaching the terminal
+        // stays available on its own button inside the composer, where
+        // it is labelled and cannot surprise anyone.
+        .onTapGesture {
+            guard session.canReceiveMessages else { return }
+            model.composingSessionID = model.composingSessionID == session.id ? nil : session.id
+        }
+        .help(session.canReceiveMessages
+              ? "Write to this session — \(session.cwd)"
+              : session.cwd)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "\(session.agent.label): \(session.title), \(Self.place(session)), "
