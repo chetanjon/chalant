@@ -10,6 +10,13 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
 
 ## A. The notch has to look like a notch (2026-08-02)
 
+> Planned: `notch-geometry-plan-2026-08-02.md`. **Blocked on verification:**
+> this Mac is in clamshell, so no notched screen is attached and A1, A2 and
+> A3 cannot be seen until the lid is open. Measuring also corrected the
+> scope: hardware sizing already ships, and what looks wrong is the island
+> drawing deliberately bigger than what it measured.
+
+
 - [ ] **A1. Match the real hardware by default.** Default size and shape should
   be the machine's actual notch, not invented numbers, unless the user changes
   them. Today `Config` ships 196x38 for everything.
@@ -25,11 +32,11 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
 
 ## B. Sessions (2026-08-02)
 
-- [ ] **B1. Sessions move into their own tab.** Out of the always-on island
+- [!] **B1. Sessions move into their own tab.** Out of the always-on island
   body, into the switcher beside Today / Clipboard / Shelf.
-- [ ] **B2. Rows stop reshuffling.** They change places on every update. Order
+- [!] **B2. Rows stop reshuffling.** They change places on every update. Order
   must be stable unless something meaningful changed.
-- [ ] **B3. Sessions appear fast.** A second of blank on open is too slow.
+- [!] **B3. Sessions appear fast.** A second of blank on open is too slow.
 - [x] **B4. Clicking a row opens the composer**, never Finder. `bd0e9a2`.
 - [x] **B5. The mark carries state**, rings removed. `4e6d0af`.
 - [x] **B6. Queue behaves like Claude Code's**, one message per turn. `4e6d0af`.
@@ -37,22 +44,22 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
   session when clicked. `6dc36db`.
 - [ ] **B8. Cursor and Codex** get the same notifications and hooks as Claude
   Code. Feasibility for Codex is unestablished: it writes no session store.
-- [ ] **B9. Not-installed hook banner** at the top of the Sessions tab, and the
+- [!] **B9. Not-installed hook banner** at the top of the Sessions tab, and the
   installed state should use colour (green) rather than grey.
 
 ## C. Clipboard (2026-08-02)
 
-- [ ] **C1. Keep the whole history.** "so I dont lose anything that I copied."
+- [!] **C1. Keep the whole history.** "so I dont lose anything that I copied."
   Currently capped and in memory.
-- [ ] **C2. Pagination** through that history.
-- [ ] **C3. Search across all of it**, not just what is loaded.
+- [!] **C2. Pagination** through that history.
+- [!] **C3. Search across all of it**, not just what is loaded.
 
 ## D. Dashboard (2026-08-02)
 
 - [x] **D1. Sidebar toggle pinned** at the leading edge. `a299f64`.
-- [ ] **D2. A stray vertical line** appears beside the sidebar; the pane also
+- [x] **D2. A stray vertical line** appears beside the sidebar; the pane also
   misbehaves until the sidebar is closed and reopened.
-- [ ] **D3. Arrangement drag is broken** - dragging a row moves the whole
+- [!] **D3. Arrangement drag is broken** - dragging a row moves the whole
   window. Mark the feature "coming soon" for users for now, then build the
   real thing (see F1).
 - [ ] **D4. Update button** that downloads, installs and relaunches. GitHub
@@ -60,7 +67,7 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
 
 ## E. Media (2026-08-02)
 
-- [ ] **E1. The wrong app icon.** Audio playing from Dia shows Chrome's icon.
+- [!] **E1. The wrong app icon.** Audio playing from Dia shows Chrome's icon.
 - [ ] **E2. The media-row microphone** has no obvious purpose where it sits. It
   drives Chalant's own voice commands (reminders, timers, notes, dictated
   texts). Either move it beside Ask where speaking makes sense, or remove it
