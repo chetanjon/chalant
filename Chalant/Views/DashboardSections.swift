@@ -150,17 +150,23 @@ struct SessionsSection: View {
 
     var body: some View {
         // Read once per appearance rather than once per reference below:
-        // this is a live file read, and the banner and the card at the
-        // bottom must agree on the same answer.
-        let hookStatus = HookInstall.status()
+        // these are live file reads, and the banner's placement and the
+        // cards it decides to place must agree on the same answers.
+        let statuses = Dictionary(
+            uniqueKeysWithValues: HookInstall.Agent.allCases.map { ($0, HookInstall.status(agent: $0)) }
+        )
+        let allInstalled = statuses.values.allSatisfy { $0 == .installed }
         VStack(alignment: .leading, spacing: Theme.Space.xl) {
             // Not installed means a session can never announce itself
             // and a queued message can never arrive, with nothing on
             // screen saying why, so this leads the tab rather than
             // waiting at the bottom to be found (B9, founder
-            // 2026-08-02: "if not installed put this at the top").
-            if hookStatus != .installed {
-                hookCard(hookStatus)
+            // 2026-08-02: "if not installed put this at the top"). Any
+            // one of the three missing is reason enough to lead: a
+            // founder running Cursor and Claude Code both wants to
+            // know Cursor is silent even while Claude Code is fine.
+            if !allInstalled {
+                hookCards(statuses)
             }
 
             SettingCard(title: "Running now") {
@@ -182,7 +188,7 @@ struct SessionsSection: View {
 
             SettingCard(title: "How this works") {
                 SettingNote(
-                    "Chalant reads what these tools already write — Claude Code under "
+                    "Chalant reads what these tools already write: Claude Code under "
                     + "~/.claude/projects, Cursor under ~/.cursor/chats. There is nothing to "
                     + "install, nothing is sent anywhere, and sessions already running when "
                     + "Chalant launched show up too."
@@ -194,24 +200,33 @@ struct SessionsSection: View {
                 )
                 SettingDivider()
                 SettingNote(
-                    "Codex is missing because it keeps no session records on disk. It would need to "
-                    + "tell Chalant directly, the way the chalant command already does."
+                    "Codex keeps no session records on disk, so it never appears above. Its hook "
+                    + "card below is the only way it can tell Chalant anything."
                 )
             }
 
-            if hookStatus == .installed {
-                hookCard(hookStatus)
+            if allInstalled {
+                hookCards(statuses)
             }
         }
     }
 
-    /// Live install state for `scripts/chalant-hook`'s Stop event.
-    /// Discovery alone can only say a session's file went quiet; the
-    /// Stop hook is what says a session is actually waiting for you,
-    /// and what lets a queued message reach one at all
+    /// One card per agent rather than three written out by hand: each
+    /// agent's install state, note and snippet differ, but the shape
+    /// they sit in does not.
+    private func hookCards(_ statuses: [HookInstall.Agent: HookInstall.Status]) -> some View {
+        ForEach(HookInstall.Agent.allCases) { agent in
+            hookCard(agent, statuses[agent] ?? .missing)
+        }
+    }
+
+    /// Live install state for `scripts/chalant-hook`. Discovery alone
+    /// can only say a session's file went quiet; the hook is what says
+    /// a session is actually waiting for you, and for Claude Code it
+    /// is also what lets a queued message reach one at all
     /// (notch-messaging-plan-2026-08-01.md, W-E).
-    private func hookCard(_ status: HookInstall.Status) -> some View {
-        SettingCard(title: "The Stop hook") {
+    private func hookCard(_ agent: HookInstall.Agent, _ status: HookInstall.Status) -> some View {
+        SettingCard(title: "\(agent.label) hook") {
             HStack(spacing: Theme.Space.m) {
                 Image(systemName: status.symbol)
                     .font(Theme.Fonts.icon(.s))
@@ -225,46 +240,47 @@ struct SessionsSection: View {
             }
             switch status {
             case .installed:
-                SettingNote(
-                    "Claude Code hands this app a Stop event on every session: a pill the moment "
-                    + "one wants you, and the way a queued message reaches it."
-                )
+                SettingNote(installedNote(for: agent))
             case .missing:
                 SettingNote(
-                    "Chalant never writes ~/.claude/settings.json for you. Paste this under "
-                    + "\"hooks\", merging with anything already there:"
+                    "Chalant never writes \(agent.configPath) for you. Paste this in, merging "
+                    + "the arrays with whatever is already there:"
                 )
-                hookSnippet
+                hookSnippet(for: agent)
             case .unreadable:
                 SettingNote(
-                    "~/.claude/settings.json did not parse. Check it for a stray comma before "
-                    + "assuming the hook itself is missing — that is a different problem with the "
-                    + "same symptom."
+                    "\(agent.configPath) did not parse. Check it for a stray comma before "
+                    + "assuming the hook itself is missing; that is a different problem with "
+                    + "the same symptom."
                 )
-                hookSnippet
+                hookSnippet(for: agent)
             }
         }
     }
 
-    private var hookSnippetText: String {
-        let path = HookInstall.bundledScriptPath ?? "/path/to/scripts/chalant-hook"
-        return """
-        {
-          "hooks": {
-            "Notification": [
-              { "hooks": [ { "type": "command", "command": "\(path)" } ] }
-            ],
-            "Stop": [
-              { "hooks": [ { "type": "command", "command": "\(path)" } ] }
-            ]
-          }
+    /// Claude Code's queued message reaches a running session; neither
+    /// of the other two does yet (B8, cursor-codex-hooks-evidence-
+    /// 2026-08-02.md: message injection is unproven for both), so only
+    /// its note claims that.
+    private func installedNote(for agent: HookInstall.Agent) -> String {
+        switch agent {
+        case .claude:
+            return "Claude Code hands this app a Stop event on every session: a pill the moment "
+                + "one wants you, and the way a queued message reaches it."
+        case .cursor:
+            return "Cursor posts a pill the moment a session finishes, or wants a permission you "
+                + "would otherwise only see in its own window. Messaging isn't wired up for "
+                + "Cursor sessions yet."
+        case .codex:
+            return "Codex posts a pill the moment a session finishes. Messaging isn't wired up "
+                + "for Codex sessions yet."
         }
-        """
     }
 
-    private var hookSnippet: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text(hookSnippetText)
+    private func hookSnippet(for agent: HookInstall.Agent) -> some View {
+        let text = HookInstall.snippet(for: agent)
+        return VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text(text)
                 .font(Theme.Fonts.captionMono)
                 .foregroundStyle(Theme.textSecondary)
                 .textSelection(.enabled)
@@ -273,7 +289,7 @@ struct SessionsSection: View {
                 .background(RoundedRectangle(cornerRadius: Theme.Radius.row).fill(Theme.surface))
             Button("Copy") {
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(hookSnippetText, forType: .string)
+                NSPasteboard.general.setString(text, forType: .string)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)

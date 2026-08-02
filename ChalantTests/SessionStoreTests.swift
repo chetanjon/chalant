@@ -552,6 +552,44 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(HookInstall.status(settings: nil), .unreadable)
     }
 
+    // MARK: Codex and Cursor's own install state (B8)
+
+    /// Codex's ~/.codex/hooks.json is documented as Claude Code's exact
+    /// shape (cursor-codex-hooks-evidence-2026-08-02.md): the whole
+    /// file IS the `{"hooks": {...}}` object `status(settings:)`
+    /// already parses, so this locks that reuse rather than a second
+    /// parser.
+    func testCodexReusesClaudeCodesOwnParserBecauseTheShapeIsIdentical() {
+        let installed: [String: Any] = [
+            "hooks": ["Stop": [["hooks": [["type": "command", "command": "/x/scripts/chalant-hook"]]]]],
+        ]
+        XCTAssertEqual(HookInstall.status(settings: installed), .installed)
+        XCTAssertEqual(HookInstall.status(settings: [:]), .missing)
+    }
+
+    /// Cursor's hooks.json is flatter: `hooks.stop[]`, lower-case event
+    /// name, no inner `hooks` key on each entry.
+    func testCursorsFlatterShapeIsReadOnItsOwnTerms() {
+        let installed: [String: Any] = [
+            "hooks": ["stop": [["command": "/x/scripts/chalant-hook"]]],
+        ]
+        XCTAssertEqual(HookInstall.cursorStatus(hooks: installed), .installed)
+
+        let somethingElse: [String: Any] = [
+            "hooks": ["stop": [["command": "/x/.superset/hooks/cursor-hook.sh"]]],
+        ]
+        XCTAssertEqual(HookInstall.cursorStatus(hooks: somethingElse), .missing)
+
+        // Claude Code's own nested shape must not read as installed
+        // here: the two files are different schemas, not a shared one.
+        let claudeShapedEntry: [String: Any] = [
+            "hooks": ["stop": [["hooks": [["type": "command", "command": "/x/scripts/chalant-hook"]]]]],
+        ]
+        XCTAssertEqual(HookInstall.cursorStatus(hooks: claudeShapedEntry), .missing)
+
+        XCTAssertEqual(HookInstall.cursorStatus(hooks: nil), .unreadable)
+    }
+
     // MARK: Finding the app a session runs in
 
     private func snap(_ pid: pid_t, _ parent: pid_t, _ name: String, _ cwd: String? = nil)
