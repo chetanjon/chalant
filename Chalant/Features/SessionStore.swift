@@ -245,9 +245,14 @@ final class SessionStore: ObservableObject {
             answer: nil,
             askedAt: Date()
         )
+        let wasAlreadyAsking = sessions[index].state == .needsInput
         sessions[index].state = .needsInput
         sessions[index].updatedAt = Date()
         sort()
+        // Only on the way in. A re-attached question on a row already
+        // asking is the same question, and announcing it twice trains
+        // people to ignore the announcement.
+        if !wasAlreadyAsking { onSessionWantsYou?(sessions[index].title) }
         // A question outlives the discovery rescan that would otherwise
         // put the row back to `working`, so the expiry timer is dropped.
         expiryWork[sessionID]?.cancel()
@@ -371,6 +376,16 @@ final class SessionStore: ObservableObject {
     /// Fired when a session goes away with messages still queued, so
     /// the island can say so rather than letting them vanish quietly.
     var onMessageUndelivered: ((String) -> Void)?
+
+    /// Fired when a session stops and wants an answer.
+    ///
+    /// A row quietly changing shape is not a notification. The whole
+    /// promise of this app is that you find out an agent is waiting
+    /// without watching for it, and until this existed the arrival was
+    /// silent: the mark changed colour and nothing else happened
+    /// (founder, 2026-08-02, "I didn't get a notification that it
+    /// stopped working").
+    var onSessionWantsYou: ((String) -> Void)?
 
     static let maxMessage = 2000
     /// A queue this deep is somebody holding the key down, not somebody

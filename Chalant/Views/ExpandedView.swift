@@ -216,7 +216,18 @@ struct ExpandedView: View {
             topRow
         case .activities:
             if !activities.activities.isEmpty {
-                ActivitiesStrip(activities: activities)
+                ActivitiesStrip(activities: activities) { sessionID in
+                    // A pill can outlive the session that pushed it, so
+                    // check before opening a composer that would have
+                    // nothing to attach to. Saying so beats a click that
+                    // does nothing, which is the bug this is fixing.
+                    guard model.sessions.sessions.contains(where: { $0.id == sessionID }) else {
+                        model.flashGlance("That session is no longer running")
+                        return
+                    }
+                    model.composingSessionID =
+                        model.composingSessionID == sessionID ? nil : sessionID
+                }
                     .transition(.opacity)
             }
         case .sessions:
@@ -388,7 +399,23 @@ private struct JoinChip: View {
 /// the accent; finished rows fade out on their own timer.
 private struct ActivitiesStrip: View {
     @ObservedObject var activities: ActivityStore
+    /// Opens the session a row belongs to, when it belongs to one.
+    /// Rows pushed by the Claude Code hook carry the session's own id
+    /// behind a `claude-` prefix, and the pill saying an agent wants
+    /// you did nothing at all when clicked, which is the one row on
+    /// this strip somebody would certainly click (founder,
+    /// 2026-08-02).
+    var onOpenSession: ((String) -> Void)?
     @Environment(\.chalantAccent) private var accent
+
+    /// The session id behind an activity id, when the row came from a
+    /// session at all. `scripts/chalant-hook` posts `claude-<id>`.
+    private static func sessionID(of activityID: String) -> String? {
+        let prefix = "claude-"
+        guard activityID.hasPrefix(prefix) else { return nil }
+        let id = String(activityID.dropFirst(prefix.count))
+        return id.isEmpty ? nil : id
+    }
 
     var body: some View {
         // Explicitly typed and hoisted, for the same reason as
@@ -424,6 +451,10 @@ private struct ActivitiesStrip: View {
                 }
                 .rowInsets()
                 .chalantCard(radius: Theme.Radius.row)
+                .modifier(OpensSession(
+                    sessionID: Self.sessionID(of: activity.id),
+                    onOpen: onOpenSession
+                ))
             }
         }
         // Animate on which rows are here, not on their contents.
@@ -696,5 +727,26 @@ private struct ReminderRow: View {
         .onHover { hovered = $0 }
         .animation(Theme.Motion.hover, value: hovered)
         .help("Mark done")
+    }
+}
+
+
+/// Makes an activity row reach its session, and leaves rows that have
+/// no session completely alone: a hover highlight on something that
+/// does nothing when clicked is a worse lie than no highlight.
+private struct OpensSession: ViewModifier {
+    let sessionID: String?
+    let onOpen: ((String) -> Void)?
+
+    func body(content: Content) -> some View {
+        if let sessionID, let onOpen {
+            content
+                .hoverHighlight(radius: Theme.Radius.row)
+                .contentShape(Rectangle())
+                .onTapGesture { onOpen(sessionID) }
+                .help("Write to this session")
+        } else {
+            content
+        }
     }
 }
