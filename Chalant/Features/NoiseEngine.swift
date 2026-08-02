@@ -106,14 +106,20 @@ final class NoiseEngine {
     private let rainScape = RainScape()
     private let fireScape = FireScape()
 
+    /// Rain and fire are BACK ON THE RECORDINGS as of 1.3.8. The
+    /// generated versions shipped in 1.3.7 and the user's verdict was
+    /// that they were not rain and fire at all: the droplets and
+    /// crackles were struck resonators, which are tuned tones, and real
+    /// water and real wood are broadband. The generators stay in the
+    /// tree because the beds and the placement were right and the event
+    /// design is being rebuilt; nothing routes to them until it sounds
+    /// like weather.
     private func scape(for color: NoiseColor) -> Soundscape? {
         switch color {
         case .brown: return brownScape
         case .pink: return pinkScape
         case .white: return whiteScape
-        case .rain: return rainScape
-        case .fire: return fireScape
-        case .cafe: return nil
+        case .rain, .fire, .cafe: return nil
         }
     }
 
@@ -130,11 +136,10 @@ final class NoiseEngine {
 
     private(set) var isRunning = false
 
-    /// Only the room full of people is still a recording. Rain and fire
-    /// are generated now: a file of either could only ever loop, and
-    /// looping was half of what the user was hearing (2026-08-02).
     private static func fileURL(for color: NoiseColor) -> URL? {
         switch color {
+        case .rain: return Bundle.main.url(forResource: "rain", withExtension: "m4a")
+        case .fire: return Bundle.main.url(forResource: "fire", withExtension: "m4a")
         case .cafe: return Bundle.main.url(forResource: "cafe", withExtension: "m4a")
         default: return nil
         }
@@ -175,6 +180,28 @@ final class NoiseEngine {
 
     private static func voicing(for color: NoiseColor) -> Voicing {
         switch color {
+        case .rain:
+            // Slower and darker: fewer droplets, none of them sharp.
+            return Voicing(
+                rate: 0.9, pitch: -250, trim: 0.9,
+                bands: [
+                    (.highShelf, 2000, -9, 1),
+                    (.lowPass, 5500, 0, 0.7),
+                    (.parametric, 350, 2, 1.2),
+                ]
+            )
+        case .fire:
+            // A hearth heard from the sofa: the lows are cut, not
+            // boosted (the old +6.5dB shelf boomed), the crackle sits
+            // forward, the hiss stays shaved.
+            return Voicing(
+                rate: 1.0, pitch: -60, trim: 0.9,
+                bands: [
+                    (.lowShelf, 200, -8, 1),
+                    (.parametric, 2400, 2, 1.5),
+                    (.highShelf, 6000, -4, 1),
+                ]
+            )
         case .cafe:
             // The far corner of a small cafe, not the middle of a crowd.
             // Played at its own speed: it used to run at 0.78x, and
