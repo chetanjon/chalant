@@ -801,4 +801,182 @@ final class ChalantTests: XCTestCase {
             rawRequest("POST /activity HTTP/1.1\r\nSec-Fetch-Mode: cors"))?
             .fromBrowser ?? false)
     }
+
+    // MARK: The sounds themselves
+
+    /// The soundscapes render with no audio device, which is what lets
+    /// the suite hold a floor under qualities that are otherwise pure
+    /// opinion. Thresholds here are not guesses: every one was measured
+    /// off the real generators first, then set with room to move.
+
+    private func scapes() -> [(String, Soundscape)] {
+        [
+            ("brown", ColorNoise(.brown)),
+            ("pink", ColorNoise(.pink)),
+            ("white", ColorNoise(.white)),
+            ("rain", RainScape()),
+            ("fire", FireScape()),
+        ]
+    }
+
+    private func rms(_ samples: [Float]) -> Float {
+        sqrtf(samples.reduce(0) { $0 + $1 * $1 } / Float(samples.count))
+    }
+
+    /// Pearson correlation between the channels. Near zero means the
+    /// two sides were generated independently; near one means the sound
+    /// is mono wearing a stereo coat.
+    private func correlation(_ left: [Float], _ right: [Float]) -> Float {
+        let meanLeft = left.reduce(0, +) / Float(left.count)
+        let meanRight = right.reduce(0, +) / Float(right.count)
+        var covariance: Float = 0
+        var varianceLeft: Float = 0
+        var varianceRight: Float = 0
+        for index in left.indices {
+            let a = left[index] - meanLeft
+            let b = right[index] - meanRight
+            covariance += a * b
+            varianceLeft += a * a
+            varianceRight += b * b
+        }
+        return covariance / (sqrtf(varianceLeft) * sqrtf(varianceRight))
+    }
+
+    /// Zero crossings per second, a cheap and stable stand-in for
+    /// brightness: it needs no FFT and it orders the colors correctly.
+    private func crossingsPerSecond(_ samples: [Float], seconds: Double) -> Double {
+        var crossings = 0
+        for index in 1..<samples.count where (samples[index] < 0) != (samples[index - 1] < 0) {
+            crossings += 1
+        }
+        return Double(crossings) / seconds
+    }
+
+    private func windowLevels(_ samples: [Float], frames: Int) -> [Float] {
+        var levels: [Float] = []
+        var start = 0
+        while start + frames <= samples.count {
+            // Summed in place: slicing a copy per window made the suite
+            // spend most of its time allocating.
+            var sum: Float = 0
+            for index in start..<(start + frames) { sum += samples[index] * samples[index] }
+            levels.append(sqrtf(sum / Float(frames)))
+            start += frames
+        }
+        return levels
+    }
+
+    func testEverySoundscapeIsGenuinelyStereo() {
+        // Every color used to be computed once per frame and written to
+        // both channels, which measured 1.0 here and sounded like a
+        // point between the ears (user, 2026-08-02, "thin and small").
+        // Rain and fire failed this at 0.53 and 0.73 on the first pass
+        // too, because a panned voice writes the same waveform twice;
+        // they now reach each ear with their own gain and their own
+        // delay.
+        for (name, scape) in scapes() {
+            let (left, right) = scape.renderOffline(seconds: 4)
+            let value = correlation(left, right)
+            XCTAssertLessThan(
+                abs(value), 0.2,
+                "\(name) is not really stereo, channels correlate at \(value)")
+        }
+    }
+
+    func testNoSoundscapeClipsOrDrifts() {
+        // The engine clamps, so clipping is silent in the code and
+        // audible in the room. Fire peaked at 3.68 before the resonator
+        // was normalized: seeding it with an amplitude actually asks for
+        // amplitude/sin(w), so low pops came out twenty four times loud.
+        for (name, scape) in scapes() {
+            let (left, right) = scape.renderOffline(seconds: 8)
+            let peak = max(
+                left.map { abs($0) }.max() ?? 0,
+                right.map { abs($0) }.max() ?? 0)
+            XCTAssertLessThanOrEqual(peak, 1.0, "\(name) clips at \(peak)")
+            let offset = abs(left.reduce(0, +) / Float(left.count))
+            XCTAssertLessThan(offset, 0.005, "\(name) carries a DC offset of \(offset)")
+        }
+    }
+
+    func testTheSoundscapesAreLevelWithEachOther() {
+        // One volume slider serves every chip, so a chip that arrives
+        // quiet is a chip the user has to go and fix by hand.
+        for (name, scape) in scapes() {
+            let (left, _) = scape.renderOffline(seconds: 8)
+            let level = rms(left)
+            XCTAssertGreaterThan(level, 0.12, "\(name) is quiet at \(level)")
+            XCTAssertLessThan(level, 0.30, "\(name) is loud at \(level)")
+        }
+    }
+
+    func testTheColorsKeepTheirOrderFromWarmToBright() {
+        // Brown warm, pink in the middle, white bright, and fire darker
+        // than rain. This is the assertion that catches a filter tuned
+        // by accident.
+        func brightness(_ scape: Soundscape) -> Double {
+            crossingsPerSecond(scape.renderOffline(seconds: 4).left, seconds: 10)
+        }
+        let brown = brightness(ColorNoise(.brown))
+        let pink = brightness(ColorNoise(.pink))
+        let white = brightness(ColorNoise(.white))
+        XCTAssertLessThan(brown, pink)
+        XCTAssertLessThan(pink, white)
+        XCTAssertLessThan(brightness(FireScape()), brightness(RainScape()))
+    }
+
+    func testNoSoundscapeEverFallsSilent() {
+        // The failure mode of a texture built from scattered events is
+        // a hole in it. A tenth of a second of near silence is a hole.
+        for (name, scape) in scapes() {
+            let (left, _) = scape.renderOffline(seconds: 12)
+            let quietest = windowLevels(left, frames: 4800).min() ?? 0
+            XCTAssertGreaterThan(
+                quietest, 0.04,
+                "\(name) drops to \(quietest) for a tenth of a second")
+        }
+    }
+
+    func testFireActuallyCracklesAndTheColorsDoNot() {
+        // Proves the events fire at all. A steady bed sits near 1; fire
+        // measured 3.06 and white 1.14, so the gap is the crackle.
+        func burstiness(_ scape: Soundscape) -> Float {
+            let levels = windowLevels(scape.renderOffline(seconds: 12).left, frames: 480)
+                .sorted()
+            return levels.last! / levels[levels.count / 2]
+        }
+        XCTAssertGreaterThan(burstiness(FireScape()), 2.0, "fire is not crackling")
+        XCTAssertGreaterThan(burstiness(RainScape()), 1.35, "rain has no droplets in it")
+        XCTAssertLessThan(burstiness(ColorNoise(.white)), 1.5)
+    }
+
+    func testTheEngineEitherRunsOrSaysWhyNot() {
+        // The offline measurements prove the generators; this proves the
+        // wiring around them. A lit chip over silence is the one failure
+        // the user cannot debug, so the engine owes an answer either
+        // way. Volume is zeroed first: a test suite must not make noise.
+        for color in NoiseEngine.NoiseColor.allCases {
+            let engine = NoiseEngine()
+            engine.setVolume(0)
+            var reason: String?
+            engine.onSilence = { reason = $0 }
+            engine.start(color)
+            XCTAssertTrue(
+                engine.isRunning || reason != nil,
+                "\(color.rawValue) neither played nor explained itself")
+            engine.stop()
+        }
+    }
+
+    func testTheSameSeedRendersTheSameAudio() {
+        // The generators are seeded rather than reaching for the system
+        // RNG, both because the render thread must not gamble on a
+        // syscall and because every measurement above would be noise
+        // without it.
+        let first = RainScape(seed: 99).renderOffline(seconds: 1).left
+        let second = RainScape(seed: 99).renderOffline(seconds: 1).left
+        XCTAssertEqual(first, second)
+        let other = RainScape(seed: 100).renderOffline(seconds: 1).left
+        XCTAssertNotEqual(first, other)
+    }
 }
