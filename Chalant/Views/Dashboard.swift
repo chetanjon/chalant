@@ -169,6 +169,30 @@ struct DashboardView: View {
             .navigationSplitViewColumnWidth(min: 176, ideal: 196, max: 240)
             .scrollContentBackground(.hidden)
             .background(Theme.backdropTop)
+            // Pinned at the leading edge beside the traffic lights,
+            // where Mail, Notes and Finder all keep it. Left to itself
+            // the automatic one rides the sidebar's trailing edge, so
+            // it sat right of the window title with the sidebar open
+            // and jumped left when it shut, which reads as the control
+            // wandering (founder, 2026-08-01, "at once its left and
+            // once its right").
+            //
+            // The default has to be removed by name or there are two of
+            // them: adding this item does not replace it. Photographed
+            // with both on screen before this line existed.
+            .toolbar(removing: .sidebarToggle)
+            .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        NSApp.keyWindow?.firstResponder?.tryToPerform(
+                            #selector(NSSplitViewController.toggleSidebar(_:)), with: nil)
+                    } label: {
+                        Image(systemName: "sidebar.leading")
+                    }
+                    .help("Hide or show the sidebar")
+                    .accessibilityLabel("Toggle sidebar")
+                }
+            }
         } detail: {
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
