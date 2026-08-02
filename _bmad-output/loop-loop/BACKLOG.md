@@ -17,12 +17,12 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
 > drawing deliberately bigger than what it measured.
 
 
-- [ ] **A1. Match the real hardware by default.** Default size and shape should
+- [!] **A1. Match the real hardware by default.** Default size and shape should
   be the machine's actual notch, not invented numbers, unless the user changes
   them. Today `Config` ships 196x38 for everything.
-- [ ] **A2. Hide under the physical notch at rest, expand on hover.** On a
+- [!] **A2. Hide under the physical notch at rest, expand on hover.** On a
   MacBook the collapsed island should be indistinguishable from the cutout.
-- [ ] **A3. Remove the arc at the bottom edge.** Use the MacBook notch's own
+- [!] **A3. Remove the arc at the bottom edge.** Use the MacBook notch's own
   corner radius. "make it clean and proper."
 - [!] **A4. Padding, margins and type inside the island.** Content sits too
   close to the borders. Needs a proper spacing pass, not a nudge.
@@ -68,9 +68,11 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
 - [x] **D1. Sidebar toggle pinned** at the leading edge. `a299f64`.
 - [x] **D2. A stray vertical line** appears beside the sidebar; the pane also
   misbehaves until the sidebar is closed and reopened.
-- [!] **D3. Arrangement drag is broken** - dragging a row moves the whole
-  window. Mark the feature "coming soon" for users for now, then build the
-  real thing (see F1).
+- [!] **D3. Arrangement drag** - FIXED, not labelled. The gesture was never
+  the problem: the window was movable by its background, so AppKit began a
+  window drag on mouse-down and pre-empted the row's own. Property off, drag
+  restored unchanged. Needs one real drag to confirm; worst case is the rows
+  do not reorder, never that the window jumps.
 - [!] **D4. Update button** that downloads, installs and relaunches.
   **The premise was wrong and worth recording.** Sparkle has been fully
   wired since 1.2.13 - signed appcast on Pages, real key, six shipped
@@ -82,19 +84,19 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
 
 ## H. From using it, 2026-08-02 evening
 
-- [ ] **H1. Remove the media-row microphone.** Founder decided: remove, not
+- [!] **H1. Remove the media-row microphone.** Founder decided: remove, not
   move. "not needed near the spotify." Voice keeps the `.talk` hotkey and the
   collapsed long-press.
-- [ ] **H2. The scrollbar in the sessions list** is visible and "messing with
+- [!] **H2. The scrollbar in the sessions list** is visible and "messing with
   the UI". Hide the indicator; keep the scrolling.
-- [ ] **H3. Say whether a message actually went.** "how do I know if the
+- [!] **H3. Say whether a message actually went.** "how do I know if the
   request is being sent or not is it actually working". Today a queued message
   shows Next/Queued, then Delivered for 2.5s. That is easy to miss entirely,
   and nothing says it reached the model rather than merely leaving.
-- [ ] **H4. A way to test notifications.** "I want to test the notification and
+- [!] **H4. A way to test notifications.** "I want to test the notification and
   everything." A button in the Sessions pane that fires a real one through the
   real path, so it proves the wiring rather than faking a pill.
-- [ ] **H5. Old pills cannot be acted on.** A needs-input pill never expires by
+- [!] **H5. Old pills cannot be acted on.** A needs-input pill never expires by
   design, so one can sit for hours after its session has gone; clicking it can
   only report that the session is missing. When a session ends, its pill should
   resolve rather than linger as something that looks actionable and is not.
@@ -121,13 +123,26 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
   icon set, menu-bar template and in-app mark.
 - [x] **F3. Comment sweep.** The code still argues content cannot go on
   external monitors, a position withdrawn twice.
-- [ ] **F4. Icon audit, shortcuts for everything, liquid glass, calendar and
-  the other panels raised to the same bar.**
+- [!] **F4a. Liquid glass and the calendar.** Clarity floored so it cannot
+  reach unreadable, the pre-macOS-26 blur pinned dark, calendar permission
+  picked up without a relaunch.
+- [x] **F4b. Accessibility labels.** `label:` is required on both glyph
+  buttons now, so the compiler asks at every new call site.
+- [ ] **F4c. Icon audit and shortcuts.** The wave doing this died mid-refactor
+  on a network error; the a11y half was finished by hand, the audit itself and
+  the shortcut coverage were not done.
 
 ## G. Later, explicitly
 
 - Notion integration.
 - NotchBox parity: snippets, web view, translate, per-style pickers.
+
+## Verification owed
+
+**`WHEN-THE-LID-OPENS.md`** is the checklist. Almost everything above shipped
+without being seen: this machine was in clamshell for the whole build, so
+there was no cutout to check the notch work against and the displays slept
+through most of the rest.
 
 ## Not buildable as asked
 
