@@ -42,7 +42,7 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
 - [x] **B6. Queue behaves like Claude Code's**, one message per turn. `4e6d0af`.
 - [x] **B7. A session that wants you announces itself**, and its pill opens the
   session when clicked. `6dc36db`.
-- [~] **B8. Cursor and Codex** get the same notifications and hooks as Claude
+- [!] **B8. Cursor and Codex** get the same notifications and hooks as Claude
   Code. **Feasibility settled, and the earlier answer was wrong.** Both have a
   live `hooks.json`: Codex in Claude Code's exact shape (`SessionStart`,
   `UserPromptSubmit`, `Stop`), Cursor in a flatter one with the richer event
@@ -95,8 +95,11 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
   arrangement should happen on the real surface, not only as a list in the
   dashboard. Needs one decision first: does a drag on one display rearrange
   that display, or all of them? Recommendation: all, shared.
-- [ ] **F2. The logo.** "looks ugly", wants minimal and smooth.
-- [ ] **F3. Comment sweep.** The code still argues content cannot go on
+- [~] **F2. The logo.** Three directions sent 2026-08-02: the island solid,
+  the island as an open stroke, and the island with a glance in it. Each at
+  icon and menu-bar size and on a light Dock. Awaiting a pick, then the full
+  icon set, menu-bar template and in-app mark.
+- [x] **F3. Comment sweep.** The code still argues content cannot go on
   external monitors, a position withdrawn twice.
 - [ ] **F4. Icon audit, shortcuts for everything, liquid glass, calendar and
   the other panels raised to the same bar.**
