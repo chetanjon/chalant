@@ -90,6 +90,39 @@ every view, and per-display expansion means it can no longer be one value.
 | R4 | The notch and the pill both showing | Fixed in `56cd56c`; confirmed single-shape on d2 after relaunch. Needs re-checking on the built-in |
 | R5 | NotchBox feature parity (clipboard with snippets, web view, translate, battery, per-style pickers, shortcuts for everything) | A backlog, not a defect |
 
+## Founder feedback on the W-A pill, 2026-08-02, with two screenshots
+
+Two captures of the same feature on different displays, and the contrast is
+the whole point.
+
+- **Rejected**: a bare 28pt waveform, nothing else.
+- **Approved, verbatim "this version is good"**: `... The Cat and the Dra... 2`
+  - the song title beside the wave, plus the agent count.
+
+The difference is not a setting. `leftWingNeed` returns 156 when
+`showsSongBeside` holds and 28 for the bare wave, and `showsSongBeside`
+requires `islandStyle == .pill`. So the approved version is what a **pill**
+already does and the rejected one is what everything else does. The founder's
+own words alongside it - "rendering in the monitors should be according to the
+settings" - are the same request from the other end: W-C is what puts a real
+pill on every display that resolves to one, and the approved content follows
+automatically.
+
+**So the collapsed content rules are now signed off and must not be changed.**
+Anything that alters what a resting pill shows is a regression against an
+explicit approval.
+
+Two adjustments remain, and both are presentation only:
+
+| # | Feedback | Change |
+|---|---|---|
+| F1 | "the pill placement is too top" | A pill floats and should clear the top edge; a notch dresses hardware and must touch it. A small top gap for `.pill` only, never for `.notch`. |
+| F2 | "add a little very very little bit height to the default" | `DisplayConfigStore.Config.height`, currently 34. A small bump, still inside `heightRange` 20...60, and the per-display slider still overrides it. |
+
+F2 is a **default**, so it only moves displays with no stored height. Anything
+already tuned by hand keeps its value, which is correct and worth stating
+because it means the founder's own displays may not visibly change.
+
 ## What has NOT been established
 
 - Whether per-display expansion can reuse `NotchViewModel` with a keyed state
