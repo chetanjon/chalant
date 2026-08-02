@@ -23,7 +23,7 @@ Homebrew is the quiet route: the flag above skips the first-open challenge, beca
 - `remind me to call amma at 6` becomes a real Reminder with an alarm.
 - `schedule lunch with sarah friday at 1` becomes a real Calendar event.
 - `agenda` or `today` drops today's calendar out of the notch. `join` opens the next meeting's video link (Zoom, Meet, Teams, Webex, FaceTime); the Today rows carry a tap-to-join chip, and the glance marks a joinable meeting with a small camera.
-- `focus 25` starts a pomodoro with synthesized brown noise, its progress ring live beside the notch. `stop focus` ends it.
+- `focus 25` starts a pomodoro, its progress ring live beside the notch. `stop focus` ends it. Sound stays yours: a session never starts, ducks, or stops ambience on its own.
 - `timer 10` runs a countdown, its ring beside the notch. `stopwatch` counts up; `stop stopwatch` holds the reading on screen, `stopwatch` again rolls on, `reset stopwatch` clears. Also a chip in the Focus tab, with pause and reset buttons.
 - `how much time left` reads the running sessions back; `cancel the timer` and its article-carrying kin stop the right thing, honestly ("No timer running." when there is none).
 - Running sessions mark the closed pill with a small symbol (the progress ring, or a stopwatch glyph), never digits; numbers live in the open island.

@@ -563,6 +563,36 @@ final class ChalantTests: XCTestCase {
         focus.stop()
     }
 
+    func testAFocusSessionMakesNoSoundOfItsOwn() {
+        // Starting a session switched on brown noise by itself (user,
+        // 2026-08-02: "we dont want that"). Sound is the user's to
+        // start, never the timer's.
+        let ambience = AmbienceController()
+        let focus = FocusController(ambience: ambience)
+        focus.start(work: 25)
+        XCTAssertNil(ambience.active, "a focus session must not turn ambient noise on")
+        focus.skip()
+        XCTAssertNil(ambience.active, "a break must not turn ambient noise on either")
+        focus.stop()
+        XCTAssertNil(ambience.active)
+    }
+
+    func testAFocusSessionLeavesTheUsersOwnNoiseAlone() {
+        // The other half of the same coupling: the session used to
+        // pause the sound on a break and stop it at the end, so noise
+        // the user had started for themselves died with the timer.
+        let ambience = AmbienceController()
+        let focus = FocusController(ambience: ambience)
+        ambience.play(.brown)
+        focus.start(work: 25)
+        XCTAssertEqual(ambience.active, .brown)
+        focus.skip()
+        XCTAssertEqual(ambience.active, .brown, "a break must not silence the user's noise")
+        focus.stop()
+        XCTAssertEqual(ambience.active, .brown, "ending a session must not stop the user's noise")
+        ambience.stop()
+    }
+
     // MARK: What the voice trail is allowed to remember
 
     func testVoiceLogHoldsBackTheWordsOfAMessage() {

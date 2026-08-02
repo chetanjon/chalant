@@ -635,7 +635,7 @@ final class ActionEngine {
         if !asksAboutSession, lower.contains("pomodoro") || lower.hasPrefix("focus") {
             let minutes = Self.firstNumber(in: lower) ?? 25
             model.focus.start(work: minutes)
-            return "Focus on. \(minutes) minutes, brown noise. Say stop focus to end."
+            return "Focus on. \(minutes) minutes. Say stop focus to end."
         }
 
         // Plain timers

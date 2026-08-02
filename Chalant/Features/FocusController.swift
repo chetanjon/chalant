@@ -148,7 +148,6 @@ final class FocusController: ObservableObject {
     @Published var phase: Phase = .work
     @Published var remaining = 0
     @Published var cycle = 1
-    @Published var noiseColor: NoiseEngine.NoiseColor = .brown
 
     /// Fires with the work minutes when a work phase runs to zero.
     /// Skip jumps straight to advance() and stop() never gets here,
@@ -160,7 +159,13 @@ final class FocusController: ObservableObject {
     /// stays silent: the user is present.
     var onBreakComplete: ((Int) -> Void)?
 
-    /// Shared ambience owner, focus drives it, never a private engine.
+    /// Held, never driven. A session used to switch brown noise on the
+    /// moment it started, pause it on breaks and stop it at the end,
+    /// which meant the timer owned the speakers: it made sound nobody
+    /// asked for, and it killed sound the user had started for
+    /// themselves (user, 2026-08-02, "we dont want that"). Ambience is
+    /// the user's, through the chips row or a voice ask. This reference
+    /// stays so the tests can prove the session never touches it.
     let ambience: AmbienceController
 
     init(ambience: AmbienceController) {
@@ -196,21 +201,7 @@ final class FocusController: ObservableObject {
         beginPhase(seconds: workMinutes * 60)
         isActive = true
         isPaused = false
-        // A soundscape the user already chose wins over the default.
-        if let playing = ambience.active { noiseColor = playing }
-        ambience.play(noiseColor)
         run()
-    }
-
-    func setNoise(_ color: NoiseEngine.NoiseColor) {
-        noiseColor = color
-        if !isActive || phase == .work {
-            ambience.play(color)
-        }
-    }
-
-    func muteNoise() {
-        ambience.pause()
     }
 
     func togglePause() {
@@ -220,10 +211,8 @@ final class FocusController: ObservableObject {
             // Hold the reading; the deadline stops meaning anything
             // until the session is picked back up.
             deadline = nil
-            ambience.pause()
         } else {
             deadline = Date().addingTimeInterval(TimeInterval(remaining))
-            if phase == .work { ambience.resume() }
         }
     }
 
@@ -247,7 +236,6 @@ final class FocusController: ObservableObject {
         deadline = nil
         isActive = false
         isPaused = false
-        ambience.stop()
     }
 
     /// Every phase change goes through here so the reading and the
@@ -297,12 +285,10 @@ final class FocusController: ObservableObject {
             phase = .rest
             let longBreak = cycle % cyclesPerLongRest == 0
             beginPhase(seconds: (longBreak ? longRestMinutes : restMinutes) * 60)
-            ambience.pause()
         } else {
             cycle += 1
             phase = .work
             beginPhase(seconds: workMinutes * 60)
-            if !isPaused { ambience.resume() }
         }
     }
 
