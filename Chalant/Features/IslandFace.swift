@@ -46,6 +46,13 @@ final class IslandFace: ObservableObject {
     @Published var contentPadding: CGFloat = Theme.Space.xl
     /// The pointer is on this display's island right now.
     @Published var isHovering = false
+    /// The pointer is in this display's top-edge door, before any
+    /// dwell has been served. `isHovering` waits out `openDwell` so
+    /// traffic along the top edge cannot fling the island open; this
+    /// answers the different question of whether someone is reaching,
+    /// which is what a hidden island watches for so it can come back
+    /// (founder, 2026-08-02).
+    @Published var pointerNear = false
     /// Pointer position across this island, 0...1, published by the
     /// window controller's hover poll, quantized so casual movement
     /// costs a few re-renders per second, not twenty. nil = no light.

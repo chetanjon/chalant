@@ -572,6 +572,13 @@ final class NotchWindowController {
             // other face's must clear.
             for (id, face) in faces where id != hitID {
                 if face.pointerUnit != nil { face.pointerUnit = nil }
+                if face.pointerNear { face.pointerNear = false }
+            }
+            // Set before the dwell, not after: a hidden island has to
+            // arrive as someone reaches for it, or they reach for
+            // nothing and it opens under a pointer that had given up.
+            if let hitID, let hitFace = faces[hitID], !hitFace.pointerNear {
+                hitFace.pointerNear = true
             }
             if let hitID {
                 guard Date().timeIntervalSince(lastCollapseAt) > reopenCooldown,

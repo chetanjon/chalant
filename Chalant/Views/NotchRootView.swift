@@ -45,6 +45,11 @@ struct NotchRootView: View {
     @AppStorage("collapsedSong") private var collapsedSong = true
     @AppStorage("glanceAgents") private var glanceAgents = true
     @AppStorage("glanceNextEvent") private var glanceNextEvent = true
+    /// Keep the island out of the way until it is reached for. The
+    /// door is coordinate math rather than pixels, so the top edge
+    /// still summons it while nothing is drawn there (founder,
+    /// 2026-08-02).
+    @AppStorage("autoHideIsland") private var autoHideIsland = false
     @AppStorage("islandMaterial") private var islandMaterial = "ink"
     @AppStorage("glassClarity") private var glassClarity = "balanced"
 
@@ -186,6 +191,19 @@ struct NotchRootView: View {
     /// into the corner, not so much that it stops belonging to the
     /// menu bar line.
     private static let pillTopGap: CGFloat = 5
+
+    /// Whether this island is currently keeping out of the way.
+    ///
+    /// Only ever true at rest: an open island, a voice session and a
+    /// toast all outrank it, so the setting can never swallow
+    /// something the user is looking at or something the island is
+    /// trying to tell them.
+    private var hiddenUntilReachedFor: Bool {
+        autoHideIsland
+            && face.state == .collapsed
+            && !face.pointerNear
+            && model.glanceToast == nil
+    }
 
     private var islandSize: CGSize {
         switch face.state {
@@ -457,6 +475,12 @@ struct NotchRootView: View {
         // gap is dropped while a pill is open, so an expanded island
         // still hangs from the top the way it always has.
         .padding(.top, face.style == .pill && face.state == .collapsed ? Self.pillTopGap : 0)
+        // Out of the way until reached for. A toast still comes
+        // through: it is the island saying something happened, and a
+        // notification nobody can see is not a quieter notification,
+        // it is a lost one.
+        .opacity(hiddenUntilReachedFor ? 0 : 1)
+        .animation(Theme.Motion.island, value: hiddenUntilReachedFor)
         .animation(Theme.Motion.island, value: face.state)
         .frame(maxWidth: .infinity, alignment: .top)
         // The user's accent choice, not the raw album color, fixed

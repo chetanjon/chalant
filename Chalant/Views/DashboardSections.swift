@@ -414,6 +414,7 @@ struct IslandSection: View {
     @AppStorage("glassClarity") private var glassClarity = "balanced"
     @AppStorage("glowOn") private var glowOn = true
     @AppStorage("idleEdgeOn") private var idleEdgeOn = true
+    @AppStorage("autoHideIsland") private var autoHideIsland = false
     @AppStorage("motionFeel") private var motionFeel = "serene"
     @AppStorage("glideLongTitles") private var glideLongTitles = false
     @AppStorage("accentMode") private var accentMode = "silver"
@@ -445,6 +446,13 @@ struct IslandSection: View {
                 SettingNote(
                     "On a notchless display this is the resting sliver on the menu bar line. "
                     + "Off hides the island entirely until you hover the top edge."
+                )
+                SettingDivider()
+                SettingToggle(label: "Hide until I reach for it", isOn: $autoHideIsland)
+                SettingNote(
+                    "The island stays out of sight and comes back when the pointer reaches "
+                    + "the top of the screen where it lives. Anything it needs to tell you "
+                    + "still appears."
                 )
             }
 
