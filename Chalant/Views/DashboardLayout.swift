@@ -1,13 +1,19 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Rearranging what the island shows.
 ///
-/// Reordering by drag used to live here and does not right now: on this
-/// window it dragged the whole dashboard rather than the row (D3,
-/// founder 2026-08-02, "moving the entire dashboard window instead").
-/// Add, remove and the presets below are unaffected and stay live; a
-/// real drag surface is a later milestone (F1), on the island itself
-/// rather than in a settings list.
+/// Drag rather than a `List` with `.onMove`: the dashboard's detail is
+/// already a ScrollView, and a List inside one fights it for scrolling.
+/// This was labelled "coming soon" for a day because dragging a row
+/// moved the whole dashboard window instead of reordering. The gesture
+/// was never the problem: the window was set movable by its background,
+/// so AppKit began a window drag on mouse-down anywhere that was not a
+/// control and pre-empted the row's own gesture. Fixed where it lived,
+/// in `DashboardWindowController` (2026-08-02).
+///
+/// `draggable`/`dropDestination` gives the same gesture on an ordinary
+/// stack, and it is the platform's own drag, not a reimplementation.
 struct LayoutSection: View {
     @ObservedObject var layout: IslandLayoutStore
 
@@ -18,12 +24,7 @@ struct LayoutSection: View {
                     if index > 0 { SettingDivider() }
                     rowEditor(row, at: index)
                 }
-                // Dragging a row moved the whole dashboard window instead
-                // of reordering (D3, founder 2026-08-02). Rather than ship
-                // that, the drag is off and this says so; Add and the
-                // remove button still work. The real fix is a later
-                // milestone (F1: drag on the island itself).
-                comingSoonNote
+                SettingNote("Drag a row to move it. Top of the list is top of the island.")
             }
 
             if !hidden.isEmpty {
@@ -56,7 +57,6 @@ struct LayoutSection: View {
                     "Only one of these fits beside a shut island, so this is an order of "
                     + "precedence: the first with something to say gets the space."
                 )
-                comingSoonNote
             }
 
             presets
@@ -70,16 +70,15 @@ struct LayoutSection: View {
         }
     }
 
-    /// Drag-to-reorder is disabled everywhere on this page (D3); one
-    /// line, reused rather than retyped at each card it applies to.
-    private var comingSoonNote: some View {
-        SettingNote("Reordering by drag is coming soon. Add, remove and the presets below still work.")
-    }
-
     // MARK: Rows
 
     private func rowEditor(_ row: IslandRow, at index: Int) -> some View {
         HStack(spacing: Theme.Space.m) {
+            Image(systemName: "line.3.horizontal")
+                .font(Theme.Fonts.icon(.s))
+                .foregroundStyle(Theme.textGhost)
+                .frame(width: 14)
+                .accessibilityHidden(true)
             ForEach(row.elements) { element in
                 HStack(spacing: Theme.Space.s) {
                     Image(systemName: element.symbol)
@@ -92,8 +91,8 @@ struct LayoutSection: View {
                 }
             }
             Spacer(minLength: Theme.Space.m)
-            // Required elements cannot leave: without the tools and the
-            // input there is no way to use the island at all.
+            // Required elements move but cannot leave: without the tools
+            // and the input there is no way to use the island at all.
             if row.elements.allSatisfy({ !$0.isRequired }) {
                 Button {
                     remove(row)
@@ -110,15 +109,33 @@ struct LayoutSection: View {
                     .foregroundStyle(Theme.textGhost)
             }
         }
+        .contentShape(Rectangle())
+        .draggable(row.elements.first?.rawValue ?? "") {
+            // The drag preview, or macOS renders the whole row width.
+            Label(row.elements.first?.title ?? "", systemImage: row.elements.first?.symbol ?? "square")
+                .font(Theme.Fonts.body)
+                .padding(Theme.Space.m)
+                .background(Theme.surface)
+        }
+        .dropDestination(for: String.self) { items, _ in
+            guard let raw = items.first, let moved = IslandElement(rawValue: raw) else { return false }
+            move(moved, above: index)
+            return true
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(row.elements.map(\.title).joined(separator: " and ")), row \(index + 1)")
     }
 
-    /// One glance in the precedence order, with its rank shown: "first
-    /// with something to say" is a rule the list has to make visible, or
-    /// the order looks arbitrary.
+    /// One glance in the precedence order. Same drag as the rows above,
+    /// with its rank shown: "first with something to say" is a rule the
+    /// list has to make visible, or the order looks arbitrary.
     private func collapsedRow(_ item: CollapsedItem, at index: Int) -> some View {
         HStack(spacing: Theme.Space.m) {
+            Image(systemName: "line.3.horizontal")
+                .font(Theme.Fonts.icon(.s))
+                .foregroundStyle(Theme.textGhost)
+                .frame(width: 14)
+                .accessibilityHidden(true)
             Text("\(index + 1)")
                 .font(Theme.Fonts.microMono)
                 .foregroundStyle(Theme.textTertiary)
@@ -127,6 +144,19 @@ struct LayoutSection: View {
                 .font(Theme.Fonts.body)
                 .foregroundStyle(Theme.textPrimary)
             Spacer(minLength: Theme.Space.m)
+        }
+        .contentShape(Rectangle())
+        .draggable(item.rawValue) {
+            Text(item.title)
+                .font(Theme.Fonts.body)
+                .padding(Theme.Space.m)
+                .background(Theme.surface)
+        }
+        .dropDestination(for: String.self) { items, _ in
+            guard let raw = items.first, let moved = CollapsedItem(rawValue: raw)
+            else { return false }
+            layout.apply(layout.layout.movingCollapsed(moved, to: index))
+            return true
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(item.title), priority \(index + 1)")
@@ -164,6 +194,10 @@ struct LayoutSection: View {
         // `.sessions` moved into its own tab (B1) and is never placeable
         // here again, so it has no business showing up as an "Add" offer.
         return IslandElement.allCases.filter { $0 != .sessions && !placed.contains($0) }
+    }
+
+    private func move(_ element: IslandElement, above index: Int) {
+        layout.apply(layout.layout.moving(element, to: index))
     }
 
     private func remove(_ row: IslandRow) {

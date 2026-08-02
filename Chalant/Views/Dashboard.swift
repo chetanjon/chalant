@@ -91,7 +91,18 @@ final class DashboardWindowController: NSWindowController, NSWindowDelegate {
         )
         window.title = "Chalant"
         window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = true
+        // Deliberately NOT movable by its background. That convenience
+        // makes AppKit start a window drag on mouse-down anywhere that
+        // is not a control, which pre-empts a SwiftUI drag gesture on a
+        // list row: the founder reported dragging an Arrangement row
+        // and moving the whole window instead (2026-08-02), and the
+        // feature was labelled coming soon rather than fixed.
+        //
+        // The window has a title bar, so it is still draggable the way
+        // every other window is. And this is worth doing even if the
+        // row drag needs more work: without it, a failed drag moves the
+        // window, and with it a failed drag simply does nothing.
+        window.isMovableByWindowBackground = false
         window.backgroundColor = NSColor(Theme.backdropBottom)
         // The island is dark by construction and this window is its
         // other half; the system light theme would make them look like
