@@ -144,6 +144,38 @@ Both need Accessibility, which this app has deliberately avoided (the global
 shortcuts use Carbon precisely so no prompt appears and no keystrokes are
 read). A feature that surrenders that is not worth having.
 
+## Follow-up measurement: `status` is a last-transition record, not a heartbeat
+
+Taken 2026-08-01 17:42 local, four live sessions:
+
+| file | status | age of `statusUpdatedAt` |
+|---|---|---|
+| 17555.json | idle | 82.0 min |
+| 3079.json | busy | 41.7 min |
+| 4395.json | idle | 39.3 min |
+| 6436.json | idle | 101.9 min |
+
+A separate 90-second watch over all four files caught **zero** writes while a
+session was working throughout, and no inode changed.
+
+Two things follow, and they pull in opposite directions.
+
+**Good:** the file is touched only when the status actually changes, so there
+is no write storm to defend against and a slow sweep beside the directory
+watch costs nothing.
+
+**Careful:** the value can be an hour or more old. It is the last transition
+that was recorded, not a live signal, and nothing refreshes it on a timer. So
+`status` may lag reality, and the direction that matters is `busy` when the
+session has actually gone quiet: that is the case where the interface would
+promise "this arrives when the current turn ends" and the turn ended long ago.
+
+The design already tolerates this, and should keep tolerating it: liveness is
+`kill(pid, 0)`, which is authoritative, and `status` is used only to phrase
+when a message will land. **The copy must not promise a time.** "Arrives when
+this session next comes to rest" survives a stale status; "arrives in a
+moment" does not.
+
 ## What has NOT been established
 
 - Whether a Stop hook can inject text back into the model, and its exact JSON.
