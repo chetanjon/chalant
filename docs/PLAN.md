@@ -75,32 +75,40 @@ plan doc. Artifacts live in `_bmad-output/loop-loop/`.
   draw" rule and the bead's "should I yield" rule are separate. Plus clamshell
   (lid shut, on power) as a first-class case: every screen resolves to pill.
 
-- **Message an agent session from the notch** — APPROVED 2026-08-01, building.
-  Plan: `_bmad-output/loop-loop/notch-messaging-plan-2026-08-01.md`.
-  - [ ] W-E the hook exists, is findable, and its state is visible
-  - [ ] W-A liveness from the registry Claude Code already writes
-  - [ ] W-B the outbox, and the hook that collects it
-  - [ ] W-C the surface: pick a session, compose to it
-  - [ ] W-D one microphone, a named destination, nothing lost
+- **Message an agent session from the notch** — SHIPPED 2026-08-02.
+  `40f9be2` (plumbing) + `eaaff92` (surface and voice). 187 tests.
+  - [x] W-E the hook exists, is findable, and its state is visible
+  - [x] W-A liveness from the registry Claude Code already writes
+  - [x] W-B the outbox, and the hook that collects it
+  - [x] W-C the surface: pick a session, compose to it
+  - [x] W-D one microphone, a named destination, nothing lost
 
-  Founder defaults all accepted: no confirm step, no writing the user's
-  settings.json, idle sessions in the strip but not the badge, a queued
-  message is lost visibly on quit.
+  The mic did not move. It is one of three entrances to a pipeline that
+  runs reminders, timers, notes and dictated texts, so the destination
+  moved instead: a parameter on every entrance, reset before any await,
+  no mode and therefore no invisible state that sends a private note to
+  an agent. Delivery is at a turn boundary, never mid-run.
 
-  Three findings that reframed the work. `scripts/chalant-hook` is installed
-  nowhere, so the hook Chalant ships has never run and the whole path was
-  dead. `scripts/` is not in the app bundle, so a shipped Chalant carries no
-  hook to point at. And a live session that is waiting for you goes stale
-  after five minutes and leaves the island, which is exactly the session you
-  would want to message. Pick a running session in the island, speak or type, and have
-  that session act on it. The microphone moves to serve this. Whether an
-  external process can put text into a *running* session is the open question;
-  the Stop hook carries it: `hookSpecificOutput.additionalContext` lands at
-  the end of a turn and the conversation continues so Claude acts on it
-  (verified against the hooks reference). Delivery is turn-boundary only,
-  never mid-run, which the interface has to be honest about. Session
-  discovery also gets better: `claude agents --json` and `~/.claude/sessions/`
-  give the live set with busy/idle, replacing transcript scraping.
+  **Not seen on screen yet.** The compose surface has never been looked at.
+
+- **An island on every display** — APPROVED 2026-08-02, building.
+  Plan: `_bmad-output/loop-loop/island-per-display-plan-2026-08-02.md`.
+  There is one island panel that travels; every other display gets a
+  116pt bead that renders nothing. That is why only one monitor has an
+  island, why the others read as debris on someone's window, and why a
+  collapsed pill cannot show a session or a song.
+  - [ ] W-A the collapsed pill shows what the island already knows
+  - [ ] W-B `IslandFace`, with one panel still
+  - [ ] W-C a panel per display
+  - [ ] W-D hover and expansion ownership
+  - [ ] W-E remove the affordances that no longer mean anything
+  - [ ] W-F the comments stop arguing for a withdrawn position
+  - [ ] W-G remember the last tab, the sidebar toggle, the two-shape recheck
+
+  `state` stays one value because only one island can ever be open: one
+  keyboard, one WKWebView, one VoiceController. What was missing was
+  which display it applies to. Four islands cannot show *different*
+  content, since there is one Spotify and one set of sessions.
 
 ## Phase 3 — sessions become useful
 
