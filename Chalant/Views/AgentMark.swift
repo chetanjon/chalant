@@ -79,7 +79,7 @@ struct AgentMark: View {
                 // to draw, so this is plainly a pointer rather than a
                 // bad copy of their mark.
                 Image(systemName: "cursorarrow")
-                    .font(.system(size: size, weight: .semibold))
+                    .font(Theme.Fonts.icon(size: size, weight: .semibold))
             }
         }
         .frame(width: size, height: size)

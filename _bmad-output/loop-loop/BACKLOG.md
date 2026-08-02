@@ -80,21 +80,41 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
   written down: appcast.xml must reach `main`, because Pages serves `main`
   whichever branch cut the release.
 
+## H. From using it, 2026-08-02 evening
+
+- [ ] **H1. Remove the media-row microphone.** Founder decided: remove, not
+  move. "not needed near the spotify." Voice keeps the `.talk` hotkey and the
+  collapsed long-press.
+- [ ] **H2. The scrollbar in the sessions list** is visible and "messing with
+  the UI". Hide the indicator; keep the scrolling.
+- [ ] **H3. Say whether a message actually went.** "how do I know if the
+  request is being sent or not is it actually working". Today a queued message
+  shows Next/Queued, then Delivered for 2.5s. That is easy to miss entirely,
+  and nothing says it reached the model rather than merely leaving.
+- [ ] **H4. A way to test notifications.** "I want to test the notification and
+  everything." A button in the Sessions pane that fires a real one through the
+  real path, so it proves the wiring rather than faking a pill.
+- [ ] **H5. Old pills cannot be acted on.** A needs-input pill never expires by
+  design, so one can sit for hours after its session has gone; clicking it can
+  only report that the session is missing. When a session ends, its pill should
+  resolve rather than linger as something that looks actionable and is not.
+  (Two of the three the founder hit were the assistant's own uncleaned test
+  pills, since cleared.)
+
 ## E. Media (2026-08-02)
 
 - [!] **E1. The wrong app icon.** Audio playing from Dia shows Chrome's icon.
-- [ ] **E2. The media-row microphone** has no obvious purpose where it sits. It
-  drives Chalant's own voice commands (reminders, timers, notes, dictated
-  texts). Either move it beside Ask where speaking makes sense, or remove it
-  and leave the hotkey and long-press. Founder to decide; recommendation is
-  move.
+- [x] **E2. The media-row microphone** - decided: remove. See H1.
 
 ## F. Bigger, already agreed
 
-- [ ] **F1. Drag and drop inside the island.** The founder corrected me twice:
-  arrangement should happen on the real surface, not only as a list in the
-  dashboard. Needs one decision first: does a drag on one display rearrange
-  that display, or all of them? Recommendation: all, shared.
+- [ ] **F1. Drag and drop inside the island.** Decided 2026-08-02: **one
+  shared arrangement**, a drag anywhere applies everywhere. No per-display
+  copy, no migration.
+  Likely root cause of the dashboard's version already found: the dashboard
+  window sets `isMovableByWindowBackground = true`, so a drag on a row is a
+  drag on the window. That would make D3 a real fix rather than a label, and
+  the same mechanism is what the island needs.
 - [~] **F2. The logo.** Three directions sent 2026-08-02: the island solid,
   the island as an open stroke, and the island with a glance in it. Each at
   icon and menu-bar size and on a light Dock. Awaiting a pick, then the full

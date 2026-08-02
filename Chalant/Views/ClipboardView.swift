@@ -61,21 +61,19 @@ struct ClipboardView: View {
     /// actually spans more than one page.
     private func pageControls(current: Int, count: Int) -> some View {
         HStack(spacing: Theme.Space.s) {
-            IconActionButton(symbol: "chevron.left", dim: current == 0) {
+            IconActionButton(symbol: "chevron.left", label: "Previous page", dim: current == 0) {
                 guard current > 0 else { return }
                 page = current - 1
             }
-            .help("Previous page")
             Spacer()
             Text("Page \(current + 1) of \(count)")
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(Theme.textTertiary)
             Spacer()
-            IconActionButton(symbol: "chevron.right", dim: current == count - 1) {
+            IconActionButton(symbol: "chevron.right", label: "Next page", dim: current == count - 1) {
                 guard current < count - 1 else { return }
                 page = current + 1
             }
-            .help("Next page")
         }
         .padding(.horizontal, Theme.Space.s)
     }

@@ -544,6 +544,11 @@ struct GlyphImage: View {
 
 struct HoverGlyphButton: View {
     let symbol: String
+    /// What this button does, said once and read twice: as the hover
+    /// tooltip and as the VoiceOver name. A bare glyph has no other way
+    /// to say either (WCAG 4.1.2, icon-only controls need an accessible
+    /// name).
+    let label: String
     var scale: Theme.Fonts.IconScale = .s
     var tint: Color = Theme.textSecondary
     var weight: Font.Weight = .semibold
@@ -562,6 +567,8 @@ struct HoverGlyphButton: View {
         .buttonStyle(PressableStyle())
         .onHover { hovered = $0 }
         .animation(Theme.Motion.hover, value: hovered)
+        .help(label)
+        .accessibilityLabel(label)
     }
 
     /// One step up the text hierarchy; colors outside it keep their
@@ -574,13 +581,19 @@ struct HoverGlyphButton: View {
 }
 
 /// The one close affordance, everywhere a surface can be dismissed.
+///
+/// Reused past its own name for anything an X can end (stop a focus
+/// session, reset a stopwatch): the label is what tells those apart,
+/// defaulting to the literal "Close" for the common case.
 struct CloseButton: View {
     var scale: Theme.Fonts.IconScale = .xs
+    var label = "Close"
     let action: () -> Void
 
     var body: some View {
         HoverGlyphButton(
             symbol: "xmark",
+            label: label,
             scale: scale,
             tint: Theme.textTertiary,
             weight: .bold,
@@ -612,6 +625,9 @@ struct HuggingList<Content: View>: View {
 /// Small icon-only row action (copy, delete, share...).
 struct IconActionButton: View {
     let symbol: String
+    /// What this action does; becomes both the hover tooltip and the
+    /// VoiceOver name, since the glyph alone says neither.
+    let label: String
     var tint: Color = Theme.textSecondary
     var dim = false
     let action: () -> Void
@@ -619,6 +635,7 @@ struct IconActionButton: View {
     var body: some View {
         HoverGlyphButton(
             symbol: symbol,
+            label: label,
             scale: .s,
             tint: dim ? Theme.textTertiary : tint,
             action: action
@@ -710,6 +727,10 @@ struct NoiseButton: View {
         }
         .buttonStyle(PressableStyle())
         .help(name)
+        // Compact mode drops the visible name and leaves only the
+        // glyph (the ambience row's tight track); VoiceOver needs the
+        // same word the tooltip already carries.
+        .accessibilityLabel(name)
         .onHover { hovered = $0 }
         .animation(Theme.Motion.hover, value: hovered)
     }

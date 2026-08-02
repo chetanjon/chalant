@@ -133,6 +133,15 @@ enum Theme {
         static func icon(_ scale: IconScale, weight: Font.Weight = .semibold) -> Font {
             .system(size: scale.rawValue, weight: weight)
         }
+
+        /// The same weight convention, for the rare glyph whose size has
+        /// to track a caller-supplied dimension rather than sit on the
+        /// fixed scale above (the agent mark, matched to its row's own
+        /// height). Routing it through here still means one place sets
+        /// the weight, rather than a bare `.system(size:)` reinventing it.
+        static func icon(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+            .system(size: size, weight: weight)
+        }
     }
 
     /// Spacing rhythm. Named exceptions live here too, so a raw
