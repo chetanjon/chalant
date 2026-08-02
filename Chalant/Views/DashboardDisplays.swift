@@ -164,6 +164,15 @@ struct DisplaysSection: View {
                     "Inner padding", screen, \.contentPadding,
                     range: DisplayConfigStore.Config.paddingRange, unit: "pt")
                 SettingNote("Room down each side of the island when it is open.")
+                SettingDivider()
+                slider(
+                    "Expanded width", screen, \.expandedWidth,
+                    range: DisplayConfigStore.Config.expandedWidthRange, unit: "pt")
+                SettingDivider()
+                slider(
+                    "Minimum height", screen, \.expandedMinHeight,
+                    range: DisplayConfigStore.Config.expandedMinHeightRange, unit: "pt")
+                SettingNote("The island grows past this when what is open needs more room.")
             }
         }
 

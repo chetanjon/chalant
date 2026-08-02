@@ -134,6 +134,32 @@ final class NotchViewModel: ObservableObject {
     /// the island hugs what's shown instead of reserving a fixed void.
     @Published var expandedSize = CGSize(width: 520, height: 170)
 
+    /// The expanded island's width: the user's own dial, except while
+    /// full chat is open, where the chat site's desktop breakpoint at
+    /// 0.8 zoom needs 680 regardless of what the dial says (W-F,
+    /// 2026-08-02). A floor under the dial there, never a ceiling on
+    /// it: a wider dial than 680 still wins.
+    ///
+    /// Pulled out of `ExpandedView.islandWidth` so `expandedZone(on:)`
+    /// can compute the identical number before any layout pass runs:
+    /// a hover-out door sized from a stale, one-frame-late width could
+    /// let the pointer fall outside it mid-drag and collapse the
+    /// island out from under it (EC-11).
+    static func expandedWidth(
+        configWidth: CGFloat, tab: Tab, pane: Pane, chatFull: Bool
+    ) -> CGFloat {
+        tab == .chat && pane == .none && chatFull ? max(configWidth, 680) : configWidth
+    }
+
+    /// The expanded island's height: whatever the content measured,
+    /// unless the user's own floor asks for more. Never the other way
+    /// around, a ceiling here would clip the chat pane or the notes
+    /// list with no scrollbar and no sign anything was cut (EC-10,
+    /// W-F, 2026-08-02).
+    static func expandedHeight(measured: CGFloat, floor: CGFloat) -> CGFloat {
+        max(measured, floor)
+    }
+
     /// Debug builds show the drop bubble on request; the window
     /// controller owns the panel, so it hangs the hook here.
     var onDebugDropDock: (() -> Void)?

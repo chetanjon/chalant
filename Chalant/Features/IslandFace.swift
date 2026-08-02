@@ -44,6 +44,13 @@ final class IslandFace: ObservableObject {
     @Published var cornerRadius: CGFloat = Theme.Island.radiusCollapsed
     /// Room down each side of the expanded island here.
     @Published var contentPadding: CGFloat = Theme.Space.xl
+    /// The expanded island's width here, the user's own dial
+    /// (`DisplayConfigStore.Config.expandedWidth`, W-F, 2026-08-02).
+    @Published var expandedWidth: CGFloat = 520
+    /// A floor under the expanded island's height here, never a
+    /// ceiling: content always wins over this number
+    /// (`DisplayConfigStore.Config.expandedMinHeight`, EC-10).
+    @Published var expandedMinHeight: CGFloat = 0
     /// The pointer is on this display's island right now.
     @Published var isHovering = false
     /// The pointer is in this display's top-edge door, before any

@@ -57,8 +57,19 @@ final class DisplayConfigStore: ObservableObject {
         var height: CGFloat = 38
         /// The island's bottom corners when collapsed.
         var cornerRadius: CGFloat = 16
-        /// Breathing room down each side of the expanded island.
-        var contentPadding: CGFloat = 16
+        /// Breathing room down each side of the expanded island. 20
+        /// rather than 16: the founder's complaint that content sits
+        /// too close to the borders landed here as much as anywhere
+        /// (W-E, 2026-08-02).
+        var contentPadding: CGFloat = 20
+        /// The expanded island's width. The one dimension content
+        /// cannot ask for on its own behalf; `ExpandedView` imposes it
+        /// directly and lets height stay intrinsic (W-F, 2026-08-02).
+        var expandedWidth: CGFloat = 520
+        /// A floor under the expanded island's height, never a
+        /// ceiling: content always wins over this number (EC-10). Zero
+        /// is today's behaviour, purely content-measured.
+        var expandedMinHeight: CGFloat = 0
 
         /// Bounds that keep a slider (or a hand-edited defaults blob)
         /// from producing a shape that cannot be seen or dismissed.
@@ -66,6 +77,8 @@ final class DisplayConfigStore: ObservableObject {
         static let heightRange: ClosedRange<CGFloat> = 20...60
         static let cornerRange: ClosedRange<CGFloat> = 0...32
         static let paddingRange: ClosedRange<CGFloat> = 8...36
+        static let expandedWidthRange: ClosedRange<CGFloat> = 420...840
+        static let expandedMinHeightRange: ClosedRange<CGFloat> = 0...480
 
         /// Applied on read as well as on write: a value that arrived
         /// from disk has not been through the UI and cannot be trusted
@@ -78,7 +91,44 @@ final class DisplayConfigStore: ObservableObject {
                 max(cornerRadius, Self.cornerRange.lowerBound), Self.cornerRange.upperBound)
             copy.contentPadding = min(
                 max(contentPadding, Self.paddingRange.lowerBound), Self.paddingRange.upperBound)
+            copy.expandedWidth = min(
+                max(expandedWidth, Self.expandedWidthRange.lowerBound),
+                Self.expandedWidthRange.upperBound)
+            copy.expandedMinHeight = min(
+                max(expandedMinHeight, Self.expandedMinHeightRange.lowerBound),
+                Self.expandedMinHeightRange.upperBound)
             return copy
+        }
+
+        init() {}
+
+        private enum CodingKeys: String, CodingKey {
+            case style, width, height, cornerRadius, contentPadding
+            case expandedWidth, expandedMinHeight
+        }
+
+        /// A hand-written decode, not the synthesized one it replaces.
+        /// Verified by throwing a real decode at the synthesized
+        /// version first, rather than assuming: a blob written before
+        /// this build (missing `expandedWidth`/`expandedMinHeight`)
+        /// threw `keyNotFound`, and `load()` below answers any decode
+        /// failure by deleting the whole stored map. Adding these two
+        /// fields would otherwise have wiped every existing user's
+        /// per-display settings on the first launch after the upgrade.
+        /// Every property here is `decodeIfPresent` with its own
+        /// default, so an older blob (missing the newest keys) and a
+        /// current one (missing nothing) both succeed, and a field
+        /// this struct gains later never wipes what came before it.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            style = try c.decodeIfPresent(Style.self, forKey: .style) ?? .auto
+            width = try c.decodeIfPresent(CGFloat.self, forKey: .width) ?? 196
+            height = try c.decodeIfPresent(CGFloat.self, forKey: .height) ?? 38
+            cornerRadius = try c.decodeIfPresent(CGFloat.self, forKey: .cornerRadius) ?? 16
+            contentPadding = try c.decodeIfPresent(CGFloat.self, forKey: .contentPadding) ?? 20
+            expandedWidth = try c.decodeIfPresent(CGFloat.self, forKey: .expandedWidth) ?? 520
+            expandedMinHeight =
+                try c.decodeIfPresent(CGFloat.self, forKey: .expandedMinHeight) ?? 0
         }
     }
 

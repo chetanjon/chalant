@@ -84,7 +84,7 @@ struct NotchRootView: View {
     /// keeps moving reads as something still busy.
     @ViewBuilder
     private func agentMarkGlance(_ agents: (count: Int, waiting: Bool)) -> some View {
-        let content = HStack(spacing: 3) {
+        let content = HStack(spacing: Theme.Space.xs) {
             AgentMark(agent: .claude, size: 10, state: agents.waiting ? .needsInput : .working)
             if agents.count > 1 {
                 Text("\(agents.count)")
@@ -603,7 +603,7 @@ struct NotchRootView: View {
     /// whole time with no view reading it.
     private func batteryGlance(_ battery: SystemStatsController.Battery) -> some View {
         let low = battery.level <= 20 && !battery.charging
-        return HStack(spacing: 3) {
+        return HStack(spacing: Theme.Space.xs) {
             // The glyph carries charging and low on its own, so the
             // number is never the only thing saying which it is.
             Image(systemName: battery.charging ? "bolt.fill" : (low ? "battery.25" : "battery.100"))
@@ -648,7 +648,7 @@ struct NotchRootView: View {
     /// few seconds, then gone.
     private func toastGlance(_ text: String) -> some View {
         Text(text)
-            .font(Theme.Fonts.captionMono)
+            .font(Theme.Fonts.microMono)
             .foregroundStyle(accent)
             .lineLimit(1)
             .transition(.opacity)
@@ -731,7 +731,7 @@ struct NotchRootView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
-        .frame(maxWidth: 140, alignment: .leading)
+        .frame(maxWidth: Theme.Island.songGlanceWidth, alignment: .leading)
     }
 
     private var listeningContent: some View {
@@ -768,7 +768,7 @@ struct NotchRootView: View {
                     .lineLimit(1)
             }
         }
-        .padding(.top, face.contentTopReserve + 6)
+        .padding(.top, face.contentTopReserve + Theme.Space.notchClearance)
         .contentShape(Rectangle())
         .onTapGesture {
             model.endListening()
@@ -777,7 +777,7 @@ struct NotchRootView: View {
             CloseButton {
                 model.cancelListening()
             }
-            .padding(.top, face.contentTopReserve + Theme.Space.xs)
+            .padding(.top, face.contentTopReserve + Theme.Space.notchClearance)
             .padding(.trailing, Theme.Space.m)
         }
     }

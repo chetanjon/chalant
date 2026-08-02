@@ -155,9 +155,9 @@ enum Theme {
         /// Room below the notch's own reserved strip, wherever content
         /// has to clear it: the listening caption, its close button,
         /// and the expanded island's first row each wrote their own
-        /// number for the identical job — 8, 6 and 4 — and the founder's
-        /// complaint that content sits too close to the top edge landed
-        /// on the tightest of the three (EC-14, 2026-08-02).
+        /// number for the identical job (8, 6 and 4), and the
+        /// founder's complaint that content sits too close to the top
+        /// edge landed on the tightest of the three (EC-14, 2026-08-02).
         static let notchClearance: CGFloat = l
     }
 

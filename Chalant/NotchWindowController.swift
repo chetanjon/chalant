@@ -162,7 +162,10 @@ final class NotchWindowController {
     /// display, this always compares a face against itself, never one
     /// face against another's numbers.
     private func islandGeometry(of face: IslandFace) -> [AnyHashable] {
-        [face.displayID, face.notchSize, face.style, face.cornerRadius, face.contentPadding]
+        [
+            face.displayID, face.notchSize, face.style, face.cornerRadius, face.contentPadding,
+            face.expandedWidth, face.expandedMinHeight,
+        ]
     }
 
     /// Measure the target screen and write the face's geometry — the
@@ -190,6 +193,8 @@ final class NotchWindowController {
         face.style = style
         face.cornerRadius = config.cornerRadius
         face.contentPadding = config.contentPadding
+        face.expandedWidth = config.expandedWidth
+        face.expandedMinHeight = config.expandedMinHeight
         face.displayID = screen.displayID
         // hasPhysicalNotch used to be written here too; it is now
         // derived from style (IslandFace.hasPhysicalNotch), so a screen
@@ -622,13 +627,14 @@ final class NotchWindowController {
                   let ownerScreen = NSScreen.screens.first(where: { $0.displayID == ownerID }),
                   let ownerFace = faces[ownerID]
             else { return }
-            publishPointerUnit(location, zone: expandedZone(on: ownerScreen), face: ownerFace)
+            publishPointerUnit(
+                location, zone: expandedZone(on: ownerScreen, face: ownerFace), face: ownerFace)
             for (id, face) in faces where id != ownerID {
                 if face.pointerUnit != nil { face.pointerUnit = nil }
             }
             openIntentWork?.cancel()
             openIntentWork = nil
-            let inside = expandedZone(on: ownerScreen).contains(location)
+            let inside = expandedZone(on: ownerScreen, face: ownerFace).contains(location)
             guard inside != pointerInside else { return }
             // Freshly opened islands don't close; kills any fast cycle.
             if !inside, Date().timeIntervalSince(lastOpenAt) < minimumOpen { return }
@@ -814,8 +820,9 @@ final class NotchWindowController {
         case .expanded:
             lastOpenAt = Date()
             if let id = viewModel.expandedDisplayID,
-               let screen = NSScreen.screens.first(where: { $0.displayID == id }) {
-                pointerInside = expandedZone(on: screen).contains(NSEvent.mouseLocation)
+               let screen = NSScreen.screens.first(where: { $0.displayID == id }),
+               let face = faces[id] {
+                pointerInside = expandedZone(on: screen, face: face).contains(NSEvent.mouseLocation)
             }
         case .listening:
             break
@@ -894,9 +901,21 @@ final class NotchWindowController {
         )
     }
 
-    private func expandedZone(on screen: NSScreen) -> NSRect {
-        let size = viewModel.expandedSize
-        return hoverZone(on: screen, width: size.width + 28, height: size.height + 16)
+    /// Width from the owner's own config, not the measured size: a
+    /// door sized from `viewModel.expandedSize` lands one layout pass
+    /// after a width-slider drag re-lays the content out, so for one
+    /// frame the door is still the old width and the pointer can fall
+    /// outside it and collapse the island mid-drag (EC-11). Height has
+    /// no such door, it only ever grows from content or a floor, both
+    /// already reflected in `expandedSize` by the time this runs, so
+    /// it still reads the measurement.
+    private func expandedZone(on screen: NSScreen, face: IslandFace) -> NSRect {
+        let chatFull = UserDefaults.standard.object(forKey: "chatFull") as? Bool ?? false
+        let width = NotchViewModel.expandedWidth(
+            configWidth: face.expandedWidth, tab: viewModel.tab, pane: viewModel.pane,
+            chatFull: chatFull)
+        let height = viewModel.expandedSize.height
+        return hoverZone(on: screen, width: width + 28, height: height + 16)
     }
 
     /// A rect hanging from the top-center of the screen, in the global

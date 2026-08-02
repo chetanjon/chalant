@@ -1107,6 +1107,19 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(plain.clamped, plain)
     }
 
+    func testTheExpandedSizeDialsAreClampedLikeTheOldOnes() {
+        // W-F adds two new sliders; a hand-edited or corrupted blob
+        // must not be able to produce an expanded island that cannot
+        // be seen either.
+        var wild = DisplayConfigStore.Config()
+        wild.expandedWidth = 5
+        wild.expandedMinHeight = -40
+        let safe = wild.clamped
+        XCTAssertEqual(safe.expandedWidth, DisplayConfigStore.Config.expandedWidthRange.lowerBound)
+        XCTAssertEqual(
+            safe.expandedMinHeight, DisplayConfigStore.Config.expandedMinHeightRange.lowerBound)
+    }
+
     func testConfigsRoundTripThroughJSON() throws {
         var config = DisplayConfigStore.Config()
         config.style = .pill
@@ -1115,6 +1128,32 @@ final class SessionStoreTests: XCTestCase {
         let data = try JSONEncoder().encode(["screen-uuid": config])
         let back = try JSONDecoder().decode([String: DisplayConfigStore.Config].self, from: data)
         XCTAssertEqual(back["screen-uuid"], config)
+    }
+
+    func testAStoredBlobFromAnOlderBuildKeepsItsValues() throws {
+        // Exactly today's key set: `expandedWidth` and
+        // `expandedMinHeight` both absent, the way every already
+        // installed user's stored blob reads the moment this build
+        // lands. Verified by throwing this exact decode at the
+        // synthesized `Codable` first: it threw `keyNotFound`, and
+        // `load()` answers any decode failure by deleting the whole
+        // stored map, so a field this struct gains would otherwise
+        // wipe every existing display's settings on the first launch
+        // after the upgrade (EC-1).
+        let json = """
+            {"style":"pill","width":210,"height":40,"cornerRadius":10,"contentPadding":18}
+            """
+        let config = try JSONDecoder().decode(
+            DisplayConfigStore.Config.self, from: Data(json.utf8))
+        XCTAssertEqual(config.style, .pill)
+        XCTAssertEqual(config.width, 210)
+        XCTAssertEqual(config.height, 40)
+        XCTAssertEqual(config.cornerRadius, 10)
+        XCTAssertEqual(config.contentPadding, 18)
+        // Keys this build adds were never written; the property's own
+        // default stands in rather than the whole decode failing.
+        XCTAssertEqual(config.expandedWidth, 520)
+        XCTAssertEqual(config.expandedMinHeight, 0)
     }
 
     func testUnreadableStoredSettingsAreDroppedRatherThanFailingEveryLaunch() throws {
@@ -1299,6 +1338,46 @@ final class SessionStoreTests: XCTestCase {
         // holding the left one, on either style.
         XCTAssertEqual(NotchViewModel.timersWidth(sessionOnRight: false, style: .pill), 0)
         XCTAssertEqual(NotchViewModel.timersWidth(sessionOnRight: false, style: .notch), 0)
+    }
+
+    // MARK: One number for a reservation and what fills it (W-E, EC-13)
+
+    func testTheSongGlanceReservesExactlyWhatItDraws() {
+        // `leftWingNeed`'s song branch and `songBeside`'s frame both
+        // read this one constant now, rather than 156 and 140 written
+        // separately in two files; pinning the number is what stops
+        // them drifting apart again the way they already had once.
+        XCTAssertEqual(Theme.Island.songGlanceWidth, 140)
+    }
+
+    // MARK: Expanded size, a dial and a floor that is never a ceiling
+    // (W-F)
+
+    func testChatFullKeepsItsBreakpointAboveAUserWidth() {
+        // The chat site's desktop breakpoint at 0.8 zoom needs 680; a
+        // user who dialed the island down must not undercut it while
+        // full-mode chat is open.
+        XCTAssertEqual(
+            NotchViewModel.expandedWidth(
+                configWidth: 600, tab: .chat, pane: .none, chatFull: true), 680)
+        // A dial already past the breakpoint wins on its own merits.
+        XCTAssertEqual(
+            NotchViewModel.expandedWidth(
+                configWidth: 720, tab: .chat, pane: .none, chatFull: true), 720)
+        // Anywhere else, or with full mode off, the dial is just the width.
+        XCTAssertEqual(
+            NotchViewModel.expandedWidth(
+                configWidth: 600, tab: .today, pane: .none, chatFull: true), 600)
+        XCTAssertEqual(
+            NotchViewModel.expandedWidth(
+                configWidth: 600, tab: .chat, pane: .none, chatFull: false), 600)
+    }
+
+    func testTheExpandedHeightIsAFloorAndContentStillWins() {
+        XCTAssertEqual(NotchViewModel.expandedHeight(measured: 170, floor: 300), 300)
+        XCTAssertEqual(NotchViewModel.expandedHeight(measured: 400, floor: 300), 400)
+        // No floor set at all is today's behaviour: purely content-measured.
+        XCTAssertEqual(NotchViewModel.expandedHeight(measured: 170, floor: 0), 170)
     }
 
     func testOnlyTheDisplayThatWasOpenedReadsAsOpen() {

@@ -42,12 +42,14 @@ struct ExpandedView: View {
 
     private var todayEnabled: Bool { showCalendar || showReminders }
 
-    /// Chat costs nothing by default: compact mode keeps the island
-    /// at its everyday 520 and renders the site single-column. Full
-    /// mode (the expand glyph in the pane) grows to 680, where 0.8
-    /// zoom crosses the desktop breakpoint and the sidebar returns.
+    /// The user's own width dial by default (`face.expandedWidth`,
+    /// W-F). Full-mode chat (the expand glyph in the pane) is the one
+    /// exception: 680 is where 0.8 zoom crosses the chat site's
+    /// desktop breakpoint and the sidebar returns, so it survives as a
+    /// floor under the dial there, never a ceiling on it.
     private var islandWidth: CGFloat {
-        model.tab == .chat && model.pane == .none && chatFull ? 680 : 520
+        NotchViewModel.expandedWidth(
+            configWidth: face.expandedWidth, tab: model.tab, pane: model.pane, chatFull: chatFull)
     }
 
     private var enabledTools: [NotchViewModel.Tab] {
@@ -71,7 +73,10 @@ struct ExpandedView: View {
                 if row.elements.count == 1 {
                     element(row.elements[0])
                 } else {
-                    HStack(alignment: .top, spacing: Theme.Space.l) {
+                    // Tighter than the gap between rows (below), so a
+                    // two-up row's pair reads as one group and the rows
+                    // themselves read as separate ones (EC-15).
+                    HStack(alignment: .top, spacing: Theme.Space.m) {
                         ForEach(row.elements) { each in
                             element(each)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -88,7 +93,7 @@ struct ExpandedView: View {
             }
         }
         .padding(.horizontal, face.contentPadding)
-        .padding(.top, face.contentTopReserve + Theme.Space.m)
+        .padding(.top, face.contentTopReserve + Theme.Space.notchClearance)
         // The same inset as the sides, so the island reads as one box
         // rather than three different margins. It was 10 against the
         // sides' 16, which left the input crowded against the bottom
@@ -124,7 +129,10 @@ struct ExpandedView: View {
                         // first target curves into the real one as one
                         // continuous expansion.
                         withAnimation(Theme.Motion.island) {
-                            model.expandedSize = size
+                            model.expandedSize = CGSize(
+                                width: size.width,
+                                height: NotchViewModel.expandedHeight(
+                                    measured: size.height, floor: face.expandedMinHeight))
                         }
                     }
                     // A tab switch can slip past the size observer and
@@ -135,7 +143,10 @@ struct ExpandedView: View {
                         DispatchQueue.main.async {
                             let size = geo.size
                             guard size.height > 0 else { return }
-                            model.expandedSize = size
+                            model.expandedSize = CGSize(
+                                width: size.width,
+                                height: NotchViewModel.expandedHeight(
+                                    measured: size.height, floor: face.expandedMinHeight))
                         }
                     }
             }
@@ -640,7 +651,7 @@ struct TodayView: View {
 
     /// The empty moment, in the island's own voice.
     private var clearDay: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
             Text("Clear water.")
                 .font(Theme.Fonts.reading)
                 .foregroundStyle(Theme.textSecondary)
