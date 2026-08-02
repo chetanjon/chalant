@@ -6,6 +6,10 @@ import Foundation
 /// saved by an older build has to keep meaning the same thing.
 enum IslandElement: String, Codable, CaseIterable, Identifiable, Sendable {
     case media
+    /// Moved into its own tab (B1, founder 2026-08-02: "add a tab to
+    /// see a list of all the sessions running"). The case stays only so
+    /// a layout saved before that migration still decodes; `repaired()`
+    /// never places it as a row again, whatever a stored layout says.
     case sessions
     case activities
     case ambience
@@ -123,7 +127,6 @@ struct IslandLayout: Codable, Equatable, Sendable {
             IslandRow([.timers]),
             IslandRow([.media]),
             IslandRow([.activities]),
-            IslandRow([.sessions]),
             IslandRow([.ambience]),
             IslandRow([.switcher]),
             IslandRow([.input]),
@@ -171,12 +174,15 @@ struct IslandLayout: Codable, Equatable, Sendable {
         var fixedRows: [IslandRow] = []
         for row in rows {
             let unique = row.elements
-                .filter { seen.insert($0).inserted }
+                // `.sessions` moved into its own tab (B1) and is never a
+                // row again, even for a layout saved before that, which
+                // may still list it here.
+                .filter { $0 != .sessions && seen.insert($0).inserted }
                 .prefix(IslandRow.maxColumns)
             if !unique.isEmpty { fixedRows.append(IslandRow(Array(unique))) }
         }
         let known = Set(knownElements)
-        for element in IslandElement.allCases where !seen.contains(element) {
+        for element in IslandElement.allCases where element != .sessions && !seen.contains(element) {
             // Required, or new since this layout was written. An
             // optional element the user deliberately removed is known
             // and absent, and stays that way.

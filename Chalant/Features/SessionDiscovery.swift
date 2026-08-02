@@ -124,8 +124,16 @@ final class SessionDiscovery {
             return
         }
         watchDirectory(root.path)
-        rescanAll()
-        Self.log.debug("sessions found on launch: \(self.tracked.count, privacy: .public)")
+        // Deferred rather than called straight through: this scrape
+        // reads transcript tails and can walk the filesystem to resolve
+        // a cwd, which is the slow half of session loading (B3). Firing
+        // it a turn later lets whatever the cheap registry sweep already
+        // painted reach the screen first, instead of both finishing
+        // before the notch gets its first frame.
+        Task { @MainActor in
+            self.rescanAll()
+            Self.log.debug("sessions found on launch: \(self.tracked.count, privacy: .public)")
+        }
         staleTimer = Timer.scheduledTimer(
             withTimeInterval: Self.staleRecheckInterval, repeats: true
         ) { [weak self] _ in

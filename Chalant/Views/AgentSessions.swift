@@ -5,8 +5,13 @@ import SwiftUI
 /// metadata files Claude Code already writes. Only sessions that are
 /// actually going appear: a developer's machine carries months of
 /// history, and listing all of it would push a wall of finished work
-/// into a surface whose whole premise is calm. Nothing running, nothing
-/// rendered — the strip costs an idle island zero pixels.
+/// into a surface whose whole premise is calm.
+///
+/// Its own tab rather than a row in the island body (B1, founder
+/// 2026-08-02: "add a tab to see a list of all the sessions running
+/// instead of making it exist in the view directly"). `HuggingList`
+/// hugs the few and scrolls the many, so the tab shows every live
+/// session rather than three plus a count.
 ///
 /// Named for agents rather than sessions because "session" is already
 /// taken here by the focus/timer strip (`SessionStrip`); the store keeps
@@ -18,11 +23,6 @@ struct AgentSessionsStrip: View {
     /// than as this view's own `@State`.
     @ObservedObject var model: NotchViewModel
     @Environment(\.chalantAccent) private var accent
-
-    /// Three rows sit beside media, ambience and the switcher without
-    /// the island outgrowing its panel. Beyond that the count carries
-    /// the news, which is all a fourth row would have said anyway.
-    private static let visibleLimit = 3
 
     /// Working, waiting, or idle — anything actually alive. `stale` is
     /// honest about what discovery can know from a file alone — "last
@@ -43,27 +43,22 @@ struct AgentSessionsStrip: View {
         // below, the map sent the type checker into an expression it
         // could not solve in reasonable time and the build hung.
         let liveIDs: [String] = live.map(\.id)
-        if !live.isEmpty {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                ForEach(live.prefix(Self.visibleLimit)) { session in
-                    row(session)
-                }
-                if live.count > Self.visibleLimit {
-                    // The count is the whole point of this line, so it
-                    // reads at the tier for guidance rather than the one
-                    // reserved for marks that say nothing.
-                    Text("\(live.count - Self.visibleLimit) more running")
-                        .font(Theme.Fonts.caption)
-                        .foregroundStyle(Theme.textHint)
-                        .padding(.horizontal, Theme.Space.l)
+        Group {
+            if live.isEmpty {
+                EmptyPaneHint(message: "Nothing running. Start Claude Code in any terminal and it shows up here.")
+            } else {
+                HuggingList {
+                    ForEach(live) { session in
+                        row(session)
+                    }
                 }
             }
-            // Same rule as ActivitiesStrip: the id list, not the rows.
-            // Discovery rewrites `updatedAt` on every rescan, and
-            // animating the sessions themselves re-ran the strip's
-            // animation each time for no visible change.
-            .animation(Theme.Motion.content, value: liveIDs)
         }
+        // Same rule as ActivitiesStrip: the id list, not the rows.
+        // Discovery rewrites `updatedAt` on every rescan, and animating
+        // the sessions themselves re-ran the strip's animation each
+        // time for no visible change.
+        .animation(Theme.Motion.content, value: liveIDs)
     }
 
     private func row(_ session: SessionStore.Session) -> some View {

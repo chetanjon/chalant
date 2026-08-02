@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import os
 
 @MainActor
 final class ClipboardStore: ObservableObject {
@@ -12,8 +13,8 @@ final class ClipboardStore: ObservableObject {
         var text: String?
         var imageURL: URL?
         var filePaths: [String]?
-        /// Pinned clips float to the top, never age out, and come
-        /// back after a relaunch. History stays ephemeral.
+        /// Pinned clips float to the top and never age out; plain
+        /// history is everything else. Both persist across a relaunch.
         var pinned = false
 
         var isImage: Bool { imageURL != nil }
@@ -25,7 +26,9 @@ final class ClipboardStore: ObservableObject {
     }
 
     /// Invariant: pinned clips first (newest pin first), then unpinned
-    /// by recency. Views can render straight through.
+    /// by recency. Views can render straight through. This is the
+    /// whole durable history, not a capped window: nothing here ages
+    /// out on its own, so it can grow large over a long-lived install.
     @Published var clips: [Clip] = []
 
     /// Whether a clip answers to a search.
@@ -57,15 +60,28 @@ final class ClipboardStore: ObservableObject {
 
     private var timer: Timer?
     private var lastChangeCount = NSPasteboard.general.changeCount
-    private let maxClips = 30
 
-    /// Standard flag password managers set on sensitive copies.
-    /// Chalant never stores anything marked with it.
-    private let concealedType = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
-    private let transientType = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
+    /// Standard flags password managers and other "don't persist this"
+    /// tools set on a sensitive copy. Chalant never stores anything
+    /// marked with either, on the system pasteboard or in history.
+    /// A pure function of the pasteboard's declared types, so the gate
+    /// is testable without touching the live system pasteboard.
+    static func isSensitive(_ types: [NSPasteboard.PasteboardType]) -> Bool {
+        types.contains(NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+            || types.contains(NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+    }
 
-    init() {
-        loadPinned()
+    private static let log = Logger(subsystem: "com.cj.chalant", category: "clipboard")
+
+    /// Where the index and image files live. Always Application
+    /// Support in production; a test passes its own scratch
+    /// directory so a persistence test can never touch a real
+    /// install's history.
+    private let clipsDir: URL
+
+    init(clipsDirectory: URL? = nil) {
+        clipsDir = clipsDirectory ?? Self.defaultClipsDirectory()
+        loadIndex()
     }
 
     func start() {
@@ -92,8 +108,7 @@ final class ClipboardStore: ObservableObject {
         guard pasteboard.changeCount != lastChangeCount else { return }
         lastChangeCount = pasteboard.changeCount
 
-        if let types = pasteboard.types,
-           types.contains(concealedType) || types.contains(transientType) {
+        if let types = pasteboard.types, Self.isSensitive(types) {
             return
         }
 
@@ -120,7 +135,7 @@ final class ClipboardStore: ObservableObject {
 
         // Otherwise a copied image or screenshot (Cmd-Ctrl-Shift-4).
         if let image = NSImage(pasteboard: pasteboard),
-           let url = Self.savePNG(image) {
+           let url = savePNG(image) {
             insert(Clip(imageURL: url))
         }
     }
@@ -129,7 +144,7 @@ final class ClipboardStore: ObservableObject {
     /// picture from the browser); joins history like a copied image.
     @discardableResult
     func addImage(_ image: NSImage) -> Bool {
-        guard let url = Self.savePNG(image) else { return false }
+        guard let url = savePNG(image) else { return false }
         insert(Clip(imageURL: url))
         return true
     }
@@ -149,18 +164,15 @@ final class ClipboardStore: ObservableObject {
         clips.first { !$0.pinned }
     }
 
-    /// New arrivals land at the top of the unpinned section, and only
-    /// unpinned history counts toward the cap.
+    /// New arrivals land at the top of the unpinned section. Every
+    /// copy is kept: "so I dont lose anything that I copied" ruled
+    /// out a count-based cap. Disk is the only limit now, the same as
+    /// Finder or Photos, and the row's own remove button is the one
+    /// way a clip leaves history.
     private func insert(_ clip: Clip) {
         let pinnedCount = clips.prefix { $0.pinned }.count
         clips.insert(clip, at: pinnedCount)
-        let unpinned = clips.filter { !$0.pinned }
-        if unpinned.count > maxClips {
-            for evicted in unpinned.suffix(unpinned.count - maxClips) {
-                evicted.imageURL.map { try? FileManager.default.removeItem(at: $0) }
-                clips.removeAll { $0.id == evicted.id }
-            }
-        }
+        saveIndex()
     }
 
     /// Pin lands it on top of the keepers; unpin returns it to the top
@@ -175,7 +187,7 @@ final class ClipboardStore: ObservableObject {
             let pinnedCount = clips.prefix { $0.pinned }.count
             clips.insert(moved, at: pinnedCount)
         }
-        savePinned()
+        saveIndex()
     }
 
     func copyBack(_ clip: Clip) {
@@ -192,40 +204,81 @@ final class ClipboardStore: ObservableObject {
 
     func remove(_ clip: Clip) {
         clip.imageURL.map { try? FileManager.default.removeItem(at: $0) }
-        let wasPinned = clip.pinned
         clips.removeAll { $0.id == clip.id }
-        if wasPinned { savePinned() }
+        saveIndex()
     }
 
-    // MARK: - Pinned persistence
+    /// What the history costs on disk, in bytes.
+    ///
+    /// Nothing is evicted any more, which is what "I don't lose
+    /// anything" asks for and is the right default. It does mean a
+    /// screenshot copied is a screenshot kept forever, and images are
+    /// megabytes where text is bytes, so a year of this is real disk
+    /// with nothing anywhere admitting it. Keeping everything is a
+    /// choice the user should be able to see the price of; a cost that
+    /// only shows up when the disk is full is a cost that was hidden.
+    func historyBytes() -> Int64 {
+        clips.compactMap(\.imageURL).reduce(into: Int64(0)) { total, url in
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+            total += Int64(size ?? 0)
+        }
+    }
 
-    private static func clipsDirectory() -> URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    /// Everything that is not pinned, and its images with it. Pinned
+    /// clips are the ones deliberately kept, so a reclaim never touches
+    /// them: this is for taking the disk back, not for forgetting.
+    func forgetUnpinned() {
+        for clip in clips where !clip.pinned {
+            clip.imageURL.map { try? FileManager.default.removeItem(at: $0) }
+        }
+        clips.removeAll { !$0.pinned }
+        saveIndex()
+    }
+
+    // MARK: - Persistence
+
+    private static func defaultClipsDirectory() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Chalant/Clips", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
     }
 
-    private static func pinnedFile() -> URL {
+    private func clipsDirectory() -> URL {
+        try? FileManager.default.createDirectory(at: clipsDir, withIntermediateDirectories: true)
+        return clipsDir
+    }
+
+    /// Named from when this file held only pinned clips. It now holds
+    /// the whole durable history; renaming it would need a migration
+    /// step for zero benefit, so the name stays and this comment
+    /// carries the truth. Every clip already on disk here (a founder's
+    /// pinned keepers) loads exactly as before, then joins the same
+    /// file as plain history from the next copy on.
+    private func indexFile() -> URL {
         clipsDirectory().appendingPathComponent("pinned.json")
     }
 
-    /// Pinned clips ride a small JSON file; everything else is session
-    /// history. Image files no pinned clip references are deleted here,
-    /// they used to pile up forever, one PNG per copied screenshot.
-    private func loadPinned() {
-        var pinned: [Clip] = []
-        if let data = try? Data(contentsOf: Self.pinnedFile()),
-           let decoded = try? JSONDecoder().decode([Clip].self, from: data) {
-            pinned = decoded.filter { clip in
-                guard let url = clip.imageURL else { return true }
-                return FileManager.default.fileExists(atPath: url.path)
+    /// The whole history rides one JSON file; images stay in their own
+    /// PNG files (below) so the index itself never carries pixel data.
+    /// Entries whose image went missing some other way are dropped
+    /// rather than shown broken. Orphan PNGs are swept the same way
+    /// the old pinned-only cleanup did.
+    private func loadIndex() {
+        var loaded: [Clip] = []
+        if let data = try? Data(contentsOf: indexFile()) {
+            do {
+                let decoded = try JSONDecoder().decode([Clip].self, from: data)
+                loaded = decoded.filter { clip in
+                    guard let url = clip.imageURL else { return true }
+                    return FileManager.default.fileExists(atPath: url.path)
+                }
+            } catch {
+                Self.log.error("clip history failed to decode, starting empty: \(error, privacy: .public)")
             }
         }
-        clips = pinned
-        let kept = Set(pinned.compactMap { $0.imageURL?.lastPathComponent })
+        clips = loaded
+        let kept = Set(loaded.compactMap { $0.imageURL?.lastPathComponent })
         let contents = (try? FileManager.default.contentsOfDirectory(
-            at: Self.clipsDirectory(), includingPropertiesForKeys: nil
+            at: clipsDirectory(), includingPropertiesForKeys: nil
         )) ?? []
         for file in contents
         where file.pathExtension == "png" && !kept.contains(file.lastPathComponent) {
@@ -233,10 +286,16 @@ final class ClipboardStore: ObservableObject {
         }
     }
 
-    private func savePinned() {
-        let pinned = clips.filter(\.pinned)
-        if let data = try? JSONEncoder().encode(pinned) {
-            try? data.write(to: Self.pinnedFile())
+    /// ponytail: rewrites the whole array on every save, atomically so
+    /// a crash mid-write can never leave a torn file. Fine at the size
+    /// a personal clipboard reaches; move to an append log or SQLite
+    /// if this ever measurably slows down.
+    private func saveIndex() {
+        do {
+            let data = try JSONEncoder().encode(clips)
+            try data.write(to: indexFile(), options: .atomic)
+        } catch {
+            Self.log.error("clip history failed to save: \(error, privacy: .public)")
         }
     }
 
@@ -244,7 +303,7 @@ final class ClipboardStore: ObservableObject {
 
     /// Copied images have no file behind them, so keep a PNG in the app's
     /// own folder that a clip can point at and paste back later.
-    private static func savePNG(_ image: NSImage) -> URL? {
+    private func savePNG(_ image: NSImage) -> URL? {
         guard let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:]) else { return nil }

@@ -43,6 +43,7 @@ final class NotchViewModel: ObservableObject {
         case notes
         case focus
         case chat
+        case sessions
 
         /// The settings switch that hides this tab's tool, if it has
         /// one. `today` and `ask` are the island itself and cannot be
@@ -56,6 +57,7 @@ final class NotchViewModel: ObservableObject {
             case .notes: return "toolNotes"
             case .focus: return "toolFocus"
             case .chat: return "toolChat"
+            case .sessions: return "toolSessions"
             }
         }
     }
@@ -573,8 +575,15 @@ final class NotchViewModel: ObservableObject {
             self?.flashGlance(message)
         }
         activityServer.start(store: activities, sessions: sessions)
-        sessionDiscovery.start()
+        // Registry first: it lists four small JSON files and can paint
+        // a session row immediately. Discovery scrapes transcript tails
+        // and can walk the filesystem to resolve a cwd, which is slow
+        // enough to be visible (B3, founder 2026-08-02: "sometimes they
+        // take a second to load all the sessions"). Its own first scan
+        // is deferred so it decorates rows the registry already showed,
+        // rather than making everyone wait for it to go first.
         sessionRegistry.start()
+        sessionDiscovery.start()
         cursorDiscovery.start()
         // EC-11: a session can exit with a message still queued while
         // nobody has the composer open to see the row flip. The store

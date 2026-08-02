@@ -1,3 +1,4 @@
+import AppKit
 import EventKit
 import XCTest
 @testable import Chalant
@@ -759,5 +760,59 @@ final class ChalantTests: XCTestCase {
         XCTAssertTrue(ActivityServer.parse(
             rawRequest("POST /activity HTTP/1.1\r\nSec-Fetch-Mode: cors"))?
             .fromBrowser ?? false)
+    }
+
+    // MARK: Clipboard durable history (backlog C, 2026-08-02)
+
+    /// A scratch directory per test, never the real Application
+    /// Support folder: a persistence test must not be able to touch
+    /// an actual install's clip history.
+    private func clipboardScratchDirectory() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("chalant-clip-test-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    func testClipHistoryPersistsAcrossRelaunchIncludingUnpinnedClips() {
+        let dir = clipboardScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let store = ClipboardStore(clipsDirectory: dir)
+        store.addText("first")
+        store.addText("second")
+        // Pin the older one: a pinned clip and a plain-history clip
+        // both have to survive the round trip.
+        if let toPin = store.clips.last {
+            store.togglePin(toPin)
+        }
+        let before = store.clips
+
+        // A fresh instance stands in for a relaunch: nothing here can
+        // come from the in-memory copy above.
+        let reloaded = ClipboardStore(clipsDirectory: dir)
+        XCTAssertEqual(reloaded.clips.map(\.text), before.map(\.text))
+        XCTAssertEqual(reloaded.clips.map(\.pinned), before.map(\.pinned))
+    }
+
+    func testClipHistoryIsNeverCappedByCount() {
+        // "so I dont lose anything that I copied": the old 30-clip
+        // cap silently dropped history. Disk is the only limit now.
+        let dir = clipboardScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let store = ClipboardStore(clipsDirectory: dir)
+        for index in 0..<50 {
+            store.addText("clip \(index)")
+        }
+        XCTAssertEqual(store.clips.count, 50)
+    }
+
+    func testClipboardRefusesConcealedAndTransientPasteboardContent() {
+        // A password manager's clip must never reach disk.
+        let concealed = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
+        let transient = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
+        XCTAssertTrue(ClipboardStore.isSensitive([concealed]))
+        XCTAssertTrue(ClipboardStore.isSensitive([transient]))
+        XCTAssertTrue(ClipboardStore.isSensitive([.string, concealed]))
+        XCTAssertFalse(ClipboardStore.isSensitive([.string]))
     }
 }

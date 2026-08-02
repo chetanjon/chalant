@@ -138,7 +138,20 @@ struct SessionsSection: View {
     @Environment(\.chalantAccent) private var accent
 
     var body: some View {
+        // Read once per appearance rather than once per reference below:
+        // this is a live file read, and the banner and the card at the
+        // bottom must agree on the same answer.
+        let hookStatus = HookInstall.status()
         VStack(alignment: .leading, spacing: Theme.Space.xl) {
+            // Not installed means a session can never announce itself
+            // and a queued message can never arrive, with nothing on
+            // screen saying why, so this leads the tab rather than
+            // waiting at the bottom to be found (B9, founder
+            // 2026-08-02: "if not installed put this at the top").
+            if hookStatus != .installed {
+                hookCard(hookStatus)
+            }
+
             SettingCard(title: "Running now") {
                 if sessions.sessions.isEmpty {
                     Text("No sessions found.")
@@ -175,23 +188,26 @@ struct SessionsSection: View {
                 )
             }
 
-            hookCard
+            if hookStatus == .installed {
+                hookCard(hookStatus)
+            }
         }
     }
 
-    /// Live install state for `scripts/chalant-hook`'s Stop event, read
-    /// fresh from `~/.claude/settings.json` every time this appears.
+    /// Live install state for `scripts/chalant-hook`'s Stop event.
     /// Discovery alone can only say a session's file went quiet; the
     /// Stop hook is what says a session is actually waiting for you,
     /// and what lets a queued message reach one at all
     /// (notch-messaging-plan-2026-08-01.md, W-E).
-    private var hookCard: some View {
-        let status = HookInstall.status()
-        return SettingCard(title: "The Stop hook") {
+    private func hookCard(_ status: HookInstall.Status) -> some View {
+        SettingCard(title: "The Stop hook") {
             HStack(spacing: Theme.Space.m) {
                 Image(systemName: status.symbol)
                     .font(Theme.Fonts.icon(.s))
-                    .foregroundStyle(status == .installed ? Theme.textSecondary : accent)
+                    // Installed reads as healthy, in colour, rather than
+                    // the grey a passing check used to wear here. Grey
+                    // says "nothing to report," not "this is fine."
+                    .foregroundStyle(status == .installed ? Theme.positive : accent)
                 Text(status.label)
                     .font(Theme.Fonts.body)
                     .foregroundStyle(Theme.textPrimary)
@@ -333,6 +349,7 @@ struct WhatShowsSection: View {
     @AppStorage("toolNotes") private var toolNotes = true
     @AppStorage("toolFocus") private var toolFocus = true
     @AppStorage("toolChat") private var toolChat = true
+    @AppStorage("toolSessions") private var toolSessions = true
     @AppStorage(ChatController.serviceKey) private var chatService = "claude"
     @AppStorage(EventKitService.reminderListKey) private var reminderListID = ""
 
@@ -379,6 +396,8 @@ struct WhatShowsSection: View {
                 SettingToggle(label: "Notes", isOn: $toolNotes)
                 SettingDivider()
                 SettingToggle(label: "Focus & timers", isOn: $toolFocus)
+                SettingDivider()
+                SettingToggle(label: "Sessions", isOn: $toolSessions)
                 SettingDivider()
                 SettingToggle(label: "Chat", isOn: $toolChat)
                 if toolChat {

@@ -13,25 +13,46 @@ final class SessionStoreTests: XCTestCase {
 
     // MARK: Sort order (attention first, newest within a state)
 
-    func testSortIsAttentionFirstThenNewestWithinState() {
+    func testSortIsAttentionFirstThenNewestStartedWithinState() {
         let store = SessionStore()
         let now = Date()
         store.upsert(id: "done", title: "d", cwd: "/a", branch: nil,
-                     lastPrompt: nil, state: .done, updatedAt: now.addingTimeInterval(-50))
+                     lastPrompt: nil, state: .done, startedAt: now.addingTimeInterval(-50))
         store.upsert(id: "failed", title: "f", cwd: "/a", branch: nil,
-                     lastPrompt: nil, state: .failed, updatedAt: now.addingTimeInterval(-40))
+                     lastPrompt: nil, state: .failed, startedAt: now.addingTimeInterval(-40))
         store.upsert(id: "stale", title: "s", cwd: "/a", branch: nil,
-                     lastPrompt: nil, state: .stale, updatedAt: now.addingTimeInterval(-30))
+                     lastPrompt: nil, state: .stale, startedAt: now.addingTimeInterval(-30))
         store.upsert(id: "working-old", title: "w1", cwd: "/a", branch: nil,
-                     lastPrompt: nil, state: .working, updatedAt: now.addingTimeInterval(-20))
+                     lastPrompt: nil, state: .working, startedAt: now.addingTimeInterval(-20))
         store.upsert(id: "working-new", title: "w2", cwd: "/a", branch: nil,
-                     lastPrompt: nil, state: .working, updatedAt: now.addingTimeInterval(-10))
+                     lastPrompt: nil, state: .working, startedAt: now.addingTimeInterval(-10))
         store.upsert(id: "needs-input", title: "n", cwd: "/a", branch: nil,
-                     lastPrompt: nil, state: .needsInput, updatedAt: now)
+                     lastPrompt: nil, state: .needsInput, startedAt: now)
 
         XCTAssertEqual(store.sessions.map(\.id), [
             "needs-input", "working-new", "working-old", "stale", "failed", "done",
         ])
+    }
+
+    func testRowsDoNotReshuffleWhenOnlyUpdatedAtChanges() {
+        // The bug: a rescan rewrites updatedAt on every sweep, and
+        // sorting by it traded two working rows' places on a five-second
+        // clock for no reason a user could see (founder, 2026-08-02:
+        // "just dont make them change places"). Only a rank change may
+        // move a row now.
+        let store = SessionStore()
+        let now = Date()
+        store.upsert(id: "older", title: "o", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .working, startedAt: now.addingTimeInterval(-20))
+        store.upsert(id: "newer", title: "n", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .working, startedAt: now.addingTimeInterval(-10))
+        XCTAssertEqual(store.sessions.map(\.id), ["newer", "older"])
+
+        // A rescan touches the older row with a fresh updatedAt, exactly
+        // as SessionDiscovery does on every debounced sweep.
+        store.upsert(id: "older", title: "o", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .working, updatedAt: now.addingTimeInterval(100))
+        XCTAssertEqual(store.sessions.map(\.id), ["newer", "older"])
     }
 
     // MARK: TTL expiry (terminal states only)
@@ -848,16 +869,36 @@ final class SessionStoreTests: XCTestCase {
     }
 
     func testAnElementAddedInALaterBuildAppearsRatherThanStayingInvisible() {
-        // Saved before `sessions` existed: absent from the rows AND from
-        // what that build knew, so it is new rather than unwanted.
+        // Saved before `activities` existed: absent from the rows AND
+        // from what that build knew, so it is new rather than unwanted.
         var layout = IslandLayout(
             rows: [IslandRow([.media]), IslandRow([.switcher]), IslandRow([.input])],
             collapsed: []
         )
-        layout.knownElements = [.media, .switcher, .input, .ambience, .activities, .timers]
-        XCTAssertTrue(layout.repaired().placed.contains(.sessions))
+        layout.knownElements = [.media, .switcher, .input, .ambience, .sessions, .timers]
+        XCTAssertTrue(layout.repaired().placed.contains(.activities))
         // And the one that build did know about, and left out, stays out.
         XCTAssertFalse(layout.repaired().placed.contains(.ambience))
+    }
+
+    func testSessionsNeverComesBackAsARowEvenForALayoutThatNeverKnewIt() {
+        // B1: sessions moved into its own tab. A layout saved before that
+        // still decodes, but the body must never place it as a row
+        // again, whether or not the build that saved it had ever heard
+        // of it.
+        var neverKnew = IslandLayout(
+            rows: [IslandRow([.media]), IslandRow([.switcher]), IslandRow([.input])],
+            collapsed: []
+        )
+        neverKnew.knownElements = [.media, .switcher, .input]
+        XCTAssertFalse(neverKnew.repaired().placed.contains(.sessions))
+
+        // Nor does a layout that had it placed keep it.
+        let hadIt = IslandLayout(
+            rows: [IslandRow([.media]), IslandRow([.sessions]), IslandRow([.switcher]), IslandRow([.input])],
+            collapsed: []
+        )
+        XCTAssertFalse(hadIt.repaired().placed.contains(.sessions))
     }
 
     func testEmptyRowsAreDropped() {
@@ -1407,7 +1448,7 @@ final class SessionStoreTests: XCTestCase {
         // The stored tab has to survive a relaunch, so a case added
         // later without a raw value would silently stop restoring.
         for tab in [NotchViewModel.Tab.today, .ask, .clipboard, .shelf,
-                    .links, .notes, .focus, .chat] {
+                    .links, .notes, .focus, .chat, .sessions] {
             XCTAssertEqual(NotchViewModel.Tab(rawValue: tab.rawValue), tab)
         }
     }
@@ -1443,6 +1484,7 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(NotchViewModel.Tab.notes.toolKey, "toolNotes")
         XCTAssertEqual(NotchViewModel.Tab.focus.toolKey, "toolFocus")
         XCTAssertEqual(NotchViewModel.Tab.chat.toolKey, "toolChat")
+        XCTAssertEqual(NotchViewModel.Tab.sessions.toolKey, "toolSessions")
     }
 
     // MARK: Dashboard section lookup

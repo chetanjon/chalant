@@ -65,6 +65,11 @@ enum Theme {
     static let textGhost = Color.white.opacity(0.45)
 
     static let danger = Color(red: 1.0, green: 0.45, blue: 0.45)
+    /// A status reading as healthy rather than merely quiet: the Stop
+    /// hook installed, a check passing. Grey never says "this is fine,"
+    /// it says "nothing to report" (founder, 2026-08-02: "use the green
+    /// fill... to show proper usage").
+    static let positive = Color(red: 0.45, green: 0.85, blue: 0.55)
 
     /// Accent when nothing is playing: soft warm-white, near zero chroma.
     static let accentFallback = Color(hue: 0.6, saturation: 0.05, brightness: 0.82)

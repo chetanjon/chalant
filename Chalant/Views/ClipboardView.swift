@@ -10,14 +10,26 @@ struct ClipboardView: View {
     }
 
     @State private var query = ""
+    @State private var page = 0
     @FocusState private var searching: Bool
     @Environment(\.chalantAccent) private var accent
 
+    /// Rows per page. HuggingList builds every row eagerly (it needs
+    /// to measure both its hugging and scrolling layouts), so an
+    /// unbounded history rendered in one go is the actual slowdown a
+    /// page window avoids, not just a visual convenience.
+    private let pageSize = 20
+
     var body: some View {
         if clipboard.clips.isEmpty {
-            EmptyPaneHint(message: "Whatever you copy lands here on its own, the last 30. Pin or shelf what should stay.")
+            EmptyPaneHint(message: "Whatever you copy lands here on its own, all of it. Pin or shelf what should stay.")
         } else {
             let shown = ClipboardStore.filtered(clipboard.clips, query: query)
+            let pageCount = max(1, (shown.count + pageSize - 1) / pageSize)
+            let currentPage = min(page, pageCount - 1)
+            let pageStart = currentPage * pageSize
+            let pageEnd = min(pageStart + pageSize, shown.count)
+            let pageClips = Array(shown[pageStart..<pageEnd])
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 // Only once there is enough history to lose something
                 // in. Below that the search field is a control that
@@ -30,14 +42,42 @@ struct ClipboardView: View {
                         .padding(.vertical, Theme.Space.m)
                 } else {
                     HuggingList {
-                        ForEach(shown) { clip in
+                        ForEach(pageClips) { clip in
                             ClipRow(clip: clip, model: model, clipboard: clipboard)
                         }
                     }
+                    if pageCount > 1 {
+                        pageControls(current: currentPage, count: pageCount)
+                    }
                 }
             }
-            .animation(Theme.Motion.content, value: shown.map(\.id))
+            .animation(Theme.Motion.content, value: pageClips.map(\.id))
+            .onChange(of: query) { _, _ in page = 0 }
         }
+    }
+
+    /// Quiet prev/next pair plus a plain count, subordinate to the
+    /// rows above it. Only shown once a search or the raw history
+    /// actually spans more than one page.
+    private func pageControls(current: Int, count: Int) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            IconActionButton(symbol: "chevron.left", dim: current == 0) {
+                guard current > 0 else { return }
+                page = current - 1
+            }
+            .help("Previous page")
+            Spacer()
+            Text("Page \(current + 1) of \(count)")
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textTertiary)
+            Spacer()
+            IconActionButton(symbol: "chevron.right", dim: current == count - 1) {
+                guard current < count - 1 else { return }
+                page = current + 1
+            }
+            .help("Next page")
+        }
+        .padding(.horizontal, Theme.Space.s)
     }
 
     private var searchField: some View {

@@ -155,16 +155,19 @@ final class SessionStore: ObservableObject {
     /// on purpose — discovery has no opinion on it, and clobbering it
     /// on every metadata-file rescan would drop a question a hook (a
     /// later phase) pushed moments before.
+    /// `startedAt` is a testing seam only, exactly like `updatedAt`
+    /// below: real callers never pass it, and it is only read the
+    /// first time this id is seen.
     func upsert(
         id: String, title: String, cwd: String, branch: String?,
         lastPrompt: String?, state: State, activity: String? = nil,
-        agent: Agent = .claude, updatedAt: Date = Date()
+        agent: Agent = .claude, updatedAt: Date = Date(), startedAt: Date = Date()
     ) {
         var session = sessions.first { $0.id == id }
             ?? Session(
                 id: id, title: title, cwd: cwd, branch: branch,
                 lastPrompt: lastPrompt, activity: activity, agent: agent,
-                state: state, ask: nil, startedAt: Date(), updatedAt: updatedAt
+                state: state, ask: nil, startedAt: startedAt, updatedAt: updatedAt
             )
         let previousState = session.state
         session.title = title
@@ -296,6 +299,15 @@ final class SessionStore: ObservableObject {
         sessions.map(\.id).forEach { clear(id: $0) }
     }
 
+    /// Rank first, then `startedAt`, never `updatedAt`, within a rank.
+    ///
+    /// A rescan rewrites `updatedAt` on every session on every sweep, so
+    /// sorting by it made two working rows trade places on a five-second
+    /// clock for no reason a user could see (founder, 2026-08-02: "just
+    /// dont make them change places"). `startedAt` is set once, when a
+    /// session is first seen, and never touched again: a row only
+    /// moves when its rank actually changes, which is the one kind of
+    /// move that means something.
     private func sort() {
         func rank(_ state: State) -> Int {
             switch state {
@@ -310,7 +322,7 @@ final class SessionStore: ObservableObject {
         sessions.sort {
             rank($0.state) != rank($1.state)
                 ? rank($0.state) < rank($1.state)
-                : $0.updatedAt > $1.updatedAt
+                : $0.startedAt > $1.startedAt
         }
     }
 

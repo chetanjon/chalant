@@ -26,6 +26,7 @@ struct ExpandedView: View {
     @AppStorage("toolNotes") private var toolNotes = true
     @AppStorage("toolFocus") private var toolFocus = true
     @AppStorage("toolChat") private var toolChat = true
+    @AppStorage("toolSessions") private var toolSessions = true
     @AppStorage("chatFull") private var chatFull = false
 
     init(model: NotchViewModel, face: IslandFace) {
@@ -57,6 +58,7 @@ struct ExpandedView: View {
         if toolNotes { tools.append(.notes) }
         if toolFocus { tools.append(.focus) }
         if toolChat { tools.append(.chat) }
+        if toolSessions { tools.append(.sessions) }
         return tools
     }
 
@@ -231,8 +233,10 @@ struct ExpandedView: View {
                     .transition(.opacity)
             }
         case .sessions:
-            AgentSessionsStrip(sessions: model.sessions, model: model)
-                .transition(.opacity)
+            // Moved into its own tab (B1); this row case is kept only
+            // so a layout saved before that still decodes. `repaired()`
+            // never places it, so this is never actually reached.
+            EmptyView()
         case .ambience:
             if showAmbience {
                 AmbienceRow(ambience: ambience)
@@ -331,6 +335,9 @@ struct ExpandedView: View {
         case .chat:
             ChatPane(chat: model.chat)
                 .frame(height: chatFull ? Theme.Panel.chatFull : Theme.Panel.chat)
+        case .sessions:
+            AgentSessionsStrip(sessions: model.sessions, model: model)
+                .frame(maxHeight: Theme.Panel.list, alignment: .top)
         }
     }
 

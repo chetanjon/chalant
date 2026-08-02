@@ -198,6 +198,17 @@ struct DashboardView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .background(Theme.backdrop)
         }
+        // `.automatic` hands the divider to AppKit's own
+        // NSSplitViewController, which lays it out against the
+        // toolbar's default item set. Once that default sidebar toggle
+        // was removed for a custom one pinned at the leading edge
+        // (a299f64), the divider's own layout pass went stale on first
+        // appearance: a stray hairline beside the sidebar that only
+        // corrected itself once toggling the sidebar forced AppKit to
+        // recompute (D2, founder 2026-08-02, "there is a weird line").
+        // `.balanced` draws the divider in SwiftUI itself instead, so it
+        // is never tied to that toolbar layout cache in the first place.
+        .navigationSplitViewStyle(.balanced)
         .tint(Theme.fixedAccent(for: accentMode) ?? model.music.accent)
         .environment(\.chalantAccent, Theme.fixedAccent(for: accentMode) ?? model.music.accent)
     }

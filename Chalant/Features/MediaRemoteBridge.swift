@@ -15,6 +15,12 @@ final class MediaRemoteBridge: ObservableObject {
         /// (com.apple.WebKit.GPU); this carries the app that actually
         /// owns the page so the UI can name and open the right thing.
         var parentBundleIdentifier: String?
+        /// The pid MediaRemote actually heard from, straight from the
+        /// framework rather than a string the app chose to send. A
+        /// Chromium-based browser can misreport `bundleIdentifier`
+        /// (Dia sends Chrome's); the pid still names the real process,
+        /// so `MusicController.resolveSource` checks it first (E1).
+        var processIdentifier: pid_t?
         var title: String
         var artist: String
         var album: String
@@ -249,6 +255,7 @@ final class MediaRemoteBridge: ObservableObject {
         let fresh = State(
             bundleIdentifier: bundleID,
             parentBundleIdentifier: merged["parentApplicationBundleIdentifier"] as? String,
+            processIdentifier: (merged["processIdentifier"] as? NSNumber)?.int32Value,
             title: title,
             artist: merged["artist"] as? String ?? "",
             album: merged["album"] as? String ?? "",

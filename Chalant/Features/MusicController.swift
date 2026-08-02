@@ -320,7 +320,9 @@ final class MusicController: ObservableObject {
         }
         appliedIdentity = identity
         bridgeTrace = "applied:\(state.bundleIdentifier)"
-        let source = resolveSource(state.bundleIdentifier, parent: state.parentBundleIdentifier)
+        let source = resolveSource(
+            state.bundleIdentifier, parent: state.parentBundleIdentifier, pid: state.processIdentifier
+        )
         let sameSource = nowPlaying?.source == source
         let fresh = NowPlaying(
             source: source,
@@ -347,11 +349,30 @@ final class MusicController: ObservableObject {
     /// real app in `parent`, so both are candidates. A user-facing app
     /// wins over a faceless helper ("Safari", never "Safari Graphics
     /// and Media"), and the winner is also what a tap opens.
-    private func resolveSource(_ bundleID: String, parent: String?) -> Source {
+    ///
+    /// `bundleIdentifier` is a string the sender chose to report, and
+    /// that is not always trustworthy: a Chromium-based browser can
+    /// send Chrome's rather than its own. Dia's audio arrived labelled
+    /// "com.google.Chrome" with Chrome not even running, so the row
+    /// named and opened Chrome (E1, founder 2026-08-02: "the app
+    /// should be dia here"). `pid` is MediaRemote's own answer to which
+    /// process this is, never a string an app can misreport, so it is
+    /// checked first and wins whenever it names a real, Dock-visible
+    /// app. Safari's GPU helper resolves by pid too, but as an
+    /// accessory, not a Dock-visible one, so it falls through to the
+    /// string-based lookup below exactly as before.
+    private func resolveSource(_ bundleID: String, parent: String?, pid: pid_t?) -> Source {
         let candidates = [bundleID, parent].compactMap { $0 }
         for candidate in candidates {
             if candidate == MusicApp.spotify.bundleID { return .spotify }
             if candidate == MusicApp.appleMusic.bundleID { return .appleMusic }
+        }
+        if let pid, let owner = NSRunningApplication(processIdentifier: pid),
+           owner.activationPolicy == .regular,
+           let ownerBundleID = owner.bundleIdentifier, let name = owner.localizedName {
+            if ownerBundleID == MusicApp.spotify.bundleID { return .spotify }
+            if ownerBundleID == MusicApp.appleMusic.bundleID { return .appleMusic }
+            return .system(bundleID: ownerBundleID, name: name)
         }
         let running = candidates.compactMap { candidate -> (String, NSRunningApplication)? in
             NSRunningApplication.runningApplications(withBundleIdentifier: candidate)
@@ -363,8 +384,10 @@ final class MusicController: ObservableObject {
         if let (candidate, app) = best, let name = app.localizedName {
             return .system(bundleID: candidate, name: name)
         }
-        let name = bundleID.split(separator: ".").last.map(String.init)?.capitalized ?? "Media"
-        return .system(bundleID: bundleID, name: name)
+        // Nothing here names a real, running app: guessing from the raw
+        // string would confidently name the wrong one, the way "Chrome"
+        // did for Dia above. Honest is better than wrong.
+        return .system(bundleID: bundleID, name: "Media")
     }
 
     private func seedVolume(for source: Source) -> Double {
