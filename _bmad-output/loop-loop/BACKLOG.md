@@ -42,8 +42,17 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
 - [x] **B6. Queue behaves like Claude Code's**, one message per turn. `4e6d0af`.
 - [x] **B7. A session that wants you announces itself**, and its pill opens the
   session when clicked. `6dc36db`.
-- [ ] **B8. Cursor and Codex** get the same notifications and hooks as Claude
-  Code. Feasibility for Codex is unestablished: it writes no session store.
+- [~] **B8. Cursor and Codex** get the same notifications and hooks as Claude
+  Code. **Feasibility settled, and the earlier answer was wrong.** Both have a
+  live `hooks.json`: Codex in Claude Code's exact shape (`SessionStart`,
+  `UserPromptSubmit`, `Stop`), Cursor in a flatter one with the richer event
+  set (`stop`, `beforeShellExecution`, `beforeMCPExecution` - a named
+  permission-request event neither of the others has). "Codex has no session
+  store" was true and was the wrong test: a notification needs a hook, not a
+  store. Evidence: `cursor-codex-hooks-evidence-2026-08-02.md`.
+  Both files are already in use by a third-party tool the founder runs, so
+  Chalant adds itself alongside and never rewrites either. Messaging stays
+  Claude-only until injection is documented rather than guessed.
 - [!] **B9. Not-installed hook banner** at the top of the Sessions tab, and the
   installed state should use colour (green) rather than grey.
 
