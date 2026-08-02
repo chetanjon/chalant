@@ -212,11 +212,10 @@ enum RelativeAge {
 
 /// One line: title, a dot, subtitle. It holds still by default.
 ///
-/// The glide is off unless asked for, because the notch is the wrong
-/// stage for it: on an external display the sliver is narrow enough
-/// that a name spends most of its journey behind the edge fade, and it
-/// reads as broken text rather than as motion (user, 2026-07-28). The
-/// system Reduce Motion setting keeps it still regardless.
+/// The glide is off unless asked for: at the glance's fixed 100pt
+/// width, a name spends most of its journey behind the edge fade, and
+/// it reads as broken text rather than as motion (user, 2026-07-28).
+/// The system Reduce Motion setting keeps it still regardless.
 struct MarqueeText: View {
     let title: String
     var subtitle = ""

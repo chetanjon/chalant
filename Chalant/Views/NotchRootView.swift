@@ -424,14 +424,15 @@ struct NotchRootView: View {
             }
             .frame(width: islandSize.width, height: islandSize.height)
             // This used to gate the whole shell's opacity so it could
-            // hand off to the bead (NotchWindowController.rebuildSlivers)
-            // whenever collapsed with nothing to say — the two used to
-            // disagree, drawing both shapes at once (2026-08-01). The
-            // bead is gone (W-C, 2026-08-02): every non-Off display
-            // wears its own island and nothing else can draw the
-            // resting handle in its place, so a quiet pill keeps its
-            // sliver instead of fading to nothing — `collapsedIsEmpty`
-            // above already shrinks it rather than hiding it.
+            // hand off to the bead (`NotchWindowController.rebuildSlivers`,
+            // now deleted) whenever collapsed with nothing to say — the
+            // two used to disagree, drawing both shapes at once
+            // (2026-08-01). The bead is gone (W-C, 2026-08-02): every
+            // non-Off display wears its own island and nothing else
+            // can draw the resting handle in its place, so a quiet
+            // pill keeps its sliver instead of fading to nothing —
+            // `collapsedIsEmpty` above already shrinks it rather than
+            // hiding it.
             .contentShape(Rectangle())
             // Hover is tracked by NotchWindowController against stable
             // state-based zones; tracking this animating view flickers.

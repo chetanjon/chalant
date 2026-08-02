@@ -335,12 +335,12 @@ final class NotchViewModel: ObservableObject {
     //
     // Moved here from NotchRootView (2026-08-01). The bead
     // (`NotchWindowController.rebuildSlivers`, now deleted) and the
-    // island's own opacity used to each carry a version of "is there anything to
-    // show" — the bead asked "collapsed with no toast", the island
-    // asked "nothing to say" — and a collapsed island with music
-    // playing satisfied the second without satisfying the first, so
-    // both drew on the same display. `islandIsShowing` below is the
-    // one place either can ask it now.
+    // island's own opacity used to each carry a version of "is there
+    // anything to show" — the bead asked "collapsed with no toast",
+    // the island asked "nothing to say" — and a collapsed island with
+    // music playing satisfied the second without satisfying the
+    // first, so both drew on the same display. `islandIsShowing`
+    // below is the one place either can ask it now.
     //
     // These read UserDefaults directly rather than through
     // `@AppStorage`, which only works as a SwiftUI `DynamicProperty`
