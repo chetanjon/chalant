@@ -104,9 +104,13 @@ struct NotchRootView: View {
     /// How wide the wings need to be, for the notch-widening math below.
     /// One function for the width and the show/hide decision now
     /// (`NotchViewModel.collapsedSpan`), so a pill and a notch answer
-    /// this from the same numbers (2026-08-02).
+    /// this from the same numbers (2026-08-02). `face.style`/`face.state`
+    /// rather than the model's, so four faces can answer this four
+    /// different ways in the same instant (W-C, 2026-08-02).
     private var statusWings: CGFloat {
-        NotchViewModel.collapsedSpan(left: model.leftWingNeed, right: model.notchSideNeed, style: face.style) ?? 0
+        let left = model.leftWingNeed(style: face.style, state: face.state)
+        let right = model.notchSideNeed(style: face.style)
+        return NotchViewModel.collapsedSpan(left: left, right: right, style: face.style) ?? 0
     }
 
     // MARK: Collapsed sizing
@@ -125,12 +129,13 @@ struct NotchRootView: View {
     /// the sliver only when there is nothing to show.
     ///
     /// Narrowed to `.pill` rather than `!hasPhysicalNotch` (which also
-    /// covers `.off`): an Off island's opacity is already 0 via
-    /// `islandIsShowing`, so what this drives no longer needs to agree
-    /// with it, and the old `monitorTucked` this replaced tested the
-    /// exact same pair of things twice under two names (2026-08-01).
+    /// covers `.off`) because a notch's wings always draw something —
+    /// the camera mark — and an Off display never gets a face to ask
+    /// this question of at all: `rebuildIslands()` builds one for every
+    /// display except Off, so there is nothing left for an opacity
+    /// gate to guard against (island-per-display-plan, W-C, 2026-08-02).
     private var collapsedIsEmpty: Bool {
-        face.style == .pill && !model.collapsedHasSomethingToSay
+        face.style == .pill && !model.collapsedHasSomethingToSay(style: face.style, state: face.state)
     }
 
     /// Stable per-state sizes: content is framed to its own state's
@@ -147,7 +152,9 @@ struct NotchRootView: View {
                 return CGSize(width: 120 + 56 * grow, height: 14 + 16 * grow)
             }
             let grow: CGFloat = face.isHovering ? 1 : 0
-            let span = NotchViewModel.collapsedSpan(left: model.leftWingNeed, right: model.notchSideNeed, style: .pill) ?? 0
+            let left = model.leftWingNeed(style: face.style, state: face.state)
+            let right = model.notchSideNeed(style: face.style)
+            let span = NotchViewModel.collapsedSpan(left: left, right: right, style: .pill) ?? 0
             return CGSize(
                 width: span + 40 + 12 * grow,
                 height: 18 + 10 * grow
@@ -173,6 +180,12 @@ struct NotchRootView: View {
     // Height chalantrs bars, two transcript lines, RELEASE TO RUN, and
     // the live device caption underneath.
     private static let listeningSize = CGSize(width: 380, height: 192)
+
+    /// How far a resting pill clears the top of its screen. Small on
+    /// purpose: enough that it reads as floating rather than wedged
+    /// into the corner, not so much that it stops belonging to the
+    /// menu bar line.
+    private static let pillTopGap: CGFloat = 5
 
     private var islandSize: CGSize {
         switch face.state {
@@ -200,12 +213,13 @@ struct NotchRootView: View {
             )
         }
         if face.state == .collapsed {
-            // Reaching here means style is .notch or .off (.pill
-            // returned above): .notch forces hasPhysicalNotch true, and
-            // .off draws at opacity 0 regardless (islandIsShowing),
-            // so the sliver and compact-pill branches this used to
-            // test for here were unreachable in every visible state
-            // and are gone (2026-08-01).
+            // Reaching here means style is .notch (.pill returned
+            // above, and .off never builds a face or panel to reach
+            // this view with at all — rebuildIslands() only makes one
+            // for a display that is not Off, W-C, 2026-08-02), so the
+            // sliver and compact-pill branches this used to test for
+            // here were unreachable in every visible state and are
+            // gone (2026-08-01).
             //
             // On hover the droplet "reaches", shoulders widen, belly
             // sags, a soft beat of anticipation before opening.
@@ -390,12 +404,15 @@ struct NotchRootView: View {
                 contentLayer
             }
             .frame(width: islandSize.width, height: islandSize.height)
-            // One rule for "is the island drawing here", also read by
-            // the bead (NotchWindowController.rebuildSlivers): the two
-            // used to disagree exactly when collapsed with nothing to
-            // say but music playing, drawing both shapes at once
-            // (2026-08-01).
-            .opacity(model.islandIsShowing ? 1 : 0)
+            // This used to gate the whole shell's opacity so it could
+            // hand off to the bead (NotchWindowController.rebuildSlivers)
+            // whenever collapsed with nothing to say — the two used to
+            // disagree, drawing both shapes at once (2026-08-01). The
+            // bead is gone (W-C, 2026-08-02): every non-Off display
+            // wears its own island and nothing else can draw the
+            // resting handle in its place, so a quiet pill keeps its
+            // sliver instead of fading to nothing — `collapsedIsEmpty`
+            // above already shrinks it rather than hiding it.
             .contentShape(Rectangle())
             // Hover is tracked by NotchWindowController against stable
             // state-based zones; tracking this animating view flickers.
@@ -432,6 +449,15 @@ struct NotchRootView: View {
 
             Spacer(minLength: 0)
         }
+        // A notch dresses hardware and has to meet the top edge exactly
+        // or the cutout shows above it. A pill is free-floating and was
+        // meeting that edge for no reason other than sharing the code
+        // path, which read as jammed into the corner of the screen
+        // (founder, 2026-08-02, "the pill placement is too top"). The
+        // gap is dropped while a pill is open, so an expanded island
+        // still hangs from the top the way it always has.
+        .padding(.top, face.style == .pill && face.state == .collapsed ? Self.pillTopGap : 0)
+        .animation(Theme.Motion.island, value: face.state)
         .frame(maxWidth: .infinity, alignment: .top)
         // The user's accent choice, not the raw album color, fixed
         // modes must win everywhere below this point.
@@ -521,7 +547,7 @@ struct NotchRootView: View {
     private var notchSideContent: some View {
         if let toast = model.glanceToast {
             toastGlance(toast)
-        } else if let item = model.winningCollapsedItem {
+        } else if let item = model.winningCollapsedItem(style: face.style) {
             collapsedGlance(item)
         }
     }
@@ -628,8 +654,13 @@ struct NotchRootView: View {
     }
 
     private var wingsContent: some View {
-        HStack {
-            if model.showsSongBeside, let playing = music.nowPlaying {
+        // This face's own style and state, not the model's: the song
+        // beside the wave only belongs here when THIS display is the
+        // pill showing it collapsed (W-C, 2026-08-02).
+        let showsSong = model.showsSongBeside(style: face.style, state: face.state)
+        let leftWingNeed = model.leftWingNeed(style: face.style, state: face.state)
+        return HStack {
+            if showsSong, let playing = music.nowPlaying {
                 songBeside(playing)
                     .padding(.leading, Theme.Space.wingInset)
             } else if playingSignal == "wave", music.nowPlaying?.isPlaying == true {
@@ -650,7 +681,7 @@ struct NotchRootView: View {
                 Image(systemName: active.symbol)
                     .font(Theme.Fonts.icon(.xs))
                     .foregroundStyle(accent)
-                    .padding(.leading, model.leftWingNeed > 0 ? 0 : Theme.Space.wingInset)
+                    .padding(.leading, leftWingNeed > 0 ? 0 : Theme.Space.wingInset)
             }
             Spacer()
             // Not gated on there being a notch any more. A pill has the

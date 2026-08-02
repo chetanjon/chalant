@@ -9,17 +9,6 @@ import SwiftUI
 /// write goes through the stable UUID key.
 struct DisplaysSection: View {
     @ObservedObject var displays: DisplayConfigStore
-    /// Which display the island is dressing right now, so the pane
-    /// can say so honestly: it presents every attached screen as an
-    /// equal, and the island can only be on one. Without this,
-    /// editing any other display was a correct write with no visible
-    /// effect and nothing on screen saying why (2026-08-01).
-    let islandOn: CGDirectDisplayID?
-    /// Brings the island to the display holding the given stable key.
-    /// The window controller resolves the key back to a live
-    /// `NSScreen` at call time - this view never holds one (see the
-    /// type comment above).
-    let onTravel: (String) -> Void
 
     /// One attached screen, flattened to what the pane needs.
     private struct Attached: Identifiable, Equatable {
@@ -28,7 +17,6 @@ struct DisplaysSection: View {
         let pixels: String
         let hasHardwareNotch: Bool
         let isMain: Bool
-        let hasIsland: Bool
     }
 
     @State private var attached: [Attached] = []
@@ -54,16 +42,6 @@ struct DisplaysSection: View {
                         row(screen)
                     }
                 }
-                // A display that reports no stable UUID never gets a
-                // row (refresh() drops it below); if the island is
-                // resting on exactly that one, every row's edit would
-                // read as inert with nothing explaining why (EC-8).
-                if islandOn != nil, !attached.contains(where: { $0.hasIsland }) {
-                    SettingNote(
-                        "The island is on a display that cannot be remembered, so nothing "
-                        + "here reaches it yet."
-                    )
-                }
                 if let current {
                     settings(for: current)
                 }
@@ -76,14 +54,6 @@ struct DisplaysSection: View {
             NotificationCenter.default.publisher(
                 for: NSApplication.didChangeScreenParametersNotification)
         ) { _ in refresh() }
-        // `hasIsland` is baked into `attached` by refresh(), and the
-        // island travelling changes no screen parameter, so without
-        // this the badge, the "different display" note and the button
-        // all keep describing where the island used to be: pressing
-        // "Move island here" would move it and leave the pane looking
-        // like nothing happened. That is the exact failure this pane
-        // is being fixed for, so it does not get to reappear here.
-        .onChange(of: islandOn) { _, _ in refresh() }
     }
 
     private var current: Attached? {
@@ -124,13 +94,8 @@ struct DisplaysSection: View {
         .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
     }
 
-    /// `· main` and `· island here` compose independently: a display
-    /// can be both, neither, or just one.
     private func rowCaption(_ screen: Attached) -> String {
-        var caption = screen.pixels
-        if screen.isMain { caption += " · main" }
-        if screen.hasIsland { caption += " · island here" }
-        return caption
+        screen.isMain ? "\(screen.pixels) · main" : screen.pixels
     }
 
     // MARK: Settings for the selected screen
@@ -140,39 +105,6 @@ struct DisplaysSection: View {
         let config = displays.config(forKey: screen.id)
         let resolved = DisplayConfigStore.resolve(
             config.style, hasHardwareNotch: screen.hasHardwareNotch)
-
-        // The single-island fact, named plainly: a change below is
-        // always saved, but only visible on the display the island is
-        // actually dressing (H2, 2026-08-01). The button is the same
-        // travel a hover already does (NotchWindowController.travel),
-        // just triggered from here instead of from the top edge.
-        if !screen.hasIsland {
-            SettingCard(title: "Island") {
-                if resolved == .off {
-                    // NotchWindowController.notchScreen refuses to land
-                    // the island on a display resolved to Off, so the
-                    // button below would silently do nothing here -
-                    // exactly the class of bug this pane exists to
-                    // kill. Say why instead of offering a dead control.
-                    SettingNote(
-                        "This display is switched off, so the island cannot come here "
-                        + "until its style is Notch or Pill."
-                    )
-                } else {
-                    SettingNote(
-                        "The island is on a different display right now, so a change "
-                        + "here is saved but stays invisible until it travels over - on "
-                        + "its own if you hover this display's top edge, or right away "
-                        + "below. It walks home again once it closes."
-                    )
-                    Button("Move island here") {
-                        onTravel(screen.id)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
-                }
-            }
-        }
 
         SettingCard(title: "Shape") {
             SettingPicker(
@@ -301,8 +233,7 @@ struct DisplaysSection: View {
                 name: screen.localizedName,
                 pixels: "\(Int(screen.frame.width)) × \(Int(screen.frame.height))",
                 hasHardwareNotch: screen.safeAreaInsets.top > 0,
-                isMain: screen == NSScreen.main,
-                hasIsland: screen.displayID == islandOn
+                isMain: screen == NSScreen.main
             )
         }
         // A display that went away must not leave the pane showing

@@ -10,13 +10,12 @@ import Foundation
 /// pointer is over it — moves here instead (island-per-display-plan,
 /// 2026-08-02).
 ///
-/// Exactly one of these exists today, built by `NotchWindowController`
-/// for the one panel that still travels between displays. That is why
-/// `displayID` is a `var`: this face currently follows the travelling
-/// island from screen to screen rather than naming one fixed display for
-/// good. A per-display map, and the panel that stops travelling, are a
-/// later round (W-C/W-D); this is only the shape the render state moves
-/// onto first, with the app behaving exactly as it did before.
+/// One of these exists per display that wears an island, built and torn
+/// down by `NotchWindowController.rebuildIslands()` as displays come and
+/// go. `displayID` stays a `var` because `apply(_:to:)` re-confirms it
+/// (to the same value) on every re-measure rather than because the face
+/// itself ever moves between screens — nothing does, any more
+/// (island-per-display-plan, W-C, 2026-08-02).
 ///
 /// Not unit tested directly: it holds `unowned let model`, so
 /// constructing one means constructing a `NotchViewModel`, which starts
@@ -61,16 +60,14 @@ final class IslandFace: ObservableObject {
         self.model = model
     }
 
-    /// What this face should render as. A passthrough for now: with
-    /// exactly one face ever built, "the display that is open" is
-    /// always this one, whenever the shared `state` is anything but
-    /// collapsed. `NotchViewModel.expandedDisplayID` exists already, but
-    /// nothing keeps it current yet — `expand(on:)`/`hoverChanged(_:on:)`
-    /// are a later round's job. Once those set and clear it for real,
-    /// this becomes `NotchViewModel.state(model.state, expandedOn:
-    /// model.expandedDisplayID, face: displayID)`, so a second face
-    /// never reads another's expansion as its own (2026-08-02).
-    var state: NotchViewModel.IslandState { model.state }
+    /// What this face should render as: `model.state` when this
+    /// display is the one `expand(on:)`/`hoverChanged(_:on:)` last gave
+    /// the expansion to, `.collapsed` for every other face at the same
+    /// instant — the whole of "hovering one display must not expand
+    /// four" (2026-08-02).
+    var state: NotchViewModel.IslandState {
+        NotchViewModel.state(model.state, expandedOn: model.expandedDisplayID, face: displayID)
+    }
 
     /// True where the island wraps a notch, real or emulated: the
     /// render-facing half of this face's own `style`, not the model's.

@@ -109,7 +109,7 @@ struct ExpandedView: View {
                         // This lands one layout pass after the state
                         // flip, so the shell is already mid-morph toward
                         // whatever size was measured last time. The
-                        // island's `.animation(_:value: model.state)`
+                        // island's `.animation(_:value: face.state)`
                         // does not cover this change — state did not
                         // change — so unanimated it SNAPPED the frame to
                         // full size on the very first frame, cancelling

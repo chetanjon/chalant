@@ -1144,43 +1144,83 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.config(forKey: "display-a").cornerRadius, 4)
     }
 
-    // MARK: Bead visibility (D2: the bead and the collapsed island used
-    // to answer two different questions about the same display, so a
-    // collapsed pill with something to say drew both shapes at once)
+    // MARK: A panel per display (island-per-display-plan, W-C: the bead
+    // and the collapsed island used to answer two different questions
+    // about the same display; there is no bead any more, every display
+    // that is not Off wears a real island instead)
 
-    func testABeadYieldsOnlyToAnIslandThatIsActuallyDrawing() {
-        // This is the exact case that shipped wrong.
-        XCTAssertFalse(
-            NotchWindowController.wearsBead(style: .pill, isIslandDisplay: true, islandShowing: true))
-        // The island is on this display but has nothing to say right
-        // now (idle, collapsed): the bead is the resting handle here.
-        XCTAssertTrue(
-            NotchWindowController.wearsBead(style: .pill, isIslandDisplay: true, islandShowing: false))
-        // The island lives elsewhere: this pill display always gets
-        // the bead, whether or not the island happens to be "showing".
-        // Both halves of "whether or not" are asserted, since the
-        // second is the ordinary resting state of every other monitor
-        // and the one a future rule could quietly drop.
-        XCTAssertTrue(
-            NotchWindowController.wearsBead(style: .pill, isIslandDisplay: false, islandShowing: true))
-        XCTAssertTrue(
-            NotchWindowController.wearsBead(style: .pill, isIslandDisplay: false, islandShowing: false))
+    func testEveryDisplayButAnOffOneWearsAnIsland() {
+        let panelSize = CGSize(width: 1000, height: 720)
+        let screens: [(id: CGDirectDisplayID, frame: CGRect, style: DisplayConfigStore.Style)] = [
+            (1, CGRect(x: 0, y: 0, width: 1512, height: 982), .notch),
+            (2, CGRect(x: 1512, y: 0, width: 1920, height: 1080), .pill),
+            (3, CGRect(x: -1920, y: 0, width: 1920, height: 1080), .off),
+            (4, CGRect(x: 0, y: 1080, width: 2560, height: 1440), .pill),
+        ]
+        let frames = NotchWindowController.islandFrames(for: screens, panelSize: panelSize)
+        // Three of four: the Off display gets no panel at all, not an
+        // invisible one (EC-10) — a long press on it must have nothing
+        // to open.
+        XCTAssertEqual(frames.count, 3)
+        XCTAssertNil(frames[3])
+        for screen in screens where screen.style != .off {
+            guard let frame = frames[screen.id] else {
+                XCTFail("missing a frame for display \(screen.id)")
+                continue
+            }
+            XCTAssertEqual(frame.width, panelSize.width)
+            XCTAssertEqual(frame.height, panelSize.height)
+            XCTAssertEqual(frame.midX, screen.frame.midX)
+            XCTAssertEqual(frame.maxY, screen.frame.maxY)
+        }
+        // A momentarily empty screen list (mid-wake) is a no-op, not an
+        // instruction to remove every panel (EC-19).
+        XCTAssertTrue(NotchWindowController.islandFrames(for: [], panelSize: panelSize).isEmpty)
     }
 
-    func testOnlyPillDisplaysWearABead() {
-        // Style-shaped, not hardware-shaped (2026-08-01): an emulated
-        // notch (Notch style, no real cutout) and a display switched
-        // Off never wear a bead, whatever the island is doing.
-        for isIslandDisplay in [true, false] {
-            for islandShowing in [true, false] {
-                XCTAssertFalse(
-                    NotchWindowController.wearsBead(
-                        style: .off, isIslandDisplay: isIslandDisplay, islandShowing: islandShowing))
-                XCTAssertFalse(
-                    NotchWindowController.wearsBead(
-                        style: .notch, isIslandDisplay: isIslandDisplay, islandShowing: islandShowing))
-            }
-        }
+    func testThePanelSetIsADiffAndNotARebuild() {
+        // A screen present in both maps at the same frame: kept, and it
+        // must never be torn down to be re-placed (EC-7) — this is what
+        // stops an open island's WKWebView reloading, or a voice
+        // session dying, on every unrelated screen event.
+        let steady = CGRect(x: 0, y: 0, width: 1000, height: 720)
+        let before = CGRect(x: 1512, y: 0, width: 1000, height: 720)
+        let after = CGRect(x: 1512, y: 200, width: 1000, height: 720)
+        let current: [CGDirectDisplayID: CGRect] = [
+            1: steady, 2: before, 3: CGRect(x: 0, y: 0, width: 1, height: 1),
+        ]
+        let wanted: [CGDirectDisplayID: CGRect] = [
+            1: steady, 2: after, 4: CGRect(x: 0, y: 0, width: 1, height: 1),
+        ]
+        let diff = NotchWindowController.diffPanels(current: current, wanted: wanted)
+        XCTAssertEqual(diff.added, [4])
+        XCTAssertEqual(diff.removed, [3])
+        XCTAssertEqual(diff.moved, [2])
+        // Present in both, unchanged: in none of the three.
+        XCTAssertFalse(diff.added.contains(1))
+        XCTAssertFalse(diff.removed.contains(1))
+        XCTAssertFalse(diff.moved.contains(1))
+    }
+
+    // MARK: Hover and expansion ownership (island-per-display-plan, W-D)
+
+    func testAnOpenIslandNeverOpensASecondOne() {
+        let a: CGDirectDisplayID = 1, b: CGDirectDisplayID = 2, c: CGDirectDisplayID = 3
+
+        // Ownership: every face but the owner reads collapsed, however
+        // loud the shared state is (EC-4, the crux).
+        XCTAssertEqual(NotchViewModel.state(.expanded, expandedOn: a, face: a), .expanded)
+        XCTAssertEqual(NotchViewModel.state(.expanded, expandedOn: a, face: b), .collapsed)
+        XCTAssertEqual(NotchViewModel.state(.expanded, expandedOn: a, face: c), .collapsed)
+
+        // defaultOwner: the pointer's own display first, then the last
+        // hovered, then main, then whatever is attached (EC-12).
+        XCTAssertEqual(NotchViewModel.defaultOwner(pointerOn: a, lastHovered: b, main: c, any: c), a)
+        XCTAssertEqual(NotchViewModel.defaultOwner(pointerOn: nil, lastHovered: b, main: c, any: c), b)
+        XCTAssertEqual(NotchViewModel.defaultOwner(pointerOn: nil, lastHovered: nil, main: c, any: a), c)
+        XCTAssertEqual(NotchViewModel.defaultOwner(pointerOn: nil, lastHovered: nil, main: nil, any: a), a)
+        // Nowhere to go means expand() does nothing rather than crash.
+        XCTAssertNil(NotchViewModel.defaultOwner(pointerOn: nil, lastHovered: nil, main: nil, any: nil))
     }
 
     // MARK: Collapsed content, per display (island-per-display-plan

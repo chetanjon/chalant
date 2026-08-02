@@ -68,20 +68,47 @@ final class NotchViewModel: ObservableObject {
         case welcome
     }
 
-    @Published var state: IslandState = .collapsed
+    /// Cleared to nil the instant this becomes `.collapsed` (see the
+    /// `didSet` below), so a stale `expandedDisplayID` can never
+    /// outlive the state it was opened for.
+    @Published var state: IslandState = .collapsed {
+        didSet {
+            // One guard here beats a clear at every path that can
+            // collapse (`collapse()`, `cancelListening()`, and any
+            // future one): `expand(on:)`'s hand-off logic treats a
+            // non-nil `expandedDisplayID` as "someone else is open,
+            // collapse them first," and a stale id left behind by a
+            // path that forgot to clear it would wedge every later
+            // expand behind a hand-off to a display that was never
+            // actually open (2026-08-02).
+            if state == .collapsed { expandedDisplayID = nil }
+        }
+    }
 
     /// Which display's island is open, when one is.
     ///
     /// `state` stays one value because only one island can ever be
     /// open: there is one keyboard, one `WKWebView`
-    /// (`ChatController.swift:96`) and one `VoiceController`. What is
-    /// missing, once more than one display wears an island, is not a
-    /// second state, it is WHICH display the one state applies to.
-    /// Nothing keeps this current yet — `expand(on:)`/
-    /// `hoverChanged(_:on:)` are a later round's job — so it stays nil
-    /// today and `IslandFace.state` does not read it yet either
-    /// (2026-08-02).
+    /// (`ChatController.swift:96`) and one `VoiceController`. What was
+    /// missing, once more than one display wears an island, was not a
+    /// second state, it was WHICH display the one state applies to —
+    /// without it, hovering one display expanded all of them, because
+    /// every face read the same `state` (2026-08-02).
     @Published private(set) var expandedDisplayID: CGDirectDisplayID?
+
+    /// Which display last reported hovering true, remembered after the
+    /// hover itself ends: `defaultOwner` below falls back to it when
+    /// there is nothing more specific — the pointer's own display — to
+    /// go on (EC-12, 2026-08-02).
+    @Published private(set) var lastHoveredDisplayID: CGDirectDisplayID?
+
+    /// A display that vanished takes its last-hovered claim with it, so
+    /// a stale id can never outrank a screen that still exists in
+    /// `defaultOwner`'s fallback chain. The window controller calls
+    /// this when a panel is torn down.
+    func forgetHover(on display: CGDirectDisplayID) {
+        if lastHoveredDisplayID == display { lastHoveredDisplayID = nil }
+    }
 
     /// What a given face should render as. The one function that turns
     /// the shared `state` into a per-display one: a face reads
@@ -246,14 +273,10 @@ final class NotchViewModel: ObservableObject {
     private(set) lazy var engine = ActionEngine(model: self)
 
     /// Default pill for notch-less displays, so Chalant works on any Mac.
+    /// `IslandFace.notchSize` starts here; the model no longer keeps a
+    /// copy of its own — every display's measured size lives on that
+    /// display's own face now (island-per-display-plan, W-C, 2026-08-02).
     static let defaultNotchSize = CGSize(width: 196, height: 34)
-
-    /// Physical notch size measured by NotchWindowController. Published
-    /// because the whole collapsed geometry is derived from it; it was
-    /// a plain var, and the controller compensated with a manual
-    /// objectWillChange *after* mutating, which is the wrong order and
-    /// left any other writer silently rendering stale geometry.
-    @Published var notchSize = NotchViewModel.defaultNotchSize
     /// Debug-driven request to open the shortcut add flow; the
     /// Shortcuts pane consumes and resets it.
     @Published var wantsShortcutAdd = false
@@ -267,33 +290,15 @@ final class NotchViewModel: ObservableObject {
     /// How the island's contents are arranged, and the saved presets.
     let layout = IslandLayoutStore()
 
-    /// The shape this screen's island wears, already resolved out of
-    /// `.auto`. `IslandFace.hasPhysicalNotch` is its render-facing half,
-    /// derived from `IslandFace.style` rather than from this property:
-    /// `apply(_:to:)` writes both from the same resolved value, so they
-    /// cannot drift.
-    @Published var islandStyle: DisplayConfigStore.Style = .notch
-    /// Bottom-corner radius of the collapsed island on this screen.
-    @Published var islandCornerRadius: CGFloat = Theme.Island.radiusCollapsed
-    /// Room down each side of the expanded island on this screen.
-    @Published var islandContentPadding: CGFloat = Theme.Space.xl
-
-    /// Which display `apply(_:to:)` last measured. The Displays pane
-    /// lists every attached screen as an equal, and the island can
-    /// only be on one: without this, editing any display but this one
-    /// was a correct write with no visible effect and nothing on
-    /// screen saying why (2026-08-01). `apply(_:to:)` is its only
-    /// writer (`IslandFace.displayID` is the other, added alongside it
-    /// for the face — the same value, from the same call, 2026-08-02).
-    @Published var islandDisplayID: CGDirectDisplayID?
-
-    /// Set by the window controller so the Displays pane's "Move
-    /// island here" button can ask for a travel it would otherwise
-    /// have no way to trigger — the pane holds a stable UUID key,
-    /// never an `NSScreen` (see `DisplayConfigStore.key(for:)`), so
-    /// resolving the key back to a live screen is the controller's
-    /// job, not this model's.
-    var travelToDisplay: ((String) -> Void)?
+    // `islandStyle`, `notchSize`, `islandCornerRadius` and
+    // `islandContentPadding` used to live here too, dual-written by
+    // `apply(_:to:)` alongside the same values on `IslandFace` — a
+    // stopgap for the round where only one face existed. Now that
+    // every display gets its own face, a single shared copy of a
+    // per-display fact is exactly the bug class this branch exists to
+    // remove: every face would read whichever screen `apply(_:to:)`
+    // happened to run for last. Deleted; `IslandFace` is the only
+    // copy (island-per-display-plan, W-C, 2026-08-02).
 
     /// Set by the window controller so the panel can grab key focus.
     var onExpandChange: ((Bool) -> Void)?
@@ -368,9 +373,15 @@ final class NotchViewModel: ObservableObject {
     /// rather than a notch on external displays, the user now wants the
     /// song beside it, so this is on for pills and off for notches —
     /// where the old reasoning still holds exactly.
-    var showsSongBeside: Bool {
+    ///
+    /// Style-and-state-shaped rather than reading `self.islandStyle`/
+    /// `self.state`, now that those are per-face facts and not a single
+    /// fact about the model: a caller passes its own face's `style` and
+    /// `state`, so four faces can answer this four different ways in
+    /// the same instant (island-per-display-plan, W-C, 2026-08-02).
+    func showsSongBeside(style: DisplayConfigStore.Style, state: IslandState) -> Bool {
         let collapsedSong = UserDefaults.standard.object(forKey: "collapsedSong") as? Bool ?? true
-        return islandStyle == .pill
+        return style == .pill
             && collapsedSong
             && state == .collapsed
             && music.nowPlaying?.isPlaying == true
@@ -385,15 +396,15 @@ final class NotchViewModel: ObservableObject {
     /// wave takes 28. Quiet mode keeps the bare pill and lets the rim
     /// carry it (both moods proved real within one day, so it's a
     /// setting).
-    var leftWingNeed: CGFloat {
-        if showsSongBeside { return 156 }
+    func leftWingNeed(style: DisplayConfigStore.Style, state: IslandState) -> CGFloat {
+        if showsSongBeside(style: style, state: state) { return 156 }
         let playingSignal = UserDefaults.standard
             .object(forKey: MusicController.playingSignalKey) as? String
             ?? MusicController.playingSignalDefault
         if playingSignal == "wave", music.nowPlaying?.isPlaying == true { return 28 }
         let glanceSession = UserDefaults.standard.object(forKey: "glanceSession") as? Bool ?? true
         if glanceSession, sessionActive, !sessionOnRight {
-            return islandStyle == .pill ? 90 : 26
+            return style == .pill ? 90 : 26
         }
         return 0
     }
@@ -403,8 +414,8 @@ final class NotchViewModel: ObservableObject {
     /// Precedence is the user's list rather than the order these
     /// happen to be written in, since only one of them fits and which
     /// one matters more is a matter of taste, not of code.
-    var winningCollapsedItem: CollapsedItem? {
-        layout.layout.collapsed.first { collapsedWidth($0, style: islandStyle) > 0 }
+    func winningCollapsedItem(style: DisplayConfigStore.Style) -> CollapsedItem? {
+        layout.layout.collapsed.first { collapsedWidth($0, style: style) > 0 }
     }
 
     /// What a glance needs, and nothing if it has nothing to say. One
@@ -450,14 +461,14 @@ final class NotchViewModel: ObservableObject {
     }
 
     /// Width the right-of-camera glance needs.
-    var notchSideNeed: CGFloat {
+    func notchSideNeed(style: DisplayConfigStore.Style) -> CGFloat {
         if glanceToast != nil { return 124 }
         // Nothing beyond the user's list: the day, the streak, and the
         // clock glances all duplicated surfaces that already exist (the
         // menu bar clock sits an inch away), and every one of them
         // stretched the pill past the hardware (user, 2026-07-23, "it
         // should not be too wide on the Mac").
-        return winningCollapsedItem.map { collapsedWidth($0, style: islandStyle) } ?? 0
+        return winningCollapsedItem(style: style).map { collapsedWidth($0, style: style) } ?? 0
     }
 
     /// The resting island's total span, in points, or nil when it has
@@ -480,38 +491,32 @@ final class NotchViewModel: ObservableObject {
     }
 
     /// Anything the resting island would actually draw.
-    var collapsedHasSomethingToSay: Bool {
-        Self.collapsedSpan(left: leftWingNeed, right: notchSideNeed, style: islandStyle) != nil
+    func collapsedHasSomethingToSay(style: DisplayConfigStore.Style, state: IslandState) -> Bool {
+        let left = leftWingNeed(style: style, state: state)
+        let right = notchSideNeed(style: style)
+        return Self.collapsedSpan(left: left, right: right, style: style) != nil
             || (ambience.active != nil && music.nowPlaying?.isPlaying != true)
     }
 
-    /// The island is putting pixels on this display right now.
+    /// Style-and-state-shaped so a rule about "is the island showing"
+    /// can be asked of any display, not only this model's own screen —
+    /// the whole of "hovering one display must not expand four"
+    /// (2026-08-02).
     ///
-    /// One answer, read by the island's own opacity and by the bead.
-    /// They used to carry a rule each — the bead asked "collapsed
-    /// with no toast", the island asked "nothing to say" — so a
-    /// collapsed island with a song playing drew its pill AND the
-    /// bead on the same display (2026-08-01).
-    var islandIsShowing: Bool {
-        switch islandStyle {
-        case .off: return false
-        // A notch island dresses hardware; it is drawn whether or not
-        // it has anything to say. `.auto` never reaches here,
-        // `apply(_:to:)` resolves it, but the switch has to be whole.
-        case .auto, .notch: return true
-        case .pill: return state != .collapsed || collapsedHasSomethingToSay
-        }
-    }
-
-    /// The style-and-state-shaped version of `islandIsShowing` above,
-    /// for a face that is not necessarily this model's own screen:
-    /// three displays can read this as false at the same instant a
-    /// fourth reads it as true, which is the whole of "hovering one
-    /// display must not expand four" (2026-08-02). Not wired to a call
-    /// site yet — `rebuildSlivers`/`wearsBead` still read the
-    /// zero-argument property above, since there is only one panel
-    /// until a later round gives every display its own. Tested (T-B2)
-    /// ahead of that round rather than with it.
+    /// Deliberately **not called** from `NotchRootView` any more, and
+    /// that is a real behaviour change, not an oversight: before W-C,
+    /// a quiet pill's own opacity went to 0 here and the bead
+    /// (`NotchWindowController.rebuildSlivers`, now deleted) drew the
+    /// visible resting sliver in its place. With no bead left to hand
+    /// off to, gating the shell on this would make a quiet pill show
+    /// nothing at all, which is exactly the "fully invisible island
+    /// reads as not installed" problem the sliver existed to solve —
+    /// and the founder's explicit call is the opposite: a quiet
+    /// display keeps its sliver. `collapsedIsEmpty` in `NotchRootView`
+    /// already shrinks the shell to that sliver instead of hiding it.
+    /// Kept and still tested (T-B2) as the rule it always was — an Off
+    /// display never shows, a notch always does — for whatever future
+    /// caller needs exactly that rule; there is none in this round.
     static func islandIsShowing(
         style: DisplayConfigStore.Style, expandedHere: Bool, hasSomethingToSay: Bool
     ) -> Bool {
@@ -811,15 +816,69 @@ final class NotchViewModel: ObservableObject {
         }
     }
 
+    /// Where an island opens when nothing said which display.
+    ///
+    /// The pointer's own display, else the one last hovered, else the
+    /// main one, else whatever is attached. Written once rather than at
+    /// each of the fifteen callers of the old no-argument `expand()`:
+    /// fifteen answers to one question is how `hasPhysicalNotch` and
+    /// `islandStyle` once came to contradict each other (56cd56c).
+    static func defaultOwner(
+        pointerOn: CGDirectDisplayID?, lastHovered: CGDirectDisplayID?,
+        main: CGDirectDisplayID?, any: CGDirectDisplayID?
+    ) -> CGDirectDisplayID? {
+        pointerOn ?? lastHovered ?? main ?? any
+    }
+
+    /// `defaultOwner` fed from live AppKit state: wherever the pointer
+    /// currently sits, else the last display that reported hovering,
+    /// else the main screen, else the first attached one.
+    private func defaultOwnerDisplay() -> CGDirectDisplayID? {
+        let pointerOn = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) }?.displayID
+        return Self.defaultOwner(
+            pointerOn: pointerOn,
+            lastHovered: lastHoveredDisplayID,
+            main: NSScreen.main?.displayID,
+            any: NSScreen.screens.first?.displayID
+        )
+    }
+
     /// `takeKey: false` for drag-driven opens: grabbing key focus in
-    /// the middle of someone's drag yanks their app around.
+    /// the middle of someone's drag yanks their app around. No display
+    /// named, so `defaultOwnerDisplay()` picks one (EC-12).
     func expand(takeKey: Bool = true) {
-        // Switched off on this screen. Refused here rather than hidden
-        // in the view: hover is tracked by the window controller against
-        // screen zones, not by the island's own hit testing, so an
-        // invisible island would still open under the pointer.
-        guard islandStyle != .off else { return }
+        expand(on: defaultOwnerDisplay(), takeKey: takeKey)
+    }
+
+    /// The one door into an expansion on a specific display.
+    ///
+    /// Handing the island from one display to another is a collapse
+    /// and an expansion, one run-loop turn apart, never a swap of
+    /// `expandedDisplayID` under a live view: `ExpandedView` holds
+    /// `ChatController`'s single `WKWebView` (`ChatController.swift:96`),
+    /// an `NSView` cannot be in two hierarchies, and the outgoing
+    /// panel keeps its content mounted for the removal fade
+    /// (`NotchRootView.swift`). Swapped in place, the chat went blank
+    /// on both (EC-9, 2026-08-02).
+    func expand(on display: CGDirectDisplayID?, takeKey: Bool = true) {
+        // Switched off on this screen, or the screen is gone. Refused
+        // here rather than hidden in the view: hover is tracked by the
+        // window controller against screen zones, not by the island's
+        // own hit testing, so an invisible island would still open
+        // under the pointer.
+        guard let display,
+              let screen = NSScreen.screens.first(where: { $0.displayID == display }),
+              displays.resolvedStyle(for: screen) != .off
+        else { return }
+        if let current = expandedDisplayID, current != display {
+            collapse()
+            DispatchQueue.main.async { [weak self] in
+                self?.expand(on: display, takeKey: takeKey)
+            }
+            return
+        }
         guard state != .expanded else { return }
+        expandedDisplayID = display
         state = .expanded
         restoreLastTabIfWanted()
         music.expandedVisible = true
@@ -874,9 +933,16 @@ final class NotchViewModel: ObservableObject {
 
     private var hoverCollapseWork: DispatchWorkItem?
 
-    func hoverChanged(_ hovering: Bool) {
+    /// `isHovering` stays the one shared flag the collapse guards below
+    /// read ("is the pointer on the island at all"); `on:` is which
+    /// display it is on, so hover-out only schedules a collapse when it
+    /// is the display actually holding the expansion that lost the
+    /// pointer, and hover-in expands that display specifically rather
+    /// than wherever `expandedDisplayID` used to point.
+    func hoverChanged(_ hovering: Bool, on display: CGDirectDisplayID) {
         isHovering = hovering
         if hovering {
+            lastHoveredDisplayID = display
             hoverCollapseWork?.cancel()
             hoverCollapseWork = nil
             // The reader arrived; the voice answer is theirs now.
@@ -884,8 +950,8 @@ final class NotchViewModel: ObservableObject {
             answerCollapseWork = nil
             let expandOnHover = UserDefaults.standard
                 .object(forKey: "expandOnHover") as? Bool ?? true
-            if state == .collapsed, expandOnHover { expand() }
-        } else if state == .expanded {
+            if state == .collapsed, expandOnHover { expand(on: display) }
+        } else if state == .expanded, expandedDisplayID == display {
             scheduleHoverCollapse()
         }
     }
@@ -1005,6 +1071,17 @@ final class NotchViewModel: ObservableObject {
     /// inside 1.2 seconds and then click outside, and the app was deaf
     /// until relaunch.
     private func startListening() {
+        // A listening session needs an owner display too, just like an
+        // expansion — `state(_:expandedOn:face:)` treats `.listening`
+        // the same as `.expanded`, so with no owner every face would
+        // read `.collapsed` while the mic was live and the room ducked
+        // (EC-11, 2026-08-02). Only when nothing already owns this: the
+        // composer's mic and the persistent media-row mic both start
+        // listening while already expanded on a specific display, and
+        // must keep it, not have it reassigned here.
+        if expandedDisplayID == nil {
+            expandedDisplayID = defaultOwnerDisplay()
+        }
         quietTheRoom()
         state = .listening
         // Only the orphaned case clears the flag. A typed question

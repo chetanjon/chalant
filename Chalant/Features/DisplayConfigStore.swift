@@ -48,7 +48,13 @@ final class DisplayConfigStore: ObservableObject {
         /// Emulated notch size. Ignored where the hardware reports its
         /// own — a real notch's dimensions are not ours to invent.
         var width: CGFloat = 196
-        var height: CGFloat = 34
+        /// 38 rather than the 34 this shipped with. A resting pill now
+        /// carries a song title and a session count rather than a bare
+        /// waveform, and 34 left that content sitting tight against
+        /// both edges (founder, 2026-08-02, "add a little very very
+        /// little bit height"). Only displays with no stored height
+        /// move: a screen whose slider has been touched keeps its own.
+        var height: CGFloat = 38
         /// The island's bottom corners when collapsed.
         var cornerRadius: CGFloat = 16
         /// Breathing room down each side of the expanded island.
