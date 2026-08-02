@@ -256,7 +256,16 @@ final class ActivityServer: @unchecked Sendable {
         // the island. Reading (GET) is already walled off by the
         // browser's own same-origin policy; the writing routes refuse
         // anything wearing browser headers outright.
-        if request.fromBrowser, request.method != "GET" {
+        //
+        // Two GETs are writes in disguise: `/outbox/<id>` and
+        // `/ask/<id>` each hand over something exactly once and clear
+        // it in the same breath, so a page that guessed a session id
+        // could otherwise consume a queued message or a pending answer
+        // that was never meant for it. Both need the real token too,
+        // but this is the second wall, not the only one (EC-14).
+        let consumesGET = request.method == "GET"
+            && (request.path.hasPrefix("/outbox/") || request.path.hasPrefix("/ask/"))
+        if request.fromBrowser, request.method != "GET" || consumesGET {
             respond(connection, status: "403 Forbidden",
                     body: #"{"ok":false,"error":"cross-origin writes refused"}"#)
             return
@@ -349,6 +358,28 @@ final class ActivityServer: @unchecked Sendable {
                 let body = (try? JSONSerialization.data(
                     withJSONObject: ["ok": true, "answered": true, "answer": answer]
                 )).flatMap { String(data: $0, encoding: .utf8) } ?? #"{"ok":true,"answered":false}"#
+                self.respond(connection, status: "200 OK", body: body)
+            }
+
+        // The outbox's other half: a Stop hook comes to collect
+        // whatever the user left for this session, exactly the same
+        // shape as /ask/<session> above — the island cannot reach into
+        // a running agent, so the agent has to come and collect.
+        case ("GET", let path) where path.hasPrefix("/outbox/"):
+            let session = String(path.dropFirst("/outbox/".count)).removingPercentEncoding ?? ""
+            Task { @MainActor in
+                // Collected once: read, clear, respond, in that order,
+                // the same ordering clearAsk gets above, so a Stop hook
+                // that fires twice cannot hand the model the same
+                // instruction twice (EC-7).
+                let message = self.sessions?.collectMessage(sessionID: session)
+                let body = (try? JSONSerialization.data(
+                    withJSONObject: ["ok": true, "message": (message ?? NSNull()) as Any]
+                )).flatMap { String(data: $0, encoding: .utf8) } ?? #"{"ok":true,"message":null}"#
+                // Never a 404 for an empty outbox: this route is hit at
+                // the end of every turn of every session on the
+                // machine, and a 404 as the normal case would make a
+                // real failure unreadable.
                 self.respond(connection, status: "200 OK", body: body)
             }
 

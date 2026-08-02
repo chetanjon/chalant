@@ -20,11 +20,17 @@ struct AgentSessionsStrip: View {
     /// the news, which is all a fourth row would have said anyway.
     private static let visibleLimit = 3
 
-    /// Working or waiting only. `stale` is honest about what discovery
-    /// can know from a file alone — "last seen", not "running" — and a
-    /// last-seen row is history, not attention.
+    /// Working, waiting, or idle — anything actually alive. `stale` is
+    /// honest about what discovery can know from a file alone — "last
+    /// seen", not "running" — and a last-seen row is history, not
+    /// attention. `idle` is different from `stale`: the registry has
+    /// confirmed the process is still there, sitting at its prompt, and
+    /// that is exactly the session someone would most want to message
+    /// (notch-messaging-plan-2026-08-01.md, finding 3).
     private var live: [SessionStore.Session] {
-        sessions.sessions.filter { $0.state == .working || $0.state == .needsInput }
+        sessions.sessions.filter {
+            $0.state == .working || $0.state == .needsInput || $0.state == .idle
+        }
     }
 
     var body: some View {
@@ -77,9 +83,11 @@ struct AgentSessionsStrip: View {
             AgentMark(agent: session.agent, size: 11)
                 .foregroundStyle(Theme.textTertiary)
             // Glyph as well as tint: a row that only changed colour
-            // would say nothing to anyone reading it in greyscale.
-            Image(systemName: session.state == .needsInput
-                  ? "exclamationmark.circle.fill" : "circle.dashed")
+            // would say nothing to anyone reading it in greyscale. A
+            // hollow ring for idle, distinct from working's dashed
+            // circle — this is a session sitting still, not one going.
+            Image(systemName: session.state == .needsInput ? "exclamationmark.circle.fill"
+                  : session.state == .idle ? "circle" : "circle.dashed")
                 .font(Theme.Fonts.icon(.s))
                 .foregroundStyle(session.state == .needsInput ? accent : Theme.textSecondary)
             VStack(alignment: .leading, spacing: 1) {
@@ -116,7 +124,8 @@ struct AgentSessionsStrip: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "\(session.agent.label): \(session.title), \(Self.place(session)), "
-            + (session.state == .needsInput ? "waiting for you" : "working")
+            + (session.state == .needsInput ? "waiting for you"
+               : session.state == .idle ? "waiting for input" : "working")
         )
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Opens the app running this session")

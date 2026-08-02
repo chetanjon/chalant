@@ -372,6 +372,153 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertNil(store.pendingAsk(sessionID: "s1"))
     }
 
+    // MARK: Registry liveness (T1-T3, T8)
+
+    private func registryEntryJSON(
+        sessionId: String = "s1", pid: Int = 4242, status: String = "idle",
+        kind: String = "interactive", cwd: String = "/a", name: String = "chalant-f1"
+    ) -> Data {
+        Data("""
+        {"sessionId":"\(sessionId)","pid":\(pid),"cwd":"\(cwd)","name":"\(name)",
+         "kind":"\(kind)","status":"\(status)"}
+        """.utf8)
+    }
+
+    func testALiveSessionSittingAtItsPromptReadsAsIdleNotStale() {
+        // The bug this whole feature is built on top of: a session
+        // waiting at its prompt is not proof it ended, and only the
+        // registry — never a quiet transcript file — can tell the two
+        // apart.
+        let entry = SessionRegistry.parse(registryEntryJSON(status: "idle"), filename: "4242.json")
+        XCTAssertNotNil(entry)
+        XCTAssertEqual(SessionRegistry.state(for: entry!, alive: { _ in true }), .idle)
+        XCTAssertNil(SessionRegistry.state(for: entry!, alive: { _ in false }))
+
+        // markLive must never blank what the scraper already knows —
+        // the two-writers bug this store already fixed once for the
+        // scraper itself (4d6ccff).
+        let store = storeWithSession()
+        store.upsert(id: "s1", title: "chalant", cwd: "/somewhere", branch: "main",
+                     lastPrompt: "do the thing", state: .working, activity: "Editing")
+        store.markLive(id: "s1", name: entry!.name, cwd: entry!.cwd, pid: entry!.pid,
+                        kind: entry!.kind, status: .idle)
+        XCTAssertEqual(store.sessions.first?.state, .idle)
+        XCTAssertEqual(store.sessions.first?.title, "chalant")
+        XCTAssertEqual(store.sessions.first?.activity, "Editing")
+        XCTAssertEqual(store.sessions.first?.pid, 4242)
+        XCTAssertEqual(store.sessions.first?.kind, .interactive)
+    }
+
+    func testARegistryEntryWhoseProcessIsGoneIsNotALiveSession() {
+        let entry = SessionRegistry.parse(registryEntryJSON(status: "busy"), filename: "4242.json")
+        XCTAssertNotNil(entry)
+        XCTAssertNil(SessionRegistry.state(for: entry!, alive: { _ in false }))
+
+        // A renamed file cannot lie about which process it speaks for:
+        // the filename pid and the body pid are both checked.
+        XCTAssertNil(SessionRegistry.parse(registryEntryJSON(), filename: "9999.json"))
+    }
+
+    func testTheRegistryGoingSilentNeverBlanksTheStrip() {
+        let store = storeWithSession()
+        // A failed read is not the directory saying "empty".
+        store.markGone([])
+        XCTAssertEqual(store.sessions.first?.state, .working)
+
+        // A real id the registry no longer reports: last seen, not
+        // dropped, and never claimed as `.done` — this store cannot
+        // know a killed session finished.
+        store.markGone(["s1"])
+        XCTAssertEqual(store.sessions.count, 1)
+        XCTAssertEqual(store.sessions.first?.state, .stale)
+        XCTAssertNil(store.sessions.first?.pid)
+    }
+
+    func testAnOutstandingQuestionStillOutranksTheRegistry() {
+        let store = storeWithSession()
+        store.attach(askID: "q", to: "s1", header: "h", question: "q?",
+                     options: ["A"], multiSelect: false)
+        XCTAssertEqual(store.sessions.first?.state, .needsInput)
+
+        store.markLive(id: "s1", name: "t", cwd: "/a", pid: 1, kind: .interactive, status: .working)
+        XCTAssertEqual(store.sessions.first?.state, .needsInput)
+    }
+
+    // MARK: The outbox (T4, T7)
+
+    func testAQueuedMessageIsHandedOverExactlyOnce() {
+        let store = storeWithSession()
+        XCTAssertTrue(store.queue(message: "do the thing", for: "s1"))
+        XCTAssertEqual(store.collectMessage(sessionID: "s1"), "do the thing")
+        // Collected once: a second collect is nil.
+        XCTAssertNil(store.collectMessage(sessionID: "s1"))
+
+        // A second queue before the first is collected appends rather
+        // than replacing it.
+        XCTAssertTrue(store.queue(message: "first", for: "s1"))
+        XCTAssertTrue(store.queue(message: "second", for: "s1"))
+        XCTAssertEqual(store.collectMessage(sessionID: "s1"), "first\n\nsecond")
+
+        // A Cursor session keeps no hook contract with this app.
+        store.upsert(id: "cur", title: "c", cwd: "/b", branch: nil,
+                     lastPrompt: nil, state: .working, agent: .cursor)
+        XCTAssertFalse(store.queue(message: "hi", for: "cur"))
+
+        // A session the registry has stopped listing has no process
+        // left to collect anything.
+        store.upsert(id: "gone", title: "g", cwd: "/c", branch: nil,
+                     lastPrompt: nil, state: .stale)
+        XCTAssertFalse(store.queue(message: "hi", for: "gone"))
+    }
+
+    func testAMessageTooLongIsRefusedRatherThanTruncated() {
+        // A silent truncation would hand a model half an instruction,
+        // which is worse than none.
+        let store = storeWithSession()
+        let tooLong = String(repeating: "x", count: SessionStore.maxMessage + 1)
+        XCTAssertFalse(store.queue(message: tooLong, for: "s1"))
+        XCTAssertNil(store.collectMessage(sessionID: "s1"))
+
+        let atLimit = String(repeating: "x", count: SessionStore.maxMessage)
+        XCTAssertTrue(store.queue(message: atLimit, for: "s1"))
+    }
+
+    func testASessionThatExitsWithAMessageQueuedFlipsToUndelivered() {
+        let store = storeWithSession()
+        XCTAssertTrue(store.queue(message: "still waiting", for: "s1"))
+        store.markGone(["s1"])
+        XCTAssertEqual(store.sessions.first?.state, .stale)
+        // The text stays, for Copy and Dismiss — it does not vanish.
+        XCTAssertEqual(store.sessions.first?.outbox?.text, "still waiting")
+        XCTAssertTrue(store.sessions.first?.outbox?.undelivered ?? false)
+    }
+
+    // MARK: The Stop hook's install state (T6)
+
+    func testTheHookReadsAsInstalledOnlyWhenAStopHookPointsAtIt() {
+        let installed: [String: Any] = [
+            "hooks": ["Stop": [["hooks": [["type": "command", "command": "/x/scripts/chalant-hook"]]]]],
+        ]
+        XCTAssertEqual(HookInstall.status(settings: installed), .installed)
+
+        let somethingElse: [String: Any] = [
+            "hooks": ["Stop": [["hooks": [["type": "command", "command": "/usr/bin/true"]]]]],
+        ]
+        XCTAssertEqual(HookInstall.status(settings: somethingElse), .missing)
+
+        // Notification is a different hook event and cannot hand a
+        // message back into the model — it is not the injection path.
+        let notificationOnly: [String: Any] = [
+            "hooks": ["Notification": [["hooks": [["type": "command", "command": "/x/scripts/chalant-hook"]]]]],
+        ]
+        XCTAssertEqual(HookInstall.status(settings: notificationOnly), .missing)
+
+        // A settings file that would not parse must never render as
+        // "missing" — that would tell someone to install what they
+        // already have.
+        XCTAssertEqual(HookInstall.status(settings: nil), .unreadable)
+    }
+
     // MARK: Finding the app a session runs in
 
     private func snap(_ pid: pid_t, _ parent: pid_t, _ name: String, _ cwd: String? = nil)

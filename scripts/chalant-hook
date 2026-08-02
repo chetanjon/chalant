@@ -40,7 +40,7 @@ PAYLOAD="$(cat)"
 
 # python3 rather than sed: this is JSON from another program, and a
 # message with a quote or a newline in it would take a regex apart.
-read -r EVENT SESSION TITLE <<EOF
+read -r EVENT SESSION STOP_ACTIVE TITLE <<EOF
 $(printf '%s' "$PAYLOAD" | python3 -c '
 import json, sys
 try:
@@ -55,7 +55,12 @@ session = (d.get("session_id") or "").strip()
 cwd = (d.get("cwd") or "").rstrip("/")
 where = cwd.rsplit("/", 1)[-1] if cwd else ""
 title = where or session[:8] or "a session"
-print(event, session or "-", title.replace(" ", " "))
+# Set when a Stop hook is already running for this turn. The field
+# name is believed, not documented (notch-messaging-evidence); the
+# real guard against a double delivery is the once-only collection
+# below, which does not depend on this at all.
+stop_active = "1" if d.get("stop_hook_active") else "0"
+print(event, session or "-", stop_active, title.replace(" ", " "))
 ' 2>/dev/null)
 EOF
 
@@ -73,5 +78,39 @@ esc() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.std
 curl -s --max-time 2 -H "X-Chalant-Token: $TOKEN" "$BASE/activity" \
   -d "{\"id\":\"claude-$(esc "$SESSION")\",\"title\":\"$(esc "$WHAT")\",\"state\":\"$STATE\"}" \
   >/dev/null 2>&1
+
+# A message the user left on the island, collected at the turn
+# boundary — the only moment a Stop hook gets to say anything back.
+# Notification does not reach here: a permission prompt is not a turn
+# boundary, and nothing would be there to collect yet.
+if [ "$EVENT" = "Stop" ] && [ "${STOP_ACTIVE:-0}" != "1" ]; then
+  # $SESSION, not "claude-$SESSION": the pill above uses the prefixed
+  # id, but the outbox route (like /ask) takes the bare session id
+  # Claude Code itself uses. Using the prefixed id here 404s forever
+  # with nothing anywhere saying why.
+  OUTBOX="$(curl -s --connect-timeout 1 --max-time 2 -H "X-Chalant-Token: $TOKEN" \
+    "$BASE/outbox/$SESSION" 2>/dev/null)"
+  printf '%s' "$OUTBOX" | python3 -c '
+import json, sys
+try:
+    body = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+message = body.get("message")
+if not message:
+    sys.exit(0)
+# Built with json.dumps, never string interpolation: this message came
+# from a user and may contain a quote, a newline or a backslash, and
+# still has to become one well-formed JSON object on stdout.
+print(json.dumps({
+    "decision": "block",
+    "reason": "A message arrived from Chalant.",
+    "hookSpecificOutput": {
+        "hookEventName": "Stop",
+        "additionalContext": message,
+    },
+}))
+' 2>/dev/null
+fi
 
 exit 0

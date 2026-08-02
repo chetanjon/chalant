@@ -29,12 +29,40 @@ final class SessionStore: ObservableObject {
     enum State: String, Codable {
         case working
         case needsInput = "needs-input"
+        /// The registry says the session is alive and sitting at its
+        /// prompt. Only the registry can say this — a quiet transcript
+        /// file alone is `.stale`, never this — because a file that
+        /// stopped changing is not proof the process it belongs to did
+        /// (notch-messaging-plan-2026-08-01, EC-3).
+        case idle
         case done
         case failed
         // File presence is not liveness. A session whose metadata file
         // has gone quiet past the stale window, with no hook event to
         // say otherwise, renders as "last seen" — never as running.
         case stale
+    }
+
+    /// Interactive (a terminal) or background (no terminal at all): the
+    /// two kinds `claude agents --json` reports
+    /// (notch-messaging-evidence-2026-08-01.md).
+    enum Kind: String, Codable, Equatable {
+        case interactive
+        case background
+    }
+
+    /// A message the user left for a session, waiting for that session
+    /// to come and collect it.
+    ///
+    /// The mirror image of `Ask`, and deliberately the same shape: the
+    /// island cannot reach into a running agent, so the agent comes and
+    /// collects, exactly as it already does for an answer.
+    struct Outbox: Equatable {
+        var text: String
+        var queuedAt: Date
+        var deliveredAt: Date?
+        /// The session went away before it read this.
+        var undelivered: Bool
     }
 
     struct Session: Identifiable, Equatable {
@@ -47,10 +75,27 @@ final class SessionStore: ObservableObject {
         /// Nil while nothing has been reached for yet.
         var activity: String?
         var agent: Agent = .claude
-        var state: State          // working | needsInput | done | failed | stale
+        var state: State          // working | needsInput | idle | done | failed | stale
         var ask: Ask?             // present iff a question is outstanding
+        /// The live process, when the registry knows of one. Nil means
+        /// "discovered from a transcript only", which is not proof of
+        /// life.
+        var pid: pid_t?
+        /// A background agent has no terminal to go to, unlike an
+        /// interactive one; nil means the registry has never reported
+        /// this id.
+        var kind: Kind?
+        /// A message queued here, waiting to be collected. Nil means
+        /// nothing is waiting.
+        var outbox: Outbox?
         var startedAt: Date
         var updatedAt: Date
+
+        /// Whether a message left here has somewhere to land. Cursor
+        /// keeps no hook contract with this app, and a session the
+        /// registry has stopped reporting has no process left to
+        /// collect anything.
+        var canReceiveMessages: Bool { agent == .claude && state != .stale }
     }
 
     struct Ask: Identifiable, Equatable {
@@ -234,9 +279,10 @@ final class SessionStore: ObservableObject {
             switch state {
             case .needsInput: return 0
             case .working: return 1
-            case .stale: return 2
-            case .failed: return 3
-            case .done: return 4
+            case .idle: return 2
+            case .stale: return 3
+            case .failed: return 4
+            case .done: return 5
             }
         }
         sessions.sort {
@@ -244,5 +290,140 @@ final class SessionStore: ObservableObject {
                 ? rank($0.state) < rank($1.state)
                 : $0.updatedAt > $1.updatedAt
         }
+    }
+
+    // MARK: Liveness (the registry)
+
+    /// The registry's one entry point. Unlike `upsert`, this never
+    /// touches `title`, `cwd`, `activity`, `lastPrompt` or `branch` —
+    /// those belong to the transcript scraper, and a second writer
+    /// touching them would blank them on every registry tick. The one
+    /// exception is a session id the scraper has never found (EC-3,
+    /// commonly a session that fell out of `SessionDiscovery`'s
+    /// freshest-12 window): there is no scraper row to protect, so this
+    /// makes a minimal one from what the registry itself knows.
+    ///
+    /// An outstanding ask outranks the registry exactly as it outranks
+    /// the scraper at `upsert`'s `questionOutstanding` check above —
+    /// the same rule, written once more because a second writer now
+    /// reaches `state` (4d6ccff fixed this once already, for the
+    /// scraper; this is the same bug wearing the registry's clothes).
+    func markLive(id: String, name: String, cwd: String, pid: pid_t, kind: Kind, status: State) {
+        if let index = sessions.firstIndex(where: { $0.id == id }) {
+            sessions[index].pid = pid
+            sessions[index].kind = kind
+            let questionOutstanding = sessions[index].ask.map { $0.answer == nil } ?? false
+            if !questionOutstanding {
+                sessions[index].state = status
+            }
+            sessions[index].updatedAt = Date()
+        } else {
+            sessions.append(Session(
+                id: id, title: name, cwd: cwd, branch: nil, lastPrompt: nil,
+                activity: nil, agent: .claude, state: status, ask: nil,
+                pid: pid, kind: kind, startedAt: Date(), updatedAt: Date()
+            ))
+        }
+        sort()
+    }
+
+    /// Ids the registry reported alive last time and does not report
+    /// now: the process is gone. `.stale`, never `.done` — a killed
+    /// session did not finish, and claiming an outcome this store
+    /// cannot know is the kind of lie it does not tell anywhere else.
+    /// A message still waiting in the outbox flips to undelivered
+    /// rather than vanishing (EC-11).
+    func markGone(_ ids: Set<String>) {
+        guard !ids.isEmpty else { return }
+        for id in ids {
+            guard let index = sessions.firstIndex(where: { $0.id == id }) else { continue }
+            sessions[index].pid = nil
+            sessions[index].state = .stale
+            sessions[index].updatedAt = Date()
+            failMessage(sessionID: id)
+            expiryWork[id]?.cancel()
+            expiryWork[id] = nil
+        }
+        sort()
+    }
+
+    // MARK: Outbox — the mirror image of Ask
+
+    /// Longest message that may be queued. This becomes model context
+    /// in another process, so it is bounded here rather than trusted.
+    static let maxMessage = 2000
+
+    /// Queues a message for a session to collect at its next turn
+    /// boundary. Validation mirrors `attach()`'s above: trimmed,
+    /// refused empty, refused for a session this store cannot reach,
+    /// control characters other than newline and tab stripped. A
+    /// second queue before the first is collected appends rather than
+    /// replacing it, joined by a blank line — the composer shows the
+    /// whole pending text, so nothing is hidden (EC-10). Overflow past
+    /// `maxMessage` is refused outright rather than truncated: handing
+    /// a model half an instruction is worse than handing it none
+    /// (EC-16).
+    @discardableResult
+    func queue(message: String, for sessionID: String) -> Bool {
+        let cleaned = Self.sanitizeMessage(message)
+        guard !cleaned.isEmpty,
+              let index = sessions.firstIndex(where: { $0.id == sessionID }),
+              sessions[index].canReceiveMessages
+        else { return false }
+        // An outbox already collected leaves its text emptied rather
+        // than nil (see collectMessage), so an empty pending text —
+        // not merely a nil outbox — means "nothing to prepend".
+        let pending = sessions[index].outbox?.text ?? ""
+        let combined = pending.isEmpty ? cleaned : "\(pending)\n\n\(cleaned)"
+        guard combined.count <= Self.maxMessage else { return false }
+        sessions[index].outbox = Outbox(
+            text: combined, queuedAt: Date(), deliveredAt: nil, undelivered: false
+        )
+        return true
+    }
+
+    /// Trims, then drops every control character except newline and
+    /// tab. A message arrives over the local API from another process,
+    /// same trust boundary as a question's fields above.
+    private static func sanitizeMessage(_ raw: String) -> String {
+        let allowed = raw.unicodeScalars.filter {
+            $0 == "\n" || $0 == "\t" || $0.properties.generalCategory != .control
+        }
+        return String(String.UnicodeScalarView(allowed))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Hands the pending message to whoever came to collect it, once.
+    /// The text is cleared before the caller can write a response — the
+    /// same ordering `ActivityServer` gives `clearAsk` — so a Stop hook
+    /// that fires twice, or a retried curl, cannot deliver the same
+    /// instruction twice (EC-7).
+    func collectMessage(sessionID: String) -> String? {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }),
+              let outbox = sessions[index].outbox, !outbox.undelivered, !outbox.text.isEmpty
+        else { return nil }
+        let text = outbox.text
+        sessions[index].outbox?.text = ""
+        sessions[index].outbox?.deliveredAt = Date()
+        return text
+    }
+
+    /// The session went away before it read this (EC-11). Only a
+    /// message still waiting — never one already collected — flips to
+    /// undelivered, so the row can offer Copy and Dismiss on text that
+    /// really never arrived.
+    func failMessage(sessionID: String) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }),
+              let outbox = sessions[index].outbox, outbox.deliveredAt == nil
+        else { return }
+        sessions[index].outbox?.undelivered = true
+    }
+
+    /// Drops whatever is in a session's outbox — queued, delivered or
+    /// undelivered — so a composer can dismiss a card once its message
+    /// has been seen.
+    func clearMessage(sessionID: String) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        sessions[index].outbox = nil
     }
 }

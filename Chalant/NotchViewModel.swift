@@ -203,6 +203,10 @@ final class NotchViewModel: ObservableObject {
     /// running before Chalant launched.
     let sessions = SessionStore()
     private lazy var sessionDiscovery = SessionDiscovery(store: sessions)
+    /// The liveness overlay: busy/idle from the registry Claude Code
+    /// already writes, layered on top of the scraper above rather than
+    /// replacing it (notch-messaging-plan-2026-08-01.md).
+    private lazy var sessionRegistry = SessionRegistry(store: sessions)
     private lazy var cursorDiscovery = CursorDiscovery(store: sessions)
     let updates = UpdateChecker()
     let crashWatch = CrashWatch()
@@ -328,6 +332,12 @@ final class NotchViewModel: ObservableObject {
     ///
     /// `stale` is deliberately excluded: a session Chalant has only
     /// inferred is quiet is not something to put a live mark next to.
+    /// `idle` is deliberately excluded too, on purpose and not an
+    /// oversight: the sessions strip lists an idle session (you cannot
+    /// pick what is not listed), but this count stays "things are
+    /// happening" rather than becoming "things exist" — a badge that
+    /// grows every time a terminal sits at its prompt would say less,
+    /// not more.
     var agentGlance: (count: Int, waiting: Bool)? {
         guard UserDefaults.standard.object(forKey: "glanceAgents") as? Bool ?? true else {
             return nil
@@ -490,6 +500,7 @@ final class NotchViewModel: ObservableObject {
         }
         activityServer.start(store: activities, sessions: sessions)
         sessionDiscovery.start()
+        sessionRegistry.start()
         cursorDiscovery.start()
         events.startGlanceTicker()
         updates.onNewVersion = { [weak self] version in

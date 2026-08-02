@@ -173,13 +173,84 @@ struct SessionsSection: View {
                     "Codex is missing because it keeps no session records on disk. It would need to "
                     + "tell Chalant directly, the way the chalant command already does."
                 )
-                SettingDivider()
-                SettingNote(
-                    "For a pill the moment a session wants you, point Claude Code's Notification "
-                    + "and Stop hooks at scripts/chalant-hook. Discovery alone cannot know a "
-                    + "session is waiting — only that its file went quiet."
-                )
             }
+
+            hookCard
+        }
+    }
+
+    /// Live install state for `scripts/chalant-hook`'s Stop event, read
+    /// fresh from `~/.claude/settings.json` every time this appears.
+    /// Discovery alone can only say a session's file went quiet; the
+    /// Stop hook is what says a session is actually waiting for you,
+    /// and what lets a queued message reach one at all
+    /// (notch-messaging-plan-2026-08-01.md, W-E).
+    private var hookCard: some View {
+        let status = HookInstall.status()
+        return SettingCard(title: "The Stop hook") {
+            HStack(spacing: Theme.Space.m) {
+                Image(systemName: status.symbol)
+                    .font(Theme.Fonts.icon(.s))
+                    .foregroundStyle(status == .installed ? Theme.textSecondary : accent)
+                Text(status.label)
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textPrimary)
+            }
+            switch status {
+            case .installed:
+                SettingNote(
+                    "Claude Code hands this app a Stop event on every session: a pill the moment "
+                    + "one wants you, and the way a queued message reaches it."
+                )
+            case .missing:
+                SettingNote(
+                    "Chalant never writes ~/.claude/settings.json for you. Paste this under "
+                    + "\"hooks\", merging with anything already there:"
+                )
+                hookSnippet
+            case .unreadable:
+                SettingNote(
+                    "~/.claude/settings.json did not parse. Check it for a stray comma before "
+                    + "assuming the hook itself is missing — that is a different problem with the "
+                    + "same symptom."
+                )
+                hookSnippet
+            }
+        }
+    }
+
+    private var hookSnippetText: String {
+        let path = HookInstall.bundledScriptPath ?? "/path/to/scripts/chalant-hook"
+        return """
+        {
+          "hooks": {
+            "Notification": [
+              { "hooks": [ { "type": "command", "command": "\(path)" } ] }
+            ],
+            "Stop": [
+              { "hooks": [ { "type": "command", "command": "\(path)" } ] }
+            ]
+          }
+        }
+        """
+    }
+
+    private var hookSnippet: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text(hookSnippetText)
+                .font(Theme.Fonts.captionMono)
+                .foregroundStyle(Theme.textSecondary)
+                .textSelection(.enabled)
+                .padding(Theme.Space.m)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: Theme.Radius.row).fill(Theme.surface))
+            Button("Copy") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(hookSnippetText, forType: .string)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(accent)
         }
     }
 
@@ -228,6 +299,7 @@ struct SessionsSection: View {
         switch state {
         case .needsInput: return "exclamationmark.circle.fill"
         case .working: return "circle.dashed"
+        case .idle: return "pause.circle"
         case .stale: return "clock"
         case .done: return "checkmark.circle"
         case .failed: return "xmark.circle"
@@ -238,6 +310,7 @@ struct SessionsSection: View {
         switch state {
         case .needsInput: return "Waiting for you"
         case .working: return "Working"
+        case .idle: return "Waiting for input"
         case .stale: return "Last seen"
         case .done: return "Done"
         case .failed: return "Failed"
