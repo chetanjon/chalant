@@ -13,6 +13,10 @@ import SwiftUI
 /// Claude Code's own vocabulary, the surface uses the island's.
 struct AgentSessionsStrip: View {
     @ObservedObject var sessions: SessionStore
+    /// Only reached for `composingSessionID` and the voice pipeline;
+    /// see that property's doc for why it lives on the model rather
+    /// than as this view's own `@State`.
+    @ObservedObject var model: NotchViewModel
     @Environment(\.chalantAccent) private var accent
 
     /// Three rows sit beside media, ambience and the switcher without
@@ -73,6 +77,13 @@ struct AgentSessionsStrip: View {
                     sessions.answer(sessionID: session.id, with: choices)
                 }
             }
+            // The composer goes in the slot AskCard occupies, under the
+            // row it belongs to: no second element, no stored layout
+            // migration for a surface that already has a home
+            // (notch-messaging-plan-2026-08-01.md, W-C rationale).
+            if model.composingSessionID == session.id {
+                ComposeCard(session: session, sessions: sessions, model: model)
+            }
         }
     }
 
@@ -111,6 +122,7 @@ struct AgentSessionsStrip: View {
             Text(RelativeAge.short(session.updatedAt))
                 .font(Theme.Fonts.microMono)
                 .foregroundStyle(Theme.textGhost)
+            composeAffordance(session)
         }
         .rowInsets()
         .chalantCard(radius: Theme.Radius.row)
@@ -131,6 +143,36 @@ struct AgentSessionsStrip: View {
         .accessibilityHint("Opens the app running this session")
     }
 
+    /// The row's own tap keeps meaning "go to this session"; this is a
+    /// second, narrower tap target for a second meaning, exactly the
+    /// way `ShelfView`'s trailing clear button sits inside a tappable
+    /// row without stealing its tap.
+    @ViewBuilder
+    private func composeAffordance(_ session: SessionStore.Session) -> some View {
+        if session.canReceiveMessages {
+            let composing = model.composingSessionID == session.id
+            let label = composing ? "Close the composer" : "Message this session"
+            IconActionButton(
+                symbol: composing ? "text.bubble.fill" : "text.bubble",
+                tint: composing ? accent : Theme.textSecondary
+            ) {
+                model.composingSessionID = composing ? nil : session.id
+            }
+            .help(label)
+            .accessibilityLabel(label)
+        } else if session.agent == .cursor {
+            // The affordance itself is absent: Cursor keeps no hook
+            // contract with this app, so nothing queued here would ever
+            // be collected (EC-17). The reason still needs somewhere to
+            // live for anyone who goes looking for it.
+            Image(systemName: "text.bubble")
+                .font(Theme.Fonts.icon(.s))
+                .foregroundStyle(Theme.textGhost)
+                .help("Cursor keeps no hook here yet, so this session can't be messaged.")
+                .accessibilityLabel("Cursor sessions cannot receive messages")
+        }
+    }
+
     /// Bring up whatever is running this session.
     ///
     /// The folder is the fallback rather than the answer: a session
@@ -148,6 +190,169 @@ struct AgentSessionsStrip: View {
         let folder = session.cwd.split(separator: "/").last.map(String.init) ?? session.cwd
         guard let branch = session.branch, !branch.isEmpty else { return folder }
         return "\(folder) · \(branch)"
+    }
+}
+
+/// A message to a running session: typed or spoken, sent on return or
+/// on the mic's release. No confirmation step: the words are already
+/// visible in the field, and an agent is not a person, so the "say
+/// send to confirm" staging a spoken text message to a human gets does
+/// not apply here (Open Question 1, notch-messaging-plan-2026-08-01.md).
+///
+/// One line of field, one line of status, never more. The island is a
+/// glance surface, and this composer is the row most likely to try to
+/// grow past that.
+private struct ComposeCard: View {
+    let session: SessionStore.Session
+    @ObservedObject var sessions: SessionStore
+    @ObservedObject var model: NotchViewModel
+
+    @State private var draft = ""
+    @Environment(\.chalantAccent) private var accent
+
+    /// Read fresh on every render rather than cached, same as the
+    /// Sessions pane's own card: the file is never written by this app,
+    /// so there is nothing here worth a cache invalidating.
+    private var hookInstalled: Bool { HookInstall.status() == .installed }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            if let outbox = session.outbox {
+                outboxStatus(outbox)
+            } else {
+                field
+                statusLine
+            }
+        }
+        .rowInsets()
+        .chalantCard(radius: Theme.Radius.row)
+    }
+
+    // MARK: Composing, nothing queued yet
+
+    private var field: some View {
+        HStack(spacing: Theme.Space.s) {
+            TextField("Message this session", text: $draft)
+                .textFieldStyle(.plain)
+                .font(Theme.Fonts.body)
+                .onSubmit(send)
+            MicButton(destination: .session(id: session.id, title: session.title)) {
+                model.toggleListening(to: .session(id: session.id, title: session.title))
+            }
+            if !draft.isEmpty {
+                HoverGlyphButton(symbol: "arrow.up.circle.fill", scale: .m, tint: accent, action: send)
+                    .accessibilityLabel("Send")
+                    .transition(.opacity)
+            }
+        }
+        .padding(Theme.Space.m)
+        .chalantField()
+        // Sending here is pointless before the hook exists to collect
+        // it, and a live field that quietly does nothing reads as
+        // broken rather than as "not set up yet" (EC-18).
+        .disabled(!hookInstalled)
+        .animation(Theme.Motion.hover, value: draft.isEmpty)
+    }
+
+    private func send() {
+        let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft = ""
+        guard !typed.isEmpty else { return }
+        sessions.queue(message: typed, for: session.id)
+    }
+
+    @ViewBuilder
+    private var statusLine: some View {
+        if !hookInstalled {
+            HStack(spacing: Theme.Space.s) {
+                Text("Claude Code is not set up to receive these yet.")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                Button("Open settings") { model.openDashboard?(.sessions) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(accent)
+            }
+        } else {
+            HStack(spacing: Theme.Space.s) {
+                // Said before the send, not after, and differently for
+                // the two shapes delivery actually takes (EC-2): a busy
+                // session gets this at its next turn boundary, an idle
+                // one only when something starts a turn at all.
+                Text(session.state == .idle
+                     ? "Waiting for input. This arrives the next time it takes a turn."
+                     : "Arrives when this turn ends.")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                if session.state == .idle {
+                    Button("Open session") { AgentSessionsStrip.go(to: session) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(accent)
+                }
+            }
+        }
+    }
+
+    // MARK: A message already in the outbox
+
+    @ViewBuilder
+    private func outboxStatus(_ outbox: SessionStore.Outbox) -> some View {
+        if outbox.undelivered {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Text("\(session.title) ended before reading this.")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                Text(outbox.text)
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: Theme.Space.m) {
+                    Button("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(outbox.text, forType: .string)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(accent)
+                    Button("Dismiss") { sessions.clearMessage(sessionID: session.id) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+            }
+        } else if outbox.deliveredAt != nil {
+            Text("Delivered.")
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textSecondary)
+                .task(id: outbox.deliveredAt) {
+                    // Seen, then gone: a delivered card left standing
+                    // would be a finished pill with no expiry of its own.
+                    try? await Task.sleep(nanoseconds: 2_500_000_000)
+                    guard !Task.isCancelled else { return }
+                    sessions.clearMessage(sessionID: session.id)
+                    if model.composingSessionID == session.id {
+                        model.composingSessionID = nil
+                    }
+                }
+        } else {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                // The whole pending text, not just a count: a second
+                // message queued before the first is collected must
+                // never hide the first (EC-10).
+                Text(outbox.text)
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: Theme.Space.m) {
+                    Text("Queued.")
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                    Button("Cancel") { sessions.clearMessage(sessionID: session.id) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+            }
+        }
     }
 }
 

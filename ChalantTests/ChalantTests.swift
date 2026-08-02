@@ -578,6 +578,23 @@ final class ChalantTests: XCTestCase {
         XCTAssertEqual(joke, "tell me a joke")
     }
 
+    func testTheVoiceTrailNeverCarriesAnAgentMessagesBody() {
+        // A message to a session is the same class of thing as one to a
+        // person: the trail keeps where it went and how long it was,
+        // never the words themselves (EC-13). Unlike redactedForLog
+        // above, the body is never assembled at all, not stripped out
+        // after the fact.
+        let (heard, outcome) = NotchViewModel.agentMessageLogLine(
+            title: "chalant", text: "the secret thing"
+        )
+        XCTAssertFalse(heard.contains("secret"))
+        XCTAssertFalse(heard.contains("thing"))
+        XCTAssertFalse(outcome.contains("secret"))
+        XCTAssertFalse(outcome.contains("thing"))
+        XCTAssertTrue(heard.contains("chalant"))
+        XCTAssertTrue(outcome.contains("3 word"))
+    }
+
     // MARK: Giving up on an await (the island's ceiling)
 
     func testTimeboxedGivesUpOnWorkThatNeverAnswers() async {

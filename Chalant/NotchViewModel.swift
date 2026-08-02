@@ -502,6 +502,12 @@ final class NotchViewModel: ObservableObject {
         sessionDiscovery.start()
         sessionRegistry.start()
         cursorDiscovery.start()
+        // EC-11: a session can exit with a message still queued while
+        // nobody has the composer open to see the row flip. The store
+        // has no glance to flash, so it hands the moment back here.
+        sessions.onMessageUndelivered = { [weak self] title in
+            self?.flashGlance("\(title) ended before reading your message")
+        }
         events.startGlanceTicker()
         updates.onNewVersion = { [weak self] version in
             self?.flashGlance("\(version) is out", seconds: 8)
@@ -890,16 +896,45 @@ final class NotchViewModel: ObservableObject {
         }
     }
 
-    func beginListening() {
+    /// Where the next transcript goes. Passed in at every entrance
+    /// rather than stored as a mode: a sticky destination would send
+    /// the next reminder, note or text message into an agent's context
+    /// with nothing on screen having changed, the worst outcome named
+    /// in the plan (notch-messaging-plan-2026-08-01.md, EC-12).
+    enum VoiceDestination: Equatable {
+        case chalant
+        case session(id: String, title: String)
+    }
+
+    /// Set by whichever entrance started this listening session,
+    /// captured and reset by `endListening` before anything else runs.
+    /// Never read outside that capture and `listeningContent`, which
+    /// only names the destination while `state == .listening`.
+    @Published private(set) var voiceDestination: VoiceDestination = .chalant
+
+    /// Which session's compose card is open in the strip, if any. Lives
+    /// here rather than as the strip's own view state: the composer's
+    /// mic sends the whole island through `.listening`, which unmounts
+    /// `ExpandedView`, taking the strip with it, exactly as it does for
+    /// the persistent mic. View-local state does not survive that round
+    /// trip; `tab` and `draftPrompt` live here for the same reason.
+    @Published var composingSessionID: String?
+
+    func beginListening(to destination: VoiceDestination = .chalant) {
         guard state == .collapsed else { return }
+        voiceDestination = destination
         startListening()
     }
 
     /// Mic button in the expanded island: tap to talk, tap to run.
-    func toggleListening() {
+    /// `to:` defaults to `.chalant`, so the persistent media-row mic,
+    /// the `.talk` hotkey and the collapsed long press all keep their
+    /// exact behaviour without being touched.
+    func toggleListening(to destination: VoiceDestination = .chalant) {
         if state == .listening {
             endListening()
         } else {
+            voiceDestination = destination
             startListening()
         }
     }
@@ -930,10 +965,21 @@ final class NotchViewModel: ObservableObject {
 
     func endListening() {
         guard state == .listening else { return }
+        // Captured now and reset in the same statement, before any
+        // await below: the one invariant EC-12 exists to protect.
+        // Every entrance sets `voiceDestination` fresh right before it
+        // starts listening, so nothing downstream can carry a
+        // destination past the transcript it was captured for.
+        let destination = voiceDestination
+        voiceDestination = .chalant
         // Leave listening immediately, finalization can take a second
         // and lingering in the listening UI reads as "release didn't
         // work". Dots show while the transcript settles.
-        tab = .ask
+        //
+        // Only a Chalant-bound answer wants the Ask tab; jumping there
+        // mid-message to a session would pull the user off the
+        // composer they were just speaking into.
+        if case .chalant = destination { tab = .ask }
         state = .expanded
         onExpandChange?(true)
         isWorking = true
@@ -946,7 +992,9 @@ final class NotchViewModel: ObservableObject {
                 self.lastHeard = nil
                 let why = self.voice.failure
                     ?? "Heard nothing. Hold a beat longer next time."
-                self.answer = why
+                if case .chalant = destination {
+                    self.answer = why
+                }
                 // Empty sessions were the only unlogged outcome, and
                 // exactly the ones every mystery report is made of.
                 self.logVoice(
@@ -955,8 +1003,33 @@ final class NotchViewModel: ObservableObject {
                         + " \(self.voice.deviceNote)]"
                 )
             } else {
-                self.submit(spoken)
-                self.lastHeard = spoken
+                switch destination {
+                case .chalant:
+                    self.submit(spoken)
+                    self.lastHeard = spoken
+                case .session(let id, let title):
+                    // Straight to the outbox, never through submit():
+                    // ActionEngine's verbs are Chalant's business, not
+                    // an agent's, and the body never reaches the trail
+                    // that follows (EC-13).
+                    //
+                    // The result is read, not discarded. `queue` refuses
+                    // a session that has ended, a row that cannot
+                    // receive, and anything past the cap, and a refusal
+                    // here means the user just spoke a sentence that
+                    // went nowhere. Dropping it silently while the trail
+                    // recorded "queued" would make the log lie about the
+                    // one thing it exists to answer.
+                    let queued = self.sessions.queue(message: spoken, for: id)
+                    if queued {
+                        let (heard, outcome) = Self.agentMessageLogLine(title: title, text: spoken)
+                        self.logVoice(heard, outcome: outcome)
+                    } else {
+                        self.flashGlance("\(title) did not take that message")
+                        let (heard, _) = Self.agentMessageLogLine(title: title, text: spoken)
+                        self.logVoice(heard, outcome: "refused, nothing was queued")
+                    }
+                }
             }
             // A voice answer opened the island without the cursor
             // ever visiting; give it a readable moment, then slip
@@ -1010,6 +1083,17 @@ final class NotchViewModel: ObservableObject {
         return (heard, outcome)
     }
 
+    /// A message bound for an agent is the same class of thing as one
+    /// bound for a person: the user's own words, going somewhere else.
+    /// `voiceLog` is a preferences array that is never cleared, so the
+    /// body never reaches it at all here, not redacted after the fact
+    /// like `redactedForLog` above, simply never assembled. Only where
+    /// it went and how long it was.
+    static func agentMessageLogLine(title: String, text: String) -> (String, String) {
+        let words = text.split(separator: " ").count
+        return ("a message for \(title)", "queued, \(words) word\(words == 1 ? "" : "s")")
+    }
+
     private static func heldBack(_ words: Int) -> String {
         "[\(max(0, words)) words held back]"
     }
@@ -1056,9 +1140,21 @@ final class NotchViewModel: ObservableObject {
     }
 
     /// Discard the recording without running anything.
+    ///
+    /// This is also EC-20's guard: the global click monitor
+    /// (`NotchWindowController`) already calls this the instant a click
+    /// lands outside the app while `state == .listening`, for any
+    /// destination, so a composer dismissed mid-dictation never has its
+    /// transcript delivered anywhere. It is simply never spoken into a
+    /// destination that outlives it.
     func cancelListening() {
         guard state == .listening else { return }
         voice.cancel()
+        // Defensive: nothing reads this outside a listening session,
+        // but a destination left pointed at a session between here and
+        // the next `beginListening`/`toggleListening` is exactly the
+        // kind of stored mode EC-12 exists to rule out.
+        voiceDestination = .chalant
         // cancel() drops the completion too, so this is the last hand
         // that can put the flag down.
         isWorking = false

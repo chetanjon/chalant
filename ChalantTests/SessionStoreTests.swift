@@ -486,11 +486,16 @@ final class SessionStoreTests: XCTestCase {
     func testASessionThatExitsWithAMessageQueuedFlipsToUndelivered() {
         let store = storeWithSession()
         XCTAssertTrue(store.queue(message: "still waiting", for: "s1"))
+        var flashed: String?
+        store.onMessageUndelivered = { flashed = $0 }
         store.markGone(["s1"])
         XCTAssertEqual(store.sessions.first?.state, .stale)
         // The text stays, for Copy and Dismiss — it does not vanish.
         XCTAssertEqual(store.sessions.first?.outbox?.text, "still waiting")
         XCTAssertTrue(store.sessions.first?.outbox?.undelivered ?? false)
+        // The store has no glance to flash; it hands the title back and
+        // the view model does the flashing (EC-11, left for W-C).
+        XCTAssertEqual(flashed, "t")
     }
 
     // MARK: The Stop hook's install state (T6)

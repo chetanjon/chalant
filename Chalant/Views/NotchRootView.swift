@@ -712,6 +712,14 @@ struct NotchRootView: View {
     private var listeningContent: some View {
         VStack(spacing: Theme.Space.m) {
             listeningCaption
+            // Speaking into a full-screen view with no idea where the
+            // words are going is the failure this line prevents
+            // (notch-messaging-plan-2026-08-01.md, W-D item 31).
+            if case .session(_, let title) = model.voiceDestination {
+                Text("to \(title)")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+            }
             levelBars
             // Fixed two-line box: arriving words must not bounce the
             // whole stack vertically.

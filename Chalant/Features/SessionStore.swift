@@ -408,6 +408,13 @@ final class SessionStore: ObservableObject {
         return text
     }
 
+    /// Fired the moment a queued message flips to undelivered, title of
+    /// the session it was waiting on. The store has no glance to flash
+    /// (it constructs nothing and touches no IO); `NotchViewModel` wires
+    /// this in `start()`, the same shape `ShortcutStore.announce`
+    /// already uses (EC-11, left undone by wave 1 on purpose).
+    var onMessageUndelivered: ((String) -> Void)?
+
     /// The session went away before it read this (EC-11). Only a
     /// message still waiting — never one already collected — flips to
     /// undelivered, so the row can offer Copy and Dismiss on text that
@@ -417,6 +424,7 @@ final class SessionStore: ObservableObject {
               let outbox = sessions[index].outbox, outbox.deliveredAt == nil
         else { return }
         sessions[index].outbox?.undelivered = true
+        onMessageUndelivered?(sessions[index].title)
     }
 
     /// Drops whatever is in a session's outbox — queued, delivered or

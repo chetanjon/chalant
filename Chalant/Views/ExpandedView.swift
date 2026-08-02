@@ -218,7 +218,7 @@ struct ExpandedView: View {
                     .transition(.opacity)
             }
         case .sessions:
-            AgentSessionsStrip(sessions: model.sessions)
+            AgentSessionsStrip(sessions: model.sessions, model: model)
                 .transition(.opacity)
         case .ambience:
             if showAmbience {
@@ -480,9 +480,22 @@ private struct MusicLaunchChip: View {
 
 /// The voice affordance: tap to talk, tap again to run, or hold the
 /// notch. Always present, whatever else the island is showing.
-private struct MicButton: View {
+///
+/// Reused inside a session's compose card (`AgentSessions.swift`) with
+/// `destination: .session(...)`: same button, same pipeline, a
+/// different `help` string is the only thing that tells the two mics
+/// apart, so which one you are looking at is never ambiguous.
+struct MicButton: View {
+    var destination: NotchViewModel.VoiceDestination = .chalant
     let action: () -> Void
     @State private var hovered = false
+
+    private var helpText: String {
+        switch destination {
+        case .chalant: return "Speak, or hold the notch"
+        case .session(_, let title): return "Speak to \(title)"
+        }
+    }
 
     var body: some View {
         Button(action: action) {
@@ -496,7 +509,8 @@ private struct MicButton: View {
         }
         .buttonStyle(PressableStyle())
         .onHover { hovered = $0 }
-        .help("Speak, or hold the notch")
+        .help(helpText)
+        .accessibilityLabel(helpText)
         .animation(Theme.Motion.hover, value: hovered)
     }
 }
