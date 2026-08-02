@@ -340,6 +340,37 @@ final class ActivityServer: @unchecked Sendable {
                 )
             }
 
+        // Queue a message for a session, the same thing the island's
+        // composer does. It exists because everything else in this app
+        // can be driven from a terminal and checked, and this could
+        // not: the only way to prove a message reaches a running agent
+        // was to type one by hand and watch, which also means a test
+        // costs somebody their real message (2026-08-02).
+        case ("POST", "/outbox"):
+            guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+                  let session = object["session"] as? String, !session.isEmpty,
+                  let message = object["message"] as? String, !message.isEmpty
+            else {
+                respond(connection, status: "400 Bad Request",
+                        body: #"{"ok":false,"error":"need session and message"}"#)
+                return
+            }
+            Task { @MainActor in
+                // `queue` does the bounding: it refuses a session that
+                // has ended, one that cannot receive, and anything past
+                // the cap. Refusing loudly here beats accepting and
+                // dropping, which is the failure this whole feature
+                // keeps being about.
+                let queued = self.sessions?.queue(message: message, for: session) ?? false
+                self.respond(
+                    connection,
+                    status: queued ? "200 OK" : "404 Not Found",
+                    body: queued
+                        ? #"{"ok":true}"#
+                        : #"{"ok":false,"error":"no such session, or the message was refused"}"#
+                )
+            }
+
         case ("GET", let path) where path.hasPrefix("/ask/"):
             let session = String(path.dropFirst("/ask/".count)).removingPercentEncoding ?? ""
             Task { @MainActor in

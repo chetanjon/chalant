@@ -51,6 +51,24 @@ case "${1:-}" in
     curl -sf "${AUTH[@]}" "$BASE/activities"
     echo
     ;;
+  message)
+    # chalant message <session-id> "text"
+    #
+    # Queues a message for a running agent, exactly as the island's
+    # composer does. It is collected by that session's Stop hook at the
+    # end of its next turn, so nothing arrives mid-run. Exists so the
+    # path can be exercised without a person typing into the notch and
+    # spending their real message on a test.
+    SESSION="${2:?usage: chalant message <session-id> \"text\"}"
+    TEXT="${3:?usage: chalant message <session-id> \"text\"}"
+    esc() { printf '%s' "$1" | python3 -c 'import json,sys; sys.stdout.write(json.dumps(sys.stdin.read())[1:-1])'; }
+    if ! curl -sf "${AUTH[@]}" "$BASE/outbox" \
+        -d "{\"session\":\"$(esc "$SESSION")\",\"message\":\"$(esc "$TEXT")\"}" >/dev/null; then
+      echo "chalant: the island would not take that message for $SESSION" >&2
+      exit 1
+    fi
+    echo "queued for $SESSION; it arrives when that session next comes to rest"
+    ;;
   ask)
     # chalant ask <session-id> "Question?" [option ...]
     #
