@@ -1,3 +1,4 @@
+import AppKit
 import Carbon.HIToolbox
 import XCTest
 @testable import Chalant
@@ -1180,6 +1181,72 @@ final class SessionStoreTests: XCTestCase {
                         style: .notch, isIslandDisplay: isIslandDisplay, islandShowing: islandShowing))
             }
         }
+    }
+
+    // MARK: Collapsed content, per display (island-per-display-plan
+    // 2026-08-02, W-A/W-B: the pill used to render from a shorter,
+    // separate list than the one deciding whether to show anything at
+    // all, which is how an agent session with nothing else running
+    // grew a pill to a 40x18 lozenge with nothing drawn in it)
+
+    func testAPillIsOnlyAsWideAsItActuallyDraws() {
+        XCTAssertNil(NotchViewModel.collapsedSpan(left: 0, right: 0, style: .pill))
+        XCTAssertNil(NotchViewModel.collapsedSpan(left: 0, right: 0, style: .notch))
+        // The case that shipped wrong: a glance with real width must
+        // make the span non-nil, on both styles, or the renderer draws
+        // something the show/hide rule never agreed to.
+        XCTAssertEqual(NotchViewModel.collapsedSpan(left: 0, right: 44, style: .pill), 44)
+        XCTAssertEqual(NotchViewModel.collapsedSpan(left: 0, right: 44, style: .notch), 88)
+        // A pill's two wings sit adjacent; a notch's widen symmetrically
+        // around the camera.
+        XCTAssertEqual(NotchViewModel.collapsedSpan(left: 30, right: 44, style: .pill), 74)
+        XCTAssertEqual(NotchViewModel.collapsedSpan(left: 30, right: 44, style: .notch), 88)
+    }
+
+    func testACountdownKeepsItsDigitsOnAPillAndLosesThemInANotch() {
+        // A notch's narrow wing has room for the ring or the stopwatch
+        // glyph, never digits; a pill has room for both.
+        XCTAssertEqual(NotchViewModel.timersWidth(sessionOnRight: true, style: .pill), 90)
+        XCTAssertEqual(NotchViewModel.timersWidth(sessionOnRight: true, style: .notch), 30)
+        // Nothing to cross to the right wing for without music also
+        // holding the left one, on either style.
+        XCTAssertEqual(NotchViewModel.timersWidth(sessionOnRight: false, style: .pill), 0)
+        XCTAssertEqual(NotchViewModel.timersWidth(sessionOnRight: false, style: .notch), 0)
+    }
+
+    func testOnlyTheDisplayThatWasOpenedReadsAsOpen() {
+        let a: CGDirectDisplayID = 1, b: CGDirectDisplayID = 2
+        XCTAssertEqual(NotchViewModel.state(.expanded, expandedOn: a, face: a), .expanded)
+        XCTAssertEqual(NotchViewModel.state(.expanded, expandedOn: a, face: b), .collapsed)
+        XCTAssertEqual(NotchViewModel.state(.listening, expandedOn: a, face: b), .collapsed)
+        // No owner means nobody is open, however loud the shared state is.
+        XCTAssertEqual(NotchViewModel.state(.expanded, expandedOn: nil, face: a), .collapsed)
+        // A face with no id never inherits an expansion.
+        XCTAssertEqual(NotchViewModel.state(.expanded, expandedOn: a, face: nil), .collapsed)
+    }
+
+    func testAnOffDisplayNeverShowsAndANotchAlwaysDoes() {
+        for expandedHere in [true, false] {
+            for hasSomethingToSay in [true, false] {
+                XCTAssertFalse(NotchViewModel.islandIsShowing(
+                    style: .off, expandedHere: expandedHere, hasSomethingToSay: hasSomethingToSay))
+                XCTAssertTrue(NotchViewModel.islandIsShowing(
+                    style: .notch, expandedHere: expandedHere, hasSomethingToSay: hasSomethingToSay))
+                XCTAssertTrue(NotchViewModel.islandIsShowing(
+                    style: .auto, expandedHere: expandedHere, hasSomethingToSay: hasSomethingToSay))
+            }
+        }
+        // A pill shows when it is the open one, or when it has
+        // something to say collapsed, and stays a sliver only when
+        // neither is true.
+        XCTAssertFalse(NotchViewModel.islandIsShowing(
+            style: .pill, expandedHere: false, hasSomethingToSay: false))
+        XCTAssertTrue(NotchViewModel.islandIsShowing(
+            style: .pill, expandedHere: true, hasSomethingToSay: false))
+        XCTAssertTrue(NotchViewModel.islandIsShowing(
+            style: .pill, expandedHere: false, hasSomethingToSay: true))
+        XCTAssertTrue(NotchViewModel.islandIsShowing(
+            style: .pill, expandedHere: true, hasSomethingToSay: true))
     }
 
     // MARK: Activity eviction

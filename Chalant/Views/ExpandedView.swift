@@ -5,6 +5,7 @@ import SwiftUI
 /// island shows only the blocks you keep on, sizing itself to fit.
 struct ExpandedView: View {
     @ObservedObject var model: NotchViewModel
+    @ObservedObject var face: IslandFace
     @ObservedObject var music: MusicController
     @ObservedObject var timer: CountdownController
     @ObservedObject var stopwatch: StopwatchController
@@ -27,8 +28,9 @@ struct ExpandedView: View {
     @AppStorage("toolChat") private var toolChat = true
     @AppStorage("chatFull") private var chatFull = false
 
-    init(model: NotchViewModel) {
+    init(model: NotchViewModel, face: IslandFace) {
         self.model = model
+        self.face = face
         self.music = model.music
         self.timer = model.timer
         self.stopwatch = model.stopwatch
@@ -79,17 +81,17 @@ struct ExpandedView: View {
             // While a drag hovers, the body reaches further down the
             // screen, so the release happens nowhere near the top
             // edge and its Mission Control hot zone.
-            if model.isDropTargeted {
+            if face.isDropTargeted {
                 Color.clear.frame(height: 150)
             }
         }
-        .padding(.horizontal, model.islandContentPadding)
-        .padding(.top, model.contentTopReserve + Theme.Space.m)
+        .padding(.horizontal, face.contentPadding)
+        .padding(.top, face.contentTopReserve + Theme.Space.m)
         // The same inset as the sides, so the island reads as one box
         // rather than three different margins. It was 10 against the
         // sides' 16, which left the input crowded against the bottom
         // curve — and the belly sags below this, taking some of it back.
-        .padding(.bottom, model.islandContentPadding)
+        .padding(.bottom, face.contentPadding)
         .foregroundStyle(.white)
         .frame(width: islandWidth)
         .fixedSize(horizontal: false, vertical: true)
@@ -140,12 +142,12 @@ struct ExpandedView: View {
         // unmistakable target, so drops aim here, well below the
         // browser's tab strip, instead of at the little pill.
         .overlay {
-            if model.isDropTargeted {
+            if face.isDropTargeted {
                 dropTarget
                     .transition(.opacity)
             }
         }
-        .animation(Theme.Motion.hover, value: model.isDropTargeted)
+        .animation(Theme.Motion.hover, value: face.isDropTargeted)
         .animation(Theme.Motion.content, value: model.tab)
         .animation(Theme.Motion.content, value: chatFull)
         .animation(Theme.Motion.content, value: model.pane)

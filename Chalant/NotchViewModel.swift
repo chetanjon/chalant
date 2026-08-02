@@ -69,6 +69,33 @@ final class NotchViewModel: ObservableObject {
     }
 
     @Published var state: IslandState = .collapsed
+
+    /// Which display's island is open, when one is.
+    ///
+    /// `state` stays one value because only one island can ever be
+    /// open: there is one keyboard, one `WKWebView`
+    /// (`ChatController.swift:96`) and one `VoiceController`. What is
+    /// missing, once more than one display wears an island, is not a
+    /// second state, it is WHICH display the one state applies to.
+    /// Nothing keeps this current yet — `expand(on:)`/
+    /// `hoverChanged(_:on:)` are a later round's job — so it stays nil
+    /// today and `IslandFace.state` does not read it yet either
+    /// (2026-08-02).
+    @Published private(set) var expandedDisplayID: CGDirectDisplayID?
+
+    /// What a given face should render as. The one function that turns
+    /// the shared `state` into a per-display one: a face reads
+    /// `.collapsed` unless it IS the one display holding the
+    /// expansion, however loud `shared` is (2026-08-02).
+    static func state(
+        _ shared: IslandState,
+        expandedOn: CGDirectDisplayID?,
+        face: CGDirectDisplayID?
+    ) -> IslandState {
+        guard let face, face == expandedOn else { return .collapsed }
+        return shared
+    }
+
     @Published var isHovering = false
     /// Which lower panel the switcher is showing. `.today` is home.
     @Published var tab: Tab = .today
@@ -78,12 +105,16 @@ final class NotchViewModel: ObservableObject {
     /// the island hugs what's shown instead of reserving a fixed void.
     @Published var expandedSize = CGSize(width: 520, height: 170)
 
-    /// A drag is hovering the island: light the accent edge.
-    @Published var isDropTargeted = false
-
     /// Debug builds show the drop bubble on request; the window
     /// controller owns the panel, so it hangs the hook here.
     var onDebugDropDock: (() -> Void)?
+
+    /// Lets "debug droptarget" flash the same highlight a live drag
+    /// would. `isDropTargeted` lives on `IslandFace` now, and
+    /// `IslandFace` holds a reference back to the model, not the other
+    /// way around, so this is the one way a debug command here can
+    /// still reach it (2026-08-02).
+    var debugSetDropTargeted: ((Bool) -> Void)?
 
     /// Which page of the first-run tour is showing.
     @Published var welcomeStep = 0
@@ -131,15 +162,6 @@ final class NotchViewModel: ObservableObject {
         pane = .none
         collapse()
     }
-
-    /// The island opened itself for an incoming drag; if the drag
-    /// leaves without dropping it closes again.
-    var dragExpanded = false
-
-    /// Pointer position across the island, 0...1, published by the
-    /// window controller's hover poll, quantized so casual movement
-    /// costs a few re-renders per second, not twenty. nil = no light.
-    @Published var pointerUnit: CGFloat?
 
     /// Which way the next tab switch should slide, set by TabRow just
     /// before the tab changes so both land in the same transaction.
@@ -238,7 +260,7 @@ final class NotchViewModel: ObservableObject {
     /// Same, straight into the Shortcuts.app library picker.
     @Published var wantsShortcutPick = false
 
-    /// Per-display island settings. `placement(on:)` is the one place a
+    /// Per-display island settings. `apply(_:to:)` is the one place a
     /// screen turns into island geometry, and the only reader.
     let displays = DisplayConfigStore()
 
@@ -246,19 +268,23 @@ final class NotchViewModel: ObservableObject {
     let layout = IslandLayoutStore()
 
     /// The shape this screen's island wears, already resolved out of
-    /// `.auto`. `hasPhysicalNotch` is its render-facing half.
+    /// `.auto`. `IslandFace.hasPhysicalNotch` is its render-facing half,
+    /// derived from `IslandFace.style` rather than from this property:
+    /// `apply(_:to:)` writes both from the same resolved value, so they
+    /// cannot drift.
     @Published var islandStyle: DisplayConfigStore.Style = .notch
     /// Bottom-corner radius of the collapsed island on this screen.
     @Published var islandCornerRadius: CGFloat = Theme.Island.radiusCollapsed
     /// Room down each side of the expanded island on this screen.
     @Published var islandContentPadding: CGFloat = Theme.Space.xl
 
-    /// Which display `placement(on:)` last measured. The Displays pane
+    /// Which display `apply(_:to:)` last measured. The Displays pane
     /// lists every attached screen as an equal, and the island can
     /// only be on one: without this, editing any display but this one
     /// was a correct write with no visible effect and nothing on
-    /// screen saying why (2026-08-01). `placement(on:)` is its only
-    /// writer.
+    /// screen saying why (2026-08-01). `apply(_:to:)` is its only
+    /// writer (`IslandFace.displayID` is the other, added alongside it
+    /// for the face — the same value, from the same call, 2026-08-02).
     @Published var islandDisplayID: CGDirectDisplayID?
 
     /// Set by the window controller so the Displays pane's "Move
@@ -268,39 +294,6 @@ final class NotchViewModel: ObservableObject {
     /// resolving the key back to a live screen is the controller's
     /// job, not this model's.
     var travelToDisplay: ((String) -> Void)?
-
-    /// True on the built-in display where hardware occupies the middle
-    /// of the island; external displays keep that space usable.
-    ///
-    /// Derived from `islandStyle` rather than its own stored
-    /// `@Published` bool: the stored version defaulted `false` while
-    /// `islandStyle` defaulted `.notch` — two answers to one question
-    /// that only ever agreed because `placement(on:)` runs before the
-    /// first render. Deriving it removes the second default outright;
-    /// a reader still gets a live re-render, since `islandStyle` is
-    /// the `@Published` one.
-    ///
-    /// Read as "the island wraps a notch here", not "this panel has one
-    /// in it": a screen set to Notch in settings wraps an emulated one,
-    /// and a MacBook set to Pill does not wrap its real one. Every read
-    /// site is a render decision and wants the resolved answer.
-    var hasPhysicalNotch: Bool { islandStyle == .notch }
-
-    /// How much room island content leaves clear at the top.
-    ///
-    /// A real notch has to be cleared or the content slides under the
-    /// camera. A display without one has nothing to clear — but
-    /// `placement(on:)` still assigns the fabricated 196×34 default so
-    /// the collapsed pill has a shape, and every content site was
-    /// reserving that height as if it were hardware. The result was an
-    /// empty 34pt band across the top of the island on every external
-    /// monitor ("the blank space at the top is not quite right").
-    ///
-    /// Read by all three content sites so the rule lives in one place
-    /// rather than being re-derived from `notchSize` at each of them.
-    var contentTopReserve: CGFloat {
-        hasPhysicalNotch ? notchSize.height : Theme.Space.m
-    }
 
     /// Set by the window controller so the panel can grab key focus.
     var onExpandChange: ((Bool) -> Void)?
@@ -384,11 +377,14 @@ final class NotchViewModel: ObservableObject {
     }
 
     /// Each wing earns exactly what its content needs: the session
-    /// mark wants 26 (digits clipped at real pomodoro widths, so the
-    /// wing wears a symbol that cannot: the ring, or the stopwatch
-    /// glyph; user, 2026-07-22), the slimmed wave takes 28. Quiet
-    /// mode keeps the bare pill and lets the rim carry it (both moods
-    /// proved real within one day, so it's a setting).
+    /// mark wants 26 on a notch (digits clipped at real pomodoro
+    /// widths, so the wing wears a symbol that cannot: the ring, or the
+    /// stopwatch glyph; user, 2026-07-22) and 90 on a pill, which has
+    /// the room for the digits themselves — a notch's narrow wing is
+    /// the only reason they were ever dropped (2026-08-02). The slimmed
+    /// wave takes 28. Quiet mode keeps the bare pill and lets the rim
+    /// carry it (both moods proved real within one day, so it's a
+    /// setting).
     var leftWingNeed: CGFloat {
         if showsSongBeside { return 156 }
         let playingSignal = UserDefaults.standard
@@ -396,7 +392,9 @@ final class NotchViewModel: ObservableObject {
             ?? MusicController.playingSignalDefault
         if playingSignal == "wave", music.nowPlaying?.isPlaying == true { return 28 }
         let glanceSession = UserDefaults.standard.object(forKey: "glanceSession") as? Bool ?? true
-        if glanceSession, sessionActive, !sessionOnRight { return 26 }
+        if glanceSession, sessionActive, !sessionOnRight {
+            return islandStyle == .pill ? 90 : 26
+        }
         return 0
     }
 
@@ -406,19 +404,26 @@ final class NotchViewModel: ObservableObject {
     /// happen to be written in, since only one of them fits and which
     /// one matters more is a matter of taste, not of code.
     var winningCollapsedItem: CollapsedItem? {
-        layout.layout.collapsed.first { collapsedWidth($0) > 0 }
+        layout.layout.collapsed.first { collapsedWidth($0, style: islandStyle) > 0 }
     }
 
     /// What a glance needs, and nothing if it has nothing to say. One
     /// function so the width and the decision to show it can never
     /// disagree — a glance with no width has nowhere to sit, which is
     /// how the charge shipped invisible.
-    func collapsedWidth(_ item: CollapsedItem) -> CGFloat {
+    ///
+    /// Style-shaped since 2026-08-02: a pill and a notch used to answer
+    /// "is there anything to show" from the same numbers here while a
+    /// monitor rendered from a separate, shorter list that disagreed
+    /// with them — an agent session with nothing else running grew the
+    /// pill to a 40x18 lozenge with nothing drawn in it. Threading style
+    /// through this one function is what makes that impossible now.
+    func collapsedWidth(_ item: CollapsedItem, style: DisplayConfigStore.Style) -> CGFloat {
         switch item {
         case .agents:
             return agentGlance != nil ? 44 : 0
         case .timers:
-            return sessionOnRight ? 30 : 0
+            return Self.timersWidth(sessionOnRight: sessionOnRight, style: style)
         // A session shows only its left-wing ring and countdown; the
         // right-side FOCUS 1 OF 4 label was width without value
         // (user call, 2026-07-21). A joinable meeting's camera mark
@@ -433,7 +438,18 @@ final class NotchViewModel: ObservableObject {
         }
     }
 
-    /// Width the right-of-camera glance needs on notched displays.
+    /// The session mark's width when it has crossed to the right wing
+    /// (music is holding the left one): a notch's narrow side only has
+    /// room for the ring or the stopwatch glyph, never digits; a pill
+    /// has room for both (2026-08-02). Its own static, pulled out of
+    /// `collapsedWidth`, so the split is checkable with no `NotchViewModel`
+    /// to build (T-A2).
+    static func timersWidth(sessionOnRight: Bool, style: DisplayConfigStore.Style) -> CGFloat {
+        guard sessionOnRight else { return 0 }
+        return style == .pill ? 90 : 30
+    }
+
+    /// Width the right-of-camera glance needs.
     var notchSideNeed: CGFloat {
         if glanceToast != nil { return 124 }
         // Nothing beyond the user's list: the day, the streak, and the
@@ -441,12 +457,31 @@ final class NotchViewModel: ObservableObject {
         // menu bar clock sits an inch away), and every one of them
         // stretched the pill past the hardware (user, 2026-07-23, "it
         // should not be too wide on the Mac").
-        return winningCollapsedItem.map(collapsedWidth) ?? 0
+        return winningCollapsedItem.map { collapsedWidth($0, style: islandStyle) } ?? 0
+    }
+
+    /// The resting island's total span, in points, or nil when it has
+    /// nothing to say. One function for "how wide" and "is there
+    /// anything", so they can never disagree again — a pill used to
+    /// answer the second question from these two numbers while
+    /// rendering from a shorter, separate list, which is how an agent
+    /// session with nothing else running grew a pill to a 40x18 lozenge
+    /// with nothing drawn in it and suppressed the bead that would at
+    /// least have been findable (2026-08-02).
+    ///
+    /// A notch widens symmetrically because the camera sits at the
+    /// screen's centre and content would otherwise slide under it. A
+    /// pill has no middle to clear, so its two wings sit adjacent.
+    static func collapsedSpan(
+        left: CGFloat, right: CGFloat, style: DisplayConfigStore.Style
+    ) -> CGFloat? {
+        guard left > 0 || right > 0 else { return nil }
+        return style == .notch ? 2 * max(left, right) : left + right
     }
 
     /// Anything the resting island would actually draw.
     var collapsedHasSomethingToSay: Bool {
-        glanceToast != nil || leftWingNeed > 0 || notchSideNeed > 0
+        Self.collapsedSpan(left: leftWingNeed, right: notchSideNeed, style: islandStyle) != nil
             || (ambience.active != nil && music.nowPlaying?.isPlaying != true)
     }
 
@@ -462,9 +497,28 @@ final class NotchViewModel: ObservableObject {
         case .off: return false
         // A notch island dresses hardware; it is drawn whether or not
         // it has anything to say. `.auto` never reaches here,
-        // `placement(on:)` resolves it, but the switch has to be whole.
+        // `apply(_:to:)` resolves it, but the switch has to be whole.
         case .auto, .notch: return true
         case .pill: return state != .collapsed || collapsedHasSomethingToSay
+        }
+    }
+
+    /// The style-and-state-shaped version of `islandIsShowing` above,
+    /// for a face that is not necessarily this model's own screen:
+    /// three displays can read this as false at the same instant a
+    /// fourth reads it as true, which is the whole of "hovering one
+    /// display must not expand four" (2026-08-02). Not wired to a call
+    /// site yet — `rebuildSlivers`/`wearsBead` still read the
+    /// zero-argument property above, since there is only one panel
+    /// until a later round gives every display its own. Tested (T-B2)
+    /// ahead of that round rather than with it.
+    static func islandIsShowing(
+        style: DisplayConfigStore.Style, expandedHere: Bool, hasSomethingToSay: Bool
+    ) -> Bool {
+        switch style {
+        case .off: return false
+        case .auto, .notch: return true
+        case .pill: return expandedHere || hasSomethingToSay
         }
     }
 
@@ -720,9 +774,9 @@ final class NotchViewModel: ObservableObject {
                 // real drags cannot be synthesized.
                 if text == "debug droptarget" {
                     self.expand(takeKey: false)
-                    self.isDropTargeted = true
+                    self.debugSetDropTargeted?(true)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                        self?.isDropTargeted = false
+                        self?.debugSetDropTargeted?(false)
                     }
                     return
                 }
@@ -1172,7 +1226,9 @@ final class NotchViewModel: ObservableObject {
     func receiveDrop(_ items: [DroppedItem], quietly: Bool = false) {
         // The hosting view already refuses drags mid-voice; belt and braces.
         guard state != .listening else { return }
-        dragExpanded = false
+        // `dragExpanded` itself now lives on `IslandFace` (2026-08-02);
+        // the window controller clears it at the same `onDrop` call that
+        // reaches here, right beside where it is set.
         var landedShelf = false
         var landedClip = false
         for item in items {

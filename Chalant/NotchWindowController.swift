@@ -101,6 +101,11 @@ final class DropHostingView<Content: View>: NSHostingView<Content> {
 @MainActor
 final class NotchWindowController {
     private var panel: NotchPanel?
+    /// The one island's render state. Built alongside `panel` in
+    /// `show()`, and the only face that exists until a later round
+    /// gives every display its own (island-per-display-plan,
+    /// 2026-08-02).
+    private var face: IslandFace?
     private var clickMonitor: Any?
     private var hoverTimer: Timer?
     private var stateSub: AnyCancellable?
@@ -144,27 +149,24 @@ final class NotchWindowController {
     /// costs nothing.
     private let panelSize = CGSize(width: 1000, height: 720)
 
-    /// Everything `placement(on:)` writes onto the view model, as one
-    /// comparable value. Kept together so adding a per-display setting
-    /// cannot quietly leave the repaint check behind — the failure
-    /// there is silent and looks like the setting doing nothing.
-    /// `hasPhysicalNotch` used to be one of these; it is now derived
-    /// from `islandStyle` (already here), so leaving it out drops
-    /// nothing. `islandDisplayID` is here instead: it is per-display
-    /// and was the one write `placement(on:)` made that this check
-    /// never covered (2026-08-01) — the Displays pane's "island here"
-    /// badge would have gone stale exactly like any other silent miss.
-    private var islandGeometry: [AnyHashable] {
-        [
-            viewModel.islandDisplayID, viewModel.notchSize,
-            viewModel.islandStyle, viewModel.islandCornerRadius,
-            viewModel.islandContentPadding,
-        ]
+    /// Everything `apply(_:to:)` writes onto a face, as one comparable
+    /// value. Kept together so adding a per-display setting cannot
+    /// quietly leave the repaint check behind — the failure there is
+    /// silent and looks like the setting doing nothing. A per-face
+    /// check now, not a per-model one (2026-08-02): once more than one
+    /// face exists this still has to compare a face against itself,
+    /// never one face against another's numbers.
+    private func islandGeometry(of face: IslandFace) -> [AnyHashable] {
+        [face.displayID, face.notchSize, face.style, face.cornerRadius, face.contentPadding]
     }
 
-    /// Measure the target screen and compute the panel frame; shared
-    /// by first show and every display change after it.
-    private func placement(on screen: NSScreen) -> NSRect {
+    /// Measure the target screen and write both the model's own
+    /// display-scoped fields (kept for `rebuildSlivers`/`islandIsShowing`,
+    /// which still read the current island's own screen directly) and
+    /// the face's — the same resolved values, so the two can never
+    /// disagree — then compute the panel frame. Shared by first show
+    /// and every display change after it.
+    private func apply(_ screen: NSScreen, to face: IslandFace) -> NSRect {
         // This screen's own settings, resolved out of `.auto` against
         // what the hardware actually reports.
         let config = viewModel.displays.config(for: screen)
@@ -175,10 +177,14 @@ final class NotchWindowController {
         viewModel.islandCornerRadius = config.cornerRadius
         viewModel.islandContentPadding = config.contentPadding
         viewModel.islandDisplayID = screen.displayID
+        face.style = style
+        face.cornerRadius = config.cornerRadius
+        face.contentPadding = config.contentPadding
+        face.displayID = screen.displayID
         // hasPhysicalNotch used to be written here too; it is now
-        // derived from islandStyle (NotchViewModel.hasPhysicalNotch),
-        // so a screen change can no longer update one and leave the
-        // other holding a stale answer.
+        // derived from style (IslandFace.hasPhysicalNotch), so a screen
+        // change can no longer update one and leave the other holding a
+        // stale answer.
 
         // The configured size is the starting point, so a pill — and an
         // emulated notch on a screen with no cutout — is sizeable.
@@ -196,6 +202,7 @@ final class NotchWindowController {
             )
         }
         viewModel.notchSize = notchSize
+        face.notchSize = notchSize
         return NSRect(
             x: screen.frame.midX - panelSize.width / 2,
             y: screen.frame.maxY - panelSize.height,
@@ -244,7 +251,9 @@ final class NotchWindowController {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: retry)
             return
         }
-        let frame = placement(on: screen)
+        let face = IslandFace(model: viewModel)
+        let frame = apply(screen, to: face)
+        self.face = face
 
         let panel = NotchPanel(
             contentRect: frame,
@@ -271,26 +280,27 @@ final class NotchWindowController {
         // so the hover monitors never go blind mid-session.
         panel.acceptsMouseMovedEvents = true
 
-        let hosting = DropHostingView(rootView: NotchRootView(model: viewModel))
+        let hosting = DropHostingView(rootView: NotchRootView(model: viewModel, face: face))
         hosting.frame = NSRect(origin: .zero, size: panelSize)
         hosting.enableDrops()
-        hosting.onTargeted = { [weak viewModel] targeted in
-            viewModel?.isDropTargeted = targeted
+        hosting.onTargeted = { [weak face] targeted in
+            face?.isDropTargeted = targeted
         }
         hosting.acceptsDrop = { [weak viewModel] in
             viewModel?.state != .listening
         }
-        hosting.onDragEntered = { [weak viewModel] in
-            guard let viewModel, viewModel.state == .collapsed else { return }
-            viewModel.dragExpanded = true
+        hosting.onDragEntered = { [weak viewModel, weak face] in
+            guard let viewModel, let face, viewModel.state == .collapsed else { return }
+            face.dragExpanded = true
             viewModel.expand(takeKey: false)
         }
-        hosting.onDragExited = { [weak viewModel] in
-            guard let viewModel, viewModel.dragExpanded else { return }
-            viewModel.dragExpanded = false
+        hosting.onDragExited = { [weak viewModel, weak face] in
+            guard let viewModel, let face, face.dragExpanded else { return }
+            face.dragExpanded = false
             viewModel.collapse()
         }
-        hosting.onDrop = { [weak viewModel] items in
+        hosting.onDrop = { [weak viewModel, weak face] items in
+            face?.dragExpanded = false
             viewModel?.receiveDrop(items)
         }
         panel.contentView = hosting
@@ -333,6 +343,12 @@ final class NotchWindowController {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                 self?.hideDropDock()
             }
+        }
+        // "debug droptarget" flashes the drop highlight for a
+        // screenshot; isDropTargeted lives on the face, which the
+        // model cannot reach on its own.
+        viewModel.debugSetDropTargeted = { [weak face] targeted in
+            face?.isDropTargeted = targeted
         }
 
         // Clicking anywhere outside the app dismisses whatever the
@@ -442,7 +458,7 @@ final class NotchWindowController {
     private var repositionRetry: DispatchWorkItem?
 
     private func reposition() {
-        guard let panel else { return }
+        guard let panel, let face else { return }
         repositionRetry?.cancel()
         repositionRetry = nil
         // Mid-transition (lid closing, display waking) the screen
@@ -461,17 +477,17 @@ final class NotchWindowController {
            !NSScreen.screens.contains(where: { $0.displayID == id }) {
             travelDisplayID = nil
         }
-        // Everything placement() derives from the screen, so a swap
+        // Everything apply() derives from the screen, so a swap
         // between two displays with different settings repaints.
-        let before = islandGeometry
-        let frame = placement(on: screen)
+        let before = islandGeometry(of: face)
+        let frame = apply(screen, to: face)
         let frameChanged = panel.frame != frame
         if frameChanged {
             panel.setFrame(frame, display: true)
         }
         // The frame can survive a display swap unchanged while the
         // notch geometry does not; repaint on either difference.
-        if frameChanged || before != islandGeometry {
+        if frameChanged || before != islandGeometry(of: face) {
             viewModel.objectWillChange.send()
         }
     }
@@ -621,7 +637,7 @@ final class NotchWindowController {
     }
 
     private func pointerMoved() {
-        guard let screen = notchScreen else { return }
+        guard let screen = notchScreen, let face else { return }
         // ponytail: resolves a UUID per screen at 20 Hz so the bead's
         // answer stays live when music starts or a timer finishes
         // while collapsed - without it the bead only re-checked on
@@ -632,7 +648,7 @@ final class NotchWindowController {
         // store, keyed by UUID, if this ever shows up in a trace.
         rebuildSlivers()
         let location = NSEvent.mouseLocation
-        senseDrag(at: location, on: screen)
+        senseDrag(at: location, on: screen, face: face)
         switch viewModel.state {
         case .collapsed:
             // Any display's top edge is a door. Travel is deferred to
@@ -645,7 +661,7 @@ final class NotchWindowController {
             let hit = NSScreen.screens.first {
                 collapsedZone(on: $0).contains(location)
             }
-            publishPointerUnit(location, zone: collapsedZone(on: hit ?? screen))
+            publishPointerUnit(location, zone: collapsedZone(on: hit ?? screen), face: face)
             if let hit {
                 let hitID = hit.displayID
                 guard Date().timeIntervalSince(lastCollapseAt) > reopenCooldown,
@@ -667,6 +683,7 @@ final class NotchWindowController {
                         self.travel(to: hitScreen)
                     }
                     self.lastOpenAt = Date()
+                    self.face?.isHovering = true
                     self.viewModel.hoverChanged(true)
                 }
                 openIntentWork = work
@@ -681,11 +698,12 @@ final class NotchWindowController {
                 // (review-caught).
                 if pointerInside || viewModel.isHovering {
                     pointerInside = false
+                    face.isHovering = false
                     viewModel.hoverChanged(false)
                 }
             }
         case .expanded:
-            publishPointerUnit(location, zone: expandedZone(on: screen))
+            publishPointerUnit(location, zone: expandedZone(on: screen), face: face)
             openIntentWork?.cancel()
             openIntentWork = nil
             let inside = expandedZone(on: screen).contains(location)
@@ -693,6 +711,7 @@ final class NotchWindowController {
             // Freshly opened islands don't close; kills any fast cycle.
             if !inside, Date().timeIntervalSince(lastOpenAt) < minimumOpen { return }
             pointerInside = inside
+            face.isHovering = inside
             viewModel.hoverChanged(inside)
         case .listening:
             // Voice sessions are press-driven; hover keeps its hands off.
@@ -705,7 +724,7 @@ final class NotchWindowController {
     /// whose Mission Control reveal fires after ~2s of dwell and
     /// cannot be disabled for file drags on this macOS. Held drags
     /// hover the bubble safely for as long as they like.
-    private func senseDrag(at location: NSPoint, on screen: NSScreen) {
+    private func senseDrag(at location: NSPoint, on screen: NSScreen, face: IslandFace) {
         guard Date() >= dockPinnedUntil else { return }
         let buttonDown = NSEvent.pressedMouseButtons & 1 != 0
         guard buttonDown else {
@@ -731,7 +750,7 @@ final class NotchWindowController {
             height: screen.frame.height * 0.5
         )
         // A drag already over the island uses the island itself.
-        if viewModel.isDropTargeted {
+        if face.isDropTargeted {
             hideDropDock()
         } else if zone.contains(location) {
             showDropDock(on: screen)
@@ -770,6 +789,14 @@ final class NotchWindowController {
         }
         hosting.onDrop = { [weak self] items in
             self?.hideDropDock()
+            // The dock is the island's other mouth, and a drag that
+            // opened the island can end here without the island ever
+            // seeing an exit. `receiveDrop` used to clear this for
+            // every path at once; now that the flag lives on the face,
+            // each mouth clears it, and a stale true would let the next
+            // unrelated drag-exit collapse an island the user had
+            // opened on purpose (2026-08-02).
+            self?.face?.dragExpanded = false
             self?.viewModel.receiveDrop(items, quietly: true)
         }
         panel.contentView = hosting
@@ -832,15 +859,15 @@ final class NotchWindowController {
     /// so the shell's specular light can follow the cursor. Quantized
     /// to 1/24 steps and set only on change: a normal sweep costs a
     /// handful of re-renders, not the full 20 Hz.
-    private func publishPointerUnit(_ location: NSPoint, zone: NSRect) {
+    private func publishPointerUnit(_ location: NSPoint, zone: NSRect, face: IslandFace) {
         guard zone.contains(location) else {
-            if viewModel.pointerUnit != nil { viewModel.pointerUnit = nil }
+            if face.pointerUnit != nil { face.pointerUnit = nil }
             return
         }
         let raw = (location.x - zone.minX) / zone.width
         let unit = min(max((raw * 24).rounded() / 24, 0), 1)
-        if viewModel.pointerUnit != unit {
-            viewModel.pointerUnit = unit
+        if face.pointerUnit != unit {
+            face.pointerUnit = unit
         }
     }
 
@@ -854,7 +881,7 @@ final class NotchWindowController {
         rebuildSlivers()
         // The light never survives a state morph; it fades back in on
         // the next poll if the pointer is still there.
-        viewModel.pointerUnit = nil
+        face?.pointerUnit = nil
         switch newState {
         case .collapsed:
             pointerInside = false

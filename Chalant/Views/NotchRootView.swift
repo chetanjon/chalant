@@ -3,6 +3,10 @@ import UniformTypeIdentifiers
 
 struct NotchRootView: View {
     @ObservedObject var model: NotchViewModel
+    /// This display's render state: style, geometry, hover, the
+    /// pointer light. `state` itself still comes from `model` — see
+    /// `IslandFace.state`'s doc comment for why.
+    @ObservedObject var face: IslandFace
     @ObservedObject var music: MusicController
     @ObservedObject var timer: CountdownController
     @ObservedObject var stopwatch: StopwatchController
@@ -51,8 +55,9 @@ struct NotchRootView: View {
         Theme.fixedAccent(for: accentMode) ?? music.accent
     }
 
-    init(model: NotchViewModel) {
+    init(model: NotchViewModel, face: IslandFace) {
         self.model = model
+        self.face = face
         self.music = model.music
         self.timer = model.timer
         self.stopwatch = model.stopwatch
@@ -96,36 +101,21 @@ struct NotchRootView: View {
         }
     }
 
+    /// How wide the wings need to be, for the notch-widening math below.
+    /// One function for the width and the show/hide decision now
+    /// (`NotchViewModel.collapsedSpan`), so a pill and a notch answer
+    /// this from the same numbers (2026-08-02).
     private var statusWings: CGFloat {
-        // Beside a physical notch the pill must widen symmetrically:
-        // the camera sits at the screen's center, so each side gets
-        // the larger wing's width or content slides under the notch.
-        if model.hasPhysicalNotch {
-            return 2 * max(model.leftWingNeed, model.notchSideNeed)
-        }
-        return model.leftWingNeed
+        NotchViewModel.collapsedSpan(left: model.leftWingNeed, right: model.notchSideNeed, style: face.style) ?? 0
     }
 
-    // MARK: Notchless pill accounting
-    // On a monitor there is no hardware to mimic, so the pill hugs
-    // its content exactly: bars left, a middle line only when it
-    // earns the space, the session countdown right. Song titles do
-    // not ride the middle here; they were width without value.
-
-    private var monitorPlaying: Bool { music.nowPlaying?.isPlaying == true }
-    private var monitorSession: Bool { model.sessionActive }
-
-    private var monitorMiddleWidth: CGFloat {
-        // The monitor pill exists only for a passing toast now.
-        model.glanceToast != nil ? 148 : 0
-    }
-
-    private var monitorContentWidth: CGFloat {
-        (monitorPlaying ? 44 : 0)
-            + (ambience.active != nil && !monitorPlaying ? 26 : 0)
-            + monitorMiddleWidth
-            + (monitorSession ? 90 : 0)
-    }
+    // MARK: Collapsed sizing
+    // A pill and a notch carry the same glance now: the only
+    // difference is that a notch has hardware in its middle, so its
+    // wings widen symmetrically while a pill's sit adjacent
+    // (2026-08-02; the old separate monitor-only rendering system —
+    // narrower, and blind to most of what the notch already drew — is
+    // what the founder's screenshots were catching).
 
     /// The sliver shape, for when the island has nothing to carry.
     ///
@@ -140,30 +130,31 @@ struct NotchRootView: View {
     /// with it, and the old `monitorTucked` this replaced tested the
     /// exact same pair of things twice under two names (2026-08-01).
     private var collapsedIsEmpty: Bool {
-        model.islandStyle == .pill && !model.collapsedHasSomethingToSay
+        face.style == .pill && !model.collapsedHasSomethingToSay
     }
 
     /// Stable per-state sizes: content is framed to its own state's
     /// size (not the live island size), so an outgoing view fades out
     /// at its natural size instead of being crushed into the pill.
     private var collapsedSize: CGSize {
-        if model.islandStyle == .pill {
+        if face.style == .pill {
             if collapsedIsEmpty {
                 // A sliver, not a pill: idle on a monitor the island
                 // yields the chrome, but stays findable. 120x14 with
                 // a firmer edge: at half brightness the old 84x10
                 // simply did not exist.
-                let grow: CGFloat = model.isHovering ? 1 : 0
+                let grow: CGFloat = face.isHovering ? 1 : 0
                 return CGSize(width: 120 + 56 * grow, height: 14 + 16 * grow)
             }
-            let grow: CGFloat = model.isHovering ? 1 : 0
+            let grow: CGFloat = face.isHovering ? 1 : 0
+            let span = NotchViewModel.collapsedSpan(left: model.leftWingNeed, right: model.notchSideNeed, style: .pill) ?? 0
             return CGSize(
-                width: monitorContentWidth + 40 + 12 * grow,
+                width: span + 40 + 12 * grow,
                 height: 18 + 10 * grow
             )
         }
-        let growW: CGFloat = model.isHovering ? 14 : 0
-        let growH: CGFloat = model.isHovering ? 4 : 0
+        let growW: CGFloat = face.isHovering ? 14 : 0
+        let growH: CGFloat = face.isHovering ? 4 : 0
         // Height is the safe area plus a 3pt apron: flush-exact put
         // the rim's bottom arc ON the glass edge and it read as the
         // border touching the hardware (user, 2026-07-22); the apron
@@ -174,8 +165,8 @@ struct NotchRootView: View {
         // hair wider than the glass, and the pill wears the camera's
         // clothes, not the report's ("reduced just a little bit").
         return CGSize(
-            width: model.notchSize.width - 8 + statusWings + growW,
-            height: model.notchSize.height + 3 + growH
+            width: face.notchSize.width - 8 + statusWings + growW,
+            height: face.notchSize.height + 3 + growH
         )
     }
 
@@ -184,7 +175,7 @@ struct NotchRootView: View {
     private static let listeningSize = CGSize(width: 380, height: 192)
 
     private var islandSize: CGSize {
-        switch model.state {
+        switch face.state {
         case .collapsed: return collapsedSize
         case .listening: return Self.listeningSize
         case .expanded: return model.expandedSize
@@ -196,11 +187,11 @@ struct NotchRootView: View {
         // eaves to cling with. A screen with no cutout has nothing to
         // wrap, and wearing the notch silhouette there is what made the
         // island read as "still a notch" on an external display.
-        if model.islandStyle == .pill {
-            let expanded = model.state != .collapsed
+        if face.style == .pill {
+            let expanded = face.state != .collapsed
             let radius = expanded
-                ? max(model.islandCornerRadius, Theme.Island.radiusCollapsed)
-                : model.islandCornerRadius
+                ? max(face.cornerRadius, Theme.Island.radiusCollapsed)
+                : face.cornerRadius
             return IslandShape(
                 eave: 0,
                 bottomRadius: radius,
@@ -208,8 +199,8 @@ struct NotchRootView: View {
                 topRadius: radius
             )
         }
-        if model.state == .collapsed {
-            // Reaching here means islandStyle is .notch or .off (.pill
+        if face.state == .collapsed {
+            // Reaching here means style is .notch or .off (.pill
             // returned above): .notch forces hasPhysicalNotch true, and
             // .off draws at opacity 0 regardless (islandIsShowing),
             // so the sliver and compact-pill branches this used to
@@ -218,10 +209,10 @@ struct NotchRootView: View {
             //
             // On hover the droplet "reaches", shoulders widen, belly
             // sags, a soft beat of anticipation before opening.
-            let reaching = model.isHovering && Theme.Feel.current.ambient
+            let reaching = face.isHovering && Theme.Feel.current.ambient
             return IslandShape(
                 eave: Theme.Island.eaveCollapsed + (reaching ? 1.5 : 0),
-                bottomRadius: model.islandCornerRadius,
+                bottomRadius: face.cornerRadius,
                 belly: reaching ? 3 : Theme.Island.bellyCollapsed
             )
         }
@@ -303,11 +294,11 @@ struct NotchRootView: View {
         ZStack {
             if islandMaterial == "glass" {
                 glassFill
-                    .opacity(model.state == .collapsed ? 0 : 1)
+                    .opacity(face.state == .collapsed ? 0 : 1)
             }
             islandShape
                 .fill(Color.black)
-                .opacity(islandMaterial == "glass" && model.state != .collapsed ? openSmoke : 1)
+                .opacity(islandMaterial == "glass" && face.state != .collapsed ? openSmoke : 1)
         }
     }
 
@@ -322,8 +313,8 @@ struct NotchRootView: View {
                         islandShape
                             .strokeBorder(Theme.specularEdge, lineWidth: 1)
                             .opacity(
-                                model.state == .collapsed
-                                    ? (model.isHovering ? 0.9 : (idleEdgeOn ? 0.75 : 0.4))
+                                face.state == .collapsed
+                                    ? (face.isHovering ? 0.9 : (idleEdgeOn ? 0.75 : 0.4))
                                     : 1
                             )
                     )
@@ -332,19 +323,19 @@ struct NotchRootView: View {
                     .overlay(
                         islandShape
                             .strokeBorder(accent.opacity(0.16), lineWidth: 1)
-                            .opacity(model.state == .expanded ? 1 : 0)
+                            .opacity(face.state == .expanded ? 1 : 0)
                     )
                     // Bottom-lit lip: keeps the idle droplet findable
                     // over fullscreen apps' pure black top strip.
                     .overlay(
                         islandShape
                             .strokeBorder(Theme.lipLight, lineWidth: 1)
-                            .opacity(idleEdgeOn && model.state == .collapsed ? 1 : 0)
+                            .opacity(idleEdgeOn && face.state == .collapsed ? 1 : 0)
                     )
                     // A soft specular highlight that follows the cursor
                     // along the top edge, the glass answers the hand.
                     .overlay {
-                        if Theme.Feel.current.ambient, let unit = model.pointerUnit {
+                        if Theme.Feel.current.ambient, let unit = face.pointerUnit {
                             islandShape
                                 .strokeBorder(Color.white.opacity(0.14), lineWidth: 1.5)
                                 .mask(
@@ -359,13 +350,13 @@ struct NotchRootView: View {
                                 .transition(.opacity)
                         }
                     }
-                    .animation(Theme.Motion.hover, value: model.pointerUnit)
+                    .animation(Theme.Motion.hover, value: face.pointerUnit)
                     // Breathing accent ring: idle life on the edges when
                     // music or a timer is going. Intensity breathes in
                     // place, nothing travels along the border.
                     .overlay {
                         if glowOn, Theme.Feel.current.ambient,
-                           model.state == .collapsed,
+                           face.state == .collapsed,
                            model.sessionActive || music.nowPlaying?.isPlaying == true {
                             TimelineView(.animation(minimumInterval: 1 / 15)) { context in
                                 let t = context.date.timeIntervalSinceReferenceDate
@@ -389,10 +380,10 @@ struct NotchRootView: View {
                     .overlay(
                         islandShape
                             .strokeBorder(accent.opacity(0.8), lineWidth: 1.5)
-                            .opacity(model.isDropTargeted ? 1 : 0)
+                            .opacity(face.isDropTargeted ? 1 : 0)
                     )
                     .shadow(
-                        color: Color.black.opacity(model.state == .collapsed ? 0 : 0.45),
+                        color: Color.black.opacity(face.state == .collapsed ? 0 : 0.45),
                         radius: 14, y: 7
                     )
 
@@ -417,9 +408,9 @@ struct NotchRootView: View {
                     if pressing {
                         pressStarted = Date()
                     } else {
-                        if model.state == .listening {
+                        if face.state == .listening {
                             model.endListening()
-                        } else if model.state == .collapsed,
+                        } else if face.state == .collapsed,
                                   let start = pressStarted,
                                   Date().timeIntervalSince(start) < Theme.pressToTalkDelay {
                             model.expand()
@@ -433,10 +424,10 @@ struct NotchRootView: View {
             )
             // Drop handling is at the AppKit level in NotchWindowController
             // (SwiftUI's onDrop never fires in this panel); the accent edge
-            // lights via model.isDropTargeted. The island opens after the
+            // lights via face.isDropTargeted. The island opens after the
             // drop lands, not during the drag, so nothing disrupts it.
-            .animation(Theme.Motion.island, value: model.state)
-            .animation(Theme.Motion.hover, value: model.isHovering)
+            .animation(Theme.Motion.island, value: face.state)
+            .animation(Theme.Motion.hover, value: face.isHovering)
             .animation(Theme.Motion.hover, value: statusWings)
 
             Spacer(minLength: 0)
@@ -453,7 +444,7 @@ struct NotchRootView: View {
     /// content breathes in just behind it.
     private var contentLayer: some View {
         ZStack(alignment: .top) {
-            if model.state == .collapsed {
+            if face.state == .collapsed {
                 // Wings and battery wait for the shell to mostly settle,
                 // then fade in, appearing mid-shrink reads as flicker.
                 collapsedContent
@@ -461,14 +452,14 @@ struct NotchRootView: View {
                     .transition(contentTransition(insertionDelay: 0.28))
             }
 
-            if model.state == .listening {
+            if face.state == .listening {
                 listeningContent
                     .frame(width: Self.listeningSize.width, height: Self.listeningSize.height)
                     .transition(contentTransition(insertionDelay: 0.09))
             }
 
-            if model.state == .expanded {
-                ExpandedView(model: model)
+            if face.state == .expanded {
+                ExpandedView(model: model, face: face)
                     .transition(contentTransition(insertionDelay: 0.09))
             }
         }
@@ -483,49 +474,20 @@ struct NotchRootView: View {
         )
     }
 
-    /// Wings beside the notch on the built-in display; on monitors,
-    /// a compact pill that hugs exactly what is worth showing.
+    /// A pill and a notch carry the same glance now (2026-08-02): the
+    /// resting sliver is a handle, not a display, whenever there is
+    /// nothing to say; otherwise both draw `wingsContent`.
     @ViewBuilder
     private var collapsedContent: some View {
-        if model.hasPhysicalNotch {
-            wingsContent
-        } else if collapsedIsEmpty {
-            // The resting sliver is a handle, not a display.
+        if collapsedIsEmpty {
             Color.clear
         } else {
-            monitorPill
+            wingsContent
         }
     }
 
-    /// Bars left, middle only when it earns the space, session right.
-    private var monitorPill: some View {
-        HStack(spacing: Theme.Space.s) {
-            if monitorPlaying {
-                NowPlayingBars(accent: accent, barCount: 4, maxHeight: 8)
-            }
-            if let active = ambience.active, !monitorPlaying {
-                Image(systemName: active.symbol)
-                    .font(Theme.Fonts.icon(.xs))
-                    .foregroundStyle(accent)
-            }
-            monitorMiddle
-            if monitorSession {
-                sessionCompact
-            }
-        }
-        .padding(.horizontal, 16)
-    }
-
-    @ViewBuilder
-    private var monitorMiddle: some View {
-        // The landing moment outranks everything: it is six seconds
-        // long and often arrives just as a break begins.
-        if let toast = model.glanceToast {
-            toastGlance(toast)
-        }
-    }
-
-    /// The countdown at the pill's right, ring and all.
+    /// The countdown at the pill's right, ring and all. A pill has the
+    /// room for digits that a notch's narrow wing does not.
     private var sessionCompact: some View {
         HStack(spacing: Theme.Space.snug) {
             if stopwatch.isActive, !focus.isActive, !timer.isActive {
@@ -573,8 +535,10 @@ struct NotchRootView: View {
             if let agents = model.agentGlance { agentMarkGlance(agents) }
         case .timers:
             // Music holds the left wing, so the session mark crosses
-            // over rather than fighting it for the same side.
-            sessionMark
+            // over rather than fighting it for the same side. A pill
+            // has the room to keep its digits; a notch's narrow wing
+            // never did (2026-08-02).
+            if face.hasPhysicalNotch { sessionMark } else { sessionCompact }
         case .event:
             if let next = model.upcomingEvent { upcomingGlance(next, width: 100) }
         case .battery:
@@ -672,8 +636,13 @@ struct NotchRootView: View {
                 NowPlayingBars(accent: accent, barCount: 4, maxHeight: 7)
                     .padding(.leading, Theme.Space.wingInset)
             } else if glanceSession, model.sessionActive, !model.sessionOnRight {
-                sessionMark
-                    .padding(.leading, Theme.Space.wingInset)
+                // No music to share the wing with here: a pill still
+                // has the room for the countdown's digits, the same
+                // room a notch's narrow wing never had (2026-08-02).
+                Group {
+                    if face.hasPhysicalNotch { sessionMark } else { sessionCompact }
+                }
+                .padding(.leading, Theme.Space.wingInset)
             }
             // While music plays the glance belongs to the song and its
             // wave alone; the soundscape symbol steps back.
@@ -743,7 +712,7 @@ struct NotchRootView: View {
                     .lineLimit(1)
             }
         }
-        .padding(.top, model.contentTopReserve + 6)
+        .padding(.top, face.contentTopReserve + 6)
         .contentShape(Rectangle())
         .onTapGesture {
             model.endListening()
@@ -752,7 +721,7 @@ struct NotchRootView: View {
             CloseButton {
                 model.cancelListening()
             }
-            .padding(.top, model.contentTopReserve + Theme.Space.xs)
+            .padding(.top, face.contentTopReserve + Theme.Space.xs)
             .padding(.trailing, Theme.Space.m)
         }
     }

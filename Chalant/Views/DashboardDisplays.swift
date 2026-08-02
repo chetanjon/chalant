@@ -192,7 +192,7 @@ struct DisplaysSection: View {
             SettingCard(title: "Size") {
                 // Width and Height write notchSize, which only the
                 // notch render path reads (NotchWindowController.swift
-                // placement(on:) -> NotchRootView.collapsedSize); a
+                // apply(_:to:) -> NotchRootView.collapsedSize); a
                 // pill's collapsed shape comes from what it is showing
                 // instead. Offering these sliders under Pill was a
                 // control that could not move anything, and the note
