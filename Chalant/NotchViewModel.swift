@@ -1364,6 +1364,7 @@ final class NotchViewModel: ObservableObject {
     /// piece of view-local state under it.
     @Published var selectedSessionID: String?
 
+
     func beginListening(to destination: VoiceDestination = .chalant) {
         guard state == .collapsed else { return }
         voiceDestination = destination

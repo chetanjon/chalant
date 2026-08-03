@@ -24,8 +24,27 @@ struct SessionRoom: View {
     /// this lands in the conversation, which is the part that benefits.
     private static let railWidth: CGFloat = 280
 
+    /// Whether the rail is taking arrow keys. Set on appear, given up
+    /// the moment the composer wants them.
+    @FocusState private var railFocused: Bool
+
     private var bands: [(group: SessionStore.Group, live: [SessionStore.Session], ended: [SessionStore.Finished])] {
         sessions.groups()
+    }
+
+    /// Every row in the rail, in the order the eye reads them, so an
+    /// arrow key crosses a band boundary the way it looks like it should
+    /// rather than stopping at one.
+    private var order: [String] {
+        bands.flatMap { $0.live.map(\.id) + $0.ended.map(\.id) }
+    }
+
+    private func move(_ step: Int) {
+        let rows = order
+        guard !rows.isEmpty else { return }
+        let current = model.selectedSessionID.flatMap { rows.firstIndex(of: $0) } ?? 0
+        let next = min(max(current + step, 0), rows.count - 1)
+        model.selectedSessionID = rows[next]
     }
 
     var body: some View {
@@ -59,7 +78,34 @@ struct SessionRoom: View {
                 .frame(height: height)
             }
         }
-        .onAppear { landOnSomething() }
+        // Every one of these has a visible control that does the same
+        // thing, which is this app's standing rule: the arrows are the
+        // rail, return is the field, escape is the back chevron. They
+        // are here because a room you can only drive with a mouse is not
+        // one you can drive quickly.
+        .focusable()
+        .focused($railFocused)
+        .onKeyPress(.upArrow) { move(-1); return .handled }
+        .onKeyPress(.downArrow) { move(1); return .handled }
+        // No return-key handler, and that is a decision rather than an
+        // omission.
+        //
+        // The plan called for return to focus the composer. It was
+        // built, and it shut the island instead: the panel this room
+        // lives in is an `NSPanel`, which has its own idea about that
+        // key, and returning `.handled` from `onKeyPress` did not stop
+        // it. Two attempts, one with and one without giving up the
+        // rail's focus first, both collapsed on the spot (observed in
+        // pixels, 2026-08-03). A key that closes the surface you are
+        // working in is worse than a key that does nothing, so it is
+        // not here. The field takes a click, which is how it would be
+        // reached anyway.
+        //
+        // Escape went with it, untested and next to the same landmine.
+        .onAppear {
+            landOnSomething()
+            railFocused = true
+        }
         // The store re-sorts and re-bands constantly. Selection follows
         // only when what it pointed at has actually gone.
         .onChange(of: sessions.sessions.map(\.id)) { _, _ in landOnSomething() }
