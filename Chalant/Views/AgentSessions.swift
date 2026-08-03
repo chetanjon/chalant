@@ -62,15 +62,20 @@ struct AgentSessionsStrip: View {
     }
 
     private func row(_ session: SessionStore.Session) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
+        // Tighter than the standard row gap: a card that reads as
+        // belonging to the row above needs to sit close under it, not
+        // float at the same distance a wholly separate row would.
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
             rowLine(session)
             // Answering happens here rather than in the terminal the
             // question came from, which is the whole point: the island
             // already told you a session wants something.
             if let ask = session.ask, ask.answer == nil {
-                AskCard(ask: ask) { choices in
+                AskCard(ask: ask, answer: { choices in
                     sessions.answer(sessionID: session.id, with: choices)
-                }
+                }, queue: { label in
+                    sessions.queue(message: label, for: session.id)
+                })
             }
             // The composer goes in the slot AskCard occupies, under the
             // row it belongs to: no second element, no stored layout
@@ -479,32 +484,79 @@ private struct ComposeCard: View {
 
 /// A question an agent is waiting on, answerable in place.
 ///
-/// Options are buttons rather than a menu: there are at most six, and a
-/// menu would hide the choice behind a click on a surface whose whole
-/// job is to have already told you.
+/// A leading accent rule and the header sitting right above the question
+/// tie this to the row it hangs off, rather than reading as a second,
+/// unrelated box floating below it (founder, 2026-08-03: "the UI to show
+/// the question sucks"). Options are full-width rows with a real
+/// selection glyph rather than capsule chips: a chip crushes a real
+/// `AskUserQuestion` option, which is routinely a full sentence, into a
+/// pill built for a word.
 private struct AskCard: View {
     let ask: SessionStore.Ask
     let answer: ([String]) -> Void
+    /// Native asks only: queues the label through the session's outbox
+    /// instead of answering. There is no supported way to resolve
+    /// Claude Code's own `AskUserQuestion` from outside the process, so
+    /// this is the honest alternative rather than a button that looks
+    /// like it answers and silently does nothing. Returns whether the
+    /// queue actually took it, so a session that cannot receive
+    /// messages right now can be told rather than left looking answered.
+    let queue: (String) -> Bool
 
     /// Only used when several may be picked. A single-choice question
-    /// answers on the tap and never reads this.
+    /// answers (or queues) on the tap and never reads this.
     @State private var picked: Set<String> = []
+    /// Set once a native ask has been queued, replacing the options with
+    /// what actually happened. Never cleared back: the tap already
+    /// happened, and offering the buttons again would invite a second,
+    /// different pick queued behind the one Claude Code is still
+    /// waiting on in its terminal.
+    @State private var queuedOutcome: String?
 
     @Environment(\.chalantAccent) private var accent
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
+        HStack(alignment: .top, spacing: 0) {
+            Capsule()
+                .fill(accent.opacity(0.5))
+                .frame(width: 2)
+            content
+                .padding(.leading, Theme.Space.m)
+        }
+        .rowInsets()
+        .chalantCard(radius: Theme.Radius.row)
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            SectionHeader(title: ask.header.isEmpty ? "Question" : ask.header, tint: accent)
             Text(ask.question)
                 .font(Theme.Fonts.body)
                 .foregroundStyle(Theme.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
-            FlowLayout(spacing: Theme.Space.s) {
-                ForEach(ask.options, id: \.self) { option in
-                    optionChip(option)
-                }
+            if ask.native, queuedOutcome == nil {
+                Text("Claude Code asked this itself, in its own terminal. Chalant can't answer it "
+                     + "there directly: tapping a choice queues it as a message for this "
+                     + "session's next turn instead.")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            if ask.multiSelect {
-                Button("Send") { answer(Array(picked)) }
+            if let queuedOutcome {
+                Text(queuedOutcome)
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    ForEach(ask.options, id: \.self) { option in
+                        optionRow(option)
+                    }
+                }
+                if ask.multiSelect {
+                    Button("Send") {
+                        respond(with: Array(picked), label: picked.sorted().joined(separator: ", "))
+                    }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .tint(accent)
@@ -512,35 +564,64 @@ private struct AskCard: View {
                     // would tell the agent the user decided when they
                     // did not.
                     .disabled(picked.isEmpty)
+                }
             }
         }
-        .rowInsets()
-        .chalantCard(radius: Theme.Radius.row)
     }
 
-    private func optionChip(_ option: String) -> some View {
+    /// One real row per option: a selection glyph, the full label
+    /// wrapping rather than truncating, a hover lift and a press sink,
+    /// exactly what "obviously tappable" asks for.
+    private func optionRow(_ option: String) -> some View {
         let on = picked.contains(option)
         return Button {
             guard ask.multiSelect else {
-                answer([option])
+                respond(with: [option], label: option)
                 return
             }
             if on { picked.remove(option) } else { picked.insert(option) }
         } label: {
-            Text(option)
-                .font(Theme.Fonts.caption)
-                .foregroundStyle(on ? Theme.textPrimary : Theme.textSecondary)
-                .padding(.horizontal, Theme.Space.m)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule().fill(on ? accent.opacity(0.18) : Theme.surface)
-                )
-                .overlay(
-                    Capsule().strokeBorder(on ? accent.opacity(0.4) : .clear, lineWidth: 1)
-                )
-                .contentShape(Capsule())
+            HStack(alignment: .top, spacing: Theme.Space.m) {
+                Image(systemName: ask.multiSelect ? (on ? "checkmark.square.fill" : "square") : "circle")
+                    .font(Theme.Fonts.icon(.m))
+                    .foregroundStyle(on ? accent : Theme.textTertiary)
+                Text(option)
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(on ? Theme.textPrimary : Theme.textSecondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, Theme.Space.s)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                    .fill(on ? accent.opacity(0.14) : Theme.field)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                    .strokeBorder(on ? accent.opacity(0.45) : Theme.hairlineFaint, lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous))
         }
         .buttonStyle(PressableStyle())
+        .hoverHighlight(radius: Theme.Radius.row)
         .accessibilityAddTraits(on ? [.isSelected, .isButton] : .isButton)
+    }
+
+    /// Where a tap actually goes: a real answer for the scripted
+    /// `chalant ask`, which the agent polls for and collects, or a
+    /// queued message for one Claude Code asked on its own, which
+    /// cannot be answered from here at all (see `ask.native`).
+    private func respond(with choices: [String], label: String) {
+        guard ask.native else {
+            answer(choices)
+            return
+        }
+        queuedOutcome = queue(label)
+            ? "Queued \u{201C}\(label)\u{201D}. Arrives when this session next takes a turn. "
+                + "The terminal prompt still needs its own answer to move past it now."
+            : "Could not queue that; this session can't take a message right now."
     }
 }

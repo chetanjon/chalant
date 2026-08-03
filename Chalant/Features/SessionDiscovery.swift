@@ -36,6 +36,36 @@ final class SessionDiscovery {
         /// The last tool the agent reached for, which is the closest
         /// thing the transcript has to "what it is doing right now".
         var lastTool: String?
+        /// Claude Code's own `AskUserQuestion` call, still unanswered as
+        /// of the end of this tail, if there is one. Set on the tool_use
+        /// block, cleared the instant a later `tool_result` names the
+        /// same id, so a resolved question never lingers (see
+        /// `NativeAsk` below).
+        var pendingNativeAsk: NativeAsk?
+    }
+
+    /// One question from Claude Code's own `AskUserQuestion` tool call,
+    /// read straight out of the transcript rather than a hook payload:
+    /// the hook's `Notification` event carries no question text or
+    /// options at all (native-questions-evidence-2026-08-03.md), only
+    /// the assistant's own `tool_use` block has them.
+    ///
+    /// `AskUserQuestion` can bundle several questions into one call;
+    /// only the first is kept. Modelling the rest would mean giving
+    /// `SessionStore.Ask` an array of questions instead of one, which
+    /// nothing else here needs yet: a batched ask is rare, and showing
+    /// its first question is still more than showing nothing.
+    struct NativeAsk: Equatable {
+        /// The tool_use block's own id, not a freshly minted one: this
+        /// is what a later `tool_result` names when the question is
+        /// answered, and matching that is the only way to tell a live
+        /// question from a spent one (verified against a real
+        /// transcript; see `parseMetadata` below).
+        let id: String
+        let header: String
+        let question: String
+        let options: [String]
+        let multiSelect: Bool
     }
 
     /// What a tool name means to someone glancing at a row.
@@ -66,6 +96,7 @@ final class SessionDiscovery {
         var lastPrompt: String?
         var activity: String?
         var lastMessage: String?
+        var pendingNativeAsk: NativeAsk?
     }
 
     /// A burst of fs events for one file (title, then prompt, then mode
@@ -217,12 +248,31 @@ final class SessionDiscovery {
                 mtime: mtime, title: title, cwd: cwd, branch: branch,
                 lastPrompt: metadata.lastPrompt,
                 activity: metadata.lastTool.map(Self.activityPhrase(forTool:)),
-                lastMessage: metadata.lastMessage
+                lastMessage: metadata.lastMessage,
+                pendingNativeAsk: metadata.pendingNativeAsk
             )
         }
         guard let entry = tracked[id] else { return }
         let state: SessionStore.State =
             Date().timeIntervalSince(mtime) <= Self.staleWindow ? .working : .stale
+        // Attached before the upsert below, same ordering the scripted
+        // ask already relies on: upsert() reads whatever `ask` is
+        // sitting on the row right now to decide whether an outstanding
+        // question outranks the state this rescan would otherwise set.
+        if let native = entry.pendingNativeAsk {
+            store.attach(
+                askID: native.id, to: id, header: native.header, question: native.question,
+                options: native.options, multiSelect: native.multiSelect, native: true
+            )
+        } else if store.pendingAsk(sessionID: id)?.native == true {
+            // The tail no longer shows this one pending: either a
+            // tool_result resolved it, or it fell out of the window this
+            // read covers. Either way, a native ask that lingers after
+            // it stopped being live is worse than one that disappears a
+            // beat early, and this store never touches an ask it didn't
+            // attach itself (a scripted `chalant ask` is left alone).
+            store.clearAsk(sessionID: id)
+        }
         store.upsert(
             id: id, title: entry.title, cwd: entry.cwd, branch: entry.branch,
             lastPrompt: entry.lastPrompt, state: state,
@@ -364,6 +414,12 @@ final class SessionDiscovery {
                         if let name = block["name"] as? String, !name.isEmpty {
                             metadata.lastTool = name
                         }
+                        // A newer AskUserQuestion always replaces an
+                        // older pending one, same last-write-wins rule
+                        // as everything else in this fold.
+                        if let native = Self.nativeAsk(from: block) {
+                            metadata.pendingNativeAsk = native
+                        }
                     case "text":
                         // File order is turn order, so the last one
                         // standing is what it said most recently.
@@ -375,6 +431,24 @@ final class SessionDiscovery {
                     default:
                         break
                     }
+                }
+            }
+            // A tool_result answering the still-pending AskUserQuestion
+            // is the one reliable marker that it stopped being live:
+            // Claude Code writes it back wearing the same tool_use id,
+            // and nothing else in the transcript resolves that id while
+            // the question is genuinely waiting (verified against a real
+            // transcript, native-questions-evidence-2026-08-03.md: the
+            // answer lands as the very next record). Its own content is
+            // never read here: only the fact that it exists matters.
+            if type == "user",
+               let message = object["message"] as? [String: Any],
+               let blocks = message["content"] as? [[String: Any]],
+               let pending = metadata.pendingNativeAsk {
+                for block in blocks
+                where block["type"] as? String == "tool_result"
+                    && block["tool_use_id"] as? String == pending.id {
+                    metadata.pendingNativeAsk = nil
                 }
             }
             switch type {
@@ -391,6 +465,33 @@ final class SessionDiscovery {
             }
         }
         return metadata
+    }
+
+    /// Reads the first question out of an `AskUserQuestion` tool_use
+    /// block's `input.questions`, or nil for any other tool (including a
+    /// malformed `AskUserQuestion`, which is not a question worth
+    /// showing). Options arrive as objects (`label`, `description`,
+    /// `preview`); only the label is kept, the same shape the scripted
+    /// `chalant ask` already sends over the socket.
+    private static func nativeAsk(from block: [String: Any]) -> NativeAsk? {
+        guard block["name"] as? String == "AskUserQuestion",
+              let id = block["id"] as? String, !id.isEmpty,
+              let input = block["input"] as? [String: Any],
+              let questions = input["questions"] as? [[String: Any]],
+              let first = questions.first,
+              let question = (first["question"] as? String)?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              !question.isEmpty
+        else { return nil }
+        let options = (first["options"] as? [[String: Any]])?
+            .compactMap { $0["label"] as? String } ?? []
+        return NativeAsk(
+            id: id,
+            header: (first["header"] as? String) ?? "Question",
+            question: question,
+            options: options,
+            multiSelect: first["multiSelect"] as? Bool ?? false
+        )
     }
 
     static func title(metadata: ParsedMetadata, resolvedCwd: String?, slug: String) -> String {

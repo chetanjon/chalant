@@ -146,6 +146,15 @@ final class SessionStore: ObservableObject {
         var multiSelect: Bool
         var answer: [String]?     // set when the user taps; hook polls for this
         var askedAt: Date
+        /// True for a question Claude Code asked itself (its own
+        /// `AskUserQuestion` tool call, read from the transcript), false
+        /// for the scripted `chalant ask`. There is no supported way to
+        /// resolve a native one from outside the process, so the island
+        /// never calls `answer()` for these: it can only queue a pick
+        /// through the outbox, arriving at a later turn boundary rather
+        /// than answering the prompt itself. `AskCard` reads this to
+        /// decide which of the two it is doing, and to say so.
+        var native: Bool = false
     }
 
     private static let log = Logger(subsystem: "com.cj.chalant", category: "sessions")
@@ -260,7 +269,7 @@ final class SessionStore: ObservableObject {
     @discardableResult
     func attach(
         askID: String, to sessionID: String, header: String, question: String,
-        options: [String], multiSelect: Bool
+        options: [String], multiSelect: Bool, native: Bool = false
     ) -> Bool {
         let question = String(question.prefix(Self.askFieldLimit))
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -275,7 +284,8 @@ final class SessionStore: ObservableObject {
                 .filter { !$0.isEmpty },
             multiSelect: multiSelect,
             answer: nil,
-            askedAt: Date()
+            askedAt: Date(),
+            native: native
         )
         let wasAlreadyAsking = sessions[index].state == .needsInput
         sessions[index].state = .needsInput

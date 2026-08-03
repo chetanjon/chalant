@@ -864,6 +864,83 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(SessionDiscovery.activityPhrase(forTool: "SomeNewTool"), "SomeNewTool")
     }
 
+    // MARK: Claude Code's own AskUserQuestion, read from the transcript
+
+    func testAnAskUserQuestionToolCallIsReadAsAPendingNativeAsk() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"Pick","question":"Which one?","multiSelect":false,"options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]}]}}]}}
+        """
+        let ask = SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk
+        XCTAssertEqual(ask?.id, "toolu_1")
+        XCTAssertEqual(ask?.header, "Pick")
+        XCTAssertEqual(ask?.question, "Which one?")
+        // Only the label travels; description and preview are dropped,
+        // the same options shape the scripted `chalant ask` already sends.
+        XCTAssertEqual(ask?.options, ["A", "B"])
+        XCTAssertEqual(ask?.multiSelect, false)
+    }
+
+    /// `AskUserQuestion` can bundle several questions into one call; only
+    /// the first is surfaced, since `SessionStore.Ask` models one.
+    func testOnlyTheFirstQuestionOfABatchedAskIsKept() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"First","question":"q1?","options":[{"label":"A"}]},{"header":"Second","question":"q2?","options":[{"label":"B"}]}]}}]}}
+        """
+        let ask = SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk
+        XCTAssertEqual(ask?.header, "First")
+    }
+
+    /// The one thing this whole feature turned on: whether a live
+    /// question can be told apart from an already-answered one. Verified
+    /// against a real transcript (native-questions-evidence-2026-08-03.md):
+    /// the answer lands as a `tool_result` wearing the tool_use's own
+    /// id, as the very next record.
+    func testAToolResultAnsweringTheSameIdClearsThePendingAsk() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"Pick","question":"Which one?","options":[{"label":"A"}]}]}}]}}
+        {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"answered"}]}}
+        """
+        XCTAssertNil(SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk,
+                     "a matching tool_result means this question stopped being live")
+    }
+
+    func testAToolResultForADifferentIdLeavesThePendingAskAlone() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"Pick","question":"Which one?","options":[{"label":"A"}]}]}}]}}
+        {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_something_else","content":"unrelated"}]}}
+        """
+        XCTAssertEqual(SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk?.id, "toolu_1")
+    }
+
+    /// A newer AskUserQuestion replaces an older pending one, same
+    /// last-write-wins rule the rest of this fold already follows.
+    func testANewerAskUserQuestionReplacesAnOlderPendingOne() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"First","question":"q1?","options":[{"label":"A"}]}]}}]}}
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_2","name":"AskUserQuestion","input":{"questions":[{"header":"Second","question":"q2?","options":[{"label":"B"}]}]}}]}}
+        """
+        XCTAssertEqual(SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk?.id, "toolu_2")
+    }
+
+    /// A `SessionStore.attach` carrying `native: true` is what
+    /// `SessionDiscovery` calls for one of these; `AskCard` reads the
+    /// flag to know it can only queue a pick, never answer.
+    func testANativeAskIsMarkedAsSuchOnTheStore() {
+        let store = storeWithSession()
+        store.attach(askID: "toolu_1", to: "s1", header: "Pick", question: "Which one?",
+                     options: ["A"], multiSelect: false, native: true)
+        XCTAssertEqual(store.pendingAsk(sessionID: "s1")?.native, true)
+    }
+
+    /// The scripted `chalant ask` path is unaffected: it never passes
+    /// `native`, and must keep defaulting to false.
+    func testAnUnmarkedAttachIsNotNative() {
+        let store = storeWithSession()
+        store.attach(askID: "q", to: "s1", header: "h", question: "q?",
+                     options: ["A"], multiSelect: false)
+        XCTAssertEqual(store.pendingAsk(sessionID: "s1")?.native, false)
+    }
+
     // MARK: A window that comes back to a changed desk
 
     func testARememberedFrameOnAVanishedScreenIsNotOnScreen() {
