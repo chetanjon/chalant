@@ -578,7 +578,13 @@ struct HuggingList<Content: View>: View {
             // call site so the fix actually reaches every list rather
             // than the one that got reported. Scrolling itself is
             // untouched, only the indicator is gone.
-            .scrollIndicators(.hidden)
+            //
+            // `.never`, not `.hidden`. They are not synonyms: hidden
+            // yields to the system, so anyone with "Show scroll bars:
+            // Always" in System Settings still gets one, which is why
+            // this read as unfixed after it was fixed (founder,
+            // 2026-08-02, second report with the bar still there).
+            .scrollIndicators(.never)
         }
     }
 }

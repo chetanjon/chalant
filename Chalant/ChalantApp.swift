@@ -118,8 +118,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // exists to skip the switcher, and landing on Today
                 // would leave the user one click from where they asked
                 // to be.
-                model.tab = tab
+                // Expand first, then choose. `expand()` runs
+                // `restoreLastTabIfWanted()`, so setting the tab before
+                // it meant "Remember last tab" immediately overwrote
+                // the destination the shortcut had just asked for: with
+                // that switch on, every one of these landed wherever
+                // the island was last left instead (founder,
+                // 2026-08-02, "cmd ctrl s should show sessions").
+                // Ordering it this way also covers an island that is
+                // already open, where expand() returns early and the
+                // assignment is the only thing that happens.
                 model.expand()
+                model.tab = tab
                 // The clipboard's own binding covers both halves the
                 // founder asked for: opening it, and searching within
                 // it once open. A second destination just for search
