@@ -516,7 +516,8 @@ final class ChalantTests: XCTestCase {
     }
 
     func testFocusPauseHoldsTheReadingAndResumeCarriesItOn() {
-        let focus = FocusController(ambience: AmbienceController())
+        // A timing test has no business starting an audio engine.
+        let focus = FocusController(ambience: AmbienceController(engine: RecordingAmbienceSource()))
         focus.start(work: 1)
         XCTAssertEqual(focus.remaining, 60)
         letTheClockRun(1.2)
@@ -541,7 +542,8 @@ final class ChalantTests: XCTestCase {
         // into the break, then the next round, forever; a user who
         // stepped away came back to a machine still grinding rounds
         // (user, 2026-07-31).
-        let focus = FocusController(ambience: AmbienceController())
+        // A timing test has no business starting an audio engine.
+        let focus = FocusController(ambience: AmbienceController(engine: RecordingAmbienceSource()))
         var banked: Int?
         focus.onWorkPhaseComplete = { banked = $0 }
         focus.start(work: 25)
@@ -568,7 +570,8 @@ final class ChalantTests: XCTestCase {
         // Starting a session switched on brown noise by itself (user,
         // 2026-08-02: "we dont want that"). Sound is the user's to
         // start, never the timer's.
-        let ambience = AmbienceController()
+        let source = RecordingAmbienceSource()
+        let ambience = AmbienceController(engine: source)
         let focus = FocusController(ambience: ambience)
         focus.start(work: 25)
         XCTAssertNil(ambience.active, "a focus session must not turn ambient noise on")
@@ -576,14 +579,24 @@ final class ChalantTests: XCTestCase {
         XCTAssertNil(ambience.active, "a break must not turn ambient noise on either")
         focus.stop()
         XCTAssertNil(ambience.active)
+        XCTAssertTrue(source.calls.isEmpty, "a whole session asked the sound source for nothing")
     }
 
     func testAFocusSessionLeavesTheUsersOwnNoiseAlone() {
         // The other half of the same coupling: the session used to
         // pause the sound on a break and stop it at the end, so noise
         // the user had started for themselves died with the timer.
-        let ambience = AmbienceController()
+        //
+        // Held against a source that records rather than a real engine.
+        // The rule is about which object calls which method, and a
+        // machine with no audio output was previously able to answer it
+        // for us: the engine failed to start, said so through
+        // `onSilence`, and cleared `active` mid-test. Red at 0ea7534,
+        // green at 6910efa, a docs-only commit between them.
+        let source = RecordingAmbienceSource()
+        let ambience = AmbienceController(engine: source)
         let focus = FocusController(ambience: ambience)
+
         ambience.play(.brown)
         focus.start(work: 25)
         XCTAssertEqual(ambience.active, .brown)
@@ -591,7 +604,38 @@ final class ChalantTests: XCTestCase {
         XCTAssertEqual(ambience.active, .brown, "a break must not silence the user's noise")
         focus.stop()
         XCTAssertEqual(ambience.active, .brown, "ending a session must not stop the user's noise")
+
+        // The stronger form of the same claim, and the one that says it
+        // without going through any state at all: the timer started,
+        // broke, and ended without ever reaching for the sound.
+        XCTAssertEqual(source.calls, ["start(brown)"],
+                       "only the user's own play, and nothing the timer did")
         ambience.stop()
+    }
+
+    func testASourceThatCannotMakeASoundPutsTheChipOut() async {
+        // The behaviour that used to decide the test above, written
+        // down as a test of its own rather than left as folklore. It is
+        // correct and it is asynchronous, and both of those are the
+        // reason it must never again be something another test can trip
+        // over by accident.
+        let source = RecordingAmbienceSource()
+        let ambience = AmbienceController(engine: source)
+        ambience.play(.brown)
+        XCTAssertEqual(ambience.active, .brown)
+
+        source.onSilence?("the audio engine wouldn't start")
+
+        // The hop the failure takes on its way to the main actor.
+        // Bounded, so a change that stops it arriving fails here rather
+        // than hanging.
+        var spins = 0
+        while ambience.active != nil, spins < 1_000 {
+            await Task.yield()
+            spins += 1
+        }
+        XCTAssertNil(ambience.active, "a chip lit over silence is a lie")
+        XCTAssertEqual(ambience.failure, "the audio engine wouldn't start")
     }
 
     // MARK: What the voice trail is allowed to remember
@@ -1079,4 +1123,23 @@ final class ChalantTests: XCTestCase {
         let other = RainScape(seed: 100).renderOffline(seconds: 1).left
         XCTAssertNotEqual(first, other)
     }
+}
+
+/// A sound source that always succeeds and never goes silent, which is
+/// the one thing a real `NoiseEngine` cannot promise: on a machine with
+/// no audio output it fails to start and reports that failure on a
+/// later main-actor hop.
+///
+/// Records what it was asked to do, so the focus/ambience rules can be
+/// stated as what they actually are, which is a claim about which
+/// object calls which method.
+final class RecordingAmbienceSource: AmbienceSource {
+    var onSilence: ((String) -> Void)?
+    private(set) var calls: [String] = []
+
+    func start(_ color: NoiseEngine.NoiseColor) { calls.append("start(\(color.rawValue))") }
+    func stop() { calls.append("stop") }
+    func pause() { calls.append("pause") }
+    func resume() { calls.append("resume") }
+    func setVolume(_ volume: Float) { calls.append("setVolume") }
 }
