@@ -41,6 +41,15 @@ final class SessionStore: ObservableObject {
         // has gone quiet past the stale window, with no hook event to
         // say otherwise, renders as "last seen" — never as running.
         case stale
+
+        /// States that assert a process exists right now, as opposed to
+        /// describing one that did.
+        var isLive: Bool {
+            switch self {
+            case .working, .needsInput, .idle: return true
+            case .done, .failed, .stale: return false
+            }
+        }
     }
 
     /// Interactive (a terminal) or background (no terminal at all): the
@@ -204,6 +213,32 @@ final class SessionStore: ObservableObject {
     private let finishedTTL: TimeInterval
     private var expiryWork: [String: DispatchWorkItem] = [:]
 
+    /// Claude Code sessions the registry went looking for and did not
+    /// find, while it was demonstrably working. Held so discovery cannot
+    /// put them back: see `upsert`. Emptied of anything the registry
+    /// vouches for again, and of anything no longer in the list at all,
+    /// so it stays the size of the store rather than the size of the day.
+    private var disownedByRegistry: Set<String> = []
+
+    /// Sessions that earn a mark on the resting island: something is
+    /// happening, and you could go and see it.
+    ///
+    /// `idle` and `stale` are listed in the strip and never counted here
+    /// (you cannot pick what is not listed, but a number that grows every
+    /// time a terminal sits at its prompt says less, not more). A session
+    /// with no controlling terminal is left out for a sharper reason:
+    /// there is nowhere to go and see it, and the one that prompted this
+    /// runs nearly always, so counting it lit the badge permanently.
+    ///
+    /// Lives here rather than in the view so the number on the closed
+    /// pill and the rows in the open strip can never disagree about what
+    /// is running.
+    var glanceable: [Session] {
+        sessions.filter {
+            ($0.state == .working || $0.state == .needsInput) && $0.hasTerminal != false
+        }
+    }
+
     /// TTL and cap are constructor args rather than baked-in constants
     /// so a test can shrink the TTL to something it can actually wait
     /// out, instead of proving a 60-second timer fires 60 seconds at a
@@ -257,7 +292,20 @@ final class SessionStore: ObservableObject {
         // arrived — while the question itself stayed answerable, so
         // nothing looked broken.
         let questionOutstanding = session.ask.map { !$0.isFullyAnswered } ?? false
-        session.state = questionOutstanding ? .needsInput : state
+        var resolved = questionOutstanding ? .needsInput : state
+        // And a registry that went looking and did not find this
+        // session outranks both. Discovery reads an mtime; the registry
+        // holds a pid. A warm transcript is not a running process, and
+        // this is the only place in the app that difference is known.
+        //
+        // Sticky on purpose. Discovery rescans on its own clock and
+        // would re-assert the same warm file twenty seconds later, and a
+        // row flipping between running and last-seen is worse than
+        // either answer on its own.
+        if disownedByRegistry.contains(id), resolved.isLive {
+            resolved = .stale
+        }
+        session.state = resolved
         session.updatedAt = updatedAt
         sessions.removeAll { $0.id == id }
         sessions.append(session)
@@ -466,6 +514,9 @@ final class SessionStore: ObservableObject {
         id: String, name: String, cwd: String, pid: pid_t, kind: Kind,
         hasTerminal: Bool = true, status: State
     ) {
+        // Vouched for, so whatever the registry concluded last time it
+        // could not find this session no longer holds.
+        disownedByRegistry.remove(id)
         if let index = sessions.firstIndex(where: { $0.id == id }) {
             sessions[index].pid = pid
             sessions[index].kind = kind
@@ -492,6 +543,52 @@ final class SessionStore: ObservableObject {
     /// cannot know is the kind of lie it does not tell anywhere else.
     /// A message still waiting in the outbox flips to undelivered
     /// rather than vanishing (EC-11).
+    /// What the registry can see about a process without having any
+    /// opinion on what it is doing.
+    ///
+    /// Separate from `markLive` because that one is gated on a status
+    /// this app recognises, and whether a session has a terminal is not
+    /// a fact about its status. claude-mem's indexer writes a registry
+    /// file with no `status` key at all, so it took `markLive`'s else
+    /// branch every sweep and kept a composer it could never answer,
+    /// while sitting in the registry the whole time.
+    ///
+    /// Never creates a row. `markLive` is the only thing allowed to do
+    /// that, and only for a session it can describe.
+    func noteProcess(id: String, pid: pid_t, hasTerminal: Bool) {
+        guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
+        sessions[index].pid = pid
+        sessions[index].hasTerminal = hasTerminal
+        disownedByRegistry.remove(id)
+    }
+
+    /// Every Claude Code session this store thinks is running, held
+    /// against the registry's list of the ones that actually are.
+    ///
+    /// `markGone` answers "the registry used to report this and has
+    /// stopped". This answers the case it never could: a session the
+    /// registry has *never* reported, which discovery invented out of a
+    /// warm transcript. That was the whole of the claude-mem indexer's
+    /// hold on the strip.
+    ///
+    /// An empty list is not an answer. The registry directory is
+    /// undocumented and a release that moves it would read as "nobody is
+    /// running", which must cost a badge rather than empty the strip
+    /// (the standing rule for this overlay). So the registry is only
+    /// allowed to contradict discovery while it can show at least one
+    /// session of its own.
+    ///
+    /// Claude Code only. Cursor keeps no such directory, so this
+    /// registry has no standing to call a Cursor chat dead.
+    func reconcileLive(against aliveIds: Set<String>) {
+        guard !aliveIds.isEmpty else { return }
+        let unvouched = sessions.filter { $0.agent == .claude && !aliveIds.contains($0.id) }
+        disownedByRegistry.formUnion(unvouched.map(\.id))
+        disownedByRegistry.subtract(aliveIds)
+        disownedByRegistry.formIntersection(sessions.map(\.id))
+        markGone(Set(unvouched.filter { $0.state.isLive }.map(\.id)))
+    }
+
     func markGone(_ ids: Set<String>) {
         guard !ids.isEmpty else { return }
         for id in ids {

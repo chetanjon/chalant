@@ -635,6 +635,159 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(SessionRegistry.processHasTerminal(999_999))
     }
 
+    // MARK: A warm file is not a running process
+
+    /// `SessionDiscovery` infers "still going" from a transcript's
+    /// mtime. `SessionRegistry` reads a directory Claude Code writes one
+    /// file per live process into. When they disagree, the one holding a
+    /// pid is right, and until now it had no way to say so: the overlay
+    /// could only ever add liveness, never withdraw it.
+    ///
+    /// Seen on the shipped 1.4.0: claude-mem's indexer kept a row in the
+    /// strip, and a place in the island's count, while `claude agents`
+    /// listed one session and `~/.claude/sessions` held one file.
+    func testDiscoveryCannotClaimASessionTheRegistryDoesNotKnow() {
+        let store = SessionStore()
+        store.upsert(id: "real", title: "mine", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .working)
+        store.upsert(id: "ghost", title: "warm file", cwd: "/b", branch: nil,
+                     lastPrompt: nil, state: .working)
+
+        store.reconcileLive(against: ["real"])
+
+        XCTAssertEqual(store.sessions.first { $0.id == "real" }?.state, .working)
+        XCTAssertEqual(store.sessions.first { $0.id == "ghost" }?.state, .stale,
+                       "no process, so no claim of running")
+    }
+
+    /// The demotion has to stick. Discovery rescans on its own clock and
+    /// would re-assert the same warm file seconds later, and a row that
+    /// flips between running and last-seen every few seconds is worse
+    /// than either answer.
+    func testDiscoveryCannotUndoTheRegistrysVerdict() {
+        let store = SessionStore()
+        store.upsert(id: "ghost", title: "warm file", cwd: "/b", branch: nil,
+                     lastPrompt: nil, state: .working)
+        store.reconcileLive(against: ["real"])
+
+        store.upsert(id: "ghost", title: "warm file", cwd: "/b", branch: nil,
+                     lastPrompt: nil, state: .working)
+
+        XCTAssertEqual(store.sessions.first { $0.id == "ghost" }?.state, .stale,
+                       "the same warm file, read again, is still not a process")
+    }
+
+    /// The registry is undocumented and may move. A read that found
+    /// nothing is not the registry saying "nobody is running", it is the
+    /// registry saying nothing at all, and it must cost a badge rather
+    /// than empty the strip.
+    func testARegistryThatFoundNothingDisownsNobody() {
+        let store = SessionStore()
+        store.upsert(id: "a", title: "t", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .working)
+
+        store.reconcileLive(against: [])
+
+        XCTAssertEqual(store.sessions.first?.state, .working)
+    }
+
+    /// And it has to be reversible: claude-mem's indexer comes back
+    /// under a new pid every few minutes, and a session the registry
+    /// starts reporting again is running again.
+    func testASessionTheRegistryReportsAgainIsLiveAgain() {
+        let store = SessionStore()
+        store.upsert(id: "b", title: "t", cwd: "/b", branch: nil,
+                     lastPrompt: nil, state: .working)
+        store.reconcileLive(against: ["a"])
+        XCTAssertEqual(store.sessions.first { $0.id == "b" }?.state, .stale)
+
+        store.markLive(id: "b", name: "t", cwd: "/b", pid: 2, kind: .interactive, status: .working)
+        XCTAssertEqual(store.sessions.first { $0.id == "b" }?.state, .working)
+
+        store.upsert(id: "b", title: "t", cwd: "/b", branch: nil,
+                     lastPrompt: nil, state: .working)
+        XCTAssertEqual(store.sessions.first { $0.id == "b" }?.state, .working,
+                       "vouched for again, so discovery is trusted again")
+    }
+
+    /// Cursor keeps no such directory, so Claude Code's registry has no
+    /// standing to call a Cursor chat dead.
+    func testTheRegistryHasNoOpinionAboutCursor() {
+        let store = SessionStore()
+        store.upsert(id: "cursor-1", title: "t", cwd: "/c", branch: nil,
+                     lastPrompt: nil, state: .working, agent: .cursor)
+
+        store.reconcileLive(against: ["some-claude-session"])
+
+        XCTAssertEqual(store.sessions.first?.state, .working)
+    }
+
+    /// Whether a process has a terminal is a fact about the process, and
+    /// it was being written only on the path that also decides what the
+    /// process is *doing*. claude-mem's indexer registers a file with no
+    /// `status` key at all, so `state(for:)` returned nil, `markLive` was
+    /// never called, and the row kept its composer while sitting right
+    /// there in the registry.
+    ///
+    /// Found by opening the app after the unit tests were green. Both
+    /// halves were right and nothing connected them.
+    func testAProcessIsMeasuredEvenWhenItsStatusMeansNothingToUs() {
+        let store = SessionStore()
+        store.upsert(id: "indexer", title: "observer", cwd: "/b", branch: nil,
+                     lastPrompt: nil, state: .working)
+        XCTAssertTrue(store.sessions.first?.canReceiveMessages ?? false)
+
+        store.noteProcess(id: "indexer", pid: 2, hasTerminal: false)
+
+        XCTAssertEqual(store.sessions.first?.hasTerminal, false)
+        XCTAssertFalse(store.sessions.first?.canReceiveMessages ?? true,
+                       "registered, running, and still nowhere to put a reply")
+        XCTAssertTrue(store.glanceable.isEmpty)
+    }
+
+    /// A registry entry for a session no row exists for yet is not a
+    /// reason to invent one: `markLive` is the only thing allowed to
+    /// create a row, and only for a status it understands.
+    func testMeasuringAProcessNeverInventsARow() {
+        let store = SessionStore()
+        store.noteProcess(id: "nobody", pid: 3, hasTerminal: false)
+        XCTAssertTrue(store.sessions.isEmpty)
+    }
+
+    // MARK: What earns a mark on the resting island
+
+    /// The count on the closed pill is the app's smallest claim and its
+    /// most-read one. It said 2 while one of the two was a memory
+    /// indexer with no terminal, and claude-mem runs nearly always, so
+    /// the badge was on its way to being permanently lit. A glance that
+    /// never changes carries nothing.
+    func testTheGlanceCountLeavesOutASessionWithNoTerminal() {
+        let store = SessionStore()
+        store.markLive(id: "mine", name: "moai", cwd: "/a", pid: 1,
+                       kind: .interactive, hasTerminal: true, status: .working)
+        store.markLive(id: "indexer", name: "observer", cwd: "/b", pid: 2,
+                       kind: .interactive, hasTerminal: false, status: .working)
+
+        XCTAssertEqual(store.glanceable.map(\.id), ["mine"])
+    }
+
+    /// Same rule the strip uses, so the number and the list can never
+    /// disagree about what is running.
+    func testTheGlanceCountIsThingsHappeningNotThingsExisting() {
+        let store = SessionStore()
+        store.upsert(id: "working", title: "w", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .working)
+        store.upsert(id: "asking", title: "n", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .needsInput)
+        store.upsert(id: "resting", title: "i", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .idle)
+        store.upsert(id: "gone", title: "s", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .stale)
+
+        XCTAssertEqual(Set(store.glanceable.map(\.id)), ["working", "asking"],
+                       "idle and last-seen are listed, never counted")
+    }
+
     // MARK: A row that says the same thing twice says nothing
 
     /// A session whose transcript never yielded a title falls back to

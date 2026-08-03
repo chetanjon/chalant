@@ -123,6 +123,13 @@ final class SessionRegistry {
             else { continue }
             guard isAlive(entry.pid) else { continue } // a crash left the file behind (EC-5)
             aliveIds.insert(entry.sessionId)
+            // Before the status check, not inside it. Whether this
+            // process has a terminal is true of the process whatever it
+            // happens to be doing, and the entries this app has no
+            // opinion on are exactly the ones most likely not to have
+            // one: claude-mem's indexer registers with no status at all.
+            store.noteProcess(
+                id: entry.sessionId, pid: entry.pid, hasTerminal: hasTerminal(entry.pid))
             if let state = Self.state(for: entry, alive: isAlive) {
                 store.markLive(
                     id: entry.sessionId, name: entry.name, cwd: entry.cwd,
@@ -138,6 +145,10 @@ final class SessionRegistry {
         }
         let gone = lastAliveIds.subtracting(aliveIds)
         if !gone.isEmpty { store.markGone(gone) }
+        // And the ones it never reported at all. `lastAliveIds` can only
+        // catch a session this directory once knew about; discovery can
+        // invent one out of a transcript that was never here.
+        store.reconcileLive(against: aliveIds)
         lastAliveIds = aliveIds
     }
 

@@ -421,19 +421,16 @@ final class NotchViewModel: ObservableObject {
 
     /// Agents running right now, and whether any wants an answer.
     ///
-    /// `stale` is deliberately excluded: a session Chalant has only
-    /// inferred is quiet is not something to put a live mark next to.
-    /// `idle` is deliberately excluded too, on purpose and not an
-    /// oversight: the sessions strip lists an idle session (you cannot
-    /// pick what is not listed), but this count stays "things are
-    /// happening" rather than becoming "things exist" — a badge that
-    /// grows every time a terminal sits at its prompt would say less,
-    /// not more.
+    /// What counts as one is `SessionStore.glanceable`, and it lives
+    /// there rather than here so this number and the rows in the strip
+    /// are answering from the same rule. They disagreed once, which is
+    /// how the closed pill came to read 2 beside a list with one session
+    /// worth opening.
     var agentGlance: (count: Int, waiting: Bool)? {
         guard UserDefaults.standard.object(forKey: "glanceAgents") as? Bool ?? true else {
             return nil
         }
-        let live = sessions.sessions.filter { $0.state == .working || $0.state == .needsInput }
+        let live = sessions.glanceable
         guard !live.isEmpty else { return nil }
         return (live.count, live.contains { $0.state == .needsInput })
     }
