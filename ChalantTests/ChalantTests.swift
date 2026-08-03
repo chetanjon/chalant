@@ -1123,6 +1123,49 @@ final class ChalantTests: XCTestCase {
         let other = RainScape(seed: 100).renderOffline(seconds: 1).left
         XCTAssertNotEqual(first, other)
     }
+
+    // MARK: Battery panel (duration formatting, and the not-yet-known case)
+
+    private static func battery(
+        state: SystemStatsController.Battery.State, minutes: Int?
+    ) -> SystemStatsController.Battery {
+        SystemStatsController.Battery(
+            level: 50, state: state, pluggedIn: state != .discharging, minutesRemaining: minutes)
+    }
+
+    func testBatteryTimeLineFormatsAKnownDuration() {
+        XCTAssertEqual(
+            BatteryPanel.timeLine(for: Self.battery(state: .discharging, minutes: 135)),
+            "2h 15m left")
+        XCTAssertEqual(
+            BatteryPanel.timeLine(for: Self.battery(state: .charging, minutes: 45)),
+            "Full in 45 min")
+    }
+
+    func testBatteryTimeLineNeverShowsTheStillCalculatingSentinelAsANumber() {
+        // macOS reports -1 for a few seconds after any plug or unplug
+        // while it works out the real figure; that must never reach
+        // the screen as "-1 min" or "0:00".
+        XCTAssertEqual(
+            BatteryPanel.timeLine(for: Self.battery(state: .discharging, minutes: -1)),
+            "Still working out how long that'll last")
+        XCTAssertEqual(
+            BatteryPanel.timeLine(for: Self.battery(state: .charging, minutes: -1)),
+            "Still working out when it'll be full")
+    }
+
+    func testBatteryTimeLineIsNilWhenThereIsNoNumberToShow() {
+        XCTAssertNil(BatteryPanel.timeLine(for: Self.battery(state: .full, minutes: nil)))
+        XCTAssertNil(BatteryPanel.timeLine(for: Self.battery(state: .notCharging, minutes: nil)))
+    }
+
+    func testBatteryHealthLineOmitsWhateverIsntActuallyKnown() {
+        XCTAssertEqual(
+            BatteryPanel.healthLine(.init(cycleCount: 182, condition: "Normal")),
+            "182 cycles · Normal")
+        XCTAssertEqual(BatteryPanel.healthLine(.init(cycleCount: 1, condition: nil)), "1 cycle")
+        XCTAssertNil(BatteryPanel.healthLine(.init(cycleCount: nil, condition: nil)))
+    }
 }
 
 /// A sound source that always succeeds and never goes silent, which is

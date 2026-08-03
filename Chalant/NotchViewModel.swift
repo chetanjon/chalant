@@ -44,6 +44,7 @@ final class NotchViewModel: ObservableObject {
         case focus
         case chat
         case sessions
+        case battery
 
         /// The settings switch that hides this tab's tool, if it has
         /// one. `today` and `ask` are the island itself and cannot be
@@ -58,6 +59,7 @@ final class NotchViewModel: ObservableObject {
             case .focus: return "toolFocus"
             case .chat: return "toolChat"
             case .sessions: return "toolSessions"
+            case .battery: return "toolBattery"
             }
         }
     }
@@ -1097,12 +1099,21 @@ final class NotchViewModel: ObservableObject {
         // memory. Bailing out left it there — switch a tool off while
         // the island is shut and it reopened straight onto that tool's
         // panel, the one case this guard exists to prevent.
-        tab = stored.flatMap { Self.isAvailable($0, in: defaults) ? $0 : nil } ?? .today
+        tab = stored.flatMap {
+            Self.isAvailable($0, in: defaults, batteryPresent: stats.battery != nil) ? $0 : nil
+        } ?? .today
     }
 
     /// Whether a tab is somewhere the island can open onto right now:
-    /// its tool has not been switched off in settings.
-    static func isAvailable(_ tab: Tab, in defaults: UserDefaults = .standard) -> Bool {
+    /// its tool has not been switched off in settings, and, battery
+    /// alone among these, the hardware it shows actually exists.
+    /// `batteryPresent` defaults true so every other tab, and the
+    /// hotkey dispatch in ChalantApp.swift that never targets
+    /// `.battery`, reads exactly as before.
+    static func isAvailable(
+        _ tab: Tab, in defaults: UserDefaults = .standard, batteryPresent: Bool = true
+    ) -> Bool {
+        if tab == .battery, !batteryPresent { return false }
         guard let key = tab.toolKey else { return true }
         // An unset flag means the tool ships on, matching the
         // @AppStorage defaults the settings window declares.

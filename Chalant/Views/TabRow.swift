@@ -86,6 +86,7 @@ struct Switcher: View {
         case .focus: return "timer"
         case .chat: return "bubble.left.and.bubble.right"
         case .sessions: return "chevron.left.forwardslash.chevron.right"
+        case .battery: return "battery.100"
         }
     }
 
@@ -100,6 +101,7 @@ struct Switcher: View {
         case .focus: return "Focus"
         case .chat: return "Chat"
         case .sessions: return "Sessions"
+        case .battery: return "Battery"
         }
     }
 }

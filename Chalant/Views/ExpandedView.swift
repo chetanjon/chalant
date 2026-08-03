@@ -12,6 +12,11 @@ struct ExpandedView: View {
     @ObservedObject var focus: FocusController
     @ObservedObject var ambience: AmbienceController
     @ObservedObject var activities: ActivityStore
+    /// Observed in its own right for the same reason `Switcher` does
+    /// (see TabRow.swift): a nested `ObservableObject` does not
+    /// republish through `model`, and `enabledTools` below reads
+    /// `stats.battery` to decide whether the tab even exists.
+    @ObservedObject var stats: SystemStatsController
 
     // Modular blocks, each shows only if the user keeps it on. Media,
     // ambience and the tools are on out of the box; your day (calendar,
@@ -27,6 +32,7 @@ struct ExpandedView: View {
     @AppStorage("toolFocus") private var toolFocus = true
     @AppStorage("toolChat") private var toolChat = true
     @AppStorage("toolSessions") private var toolSessions = true
+    @AppStorage("toolBattery") private var toolBattery = true
     @AppStorage("chatFull") private var chatFull = false
 
     init(model: NotchViewModel, face: IslandFace) {
@@ -38,6 +44,7 @@ struct ExpandedView: View {
         self.focus = model.focus
         self.ambience = model.ambience
         self.activities = model.activities
+        self.stats = model.stats
     }
 
     private var todayEnabled: Bool { showCalendar || showReminders }
@@ -61,6 +68,13 @@ struct ExpandedView: View {
         if toolFocus { tools.append(.focus) }
         if toolChat { tools.append(.chat) }
         if toolSessions { tools.append(.sessions) }
+        // Hidden outright on a Mac with no battery (a Mac mini, a
+        // desktop docked in clamshell) rather than switched off by
+        // default: there is nothing this tool toggle should even be
+        // asked to remember on hardware that can never grow a
+        // battery, and a tab that opens onto nothing is worse than
+        // one that was never offered.
+        if toolBattery, stats.battery != nil { tools.append(.battery) }
         return tools
     }
 
@@ -344,6 +358,17 @@ struct ExpandedView: View {
         case .sessions:
             AgentSessionsStrip(sessions: model.sessions, model: model)
                 .frame(maxHeight: Theme.Panel.list, alignment: .top)
+        case .battery:
+            // `enabledTools` never offers this tab without a battery,
+            // and `NotchViewModel.isAvailable` guards the one other
+            // way a tab is reached (a restored last-open tab), so the
+            // `if let` here is a second, cheap guarantee rather than
+            // the only one: reachable with nothing to show is a
+            // blank pane, never a crash.
+            if let battery = stats.battery {
+                BatteryPanel(battery: battery, stats: stats)
+                    .frame(height: Theme.Panel.battery)
+            }
         }
     }
 

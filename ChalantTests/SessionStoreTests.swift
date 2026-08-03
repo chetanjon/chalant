@@ -2288,7 +2288,7 @@ final class SessionStoreTests: XCTestCase {
         // The stored tab has to survive a relaunch, so a case added
         // later without a raw value would silently stop restoring.
         for tab in [NotchViewModel.Tab.today, .ask, .clipboard, .shelf,
-                    .links, .notes, .focus, .chat, .sessions] {
+                    .links, .notes, .focus, .chat, .sessions, .battery] {
             XCTAssertEqual(NotchViewModel.Tab(rawValue: tab.rawValue), tab)
         }
     }
@@ -2325,6 +2325,22 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(NotchViewModel.Tab.focus.toolKey, "toolFocus")
         XCTAssertEqual(NotchViewModel.Tab.chat.toolKey, "toolChat")
         XCTAssertEqual(NotchViewModel.Tab.sessions.toolKey, "toolSessions")
+        XCTAssertEqual(NotchViewModel.Tab.battery.toolKey, "toolBattery")
+    }
+
+    func testABatteryTabIsUnavailableWithoutTheHardwareRegardlessOfTheSetting() throws {
+        // The one tab gated on more than a settings flag: no battery
+        // means no panel to open, whatever `toolBattery` says.
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "chalant.tests.\(UUID().uuidString)"))
+        defer { defaults.removePersistentDomain(forName: defaults.description) }
+
+        XCTAssertTrue(
+            NotchViewModel.isAvailable(.battery, in: defaults, batteryPresent: true))
+        XCTAssertFalse(
+            NotchViewModel.isAvailable(.battery, in: defaults, batteryPresent: false))
+        defaults.set(false, forKey: "toolBattery")
+        XCTAssertFalse(
+            NotchViewModel.isAvailable(.battery, in: defaults, batteryPresent: true))
     }
 
     // MARK: Dashboard section lookup

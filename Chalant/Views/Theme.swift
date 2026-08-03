@@ -222,6 +222,10 @@ enum Theme {
         /// Focus pane, sized to fit presets, the daily goal row, and
         /// the week of stats.
         static let focus: CGFloat = 280
+        /// Battery: charge, state, time remaining, and health when
+        /// known. Shorter than focus, it has no equivalent to the
+        /// week-of-bars block.
+        static let battery: CGFloat = 190
         /// Chat pane heights. Compact trims the dead space the page's
         /// vertical centering leaves under the input; full keeps the
         /// room the sidebar layout earns.

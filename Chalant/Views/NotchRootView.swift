@@ -613,20 +613,21 @@ struct NotchRootView: View {
     /// wants it. `SystemStatsController` had been polling for this the
     /// whole time with no view reading it.
     private func batteryGlance(_ battery: SystemStatsController.Battery) -> some View {
-        let low = battery.level <= 20 && !battery.charging
+        let charging = battery.state == .charging
+        let low = battery.level <= 20 && !charging
         return HStack(spacing: Theme.Space.xs) {
             // The glyph carries charging and low on its own, so the
             // number is never the only thing saying which it is.
-            Image(systemName: battery.charging ? "bolt.fill" : (low ? "battery.25" : "battery.100"))
+            Image(systemName: charging ? "bolt.fill" : (low ? "battery.25" : "battery.100"))
                 .font(Theme.Fonts.icon(.xs))
             Text("\(battery.level)")
                 .font(Theme.Fonts.microMono)
         }
         .foregroundStyle(low ? Theme.danger : Theme.textTertiary)
-        .help("Battery \(battery.level)%\(battery.charging ? ", charging" : "")")
+        .help("Battery \(battery.level)%\(charging ? ", charging" : "")")
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "Battery \(battery.level) percent\(battery.charging ? ", charging" : low ? ", low" : "")"
+            "Battery \(battery.level) percent\(charging ? ", charging" : low ? ", low" : "")"
         )
     }
 
