@@ -92,6 +92,9 @@ struct AgentSessionsStrip: View {
             // that used to sit beside it said the same thing a second
             // time and were dropped (founder, 2026-08-02).
             AgentMark(agent: session.agent, size: 11, state: session.state)
+                // A row you cannot reach is still worth seeing, and
+                // still not the row you came here for.
+                .opacity(Self.unreachableReason(session) == nil ? 1 : 0.55)
             // The one mark that survived, because it is the only one
             // that was not a restatement: a session asking for an
             // answer is the whole reason to look at this list, and
@@ -102,7 +105,7 @@ struct AgentSessionsStrip: View {
                     .foregroundStyle(accent)
             }
             VStack(alignment: .leading, spacing: 1) {
-                Text(session.title)
+                Text(Self.title(session))
                     .font(Theme.Fonts.body)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
@@ -110,13 +113,15 @@ struct AgentSessionsStrip: View {
                 // What it is doing wins the subtitle while it is doing
                 // something: where a session lives changes rarely, what
                 // it is up to changes constantly, and the second is the
-                // reason to glance at all.
-                Text(session.activity.map { "\($0) · \(Self.place(session))" }
-                    ?? Self.place(session))
-                    .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.textTertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                // reason to glance at all. Absent when it would only
+                // repeat the line above it.
+                if let subtitle = Self.subtitle(session) {
+                    Text(subtitle)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
             Spacer(minLength: 0)
             Text(RelativeAge.short(session.updatedAt))
@@ -140,16 +145,22 @@ struct AgentSessionsStrip: View {
             model.composingSessionID = model.composingSessionID == session.id ? nil : session.id
         }
         .help(session.canReceiveMessages
-              ? "Write to this session — \(session.cwd)"
+              ? "Write to this session. \(session.cwd)"
               : session.cwd)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(session.agent.label): \(session.title), \(Self.place(session)), "
+            "\(session.agent.label): \(Self.title(session)), \(Self.place(session)), "
             + (session.state == .needsInput ? "waiting for you"
                : session.state == .idle ? "waiting for input" : "working")
+            + (Self.unreachableReason(session).map { ", \($0)" } ?? "")
         )
         .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Opens the app running this session")
+        // The tap opens the composer. It used to reach for the terminal
+        // and the hint was never updated when that moved onto its own
+        // labelled button inside the composer.
+        .accessibilityHint(session.canReceiveMessages
+                           ? "Opens a box to write to this session"
+                           : "This session cannot be written to")
     }
 
     /// The row's own tap keeps meaning "go to this session"; this is a
@@ -168,17 +179,12 @@ struct AgentSessionsStrip: View {
             ) {
                 model.composingSessionID = composing ? nil : session.id
             }
-        } else if session.agent == .cursor {
-            // The affordance itself is absent: Cursor keeps no hook
-            // contract with this app, so nothing queued here would ever
-            // be collected (EC-17). The reason still needs somewhere to
-            // live for anyone who goes looking for it.
-            Image(systemName: "text.bubble")
-                .font(Theme.Fonts.icon(.s))
-                .foregroundStyle(Theme.textGhost)
-                .help("Cursor keeps no hook here yet, so this session can't be messaged.")
-                .accessibilityLabel("Cursor sessions cannot receive messages")
         }
+        // Nothing otherwise. A greyed bubble used to sit here carrying
+        // the reason in a tooltip, which is a place nobody looks before
+        // deciding a feature is broken. The reason moved into the
+        // subtitle, where it is read without being hunted for, and the
+        // icon went with it rather than saying it twice.
     }
 
     /// Bring up whatever is running this session.
@@ -195,9 +201,53 @@ struct AgentSessionsStrip: View {
     /// component alone is what the eye actually matches against the
     /// terminal it came from; the full path lives in the tooltip.
     private static func place(_ session: SessionStore.Session) -> String {
-        let folder = session.cwd.split(separator: "/").last.map(String.init) ?? session.cwd
-        guard let branch = session.branch, !branch.isEmpty else { return folder }
-        return "\(folder) · \(branch)"
+        guard let branch = session.branch, !branch.isEmpty else { return folder(session) }
+        return "\(folder(session)) · \(branch)"
+    }
+
+    private static func folder(_ session: SessionStore.Session) -> String {
+        session.cwd.split(separator: "/").last.map(String.init) ?? session.cwd
+    }
+
+    /// Why a message left on this row would never be read, or nil when
+    /// it would. Both answers are things the row itself now says.
+    static func unreachableReason(_ session: SessionStore.Session) -> String? {
+        if session.hasTerminal == false { return "no terminal" }
+        // Cursor keeps no hook contract with this app, so nothing
+        // queued here would ever be collected (EC-17).
+        if session.agent == .cursor { return "no hook yet" }
+        return nil
+    }
+
+    /// A session that never earned a title from its transcript falls
+    /// back to its folder name, and for a headless process that folder
+    /// is an implementation detail of whatever spawned it. Naming it
+    /// for what it is beats naming it after a directory the person has
+    /// never opened.
+    ///
+    /// Only the fallback is replaced. A headless session that does have
+    /// a real title keeps it, because that title is the one thing on
+    /// the row that was worth reading.
+    static func title(_ session: SessionStore.Session) -> String {
+        guard session.hasTerminal == false, session.title == folder(session)
+        else { return session.title }
+        return "Background task"
+    }
+
+    /// What it is doing, where it lives, and why you cannot write to it,
+    /// in that order, dropping whichever of the three does not apply.
+    ///
+    /// Nil when the whole line would only repeat the title above it,
+    /// which is what a row with no activity, no branch and a
+    /// folder-name title used to do: the same word, twice, in two
+    /// sizes.
+    static func subtitle(_ session: SessionStore.Session) -> String? {
+        var parts: [String] = []
+        if let activity = session.activity { parts.append(activity) }
+        parts.append(place(session))
+        if let reason = unreachableReason(session) { parts.append(reason) }
+        let line = parts.joined(separator: " · ")
+        return line == title(session) ? nil : line
     }
 }
 
@@ -315,9 +365,12 @@ private struct ComposeCard: View {
                 // the two shapes delivery actually takes (EC-2): a busy
                 // session gets this at its next turn boundary, an idle
                 // one only when something starts a turn at all.
+                // "Turn" is the precise word and the wrong one out
+                // here: it is the vocabulary of the thing being talked
+                // to, not of the person doing the talking.
                 Text(session.state == .idle
-                     ? "Waiting for input. This arrives the next time it takes a turn."
-                     : "Arrives when this turn ends.")
+                     ? "Waiting for input. This arrives the next time it runs."
+                     : "Arrives when it finishes what it's doing.")
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
                 if session.state == .idle {

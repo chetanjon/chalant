@@ -94,20 +94,29 @@ final class SessionStore: ObservableObject {
         var agent: Agent = .claude
         var state: State          // working | needsInput | idle | done | failed | stale
         var ask: Ask?             // present iff a question is outstanding
-        /// The live process, when the registry knows of one. Nil means
-        /// "discovered from a transcript only", which is not proof of
-        /// life.
         /// The last thing the agent actually said, so a row can show
         /// what it wants rather than only that it wants something. Read
         /// from the transcript, which means it works whether or not the
         /// Stop hook is installed (founder, 2026-08-02: "is there a way
         /// to see the message that the AI sent").
         var lastMessage: String?
+        /// The live process, when the registry knows of one. Nil means
+        /// "discovered from a transcript only", which is not proof of
+        /// life.
         var pid: pid_t?
-        /// A background agent has no terminal to go to, unlike an
-        /// interactive one; nil means the registry has never reported
-        /// this id.
+        /// What `claude agents --json` calls this session. Kept for the
+        /// record, and deliberately not used to decide anything: it was
+        /// once believed to separate a session you can reach from one
+        /// you cannot, and it does not. Claude Code's own headless
+        /// worker reports `interactive` exactly as a person's shell
+        /// does (verified 2026-08-02 against a running claude-mem
+        /// indexer). `hasTerminal` is the field that answers that.
         var kind: Kind?
+        /// Whether the process holds a controlling terminal: whether
+        /// there is a window, anywhere, that a reply could appear in.
+        /// Nil means nobody has looked, which is the ordinary state of
+        /// a row the scraper found and the registry has never seen.
+        var hasTerminal: Bool?
         /// A message queued here, waiting to be collected. Nil means
         /// nothing is waiting.
         var outbox: Outbox?
@@ -118,7 +127,15 @@ final class SessionStore: ObservableObject {
         /// keeps no hook contract with this app, and a session the
         /// registry has stopped reporting has no process left to
         /// collect anything.
-        var canReceiveMessages: Bool { agent == .claude && state != .stale }
+        ///
+        /// `hasTerminal != false`, never `== true`: a session nobody
+        /// has checked keeps the composer it has always had. The only
+        /// thing that takes it away is the kernel saying, positively,
+        /// that this process has no terminal — because a message to
+        /// such a session would be collected and answered into a void.
+        var canReceiveMessages: Bool {
+            agent == .claude && state != .stale && hasTerminal != false
+        }
     }
 
     struct Ask: Identifiable, Equatable {
@@ -354,10 +371,17 @@ final class SessionStore: ObservableObject {
     /// the same rule, written once more because a second writer now
     /// reaches `state` (4d6ccff fixed this once already, for the
     /// scraper; this is the same bug wearing the registry's clothes).
-    func markLive(id: String, name: String, cwd: String, pid: pid_t, kind: Kind, status: State) {
+    /// `hasTerminal` defaults to true so a caller that has not looked
+    /// cannot accidentally demote a row: the registry, which is the one
+    /// caller that does look, always passes what it found.
+    func markLive(
+        id: String, name: String, cwd: String, pid: pid_t, kind: Kind,
+        hasTerminal: Bool = true, status: State
+    ) {
         if let index = sessions.firstIndex(where: { $0.id == id }) {
             sessions[index].pid = pid
             sessions[index].kind = kind
+            sessions[index].hasTerminal = hasTerminal
             let questionOutstanding = sessions[index].ask.map { $0.answer == nil } ?? false
             if !questionOutstanding {
                 sessions[index].state = status
@@ -367,7 +391,8 @@ final class SessionStore: ObservableObject {
             sessions.append(Session(
                 id: id, title: name, cwd: cwd, branch: nil, lastPrompt: nil,
                 activity: nil, agent: .claude, state: status, ask: nil,
-                pid: pid, kind: kind, startedAt: Date(), updatedAt: Date()
+                pid: pid, kind: kind, hasTerminal: hasTerminal,
+                startedAt: Date(), updatedAt: Date()
             ))
         }
         sort()

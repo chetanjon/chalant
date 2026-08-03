@@ -55,6 +55,10 @@ final class SessionRegistry {
     private let root: URL
     private let watchQueue = DispatchQueue(label: "chalant.sessions.registry.watch")
     private let isAlive: (pid_t) -> Bool
+    /// Injected beside `isAlive` and for the same reason: both ask the
+    /// kernel about a real process, and neither should need one to be
+    /// tested.
+    private let hasTerminal: (pid_t) -> Bool
 
     private var dirWatch: DispatchSourceFileSystemObject?
     private var sweep: DispatchSourceTimer?
@@ -66,12 +70,14 @@ final class SessionRegistry {
 
     init(
         store: SessionStore, root: URL? = nil, fileManager: FileManager = .default,
-        isAlive: @escaping (pid_t) -> Bool = SessionRegistry.processIsAlive
+        isAlive: @escaping (pid_t) -> Bool = SessionRegistry.processIsAlive,
+        hasTerminal: @escaping (pid_t) -> Bool = SessionRegistry.processHasTerminal
     ) {
         self.store = store
         self.fileManager = fileManager
         self.root = root ?? Self.defaultRoot
         self.isAlive = isAlive
+        self.hasTerminal = hasTerminal
     }
 
     static var defaultRoot: URL {
@@ -120,7 +126,8 @@ final class SessionRegistry {
             if let state = Self.state(for: entry, alive: isAlive) {
                 store.markLive(
                     id: entry.sessionId, name: entry.name, cwd: entry.cwd,
-                    pid: entry.pid, kind: entry.kind, status: state
+                    pid: entry.pid, kind: entry.kind,
+                    hasTerminal: hasTerminal(entry.pid), status: state
                 )
             }
             // Else: alive, but a status this milestone has no opinion
@@ -180,6 +187,29 @@ final class SessionRegistry {
         guard pid > 0 else { return false }
         if kill(pid, 0) == 0 { return true }
         return errno == EPERM
+    }
+
+    /// Whether this process holds a controlling terminal, which is the
+    /// honest form of "is there a window somewhere that could show you
+    /// a reply". `claude agents --json` cannot answer it: it reports
+    /// its own headless worker as `interactive` alongside a real shell
+    /// (2026-08-02, a running claude-mem indexer beside this session).
+    /// The kernel can, and does, in one `sysctl` with no subprocess.
+    ///
+    /// Every failure answers `true`. A pid that has already gone, a pid
+    /// that never was, a `sysctl` that refused: none of those are
+    /// evidence of a missing terminal, and only evidence is allowed to
+    /// take a composer away.
+    nonisolated static func processHasTerminal(_ pid: pid_t) -> Bool {
+        guard pid > 0 else { return true }
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0
+        else { return true }
+        // NODEV, spelled out: the macro does not survive the import,
+        // and `e_tdev` is a dev_t, which is a signed 32-bit value here.
+        return info.kp_eproc.e_tdev != -1
     }
 
     // MARK: Filesystem watching

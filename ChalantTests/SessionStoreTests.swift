@@ -482,6 +482,132 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.sessions.first?.state, .needsInput)
     }
 
+    // MARK: A session with nowhere to show you a reply
+
+    /// `kind` cannot answer this. Claude Code reports its own headless
+    /// worker as `interactive` alongside a real terminal session
+    /// (verified 2026-08-02 against `claude agents --json`: the
+    /// claude-mem indexer at ~/.claude-mem/observer-sessions and a
+    /// person's own shell come back wearing the same word). The honest
+    /// question is not what the session is called but whether there is
+    /// a window anywhere that a reply could appear in, which is exactly
+    /// what a controlling terminal is.
+    func testASessionWithNoTerminalIsNotOfferedAComposer() {
+        let store = SessionStore()
+        store.markLive(id: "headless", name: "observer-sessions", cwd: "/a/observer-sessions",
+                       pid: 1, kind: .interactive, hasTerminal: false, status: .working)
+
+        XCTAssertFalse(store.sessions.first?.canReceiveMessages ?? true,
+                       "a session with no terminal has nowhere to put an answer")
+    }
+
+    func testASessionWithATerminalIsStillOfferedAComposer() {
+        let store = SessionStore()
+        store.markLive(id: "real", name: "t", cwd: "/a", pid: 1, kind: .interactive,
+                       hasTerminal: true, status: .working)
+
+        XCTAssertTrue(store.sessions.first?.canReceiveMessages ?? false)
+    }
+
+    /// Only ever demoted on positive knowledge. A scraper row has no
+    /// pid, so nobody has looked, and a row found from a transcript
+    /// alone must keep behaving exactly as it did before this signal
+    /// existed — the same rule `markLive` follows for every other field
+    /// the registry does not own.
+    func testASessionNobodyHasCheckedKeepsItsComposer() {
+        let store = storeWithSession()
+        XCTAssertNil(store.sessions.first?.hasTerminal)
+        XCTAssertTrue(store.sessions.first?.canReceiveMessages ?? false)
+    }
+
+    /// The registry owns this field and a sweep must not un-learn it:
+    /// `markLive` runs every five seconds, and an overwrite with a
+    /// stale default is how a row would silently get its composer back.
+    func testASweepDoesNotForgetThatThereIsNoTerminal() {
+        let store = SessionStore()
+        store.markLive(id: "headless", name: "n", cwd: "/a", pid: 1, kind: .interactive,
+                       hasTerminal: false, status: .working)
+        store.markLive(id: "headless", name: "n", cwd: "/a", pid: 1, kind: .interactive,
+                       hasTerminal: false, status: .idle)
+
+        XCTAssertEqual(store.sessions.first?.hasTerminal, false)
+        XCTAssertFalse(store.sessions.first?.canReceiveMessages ?? true)
+    }
+
+    /// launchd is pid 1 on every Mac and has never had a controlling
+    /// terminal, which makes it the one process this can assert against
+    /// without spawning anything.
+    func testTheKernelIsAskedWhetherAProcessHasATerminal() {
+        XCTAssertFalse(SessionRegistry.processHasTerminal(1))
+    }
+
+    /// Every unknown answers "yes". A pid that has gone, a pid that
+    /// never was, a sysctl that failed: none of those are evidence of a
+    /// missing terminal, and guessing "no" would quietly take the
+    /// composer off a session that has one.
+    func testAProcessTheKernelCannotFindIsNeverDemoted() {
+        XCTAssertTrue(SessionRegistry.processHasTerminal(0))
+        XCTAssertTrue(SessionRegistry.processHasTerminal(-1))
+        XCTAssertTrue(SessionRegistry.processHasTerminal(999_999))
+    }
+
+    // MARK: A row that says the same thing twice says nothing
+
+    /// A session whose transcript never yielded a title falls back to
+    /// its folder name, and the subtitle is the folder name too, so the
+    /// row read "observer-sessions" over "observer-sessions" (founder,
+    /// 2026-08-02, looking at the real strip).
+    func testASubtitleThatOnlyEchoesTheTitleIsDropped() {
+        let session = SessionStore.Session(
+            id: "s", title: "moai", cwd: "/a/moai", branch: nil, lastPrompt: nil,
+            activity: nil, agent: .claude, state: .working, ask: nil, pid: nil,
+            kind: nil, startedAt: Date(), updatedAt: Date()
+        )
+        XCTAssertNil(AgentSessionsStrip.subtitle(session))
+    }
+
+    func testASubtitleThatAddsSomethingSurvives() {
+        let session = SessionStore.Session(
+            id: "s", title: "Push changes to PR", cwd: "/a/moai", branch: "main",
+            lastPrompt: nil, activity: "Running a command", agent: .claude,
+            state: .working, ask: nil, pid: nil, kind: nil,
+            startedAt: Date(), updatedAt: Date()
+        )
+        XCTAssertEqual(AgentSessionsStrip.subtitle(session), "Running a command · moai · main")
+    }
+
+    /// The reason lived in a tooltip, which is a place nobody looks
+    /// before deciding a feature is broken. Both kinds of "you cannot
+    /// message this" now say so in the row itself.
+    func testARowThatCannotBeMessagedSaysWhyInTheSubtitle() {
+        let headless = SessionStore.Session(
+            id: "h", title: "observer-sessions", cwd: "/a/observer-sessions", branch: nil,
+            lastPrompt: nil, activity: nil, agent: .claude, state: .working, ask: nil,
+            pid: 1, kind: .interactive, hasTerminal: false, startedAt: Date(), updatedAt: Date()
+        )
+        XCTAssertEqual(AgentSessionsStrip.title(headless), "Background task")
+        XCTAssertEqual(AgentSessionsStrip.subtitle(headless), "observer-sessions · no terminal")
+
+        let cursor = SessionStore.Session(
+            id: "c", title: "Fix the header", cwd: "/a/site", branch: nil,
+            lastPrompt: nil, activity: nil, agent: .cursor, state: .working, ask: nil,
+            pid: nil, kind: nil, startedAt: Date(), updatedAt: Date()
+        )
+        XCTAssertEqual(AgentSessionsStrip.subtitle(cursor), "site · no hook yet")
+    }
+
+    /// A headless session that did earn a real title keeps it. Only the
+    /// folder-name fallback is replaced, because only that one tells
+    /// you nothing.
+    func testAHeadlessSessionWithARealTitleKeepsIt() {
+        let session = SessionStore.Session(
+            id: "h", title: "Indexing your history", cwd: "/a/observer-sessions", branch: nil,
+            lastPrompt: nil, activity: nil, agent: .claude, state: .working, ask: nil,
+            pid: 1, kind: .interactive, hasTerminal: false, startedAt: Date(), updatedAt: Date()
+        )
+        XCTAssertEqual(AgentSessionsStrip.title(session), "Indexing your history")
+    }
+
     // MARK: The outbox (T4, T7)
 
     func testAQueuedMessageIsHandedOverExactlyOnce() {
