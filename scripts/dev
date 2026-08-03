@@ -1,0 +1,24 @@
+#!/bin/bash
+# Dev loop: regenerate, build, relaunch. Signing team is overridden on the
+# command line rather than in project.yml so the upstream config stays intact.
+# Override with CHALANT_TEAM=<id> if you sign with a different team.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+TEAM="${CHALANT_TEAM:-QGCP5G9LVQ}"
+
+command -v xcodegen >/dev/null && xcodegen --quiet
+
+xcodebuild -scheme Chalant -configuration Debug -destination 'platform=macOS' \
+  DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic -allowProvisioningUpdates \
+  build 2>&1 | grep -E "error:|warning: .*(deprecat|unused)|BUILD (SUCCEEDED|FAILED)" || true
+
+APP=$(find ~/Library/Developer/Xcode/DerivedData -name Chalant.app -path '*Debug*' \
+      -not -path '*Index.noindex*' 2>/dev/null | head -1)
+[ -n "$APP" ] || { echo "No built app found"; exit 1; }
+
+pkill -x Chalant 2>/dev/null || true
+sleep 0.5
+open "$APP"
+echo "Launched $APP"
+echo "Logs: ./scripts/devlog"

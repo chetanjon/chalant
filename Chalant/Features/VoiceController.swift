@@ -525,7 +525,15 @@ final class VoiceController: NSObject, ObservableObject {
             let text = result.bestTranscription.formattedString
             let isFinal = result.isFinal
             Task { @MainActor in
-                guard let self else { return }
+                // Same identity guard the error branch above carries.
+                // Without it a previous session's trailing final result
+                // lands in the current session's transcript and gets
+                // acted on: say "remind me to call mom at six", release,
+                // hold again inside 1.2s and say "timer ten", and a
+                // reminder is created instead of a timer. The silence
+                // watchdog makes this fire on ordinary use, not just on
+                // fast double-taps.
+                guard let self, self.request === request else { return }
                 self.transcript = text
                 // The final result carries the completed tail of the
                 // sentence, deliver on it rather than on a fixed beat,

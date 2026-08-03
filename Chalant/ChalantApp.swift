@@ -12,6 +12,10 @@ struct ChalantApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchController: NotchWindowController?
+    /// Built once on first open and kept: the window closes, the app
+    /// keeps running headless, and reopening shows this same one back
+    /// where it was left.
+    private var dashboardController: DashboardWindowController?
     private var statusItem: NSStatusItem?
     /// Sparkle, on a leash: its own scheduler is off (Info.plist
     /// SUEnableAutomaticChecks false; the island's quiet daily
@@ -53,6 +57,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // instead, the same trade VS Code makes.
         UserDefaults.standard.register(defaults: ["ApplePressAndHoldEnabled": false])
 
+        // Info.plist ships LSUIElement, so the app starts as an
+        // accessory and only takes a Dock icon if the user asked for
+        // one. Re-applied here because the policy is process state, not
+        // a stored preference the system restores on its own.
+        if UserDefaults.standard.bool(forKey: "showInDock") {
+            NSApp.setActivationPolicy(.regular)
+        }
+
         // The island itself
         let controller = NotchWindowController()
         controller.show()
@@ -60,6 +72,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.viewModel.installUpdate = { [weak self] in
             self?.updater.checkForUpdates(nil)
         }
+        controller.viewModel.openDashboard = { [weak self] section in
+            self?.showDashboard(section: section)
+        }
+
+        // System-wide shortcuts. Unbound until the user records one, so
+        // this claims no combination on a fresh install.
+        let hotKeys = HotKeyCenter.shared
+        hotKeys.handlers = [
+            .toggleIsland: { [weak controller] in
+                guard let model = controller?.viewModel else { return }
+                switch model.state {
+                case .expanded: model.collapse()
+                case .collapsed: model.expand()
+                // A hold is in progress. `expand()` would set the state
+                // straight to expanded with the microphone still
+                // capturing and the room still ducked, stranding the
+                // session — the shortcut is not a way to interrupt one.
+                case .listening: break
+                }
+            },
+            .talk: { [weak controller] in
+                controller?.viewModel.toggleListening()
+            },
+            .openSettings: { [weak self] in
+                self?.showDashboard(section: nil)
+            },
+        ]
+        // Every shortcut that opens a panel is the same behaviour with a
+        // different destination, so it is written once.
+        for action in HotKeyCenter.Action.allCases {
+            guard let tab = action.tab else { continue }
+            hotKeys.handlers[action] = { [weak controller] in
+                guard let model = controller?.viewModel else { return }
+                // A tool switched off in settings is not somewhere to
+                // land: the switcher would not show it, leaving the
+                // panel open with no way back but Today. Both choices
+                // were the user's, so this says which one won rather
+                // than silently doing nothing.
+                guard NotchViewModel.isAvailable(tab) else {
+                    model.flashGlance("\(action.title) is switched off in settings")
+                    return
+                }
+                // Straight to the panel, not merely open: the shortcut
+                // exists to skip the switcher, and landing on Today
+                // would leave the user one click from where they asked
+                // to be.
+                model.tab = tab
+                model.expand()
+                // The clipboard's own binding covers both halves the
+                // founder asked for: opening it, and searching within
+                // it once open. A second destination just for search
+                // would be two bindings pointed at the same panel,
+                // which the one-binding-per-tab rule below exists to
+                // rule out; firing the same shortcut again instead
+                // moves focus straight to the search field.
+                if action == .clipboard { model.wantsClipboardSearch = true }
+            }
+        }
+        hotKeys.reload()
 
         // Tiny menu bar item so the agent app can be quit
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -117,11 +188,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() {
-        Task { @MainActor in
-            guard let model = self.notchController?.viewModel else { return }
-            model.expand()
-            model.pane = .settings
-        }
+        Task { @MainActor in self.showDashboard(section: nil) }
+    }
+
+    /// Opening an already-running accessory app — double-clicking it in
+    /// Finder, hitting return on it in Spotlight — did nothing at all,
+    /// because there was no window for the system to bring forward.
+    /// Now it shows the one there is.
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication, hasVisibleWindows: Bool
+    ) -> Bool {
+        showDashboard(section: nil)
+        return true
+    }
+
+    @MainActor
+    private func showDashboard(section: DashboardSection?) {
+        guard let model = notchController?.viewModel else { return }
+        // The island is a glance surface and settings is a window; both
+        // lit at once is two places claiming the same job.
+        model.collapse()
+        let controller = dashboardController ?? DashboardWindowController(model: model)
+        dashboardController = controller
+        controller.present(section: section)
     }
 
     /// One-time inheritance from the app's earlier names. The newest

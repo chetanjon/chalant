@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import os
 import Security
 
 /// The open door: a tiny HTTP server on localhost that lets any local
@@ -73,20 +74,50 @@ final class ActivityServer: @unchecked Sendable {
         return difference == 0
     }
 
+    private static let log = Logger(subsystem: "com.cj.chalant", category: "activityserver")
+
+    /// Held so a session's question can be answered from the island and
+    /// collected by the agent that asked it.
+    private var sessions: SessionStore?
+
     private var token = ""
 
     @MainActor
-    func start(store: ActivityStore) {
+    func start(store: ActivityStore, sessions: SessionStore? = nil) {
         self.store = store
+        self.sessions = sessions
         token = Self.loadOrCreateToken()
         let parameters = NWParameters.tcp
         parameters.requiredInterfaceType = .loopback
         parameters.allowLocalEndpointReuse = true
-        guard let port = NWEndpoint.Port(rawValue: Self.port),
-              let listener = try? NWListener(using: parameters, on: port)
-        else { return }
+        guard let port = NWEndpoint.Port(rawValue: Self.port) else { return }
+        let listener: NWListener
+        do {
+            listener = try NWListener(using: parameters, on: port)
+        } catch {
+            Self.log.error(
+                "activity door could not be opened on \(Self.port): \(error.localizedDescription, privacy: .public)")
+            return
+        }
         listener.newConnectionHandler = { [weak self] connection in
             self?.handle(connection)
+        }
+        // NWListener reports a taken port asynchronously, not from the
+        // initializer: without this a second instance left the door
+        // dead while the app looked perfectly healthy, and every
+        // `chalant` command failed with nothing anywhere saying why.
+        listener.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                Self.log.notice("activity door open on \(Self.port)")
+            case .failed(let error):
+                Self.log.error(
+                    "activity door failed on \(Self.port): \(error.localizedDescription, privacy: .public). Another Chalant is probably already running.")
+            case .cancelled:
+                Self.log.notice("activity door closed")
+            default:
+                break
+            }
         }
         listener.start(queue: queue)
         self.listener = listener
@@ -225,7 +256,16 @@ final class ActivityServer: @unchecked Sendable {
         // the island. Reading (GET) is already walled off by the
         // browser's own same-origin policy; the writing routes refuse
         // anything wearing browser headers outright.
-        if request.fromBrowser, request.method != "GET" {
+        //
+        // Two GETs are writes in disguise: `/outbox/<id>` and
+        // `/ask/<id>` each hand over something exactly once and clear
+        // it in the same breath, so a page that guessed a session id
+        // could otherwise consume a queued message or a pending answer
+        // that was never meant for it. Both need the real token too,
+        // but this is the second wall, not the only one (EC-14).
+        let consumesGET = request.method == "GET"
+            && (request.path.hasPrefix("/outbox/") || request.path.hasPrefix("/ask/"))
+        if request.fromBrowser, request.method != "GET" || consumesGET {
             respond(connection, status: "403 Forbidden",
                     body: #"{"ok":false,"error":"cross-origin writes refused"}"#)
             return
@@ -267,6 +307,112 @@ final class ActivityServer: @unchecked Sendable {
                 self.store?.push(id: id, title: title, detail: detail, state: state)
             }
             respond(connection, status: "200 OK", body: #"{"ok":true}"#)
+
+        // The other half of a session's question. The agent posts what
+        // it wants to know, then polls /ask/<session> until an answer
+        // appears — the island cannot reach into a running agent, so the
+        // agent has to come and collect.
+        case ("POST", "/ask"):
+            guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+                  let session = object["session"] as? String, !session.isEmpty,
+                  let question = object["question"] as? String, !question.isEmpty
+            else {
+                respond(connection, status: "400 Bad Request",
+                        body: #"{"ok":false,"error":"need session and question"}"#)
+                return
+            }
+            let askID = object["id"] as? String ?? UUID().uuidString
+            let header = object["header"] as? String ?? "Question"
+            let options = (object["options"] as? [String]) ?? []
+            let multi = object["multiSelect"] as? Bool ?? false
+            Task { @MainActor in
+                let attached = self.sessions?.attach(
+                    askID: askID, to: session, header: header, question: question,
+                    options: options, multiSelect: multi
+                ) ?? false
+                // A question for a session Chalant has never seen has
+                // nowhere to appear; saying so beats accepting it and
+                // leaving the agent polling an answer that never comes.
+                self.respond(
+                    connection,
+                    status: attached ? "200 OK" : "404 Not Found",
+                    body: attached ? #"{"ok":true}"# : #"{"ok":false,"error":"no such session"}"#
+                )
+            }
+
+        // Queue a message for a session, the same thing the island's
+        // composer does. It exists because everything else in this app
+        // can be driven from a terminal and checked, and this could
+        // not: the only way to prove a message reaches a running agent
+        // was to type one by hand and watch, which also means a test
+        // costs somebody their real message (2026-08-02).
+        case ("POST", "/outbox"):
+            guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+                  let session = object["session"] as? String, !session.isEmpty,
+                  let message = object["message"] as? String, !message.isEmpty
+            else {
+                respond(connection, status: "400 Bad Request",
+                        body: #"{"ok":false,"error":"need session and message"}"#)
+                return
+            }
+            Task { @MainActor in
+                // `queue` does the bounding: it refuses a session that
+                // has ended, one that cannot receive, and anything past
+                // the cap. Refusing loudly here beats accepting and
+                // dropping, which is the failure this whole feature
+                // keeps being about.
+                let queued = self.sessions?.queue(message: message, for: session) ?? false
+                self.respond(
+                    connection,
+                    status: queued ? "200 OK" : "404 Not Found",
+                    body: queued
+                        ? #"{"ok":true}"#
+                        : #"{"ok":false,"error":"no such session, or the message was refused"}"#
+                )
+            }
+
+        case ("GET", let path) where path.hasPrefix("/ask/"):
+            let session = String(path.dropFirst("/ask/".count)).removingPercentEncoding ?? ""
+            Task { @MainActor in
+                guard let ask = self.sessions?.pendingAsk(sessionID: session) else {
+                    self.respond(connection, status: "404 Not Found",
+                                 body: #"{"ok":false,"error":"no question outstanding"}"#)
+                    return
+                }
+                guard let answer = ask.answer else {
+                    self.respond(connection, status: "200 OK", body: #"{"ok":true,"answered":false}"#)
+                    return
+                }
+                // Handed over exactly once: the agent has it now, and a
+                // question already answered must stop being offered.
+                self.sessions?.clearAsk(sessionID: session)
+                let body = (try? JSONSerialization.data(
+                    withJSONObject: ["ok": true, "answered": true, "answer": answer]
+                )).flatMap { String(data: $0, encoding: .utf8) } ?? #"{"ok":true,"answered":false}"#
+                self.respond(connection, status: "200 OK", body: body)
+            }
+
+        // The outbox's other half: a Stop hook comes to collect
+        // whatever the user left for this session, exactly the same
+        // shape as /ask/<session> above — the island cannot reach into
+        // a running agent, so the agent has to come and collect.
+        case ("GET", let path) where path.hasPrefix("/outbox/"):
+            let session = String(path.dropFirst("/outbox/".count)).removingPercentEncoding ?? ""
+            Task { @MainActor in
+                // Collected once: read, clear, respond, in that order,
+                // the same ordering clearAsk gets above, so a Stop hook
+                // that fires twice cannot hand the model the same
+                // instruction twice (EC-7).
+                let message = self.sessions?.collectMessage(sessionID: session)
+                let body = (try? JSONSerialization.data(
+                    withJSONObject: ["ok": true, "message": (message ?? NSNull()) as Any]
+                )).flatMap { String(data: $0, encoding: .utf8) } ?? #"{"ok":true,"message":null}"#
+                // Never a 404 for an empty outbox: this route is hit at
+                // the end of every turn of every session on the
+                // machine, and a 404 as the normal case would make a
+                // real failure unreadable.
+                self.respond(connection, status: "200 OK", body: body)
+            }
 
         case ("GET", "/activities"):
             Task { @MainActor in

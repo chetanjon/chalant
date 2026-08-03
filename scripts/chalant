@@ -8,6 +8,7 @@
 #   chalant failed   "Tests broke"          [id]
 #   chalant clear    [id]
 #   chalant list
+#   chalant ask <session-id> "Question?" [option ...]
 #
 # The id defaults to "cli"; give one to run several statuses at once.
 set -euo pipefail
@@ -49,6 +50,62 @@ case "${1:-}" in
   list)
     curl -sf "${AUTH[@]}" "$BASE/activities"
     echo
+    ;;
+  message)
+    # chalant message <session-id> "text"
+    #
+    # Queues a message for a running agent, exactly as the island's
+    # composer does. It is collected by that session's Stop hook at the
+    # end of its next turn, so nothing arrives mid-run. Exists so the
+    # path can be exercised without a person typing into the notch and
+    # spending their real message on a test.
+    SESSION="${2:?usage: chalant message <session-id> \"text\"}"
+    TEXT="${3:?usage: chalant message <session-id> \"text\"}"
+    esc() { printf '%s' "$1" | python3 -c 'import json,sys; sys.stdout.write(json.dumps(sys.stdin.read())[1:-1])'; }
+    if ! curl -sf "${AUTH[@]}" "$BASE/outbox" \
+        -d "{\"session\":\"$(esc "$SESSION")\",\"message\":\"$(esc "$TEXT")\"}" >/dev/null; then
+      echo "chalant: the island would not take that message for $SESSION" >&2
+      exit 1
+    fi
+    echo "queued for $SESSION; it arrives when that session next comes to rest"
+    ;;
+  ask)
+    # chalant ask <session-id> "Question?" [option ...]
+    #
+    # Blocks until the question is answered on the island, then prints
+    # the chosen options one per line. This is the shape a hook wants:
+    # ask, wait, read stdout. Chalant cannot push an answer into a
+    # running agent, so the agent comes and collects it.
+    SESSION="${2:?usage: chalant ask <session-id> \"question\" [option ...]}"
+    QUESTION="${3:?usage: chalant ask <session-id> \"question\" [option ...]}"
+    shift 3
+    esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+    OPTS=""
+    for o in "$@"; do
+      [ -n "$OPTS" ] && OPTS="$OPTS,"
+      OPTS="$OPTS\"$(esc "$o")\""
+    done
+    if ! curl -sf "${AUTH[@]}" "$BASE/ask" \
+        -d "{\"session\":\"$(esc "$SESSION")\",\"question\":\"$(esc "$QUESTION")\",\"options\":[$OPTS]}" >/dev/null; then
+      echo "chalant: the island does not know session $SESSION" >&2
+      exit 1
+    fi
+    # Polled, not streamed: a shell has no good way to hold a socket
+    # open for an answer that may take minutes, and a second per poll
+    # is invisible next to a human deciding.
+    while true; do
+      REPLY_JSON=$(curl -sf "${AUTH[@]}" "$BASE/ask/$SESSION" || true)
+      case "$REPLY_JSON" in
+        *'"answered":true'*)
+          printf '%s' "$REPLY_JSON" \
+            | sed -n 's/.*"answer":\[\(.*\)\].*/\1/p' \
+            | tr ',' '\n' | sed 's/^ *"//; s/"$//'
+          exit 0
+          ;;
+        '') echo "chalant: the island stopped answering" >&2; exit 1 ;;
+      esac
+      sleep 1
+    done
     ;;
   *)
     sed -n '2,13p' "$0"

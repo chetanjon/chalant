@@ -46,6 +46,8 @@ struct NotesView: View {
             }
             .buttonStyle(PressableStyle())
             .disabled(draft.isEmpty)
+            .help("Add this note")
+            .accessibilityLabel("Add this note")
         }
         .padding(.horizontal, Theme.Space.l)
         .padding(.vertical, Theme.Space.s)
@@ -91,15 +93,15 @@ private struct NoteRow: View {
 
             Group {
                 // A jotted thought usually wants pasting somewhere.
-                IconActionButton(symbol: "doc.on.doc") {
+                IconActionButton(symbol: "doc.on.doc", label: "Copy") {
                     let pasteboard = NSPasteboard.general
                     pasteboard.clearContents()
                     pasteboard.setString(note.text, forType: .string)
                 }
-                IconActionButton(symbol: "chalant.mark", tint: accent) {
+                IconActionButton(symbol: "chalant.mark", label: "Ask about this", tint: accent) {
                     model.askAbout(name: "note", text: note.text)
                 }
-                IconActionButton(symbol: "xmark", dim: true) {
+                IconActionButton(symbol: "xmark", label: "Remove this note", dim: true) {
                     notes.remove(note)
                 }
             }

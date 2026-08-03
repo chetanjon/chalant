@@ -1,0 +1,199 @@
+#!/bin/bash
+# Claude Code, Cursor or Codex's hook -> the island.
+#
+# All three hand a hook a JSON object on stdin and expect it to be
+# quick and quiet. This reads whatever it can out of that and pushes a
+# pill, so a session that wants you says so on the island instead of
+# only in whatever terminal it happens to be in.
+#
+# Install by adding to ~/.claude/settings.json:
+#
+#   {
+#     "hooks": {
+#       "Notification": [
+#         { "hooks": [ { "type": "command",
+#                        "command": "/full/path/to/scripts/chalant-hook" } ] }
+#       ],
+#       "Stop": [
+#         { "hooks": [ { "type": "command",
+#                        "command": "/full/path/to/scripts/chalant-hook" } ] }
+#       ]
+#     }
+#   }
+#
+# Cursor and Codex each keep their own live hooks.json, already pointed
+# at another tool, so their snippets are additive rather than a whole
+# file to paste. See the dashboard's Sessions tab, which builds each
+# one from HookInstall.snippet(for:) so there is exactly one copy of
+# each to keep in sync, not one here and one there.
+#
+# Which agent called: CHALANT_AGENT, set by the snippet itself
+# (default "claude"; every install already out there predates this
+# variable and must keep working unset). Never sniffed from the
+# payload. Cursor's and Codex's own field names are not documented
+# anywhere this app can read, so guessing at them is exactly the kind
+# of thing that works until it doesn't.
+#
+# Which event: Claude Code and Codex say so inside the JSON payload
+# (hook_event_name); Cursor's snippet instead passes it as $1, the same
+# way the founder's own superset cursor-hook.sh is already invoked
+# ("cursor-hook.sh Stop"), since what Cursor puts in its own payload is
+# just as undocumented as its field names.
+#
+# A hook that fails must never be the reason a session stops, so every
+# path here exits 0 and stays silent. Chalant not running is the
+# ordinary case, not an error worth interrupting anybody over.
+set -uo pipefail
+
+PORT="${CHALANT_PORT:-4242}"
+BASE="http://localhost:$PORT"
+TOKEN_FILE="${CHALANT_TOKEN_FILE:-$HOME/Library/Application Support/Chalant/api-token}"
+TOKEN="${CHALANT_TOKEN:-}"
+if [ -z "$TOKEN" ] && [ -r "$TOKEN_FILE" ]; then
+  TOKEN="$(cat "$TOKEN_FILE")"
+fi
+[ -n "$TOKEN" ] || exit 0
+
+# Sanitised to exactly one of three words rather than trusted whole:
+# this becomes part of a pill id below, unescaped, so an unrecognised
+# value reads as generic "agent" rather than smuggling arbitrary text
+# into it.
+case "${CHALANT_AGENT:-claude}" in
+  claude) AGENT="claude"; AGENT_LABEL="" ;;
+  cursor) AGENT="cursor"; AGENT_LABEL="Cursor" ;;
+  codex)  AGENT="codex";  AGENT_LABEL="Codex" ;;
+  *)      AGENT="agent";  AGENT_LABEL="" ;;
+esac
+
+PAYLOAD="$(cat)"
+
+# python3 rather than sed: this is JSON from another program, and a
+# message with a quote or a newline in it would take a regex apart.
+# Every field is tried under several candidate names and falls back to
+# empty rather than raising. Cursor's and Codex's real field names are
+# not established, so this is read defensively on purpose (ponytail: a
+# handful of guessed keys, not a schema; widen the list if a founder
+# capture ever shows the real one).
+read -r EVENT SESSION STOP_ACTIVE TITLE <<EOF
+$(printf '%s' "$PAYLOAD" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    if not isinstance(d, dict):
+        d = {}
+except Exception:
+    d = {}
+
+def first(*keys):
+    for k in keys:
+        v = d.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
+
+event = first("hook_event_name", "event", "hookEventName")
+session = first("session_id", "sessionId", "session", "conversation_id",
+                 "conversationId", "chat_id", "chatId")
+cwd = first("cwd", "cwd_path", "workspaceRoot", "workspacePath")
+if not cwd:
+    roots = d.get("workspace_roots") or d.get("workspaceRoots")
+    if isinstance(roots, list) and roots and isinstance(roots[0], str):
+        cwd = roots[0]
+cwd = cwd.rstrip("/")
+# The folder is what a person recognises a session by; the raw message
+# is often "Claude needs your permission to use Bash", which says
+# nothing about which of five sessions it came from.
+where = cwd.rsplit("/", 1)[-1] if cwd else ""
+title = where or (session[:8] if session else "") or "a session"
+# Set when a Stop hook is already running for this turn. The field
+# name is believed, not documented (notch-messaging-evidence); the
+# real guard against a double delivery is the once-only collection
+# below, which does not depend on this at all, and which only Claude
+# Code is even asked for.
+stop_active = "1" if d.get("stop_hook_active") else "0"
+print(event or "-", session or "-", stop_active, title.replace(" ", " "))
+' 2>/dev/null)
+EOF
+
+[ "${EVENT:-}" = "-" ] && EVENT=""
+[ "${SESSION:-}" = "-" ] && SESSION=""
+
+# Cursor's own event name, passed as $1 rather than trusted from the
+# payload (see header). Wins over whatever the JSON said, since it is
+# the one thing about this invocation this app actually controls.
+EVENT="${1:-$EVENT}"
+[ -n "$EVENT" ] || EVENT="Notification"
+
+if [ -z "$SESSION" ]; then
+  # Claude Code always sends session_id; a payload with none is
+  # malformed and worth skipping rather than guessing at, exactly the
+  # existing behaviour. Cursor and Codex have no confirmed field for
+  # this at all, so nothing here would ever fire without a fallback:
+  # one shared id per agent, which collapses concurrent sessions of
+  # the same tool onto a single row rather than posting nothing.
+  # ponytail: per-tool, not per-session; split if a real session key
+  # for either ever turns up.
+  [ "$AGENT" = "claude" ] && exit 0
+  SESSION="default"
+fi
+TITLE="${TITLE// / }"
+
+case "$EVENT" in
+  # Claude Code's permission prompt, and Cursor's two named
+  # permission-request events: the closest thing any of the three has
+  # to "a question arrived" (Cursor names it; Claude Code only
+  # approximates it with Notification).
+  Notification|PermissionRequest) STATE="needs-input"; WHAT="$TITLE wants you" ;;
+  Stop)                           STATE="done";        WHAT="$TITLE finished" ;;
+  *)                              exit 0 ;;
+esac
+[ -n "$AGENT_LABEL" ] && WHAT="$AGENT_LABEL: $WHAT"
+
+esc() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read())[1:-1])'; }
+
+curl -s --max-time 2 -H "X-Chalant-Token: $TOKEN" "$BASE/activity" \
+  -d "{\"id\":\"$AGENT-$(esc "$SESSION")\",\"title\":\"$(esc "$WHAT")\",\"state\":\"$STATE\"}" \
+  >/dev/null 2>&1
+
+# A message the user left on the island, collected at the turn
+# boundary: the only moment a Stop hook gets to say anything back.
+# Notification and PermissionRequest do not reach here. A permission
+# prompt is not a turn boundary, and Cursor's two permission events in
+# particular may expect a structured reply of their own; answering
+# them with anything, right or wrong, could block a command Cursor was
+# about to run, so this prints nothing for either.
+#
+# Claude-only, deliberately: message injection is unproven for Cursor
+# and Codex (cursor-codex-hooks-evidence-2026-08-02.md), so even a Stop
+# from either of them stops at the pill above.
+if [ "$AGENT" = "claude" ] && [ "$EVENT" = "Stop" ] && [ "${STOP_ACTIVE:-0}" != "1" ]; then
+  # $SESSION, not "claude-$SESSION": the pill above uses the prefixed
+  # id, but the outbox route (like /ask) takes the bare session id
+  # Claude Code itself uses. Using the prefixed id here 404s forever
+  # with nothing anywhere saying why.
+  OUTBOX="$(curl -s --connect-timeout 1 --max-time 2 -H "X-Chalant-Token: $TOKEN" \
+    "$BASE/outbox/$SESSION" 2>/dev/null)"
+  printf '%s' "$OUTBOX" | python3 -c '
+import json, sys
+try:
+    body = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+message = body.get("message")
+if not message:
+    sys.exit(0)
+# Built with json.dumps, never string interpolation: this message came
+# from a user and may contain a quote, a newline or a backslash, and
+# still has to become one well-formed JSON object on stdout.
+print(json.dumps({
+    "decision": "block",
+    "reason": "A message arrived from Chalant.",
+    "hookSpecificOutput": {
+        "hookEventName": "Stop",
+        "additionalContext": message,
+    },
+}))
+' 2>/dev/null
+fi
+
+exit 0

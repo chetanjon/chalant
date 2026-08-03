@@ -235,6 +235,7 @@ struct FocusPanel: View {
                 Spacer()
                 HoverGlyphButton(
                     symbol: stopwatch.isRunning ? "pause.fill" : "play.fill",
+                    label: stopwatch.isRunning ? "Pause stopwatch" : "Start stopwatch",
                     scale: .s,
                     tint: Theme.textSecondary
                 ) {
@@ -382,6 +383,7 @@ struct FocusPanel: View {
         HStack(spacing: Theme.Space.s) {
             HoverGlyphButton(
                 symbol: focus.isPaused ? "play.fill" : "pause.fill",
+                label: focus.isPaused ? "Resume focus" : "Pause focus",
                 scale: .m,
                 tint: Theme.textPrimary
             ) {
@@ -389,6 +391,7 @@ struct FocusPanel: View {
             }
             HoverGlyphButton(
                 symbol: "forward.end.fill",
+                label: "Skip to the next round",
                 scale: .s,
                 tint: Theme.textSecondary
             ) {

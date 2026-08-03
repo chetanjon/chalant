@@ -1,0 +1,155 @@
+#!/bin/bash
+# Proves scripts/chalant-hook handles all three dialects (Claude Code,
+# Cursor, Codex) without touching a real ~/.claude, ~/.cursor or
+# ~/.codex, and without ever reaching the founder's real Chalant on
+# port 4242. Runs a throwaway HTTP mock on a scratch port, pipes
+# synthetic payloads through the real hook script, and asserts on what
+# the mock actually received.
+#
+# Run directly: scripts/chalant-hook-selftest
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOOK="$HERE/chalant-hook"
+PORT=4343   # deliberately not 4242, the founder's real Chalant
+WORKDIR="$(mktemp -d)"
+CAPTURED="$WORKDIR/captured.jsonl"
+trap 'kill "$SERVER_PID" 2>/dev/null; rm -rf "$WORKDIR"' EXIT
+
+echo -n "test-token" > "$WORKDIR/api-token"
+export CHALANT_PORT=$PORT
+export CHALANT_TOKEN_FILE="$WORKDIR/api-token"
+
+python3 - "$PORT" "$CAPTURED" <<'PYEOF' &
+import http.server, json, sys
+
+port = int(sys.argv[1])
+outfile = sys.argv[2]
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def _capture(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length) if length else b""
+        try:
+            obj = json.loads(body) if body else None
+        except Exception:
+            obj = {"_raw": body.decode(errors="replace")}
+        with open(outfile, "a") as f:
+            f.write(json.dumps({"method": self.command, "path": self.path, "body": obj}) + "\n")
+    def do_POST(self):
+        self._capture()
+        self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
+        self.wfile.write(b'{"ok":true}')
+    def do_GET(self):
+        self._capture()
+        self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
+        self.wfile.write(b'{"ok":true,"message":null}')
+
+http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+PYEOF
+SERVER_PID=$!
+disown "$SERVER_PID" 2>/dev/null
+sleep 0.4
+
+FAILURES=0
+check() {
+  local label="$1" expect="$2"
+  if grep -qF "$expect" "$CAPTURED"; then
+    echo "ok - $label"
+  else
+    echo "FAIL - $label (expected to see: $expect)"
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+count_lines_matching() { grep -cF "$1" "$CAPTURED" || true; }
+
+# Claude Code: unchanged behaviour, the existing dialect.
+printf '%s' '{"hook_event_name":"Notification","session_id":"abc123","cwd":"/x/proj-alpha"}' \
+  | bash "$HOOK"
+check "claude Notification posts a needs-input pill" \
+  '"id": "claude-abc123", "title": "proj-alpha wants you", "state": "needs-input"'
+
+printf '%s' '{"hook_event_name":"Stop","session_id":"abc123","cwd":"/x/proj-alpha","stop_hook_active":false}' \
+  | bash "$HOOK"
+check "claude Stop posts a done pill" \
+  '"id": "claude-abc123", "title": "proj-alpha finished", "state": "done"'
+check "claude Stop collects its outbox" '"path": "/outbox/abc123"'
+
+BEFORE=$(count_lines_matching '/outbox/')
+printf '%s' '{"hook_event_name":"Stop","session_id":"abc123","stop_hook_active":true}' \
+  | bash "$HOOK"
+AFTER=$(count_lines_matching '/outbox/')
+if [ "$BEFORE" = "$AFTER" ]; then
+  echo "ok - claude Stop skips outbox collection while stop_hook_active"
+else
+  echo "FAIL - claude Stop collected outbox while stop_hook_active"
+  FAILURES=$((FAILURES + 1))
+fi
+
+printf '%s' '{"hook_event_name":"Notification"}' | CHALANT_AGENT=claude bash "$HOOK"
+LINES_BEFORE=$(wc -l < "$CAPTURED")
+sleep 0.1
+LINES_AFTER=$(wc -l < "$CAPTURED")
+if [ "$LINES_BEFORE" = "$LINES_AFTER" ]; then
+  echo "ok - claude payload with no session_id posts nothing"
+else
+  echo "FAIL - claude payload with no session_id posted something"
+  FAILURES=$((FAILURES + 1))
+fi
+
+# Codex: same JSON shape as Claude Code, agent set explicitly, never
+# sniffed. Also proves an unrecognised payload shape falls back rather
+# than crashing.
+printf '%s' '{"hook_event_name":"Stop","session_id":"codexsess1","cwd":"/x/proj-beta"}' \
+  | CHALANT_AGENT=codex bash "$HOOK"
+check "codex Stop is namespaced and labelled" \
+  '"id": "codex-codexsess1", "title": "Codex: proj-beta finished", "state": "done"'
+
+printf '%s' '{"totally":"unknown","shape":true}' | CHALANT_AGENT=codex bash "$HOOK" Stop
+check "codex with an unknown payload shape still posts, via fallback id" \
+  '"id": "codex-default", "title": "Codex: a session finished", "state": "done"'
+
+# Cursor: event arrives as argv, not the payload; session id is guessed
+# defensively from candidate keys.
+printf '%s' '{"cwd":"/x/proj-gamma","conversation_id":"conv-999"}' \
+  | CHALANT_AGENT=cursor bash "$HOOK" Stop
+check "cursor Stop reads conversation_id as the session" \
+  '"id": "cursor-conv-999", "title": "Cursor: proj-gamma finished", "state": "done"'
+
+OUT=$(printf '%s' '{"conversation_id":"conv-999"}' \
+  | CHALANT_AGENT=cursor bash "$HOOK" PermissionRequest)
+check "cursor PermissionRequest posts a needs-input pill" \
+  '"id": "cursor-conv-999", "title": "Cursor: conv-999 wants you", "state": "needs-input"'
+if [ -z "$OUT" ]; then
+  echo "ok - cursor PermissionRequest prints nothing on stdout"
+else
+  echo "FAIL - cursor PermissionRequest printed: $OUT"
+  FAILURES=$((FAILURES + 1))
+fi
+
+OUTBOX_HITS_BEFORE=$(count_lines_matching '/outbox/')
+printf '%s' '{"conversation_id":"conv-999"}' | CHALANT_AGENT=cursor bash "$HOOK" Stop
+OUTBOX_HITS_AFTER=$(count_lines_matching '/outbox/')
+if [ "$OUTBOX_HITS_BEFORE" = "$OUTBOX_HITS_AFTER" ]; then
+  echo "ok - a cursor Stop never collects an outbox"
+else
+  echo "FAIL - a cursor Stop collected an outbox"
+  FAILURES=$((FAILURES + 1))
+fi
+
+# An agent this script has never heard of is sanitised, not trusted
+# whole, and still degrades to a working (unlabelled) pill.
+printf '%s' '{"hook_event_name":"Stop","session_id":"weird1"}' \
+  | CHALANT_AGENT='rm -rf' bash "$HOOK"
+check "an unrecognised CHALANT_AGENT is sanitised to a plain id" \
+  '"id": "agent-weird1", "title": "weird1 finished", "state": "done"'
+
+echo
+if [ "$FAILURES" -eq 0 ]; then
+  echo "chalant-hook-selftest: all checks passed"
+  exit 0
+else
+  echo "chalant-hook-selftest: $FAILURES check(s) failed"
+  exit 1
+fi

@@ -2,13 +2,19 @@ import AppKit
 import SwiftUI
 
 /// Real translucency behind the expanded island: whatever sits under
-/// the notch softly bleeds through, the way system HUDs do.
+/// the notch softly bleeds through, the way system HUDs do. Pinned to
+/// `.vibrantDark` rather than following the system appearance: the
+/// island's whole surface is built as near-black glass, and a light
+/// desktop reflected through an unpinned light-mode blur would fight
+/// `Theme.textPrimary` for contrast on the one system that has no
+/// real Liquid Glass to fall back on (pre-macOS 26).
 struct VisualEffectBlur: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.material = .hudWindow
         view.blendingMode = .behindWindow
         view.state = .active
+        view.appearance = NSAppearance(named: .vibrantDark)
         return view
     }
 
@@ -199,13 +205,23 @@ extension View {
     }
 }
 
+/// "now", "7m", "3h": how long ago, in the fewest characters a row can
+/// spare. Every strip that timestamps a row reads it the same way.
+enum RelativeAge {
+    static func short(_ date: Date) -> String {
+        let seconds = Int(-date.timeIntervalSinceNow)
+        if seconds < 60 { return "now" }
+        if seconds < 3600 { return "\(seconds / 60)m" }
+        return "\(seconds / 3600)h"
+    }
+}
+
 /// One line: title, a dot, subtitle. It holds still by default.
 ///
-/// The glide is off unless asked for, because the notch is the wrong
-/// stage for it: on an external display the sliver is narrow enough
-/// that a name spends most of its journey behind the edge fade, and it
-/// reads as broken text rather than as motion (user, 2026-07-28). The
-/// system Reduce Motion setting keeps it still regardless.
+/// The glide is off unless asked for: at the glance's fixed 100pt
+/// width, a name spends most of its journey behind the edge fade, and
+/// it reads as broken text rather than as motion (user, 2026-07-28).
+/// The system Reduce Motion setting keeps it still regardless.
 struct MarqueeText: View {
     let title: String
     var subtitle = ""
@@ -480,6 +496,11 @@ struct GlyphImage: View {
 
 struct HoverGlyphButton: View {
     let symbol: String
+    /// What this button does, said once and read twice: as the hover
+    /// tooltip and as the VoiceOver name. A bare glyph has no other way
+    /// to say either (WCAG 4.1.2, icon-only controls need an accessible
+    /// name).
+    let label: String
     var scale: Theme.Fonts.IconScale = .s
     var tint: Color = Theme.textSecondary
     var weight: Font.Weight = .semibold
@@ -498,6 +519,8 @@ struct HoverGlyphButton: View {
         .buttonStyle(PressableStyle())
         .onHover { hovered = $0 }
         .animation(Theme.Motion.hover, value: hovered)
+        .help(label)
+        .accessibilityLabel(label)
     }
 
     /// One step up the text hierarchy; colors outside it keep their
@@ -510,13 +533,19 @@ struct HoverGlyphButton: View {
 }
 
 /// The one close affordance, everywhere a surface can be dismissed.
+///
+/// Reused past its own name for anything an X can end (stop a focus
+/// session, reset a stopwatch): the label is what tells those apart,
+/// defaulting to the literal "Close" for the common case.
 struct CloseButton: View {
     var scale: Theme.Fonts.IconScale = .xs
+    var label = "Close"
     let action: () -> Void
 
     var body: some View {
         HoverGlyphButton(
             symbol: "xmark",
+            label: label,
             scale: scale,
             tint: Theme.textTertiary,
             weight: .bold,
@@ -541,6 +570,15 @@ struct HuggingList<Content: View>: View {
                     content()
                 }
             }
+            // Every list in the island shares this component (sessions,
+            // clipboard, shelf, notes), and the indicator was fighting
+            // the island's own chrome on all of them, not just one (H2,
+            // founder 2026-08-02: "remove the scrollbar here its
+            // messing with the UI"). Fixed here rather than at a single
+            // call site so the fix actually reaches every list rather
+            // than the one that got reported. Scrolling itself is
+            // untouched, only the indicator is gone.
+            .scrollIndicators(.hidden)
         }
     }
 }
@@ -548,6 +586,9 @@ struct HuggingList<Content: View>: View {
 /// Small icon-only row action (copy, delete, share...).
 struct IconActionButton: View {
     let symbol: String
+    /// What this action does; becomes both the hover tooltip and the
+    /// VoiceOver name, since the glyph alone says neither.
+    let label: String
     var tint: Color = Theme.textSecondary
     var dim = false
     let action: () -> Void
@@ -555,6 +596,7 @@ struct IconActionButton: View {
     var body: some View {
         HoverGlyphButton(
             symbol: symbol,
+            label: label,
             scale: .s,
             tint: dim ? Theme.textTertiary : tint,
             action: action
@@ -646,6 +688,10 @@ struct NoiseButton: View {
         }
         .buttonStyle(PressableStyle())
         .help(name)
+        // Compact mode drops the visible name and leaves only the
+        // glyph (the ambience row's tight track); VoiceOver needs the
+        // same word the tooltip already carries.
+        .accessibilityLabel(name)
         .onHover { hovered = $0 }
         .animation(Theme.Motion.hover, value: hovered)
     }

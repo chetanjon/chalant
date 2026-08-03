@@ -5,6 +5,7 @@ import SwiftUI
 /// island shows only the blocks you keep on, sizing itself to fit.
 struct ExpandedView: View {
     @ObservedObject var model: NotchViewModel
+    @ObservedObject var face: IslandFace
     @ObservedObject var music: MusicController
     @ObservedObject var timer: CountdownController
     @ObservedObject var stopwatch: StopwatchController
@@ -25,10 +26,12 @@ struct ExpandedView: View {
     @AppStorage("toolNotes") private var toolNotes = true
     @AppStorage("toolFocus") private var toolFocus = true
     @AppStorage("toolChat") private var toolChat = true
+    @AppStorage("toolSessions") private var toolSessions = true
     @AppStorage("chatFull") private var chatFull = false
 
-    init(model: NotchViewModel) {
+    init(model: NotchViewModel, face: IslandFace) {
         self.model = model
+        self.face = face
         self.music = model.music
         self.timer = model.timer
         self.stopwatch = model.stopwatch
@@ -39,12 +42,14 @@ struct ExpandedView: View {
 
     private var todayEnabled: Bool { showCalendar || showReminders }
 
-    /// Chat costs nothing by default: compact mode keeps the island
-    /// at its everyday 520 and renders the site single-column. Full
-    /// mode (the expand glyph in the pane) grows to 680, where 0.8
-    /// zoom crosses the desktop breakpoint and the sidebar returns.
+    /// The user's own width dial by default (`face.expandedWidth`,
+    /// W-F). Full-mode chat (the expand glyph in the pane) is the one
+    /// exception: 680 is where 0.8 zoom crosses the chat site's
+    /// desktop breakpoint and the sidebar returns, so it survives as a
+    /// floor under the dial there, never a ceiling on it.
     private var islandWidth: CGFloat {
-        model.tab == .chat && model.pane == .none && chatFull ? 680 : 520
+        NotchViewModel.expandedWidth(
+            configWidth: face.expandedWidth, tab: model.tab, pane: model.pane, chatFull: chatFull)
     }
 
     private var enabledTools: [NotchViewModel.Tab] {
@@ -55,82 +60,45 @@ struct ExpandedView: View {
         if toolNotes { tools.append(.notes) }
         if toolFocus { tools.append(.focus) }
         if toolChat { tools.append(.chat) }
+        if toolSessions { tools.append(.sessions) }
         return tools
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
-            if focus.isActive || timer.isActive || stopwatch.isActive {
-                SessionStrip(
-                    kind: focus.isActive ? .focus : timer.isActive ? .timer : .stopwatch,
-                    focus: focus,
-                    timer: timer,
-                    stopwatch: stopwatch
-                ) {
-                    withAnimation(Theme.Motion.content) { model.tab = .focus }
+            // Rows come from the layout rather than being written here,
+            // so rearranging one is data rather than a code change.
+            // Ordering, hiding and pairing all live in IslandLayout.
+            ForEach(layoutRows) { row in
+                if row.elements.count == 1 {
+                    element(row.elements[0])
+                } else {
+                    // Tighter than the gap between rows (below), so a
+                    // two-up row's pair reads as one group and the rows
+                    // themselves read as separate ones (EC-15).
+                    HStack(alignment: .top, spacing: Theme.Space.m) {
+                        ForEach(row.elements) { each in
+                            element(each)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
                 }
-                .transition(.opacity)
-            }
-            // A stopwatch running BESIDE a focus or timer session gets
-            // its own strip; it used to run invisibly behind their
-            // precedence with no control anywhere (review-caught).
-            if stopwatch.isActive, focus.isActive || timer.isActive {
-                SessionStrip(
-                    kind: .stopwatch,
-                    focus: focus,
-                    timer: timer,
-                    stopwatch: stopwatch
-                ) {
-                    withAnimation(Theme.Motion.content) { model.tab = .focus }
-                }
-                .transition(.opacity)
-            }
-
-            topRow
-
-            if !activities.activities.isEmpty {
-                ActivitiesStrip(activities: activities)
-                    .transition(.opacity)
-            }
-
-            if showAmbience {
-                AmbienceRow(ambience: ambience)
-                    .transition(.opacity)
-            }
-
-            // Every band used to sit the same distance from its
-            // neighbour, so five rows read as five equal claims on the
-            // eye. What is playing and what is sounding belong
-            // together; the switcher and its panel are a different
-            // thing, and the gap says so before the rule does.
-            Rectangle()
-                .fill(Theme.hairlineFaint)
-                .frame(height: 1)
-                .padding(.top, Theme.Space.xs)
-
-            switch model.pane {
-            case .settings:
-                settingsSection
-            case .welcome:
-                WelcomeView(model: model)
-                    .transition(.opacity)
-            case .none:
-                Switcher(model: model, updates: model.updates,
-                         todayEnabled: todayEnabled, tools: enabledTools)
-                panel
-                    .transition(.opacity)
             }
 
             // While a drag hovers, the body reaches further down the
             // screen, so the release happens nowhere near the top
             // edge and its Mission Control hot zone.
-            if model.isDropTargeted {
+            if face.isDropTargeted {
                 Color.clear.frame(height: 150)
             }
         }
-        .padding(.horizontal, Theme.Space.xl)
-        .padding(.top, model.notchSize.height + Theme.Space.m)
-        .padding(.bottom, Theme.Space.m + 2)
+        .padding(.horizontal, face.contentPadding)
+        .padding(.top, face.contentTopReserve + Theme.Space.notchClearance)
+        // The same inset as the sides, so the island reads as one box
+        // rather than three different margins. It was 10 against the
+        // sides' 16, which left the input crowded against the bottom
+        // curve — and the belly sags below this, taking some of it back.
+        .padding(.bottom, face.contentPadding)
         .foregroundStyle(.white)
         .frame(width: islandWidth)
         .fixedSize(horizontal: false, vertical: true)
@@ -142,7 +110,30 @@ struct ExpandedView: View {
                 Color.clear
                     .onChange(of: geo.size, initial: true) { _, size in
                         guard size.height > 0 else { return }
-                        model.expandedSize = size
+                        // Animated, with the shell's own spring, and that
+                        // is the whole reason the island expands at all.
+                        //
+                        // This lands one layout pass after the state
+                        // flip, so the shell is already mid-morph toward
+                        // whatever size was measured last time. The
+                        // island's `.animation(_:value: face.state)`
+                        // does not cover this change — state did not
+                        // change — so unanimated it SNAPPED the frame to
+                        // full size on the very first frame, cancelling
+                        // the morph. All that was left to see was the
+                        // content's opacity fade: the border never grew,
+                        // an already-open panel just faded in.
+                        //
+                        // The same spring retargets the motion already
+                        // running rather than restarting it, so a stale
+                        // first target curves into the real one as one
+                        // continuous expansion.
+                        withAnimation(Theme.Motion.island) {
+                            model.expandedSize = CGSize(
+                                width: size.width,
+                                height: NotchViewModel.expandedHeight(
+                                    measured: size.height, floor: face.expandedMinHeight))
+                        }
                     }
                     // A tab switch can slip past the size observer and
                     // leave the shell wearing the previous tab's
@@ -152,7 +143,10 @@ struct ExpandedView: View {
                         DispatchQueue.main.async {
                             let size = geo.size
                             guard size.height > 0 else { return }
-                            model.expandedSize = size
+                            model.expandedSize = CGSize(
+                                width: size.width,
+                                height: NotchViewModel.expandedHeight(
+                                    measured: size.height, floor: face.expandedMinHeight))
                         }
                     }
             }
@@ -161,12 +155,12 @@ struct ExpandedView: View {
         // unmistakable target, so drops aim here, well below the
         // browser's tab strip, instead of at the little pill.
         .overlay {
-            if model.isDropTargeted {
+            if face.isDropTargeted {
                 dropTarget
                     .transition(.opacity)
             }
         }
-        .animation(Theme.Motion.hover, value: model.isDropTargeted)
+        .animation(Theme.Motion.hover, value: face.isDropTargeted)
         .animation(Theme.Motion.content, value: model.tab)
         .animation(Theme.Motion.content, value: chatFull)
         .animation(Theme.Motion.content, value: model.pane)
@@ -192,22 +186,121 @@ struct ExpandedView: View {
             .allowsHitTesting(false)
     }
 
-    /// Media (if on and something's playing) with the persistent mic,
-    /// the voice affordance is always reachable even when media is off.
-    private var topRow: some View {
-        HStack(spacing: Theme.Space.l) {
+    /// The rows to draw. The welcome tour takes the island's chrome —
+    /// the switcher and the panel — and leaves the content rows above
+    /// it alone, which is how the tour has always behaved.
+    private var layoutRows: [IslandRow] {
+        let rows = model.layout.layout.rows
+        guard model.pane == .welcome else { return rows }
+        return rows.filter { row in !row.elements.contains { $0.isRequired } }
+            + [IslandRow([.input])]
+    }
+
+    /// One placeable element, drawn.
+    ///
+    /// Each case keeps the condition that used to sit around it in the
+    /// hard-coded stack: an element the user has placed still shows
+    /// nothing when it has nothing to say.
+    @ViewBuilder
+    private func element(_ element: IslandElement) -> some View {
+        switch element {
+        case .timers:
+            if focus.isActive || timer.isActive || stopwatch.isActive {
+                SessionStrip(
+                    kind: focus.isActive ? .focus : timer.isActive ? .timer : .stopwatch,
+                    focus: focus, timer: timer, stopwatch: stopwatch
+                ) {
+                    withAnimation(Theme.Motion.content) { model.tab = .focus }
+                }
+                .transition(.opacity)
+            }
+            // A stopwatch running BESIDE a focus or timer session gets
+            // its own strip; it used to run invisibly behind their
+            // precedence with no control anywhere (review-caught).
+            if stopwatch.isActive, focus.isActive || timer.isActive {
+                SessionStrip(
+                    kind: .stopwatch, focus: focus, timer: timer, stopwatch: stopwatch
+                ) {
+                    withAnimation(Theme.Motion.content) { model.tab = .focus }
+                }
+                .transition(.opacity)
+            }
+        case .media:
+            // The row itself vanishes once it has nothing to show: the
+            // mic that used to sit here regardless (H1, founder
+            // 2026-08-02: "for microphone 2 remove it not needed near
+            // the spotify") kept this row non-empty even with media off
+            // and nothing playing. Voice is still always reachable, via
+            // the `.talk` hotkey and the collapsed long-press; neither
+            // goes through this view.
             if showMedia, music.nowPlaying != nil {
                 MusicRow(music: music)
-            } else {
+            } else if showMedia, music.preferredApp != nil {
                 // The chip only appears once a player has earned it:
                 // running now, or seen playing before. Guessing a
                 // brand for a fresh Mac presumed too much.
-                if showMedia, music.preferredApp != nil {
-                    MusicLaunchChip(music: music)
-                }
-                Spacer(minLength: 0)
+                MusicLaunchChip(music: music)
             }
-            MicButton { model.toggleListening() }
+        case .activities:
+            if !activities.activities.isEmpty {
+                ActivitiesStrip(activities: activities) { sessionID in
+                    // A pill can outlive the session that pushed it, so
+                    // check before opening a composer that would have
+                    // nothing to attach to. Saying so beats a click that
+                    // does nothing, which is the bug this is fixing.
+                    guard model.sessions.sessions.contains(where: { $0.id == sessionID }) else {
+                        model.flashGlance("That session is no longer running")
+                        return
+                    }
+                    model.composingSessionID =
+                        model.composingSessionID == sessionID ? nil : sessionID
+                }
+                    .transition(.opacity)
+            }
+        case .sessions:
+            // Moved into its own tab (B1); this row case is kept only
+            // so a layout saved before that still decodes. `repaired()`
+            // never places it, so this is never actually reached.
+            EmptyView()
+        case .ambience:
+            if showAmbience {
+                AmbienceRow(ambience: ambience)
+                    .transition(.opacity)
+            }
+        case .switcher:
+            // Every band used to sit the same distance from its
+            // neighbour, so five rows read as five equal claims on the
+            // eye. What is playing and what is sounding belong
+            // together; the switcher and its panel are a different
+            // thing, and the gap says so before the rule does.
+            Rectangle()
+                .fill(Theme.hairlineFaint)
+                .frame(height: 1)
+                .padding(.top, Theme.Space.xs)
+            Switcher(model: model, updates: model.updates,
+                     todayEnabled: todayEnabled, tools: enabledTools)
+        case .input:
+            if model.pane == .welcome {
+                WelcomeView(model: model)
+                    .transition(.opacity)
+            } else {
+                // Identity per tab, so SwiftUI sees a swap to transition
+                // rather than one view quietly changing its contents.
+                // Without it the panels simply popped: the switch above
+                // returned a different body and nothing animated, which
+                // is what `tabSlideDirection` was declared for and never
+                // wired to.
+                panel
+                    .id(model.tab)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: model.tabSlideDirection >= 0 ? .trailing : .leading)
+                            .combined(with: .opacity),
+                        // The outgoing panel fades where it stands. Two
+                        // panels travelling at once reads as the whole
+                        // island sliding, and the island is not moving.
+                        removal: .opacity
+                    ))
+            }
         }
     }
 
@@ -248,32 +341,12 @@ struct ExpandedView: View {
         case .chat:
             ChatPane(chat: model.chat)
                 .frame(height: chatFull ? Theme.Panel.chatFull : Theme.Panel.chat)
+        case .sessions:
+            AgentSessionsStrip(sessions: model.sessions, model: model)
+                .frame(maxHeight: Theme.Panel.list, alignment: .top)
         }
     }
 
-    @ViewBuilder
-    private var settingsSection: some View {
-        HStack(spacing: Theme.Space.xs) {
-            HoverGlyphButton(symbol: "chevron.left", tint: Theme.textSecondary) {
-                withAnimation(Theme.Motion.content) { model.pane = .none }
-            }
-            Text("Settings")
-                .font(Theme.Fonts.title)
-                .foregroundStyle(Theme.textPrimary)
-            Spacer()
-        }
-        SettingsPane(
-            music: music,
-            updates: model.updates,
-            events: model.events,
-            scrollTarget: $model.settingsScrollTarget,
-            onReplayTour: {
-                withAnimation(Theme.Motion.content) { model.replayWelcome() }
-            },
-            onInstallUpdate: { model.installUpdate?() }
-        )
-        .frame(height: Theme.Panel.settings)
-    }
 }
 
 /// The dashed "Drop to stash" card: over the island body while a drag
@@ -339,10 +412,30 @@ private struct JoinChip: View {
 /// the accent; finished rows fade out on their own timer.
 private struct ActivitiesStrip: View {
     @ObservedObject var activities: ActivityStore
+    /// Opens the session a row belongs to, when it belongs to one.
+    /// Rows pushed by the Claude Code hook carry the session's own id
+    /// behind a `claude-` prefix, and the pill saying an agent wants
+    /// you did nothing at all when clicked, which is the one row on
+    /// this strip somebody would certainly click (founder,
+    /// 2026-08-02).
+    var onOpenSession: ((String) -> Void)?
     @Environment(\.chalantAccent) private var accent
 
+    /// The session id behind an activity id, when the row came from a
+    /// session at all. `scripts/chalant-hook` posts `claude-<id>`.
+    private static func sessionID(of activityID: String) -> String? {
+        let prefix = "claude-"
+        guard activityID.hasPrefix(prefix) else { return nil }
+        let id = String(activityID.dropFirst(prefix.count))
+        return id.isEmpty ? nil : id
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
+        // Explicitly typed and hoisted, for the same reason as
+        // AgentSessionsStrip: inlined in the `.animation` at the bottom
+        // this map is enough to stall the type checker.
+        let rowIDs: [String] = activities.activities.map(\.id)
+        return VStack(alignment: .leading, spacing: Theme.Space.s) {
             ForEach(activities.activities) { activity in
                 HStack(spacing: Theme.Space.m) {
                     Image(systemName: activity.state.symbol)
@@ -362,18 +455,29 @@ private struct ActivitiesStrip: View {
                         }
                     }
                     Spacer(minLength: 0)
-                    Text(Self.age(activity.updatedAt))
+                    Text(RelativeAge.short(activity.updatedAt))
                         .font(Theme.Fonts.microMono)
                         .foregroundStyle(Theme.textGhost)
-                    IconActionButton(symbol: "xmark", dim: true) {
+                    IconActionButton(symbol: "xmark", label: "Dismiss this row", dim: true) {
                         activities.clear(id: activity.id)
                     }
                 }
                 .rowInsets()
                 .chalantCard(radius: Theme.Radius.row)
+                .modifier(OpensSession(
+                    sessionID: Self.sessionID(of: activity.id),
+                    onOpen: onOpenSession
+                ))
             }
         }
-        .animation(Theme.Motion.content, value: activities.activities)
+        // Animate on which rows are here, not on their contents.
+        // `Activity` carries `updatedAt`, which every push rewrites, so
+        // animating the array itself restarted a 0.34s animation of the
+        // whole strip on each one — eight agents pushing at 1Hz meant
+        // eight full animations a second on a surface whose whole
+        // premise is calm. Inserts, removals and reorders all change
+        // the id list; a title changing in place needs no animation.
+        .animation(Theme.Motion.content, value: rowIDs)
     }
 
     private func tint(for state: ActivityStore.State) -> Color {
@@ -384,13 +488,6 @@ private struct ActivitiesStrip: View {
         case .failed: return Theme.textSecondary
         }
     }
-
-    private static func age(_ date: Date) -> String {
-        let seconds = Int(-date.timeIntervalSinceNow)
-        if seconds < 60 { return "now" }
-        if seconds < 3600 { return "\(seconds / 60)m" }
-        return "\(seconds / 3600)h"
-    }
 }
 
 /// Nothing playing: one quiet chip that opens your player, so music
@@ -400,7 +497,8 @@ private struct MusicLaunchChip: View {
     @State private var hovered = false
 
     private var label: String {
-        // Only rendered when a preferred app exists (see topRow).
+        // Only rendered when a preferred app exists (see the `.media`
+        // case in `element(_:)`).
         music.preferredApp.map { "Open \($0.rawValue)" } ?? "Open music"
     }
 
@@ -427,11 +525,29 @@ private struct MusicLaunchChip: View {
     }
 }
 
-/// The voice affordance: tap to talk, tap again to run, or hold the
-/// notch. Always present, whatever else the island is showing.
-private struct MicButton: View {
+/// The voice affordance for messaging a session by speaking instead of
+/// typing: lives in a session's compose card (`AgentSessions.swift`).
+///
+/// The media row used to carry its own copy of this button for
+/// `.chalant` (talk to the app itself), removed per H1 (founder,
+/// 2026-08-02: "not needed near the spotify"). That voice path did not
+/// go away with it: the `.talk` global hotkey and the collapsed
+/// island's long-press both call `beginListening()`/`toggleListening()`
+/// directly and never went through this view. `destination` keeps its
+/// full type rather than narrowing to `.session` alone, since
+/// `VoiceDestination` is still a two-case enum shared with those other
+/// callers and a switch here has to stay exhaustive over it regardless.
+struct MicButton: View {
+    let destination: NotchViewModel.VoiceDestination
     let action: () -> Void
     @State private var hovered = false
+
+    private var helpText: String {
+        switch destination {
+        case .chalant: return "Speak, or hold the notch"
+        case .session(_, let title): return "Speak to \(title)"
+        }
+    }
 
     var body: some View {
         Button(action: action) {
@@ -445,7 +561,8 @@ private struct MicButton: View {
         }
         .buttonStyle(PressableStyle())
         .onHover { hovered = $0 }
-        .help("Speak, or hold the notch")
+        .help(helpText)
+        .accessibilityLabel(helpText)
         .animation(Theme.Motion.hover, value: hovered)
     }
 }
@@ -535,7 +652,7 @@ struct TodayView: View {
 
     /// The empty moment, in the island's own voice.
     private var clearDay: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
             Text("Clear water.")
                 .font(Theme.Fonts.reading)
                 .foregroundStyle(Theme.textSecondary)
@@ -629,5 +746,26 @@ private struct ReminderRow: View {
         .onHover { hovered = $0 }
         .animation(Theme.Motion.hover, value: hovered)
         .help("Mark done")
+    }
+}
+
+
+/// Makes an activity row reach its session, and leaves rows that have
+/// no session completely alone: a hover highlight on something that
+/// does nothing when clicked is a worse lie than no highlight.
+private struct OpensSession: ViewModifier {
+    let sessionID: String?
+    let onOpen: ((String) -> Void)?
+
+    func body(content: Content) -> some View {
+        if let sessionID, let onOpen {
+            content
+                .hoverHighlight(radius: Theme.Radius.row)
+                .contentShape(Rectangle())
+                .onTapGesture { onOpen(sessionID) }
+                .help("Write to this session")
+        } else {
+            content
+        }
     }
 }

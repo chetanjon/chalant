@@ -100,11 +100,21 @@ final class DropHostingView<Content: View>: NSHostingView<Content> {
 
 @MainActor
 final class NotchWindowController {
-    private var panel: NotchPanel?
+    /// One panel per display that wears an island, keyed by the
+    /// display's live `CGDirectDisplayID` (never held as `NSScreen`:
+    /// AppKit recreates those at will). `rebuildIslands()` is the only
+    /// writer (island-per-display-plan, W-C, 2026-08-02).
+    private var panels: [CGDirectDisplayID: NotchPanel] = [:]
+    /// Each panel's render state, same keys as `panels`, built and torn
+    /// down alongside it.
+    private var faces: [CGDirectDisplayID: IslandFace] = [:]
+    /// `show()` guard: panels themselves can legitimately be empty for
+    /// a moment (every display resolved to Off, or mid-wake), so a
+    /// dedicated flag is the reentry guard instead of `panels.isEmpty`.
+    private var started = false
     private var clickMonitor: Any?
     private var hoverTimer: Timer?
     private var stateSub: AnyCancellable?
-    private var toastSub: AnyCancellable?
     private var napActivity: NSObjectProtocol?
     private var pointerInside = false
     /// Drag-in-flight sensing: the drag pasteboard's changeCount moves
@@ -144,20 +154,71 @@ final class NotchWindowController {
     /// costs nothing.
     private let panelSize = CGSize(width: 1000, height: 720)
 
-    /// Measure the target screen and compute the panel frame; shared
-    /// by first show and every display change after it.
-    private func placement(on screen: NSScreen) -> NSRect {
-        viewModel.hasPhysicalNotch = screen.safeAreaInsets.top > 0
-        var notchSize = NotchViewModel.defaultNotchSize
-        if screen.safeAreaInsets.top > 0,
-           let left = screen.auxiliaryTopLeftArea,
-           let right = screen.auxiliaryTopRightArea {
-            notchSize = CGSize(
-                width: screen.frame.width - left.width - right.width,
-                height: screen.safeAreaInsets.top
-            )
-        }
-        viewModel.notchSize = notchSize
+    /// Everything `apply(_:to:)` writes onto a face, as one comparable
+    /// value. Kept together so adding a per-display setting cannot
+    /// quietly leave the repaint check behind — the failure there is
+    /// silent and looks like the setting doing nothing. A per-face
+    /// check, not a per-model one (2026-08-02): with a face per
+    /// display, this always compares a face against itself, never one
+    /// face against another's numbers.
+    private func islandGeometry(of face: IslandFace) -> [AnyHashable] {
+        [
+            face.displayID, face.notchSize, face.cutout, face.style, face.cornerRadius,
+            face.contentPadding, face.expandedWidth, face.expandedMinHeight,
+        ]
+    }
+
+    /// Measure the target screen and write the face's geometry — the
+    /// one copy of it, now that every display has its own face — then
+    /// compute the panel frame. Shared by every display, on first build
+    /// and on every re-measure after.
+    ///
+    /// Used to dual-write the same five values onto `viewModel` too.
+    /// That was a stopgap for the round where only one face existed;
+    /// with a face per display, a single shared model field can only
+    /// ever hold whichever screen `apply(_:to:)` last ran for, which is
+    /// exactly the bug class this branch exists to remove. All of them
+    /// are deleted, `islandDisplayID` included: it fed the Displays
+    /// pane's "island here" badge, and a badge naming one display is a
+    /// plain untruth once every display wears an island
+    /// (island-per-display-plan, W-C and W-E, 2026-08-02).
+    @discardableResult
+    private func apply(_ screen: NSScreen, to face: IslandFace) -> NSRect {
+        // This screen's own settings, resolved out of `.auto` against
+        // what the hardware actually reports.
+        let config = viewModel.displays.config(for: screen)
+        let style = DisplayConfigStore.resolve(
+            config.style, hasHardwareNotch: screen.safeAreaInsets.top > 0
+        )
+        face.style = style
+        face.cornerRadius = config.cornerRadius
+        face.contentPadding = config.contentPadding
+        face.expandedWidth = config.expandedWidth
+        face.expandedMinHeight = config.expandedMinHeight
+        face.displayID = screen.displayID
+        // hasPhysicalNotch used to be written here too; it is now
+        // derived from style (IslandFace.hasPhysicalNotch), so a screen
+        // change can no longer update one and leave the other holding a
+        // stale answer.
+
+        // The hardware's own size, kept apart from what gets drawn
+        // below: nil wherever there is no real housing at all (a pill,
+        // or an emulated notch), non-nil wherever there is. A2's flush
+        // test keys off this being non-nil rather than off `style`, so
+        // an emulated notch never reads as having hardware to
+        // disappear into (W-A/W-C, EC-5).
+        face.cutout = screen.cutout
+        // The hardware wins by default (A1), unless the user has
+        // turned it off — chosen so every blob written before that
+        // field existed is already correct with no migration (EC-6,
+        // W-D): on a screen with a cutout this reproduces today's
+        // measured-wins behaviour, and on one without a cutout there is
+        // nothing to follow, so the configured size wins regardless,
+        // which is also today's behaviour.
+        face.notchSize = NotchViewModel.notchSize(
+            cutout: face.cutout, sizeFollowsHardware: config.sizeFollowsHardware,
+            configWidth: config.width, configHeight: config.height
+        )
         return NSRect(
             x: screen.frame.midX - panelSize.width / 2,
             y: screen.frame.maxY - panelSize.height,
@@ -188,96 +249,59 @@ final class NotchWindowController {
     private var showRetry: DispatchWorkItem?
 
     func show() {
-        // Built once. A second call would overwrite the click monitor
-        // and the hover timer without releasing either.
-        guard panel == nil else { return }
-        // Prefer the built-in display with a notch, else the primary.
+        // Built once. A second call would re-register every observer
+        // and timer without releasing the first set.
+        guard !started else { return }
         // At login, or waking from a closed lid, the screen list can
         // still be empty here. This used to return and never come
         // back: no panel, no start(), no timers, no hover, and since
         // the app has no Dock icon the only symptom was Chalant simply
-        // not being there. reposition() already knew to wait; so does
-        // this now.
+        // not being there. `rebuildIslands()` carries the same retry
+        // forward now that there is no single screen to wait for.
         showRetry?.cancel()
         showRetry = nil
-        guard let screen = notchScreen else {
+        guard !NSScreen.screens.isEmpty else {
             let retry = DispatchWorkItem { [weak self] in self?.show() }
             showRetry = retry
             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: retry)
             return
         }
-        let frame = placement(on: screen)
-
-        let panel = NotchPanel(
-            contentRect: frame,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        // Status-bar level (the menu bar's own level) still floats over
-        // apps via fullScreenAuxiliary, but unlike screen-saver level it
-        // is low enough that macOS routes file drags to it.
-        panel.level = .statusBar
-        panel.collectionBehavior = [
-            .canJoinAllSpaces,
-            .fullScreenAuxiliary,
-            .stationary,
-            .ignoresCycle
-        ]
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = false
-        panel.isMovable = false
-        panel.hidesOnDeactivate = false
-        // Keep mouse-moved events flowing even while this panel is key,
-        // so the hover monitors never go blind mid-session.
-        panel.acceptsMouseMovedEvents = true
-
-        let hosting = DropHostingView(rootView: NotchRootView(model: viewModel))
-        hosting.frame = NSRect(origin: .zero, size: panelSize)
-        hosting.enableDrops()
-        hosting.onTargeted = { [weak viewModel] targeted in
-            viewModel?.isDropTargeted = targeted
-        }
-        hosting.acceptsDrop = { [weak viewModel] in
-            viewModel?.state != .listening
-        }
-        hosting.onDragEntered = { [weak viewModel] in
-            guard let viewModel, viewModel.state == .collapsed else { return }
-            viewModel.dragExpanded = true
-            viewModel.expand(takeKey: false)
-        }
-        hosting.onDragExited = { [weak viewModel] in
-            guard let viewModel, viewModel.dragExpanded else { return }
-            viewModel.dragExpanded = false
-            viewModel.collapse()
-        }
-        hosting.onDrop = { [weak viewModel] items in
-            viewModel?.receiveDrop(items)
-        }
-        panel.contentView = hosting
-
-        // When the island expands, take key focus so typing works
-        // without pulling the user's current app out of focus.
-        viewModel.onExpandChange = { [weak panel] expanded in
-            if expanded {
-                panel?.makeKeyAndOrderFront(nil)
-            }
-        }
-
-        panel.orderFrontRegardless()
-        self.panel = panel
+        started = true
 
         viewModel.start()
+        rebuildIslands()
 
-        // Debug-only: surface the drop bubble for screenshots.
+        // A slider moved in settings has to reach every island now, not
+        // only the one it happened to be measured against.
+        viewModel.displays.onChange = { [weak self] in
+            self?.rebuildIslands()
+        }
         viewModel.onDebugDropDock = { [weak self] in
-            guard let self, let screen = self.notchScreen else { return }
+            guard let self, let screen = NSScreen.main ?? NSScreen.screens.first else { return }
             self.dockPinnedUntil = Date().addingTimeInterval(3)
             self.showDropDock(on: screen)
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                 self?.hideDropDock()
             }
+        }
+        // "debug droptarget" flashes the drop highlight for a
+        // screenshot; isDropTargeted lives on each face now, so this
+        // flashes whichever one is open, or the first, as a stand-in —
+        // there is no single "the" island to ask any more.
+        viewModel.debugSetDropTargeted = { [weak self] targeted in
+            guard let self else { return }
+            let id = self.viewModel.expandedDisplayID ?? self.faces.keys.first
+            id.flatMap { self.faces[$0] }?.isDropTargeted = targeted
+        }
+
+        // When the island expands, take key focus so typing works
+        // without pulling the user's current app out of focus. Resolved
+        // through `expandedDisplayID` at call time, never a captured
+        // panel, so the display that just opened is always the one
+        // that gets it (EC-5).
+        viewModel.onExpandChange = { [weak self] expanded in
+            guard expanded, let self, let id = self.viewModel.expandedDisplayID else { return }
+            self.panels[id]?.makeKeyAndOrderFront(nil)
         }
 
         // Clicking anywhere outside the app dismisses whatever the
@@ -331,7 +355,7 @@ final class NotchWindowController {
             Task { @MainActor in self?.stateChanged(newState) }
         }
 
-        // Displays come and go; the island follows. Without this the
+        // Displays come and go; every island follows. Without this a
         // panel stayed on a screen layout that no longer existed.
         // The immediate reposition is not enough on a hot plug: the
         // layout settles in stages, so re-checks follow (below).
@@ -341,40 +365,46 @@ final class NotchWindowController {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.reposition()
-                self?.rebuildSlivers()
+                self?.rebuildIslands()
                 self?.scheduleSettleChecks()
             }
         })
         // The window server moves windows around during a display
         // shuffle, sometimes after the last screen-parameters
-        // notification has already fired, which left the island
-        // sitting mid-screen on a freshly plugged monitor until some
-        // unrelated event nudged it home. The panel never moves
-        // legitimately except through placement(), so any move that
-        // leaves the frame wrong gets snapped straight back; when the
-        // frame is already right, reposition() is a no-op.
+        // notification has already fired, which left an island sitting
+        // mid-screen on a freshly plugged monitor until some unrelated
+        // event nudged it home. A panel never moves legitimately except
+        // through apply(_:to:), so any move that leaves a frame wrong
+        // gets snapped straight back; when every frame is already
+        // right, rebuildIslands() is a no-op. Observed on nil rather
+        // than one panel: there is no single panel to watch any more,
+        // and the handler filters to ours (main, ported to per-display).
         observers.append(NotificationCenter.default.addObserver(
             forName: NSWindow.didMoveNotification,
-            object: panel,
+            object: nil,
             queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.reposition() }
+        ) { [weak self] note in
+            Task { @MainActor in
+                guard let self, let moved = note.object as? NotchPanel,
+                      self.panels.values.contains(where: { $0 === moved })
+                else { return }
+                self.rebuildIslands()
+            }
         })
-        // The "Show edge when idle" switch governs the slivers too.
+        // The "Show edge when idle" switch governs what draws at rest.
         observers.append(NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.rebuildSlivers() }
+            Task { @MainActor in self?.rebuildIslands() }
         })
         // Waking is not a screen-parameters change. A display that
         // slept, or a monitor switched off and on, often comes back
-        // without posting one at all, and the panel would wake sized
-        // for a geometry that no longer applied or ordered behind
-        // whatever came up in front of it. Nothing re-fronted it after
-        // show(), so it stayed behind.
+        // without posting one at all, and a panel would wake sized for
+        // a geometry that no longer applied or ordered behind whatever
+        // came up in front of it. Nothing re-fronted it after show(),
+        // so it stayed behind.
         for name: NSNotification.Name in [
             NSWorkspace.didWakeNotification,
             NSWorkspace.screensDidWakeNotification,
@@ -384,29 +414,51 @@ final class NotchWindowController {
                     forName: name, object: nil, queue: .main
                 ) { [weak self] _ in
                     Task { @MainActor in
-                        self?.reposition()
-                        self?.rebuildSlivers()
-                        self?.panel?.orderFrontRegardless()
-                        self?.scheduleSettleChecks()
+                        guard let self else { return }
+                        self.rebuildIslands()
+                        self.panels.values.forEach { $0.orderFrontRegardless() }
+                        self.scheduleSettleChecks()
                     }
                 }
             )
         }
-        // A toast appearing on a notchless display must pull that
-        // display's bead so the two don't overlap.
-        toastSub = viewModel.$glanceToast.sink { [weak self] _ in
-            Task { @MainActor in self?.rebuildSlivers() }
+    }
+
+    /// Which displays wear an island, and where each panel sits.
+    ///
+    /// Static and screen-free so the rule can be checked with nothing
+    /// plugged in — the same reason `wearsBead` was (it is gone: there
+    /// is no bead to decide about any more, every display that is not
+    /// Off gets a real island).
+    ///
+    /// An Off display gets no panel rather than an invisible one. An
+    /// island at opacity 0 still hit-tests its contentShape, so the
+    /// top centre of an Off display could start a voice session with
+    /// nothing on screen ever appearing (EC-10, 2026-08-02).
+    static func islandFrames(
+        for screens: [(id: CGDirectDisplayID, frame: CGRect, style: DisplayConfigStore.Style)],
+        panelSize: CGSize
+    ) -> [CGDirectDisplayID: CGRect] {
+        var frames: [CGDirectDisplayID: CGRect] = [:]
+        for screen in screens where screen.style != .off {
+            frames[screen.id] = CGRect(
+                x: screen.frame.midX - panelSize.width / 2,
+                y: screen.frame.maxY - panelSize.height,
+                width: panelSize.width,
+                height: panelSize.height
+            )
         }
-        rebuildSlivers()
+        return frames
     }
 
     /// A hot plug settles in stages: a brief mirror, a mode switch,
     /// then the saved arrangement lands, and the window server can
     /// still be moving windows after the last notification. One
-    /// reposition at notification time reads geometry that is still
-    /// in flux, so a couple of delayed re-checks follow every display
-    /// change. The frame-compare guards make them free once nothing
-    /// is moving.
+    /// rebuild at notification time reads geometry that is still in
+    /// flux, so a couple of delayed re-checks follow every display
+    /// change. `rebuildIslands()` diffs before it touches anything, so
+    /// these are free once nothing is moving (from main, ported off
+    /// the single-panel reposition it was written against).
     private var settleChecks: [DispatchWorkItem] = []
 
     private func scheduleSettleChecks() {
@@ -414,214 +466,212 @@ final class NotchWindowController {
         settleChecks.removeAll()
         for delay: TimeInterval in [1.0, 2.5] {
             let work = DispatchWorkItem { [weak self] in
-                self?.reposition()
-                self?.rebuildSlivers()
+                MainActor.assumeIsolated { self?.rebuildIslands() }
             }
             settleChecks.append(work)
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
         }
     }
 
-    /// Re-measure and re-place after a display change: a notch
-    /// arriving or leaving changes the pill itself, not just where
-    /// the panel sits.
-    private var repositionRetry: DispatchWorkItem?
 
-    private func reposition() {
-        guard let panel else { return }
-        repositionRetry?.cancel()
-        repositionRetry = nil
-        // Mid-transition (lid closing, display waking) the screen
-        // list can be briefly empty; bailing here once used to leave
-        // the island wearing the old display's notch forever.
-        guard let screen = notchScreen else {
-            let retry = DispatchWorkItem { [weak self] in self?.reposition() }
-            repositionRetry = retry
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: retry)
-            return
-        }
-        // A visited display that vanished takes its travel with it;
-        // otherwise replugging it would teleport an open island back
-        // mid-use (review-caught).
-        if let id = travelDisplayID,
-           !NSScreen.screens.contains(where: { $0.displayID == id }) {
-            travelDisplayID = nil
-        }
-        let hadNotch = viewModel.hasPhysicalNotch
-        let hadSize = viewModel.notchSize
-        let frame = placement(on: screen)
-        let frameChanged = panel.frame != frame
-        if frameChanged {
-            panel.setFrame(frame, display: true)
-        }
-        // The frame can survive a display swap unchanged while the
-        // notch geometry does not; repaint on either difference.
-        if frameChanged || hadNotch != viewModel.hasPhysicalNotch || hadSize != viewModel.notchSize {
-            viewModel.objectWillChange.send()
-        }
-    }
-
-    /// Resolved fresh every time: AppKit recreates NSScreen objects at
-    /// will, so holding one weakly goes nil and kills hover silently.
-    /// The island rests on the notched display; hovering another
-    /// display's top edge summons it there (travel), and it walks
-    /// home after it collapses. Held by display id, never by object.
-    private var travelDisplayID: CGDirectDisplayID?
-
-    /// A notched display if there is one, otherwise the primary. Never
-    /// NSScreen.main: that is the display holding the *focused window*,
-    /// so on a notchless Mac with two monitors the island's home moved
-    /// every time the user clicked something on the other screen, which
-    /// made travel clear itself and the island teleport mid-use. It can
-    /// also be nil, which is how the panel went missing at launch.
-    /// screens.first is the menu-bar display and it holds still.
-    private var homeScreen: NSScreen? {
-        NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 })
-            ?? NSScreen.screens.first
-    }
-
-    private var notchScreen: NSScreen? {
-        if let id = travelDisplayID,
-           let visiting = NSScreen.screens.first(where: { $0.displayID == id }) {
-            return visiting
-        }
-        return homeScreen
-    }
-
-    private func travel(to screen: NSScreen) {
-        travelDisplayID = screen.displayID == homeScreen?.displayID
-            ? nil : screen.displayID
-        reposition()
-        rebuildSlivers()
-    }
-
-    /// Resting hints on every display the island is not dressing: a
-    /// Mac mini owner has no notch anywhere, and a fully invisible
-    /// island reads as not installed (user, 2026-07-23). The sliver
-    /// is a handle, never a display; "Show edge when idle" turns it
-    /// off for the total invisibility R96 chose.
-    /// The bead's room: the panel that hosts the resting hint on a
-    /// notchless display, and, since the uninvited-bloom fix, also the
-    /// exact size of that display's hover door.
-    static let sliverRoom = CGSize(width: 116, height: 20)
-    private var sliverPanels: [NSPanel] = []
-    /// Defaults change constantly (the voice log alone writes every
-    /// utterance); only a real difference rebuilds the panels.
-    private var sliverSignature = ""
-
-    /// The room is larger than the bead so IslandShape's eave flare
-    /// and belly, which draw beyond the shape's own rect, are not
-    /// clipped into a squared lozenge (review-caught; the source of
-    /// three rounds of "it looks wrong"). The bead is centered inside
-    /// this room by SliverHint.
-    private func sliverFrame(on screen: NSScreen) -> NSRect {
-        NSRect(
-            x: screen.frame.midX - Self.sliverRoom.width / 2,
-            y: screen.frame.maxY - Self.sliverRoom.height,
-            width: Self.sliverRoom.width,
-            height: Self.sliverRoom.height
+    /// The three-way diff between the panels that exist and the panels
+    /// that should: which displays are new, which are gone, and which
+    /// are staying but moved. Static so EC-7 — never tearing down a
+    /// panel that is only being re-placed, which would kill an open
+    /// island's `WKWebView` mid-conversation or a voice session
+    /// mid-capture — is checkable with nothing plugged in. A display
+    /// present in both with an unchanged frame appears in none of the
+    /// three sets.
+    static func diffPanels(
+        current: [CGDirectDisplayID: CGRect], wanted: [CGDirectDisplayID: CGRect]
+    ) -> (added: Set<CGDirectDisplayID>, removed: Set<CGDirectDisplayID>, moved: Set<CGDirectDisplayID>) {
+        let currentIDs = Set(current.keys), wantedIDs = Set(wanted.keys)
+        let kept = currentIDs.intersection(wantedIDs)
+        let moved = kept.filter { current[$0] != wanted[$0] }
+        return (
+            added: wantedIDs.subtracting(currentIDs),
+            removed: currentIDs.subtracting(wantedIDs),
+            moved: Set(moved)
         )
     }
 
-    func rebuildSlivers() {
-        let wantsEdge = UserDefaults.standard.object(forKey: "idleEdgeOn") as? Bool ?? true
-        // The bead is the ONLY resting visual on a notchless display;
-        // the island itself stays invisible there until it blooms, so
-        // hover never jump-cuts between two shapes (user, 2026-07-23,
-        // photo of the handoff). The bead yields only while the
-        // island is actually open on that display.
-        // The island's own display yields its bead while it is showing
-        // anything there: an open island, or a six-second toast (a
-        // toast renders real content in the collapsed pill and the
-        // bead would sit over its text, review-caught).
-        let showingContent = viewModel.state != .collapsed
-            || viewModel.glanceToast != nil
-        let contentID = showingContent ? notchScreen?.displayID : nil
-        let targets = wantsEdge
-            ? NSScreen.screens.filter {
-                $0.safeAreaInsets.top == 0 && $0.displayID != contentID
-            }
-            : []
-        let signature = targets
-            .map { "\($0.displayID ?? 0)@\(Int($0.frame.midX)),\(Int($0.frame.maxY))" }
-            .joined(separator: "|")
-        guard signature != sliverSignature else {
-            // Same targets, but the window server may have dragged a
-            // bead somewhere else during a display shuffle; the
-            // signature cannot see that, so check the panels
-            // themselves and put any strays back.
-            for (sliver, screen) in zip(sliverPanels, targets) {
-                let frame = sliverFrame(on: screen)
-                if sliver.frame != frame {
-                    sliver.setFrame(frame, display: true)
-                }
-            }
+    private var rebuildRetry: DispatchWorkItem?
+
+    /// Add, remove and re-place panels to match the current screen
+    /// list — never tear down and rebuild what is only being moved
+    /// (EC-7). Called on every screen-parameter change, wake, Displays
+    /// pane edit and state change; the diff makes repeated calls with
+    /// nothing new to do cheap.
+    func rebuildIslands() {
+        rebuildRetry?.cancel()
+        rebuildRetry = nil
+        // Mid-transition (lid closing, display waking) the screen list
+        // can be briefly empty; treating that as "remove every panel"
+        // once tore down an open island's hosting view for nothing
+        // better to show in its place (EC-19, 2026-08-02).
+        guard !NSScreen.screens.isEmpty else {
+            let retry = DispatchWorkItem { [weak self] in self?.rebuildIslands() }
+            rebuildRetry = retry
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: retry)
             return
         }
-        sliverSignature = signature
-        sliverPanels.forEach { $0.orderOut(nil) }
-        sliverPanels.removeAll()
-        for screen in targets {
-            let frame = sliverFrame(on: screen)
-            let sliver = NSPanel(
-                contentRect: frame,
-                styleMask: [.borderless, .nonactivatingPanel],
-                backing: .buffered,
-                defer: false
-            )
-            sliver.level = .statusBar
-            sliver.collectionBehavior = [
-                .canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle
-            ]
-            sliver.isOpaque = false
-            sliver.backgroundColor = .clear
-            sliver.hasShadow = false
-            sliver.ignoresMouseEvents = true
-            sliver.contentView = NSHostingView(rootView: SliverHint())
-            sliver.orderFrontRegardless()
-            sliverPanels.append(sliver)
+        let screens = NSScreen.screens.compactMap { screen -> (id: CGDirectDisplayID, screen: NSScreen, style: DisplayConfigStore.Style)? in
+            guard let id = screen.displayID else { return nil }
+            return (id, screen, viewModel.displays.resolvedStyle(for: screen))
+        }
+        let wanted = Self.islandFrames(
+            for: screens.map { (id: $0.id, frame: $0.screen.frame, style: $0.style) },
+            panelSize: panelSize
+        )
+        let diff = Self.diffPanels(current: panels.mapValues(\.frame), wanted: wanted)
+
+        for id in diff.removed {
+            panels[id]?.orderOut(nil)
+            panels.removeValue(forKey: id)
+            faces.removeValue(forKey: id)
+            viewModel.forgetHover(on: id)
+        }
+        // A display the expansion was open on just lost its panel;
+        // there is nowhere left to show it (EC-6).
+        if let expanded = viewModel.expandedDisplayID, wanted[expanded] == nil {
+            viewModel.collapse()
+        }
+
+        for entry in screens {
+            guard let frame = wanted[entry.id] else { continue }
+            if diff.added.contains(entry.id) {
+                makeIsland(on: entry.screen, frame: frame)
+            } else if let face = faces[entry.id] {
+                let before = islandGeometry(of: face)
+                apply(entry.screen, to: face)
+                if diff.moved.contains(entry.id) {
+                    panels[entry.id]?.setFrame(frame, display: true)
+                }
+                if diff.moved.contains(entry.id) || before != islandGeometry(of: face) {
+                    viewModel.objectWillChange.send()
+                }
+            }
         }
     }
 
+    /// One new panel and its face for a display that just started
+    /// wanting an island. `id` is captured by value in every closure
+    /// below, so a drag or drop on this panel always names the display
+    /// it actually happened on, never whichever the controller
+    /// currently thinks is "the" one.
+    private func makeIsland(on screen: NSScreen, frame: CGRect) {
+        guard let id = screen.displayID else { return }
+        let face = IslandFace(model: viewModel)
+        apply(screen, to: face)
+        faces[id] = face
+
+        let panel = NotchPanel(
+            contentRect: frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        // Status-bar level (the menu bar's own level) still floats over
+        // apps via fullScreenAuxiliary, but unlike screen-saver level it
+        // is low enough that macOS routes file drags to it.
+        panel.level = .statusBar
+        panel.collectionBehavior = [
+            .canJoinAllSpaces,
+            .fullScreenAuxiliary,
+            .stationary,
+            .ignoresCycle
+        ]
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.isMovable = false
+        panel.hidesOnDeactivate = false
+        // Keep mouse-moved events flowing even while this panel is key,
+        // so the hover monitors never go blind mid-session.
+        panel.acceptsMouseMovedEvents = true
+
+        let hosting = DropHostingView(rootView: NotchRootView(model: viewModel, face: face))
+        hosting.frame = NSRect(origin: .zero, size: panelSize)
+        hosting.enableDrops()
+        hosting.onTargeted = { [weak face] targeted in
+            face?.isDropTargeted = targeted
+        }
+        hosting.acceptsDrop = { [weak viewModel] in
+            viewModel?.state != .listening
+        }
+        hosting.onDragEntered = { [weak self, weak face] in
+            guard let self, let face, self.viewModel.state == .collapsed else { return }
+            face.dragExpanded = true
+            self.viewModel.expand(on: id, takeKey: false)
+        }
+        hosting.onDragExited = { [weak self, weak face] in
+            guard let self, let face, face.dragExpanded else { return }
+            face.dragExpanded = false
+            self.viewModel.collapse()
+        }
+        hosting.onDrop = { [weak self, weak face] items in
+            face?.dragExpanded = false
+            self?.viewModel.receiveDrop(items)
+        }
+        panel.contentView = hosting
+        panel.orderFrontRegardless()
+        panels[id] = panel
+    }
+
     private func pointerMoved() {
-        guard let screen = notchScreen else { return }
         let location = NSEvent.mouseLocation
-        senseDrag(at: location, on: screen)
+        if let hostScreen = NSScreen.screens.first(where: { $0.frame.contains(location) }),
+           let hostID = hostScreen.displayID, let hostFace = faces[hostID] {
+            senseDrag(at: location, on: hostScreen, face: hostFace)
+        }
         switch viewModel.state {
         case .collapsed:
-            // Any display's top edge is a door. Travel is deferred to
-            // the dwell (below): a bare sweep through a monitor's top
-            // band must NOT relocate the island, or it strands itself
-            // invisible there with no walk-home ever armed
-            // (review-caught). The relocation happens only once intent
-            // is confirmed, paired with the open that guarantees a
-            // later collapse and walk-home.
-            let hit = NSScreen.screens.first {
-                collapsedZone(on: $0).contains(location)
+            // Any display's top edge is a door; every one already has
+            // its own island, so a hit here needs no travel, only its
+            // own face's hover lit.
+            let hit = NSScreen.screens.first { collapsedZone(on: $0).contains(location) }
+            let hitID = hit?.displayID
+            if let hit, let hitID, let hitFace = faces[hitID] {
+                publishPointerUnit(location, zone: collapsedZone(on: hit), face: hitFace)
             }
-            publishPointerUnit(location, zone: collapsedZone(on: hit ?? screen))
-            if let hit {
-                let hitID = hit.displayID
+            // Reaching is its own question, on its own zone: the
+            // reveal door is wide and shallow where the open door is
+            // narrow and sits under the visible shape. A hidden island
+            // has no visible shape to aim at, so the two cannot be the
+            // same rectangle (2026-08-02).
+            let reaching = NSScreen.screens.first { revealZone(on: $0).contains(location) }
+            let reachingID = reaching?.displayID
+            // The light and the hover follow the hit as it moves; every
+            // other face's must clear.
+            for (id, face) in faces where id != hitID {
+                if face.pointerUnit != nil { face.pointerUnit = nil }
+            }
+            // Set before the dwell, not after: a hidden island has to
+            // arrive as someone reaches for it, or they reach for
+            // nothing and it opens under a pointer that had given up.
+            // A pointer already inside the open door is also reaching,
+            // so the island stays out once it has arrived rather than
+            // blinking away as the hand travels the last few points.
+            for (id, face) in faces {
+                let near = id == reachingID || id == hitID
+                if face.pointerNear != near { face.pointerNear = near }
+            }
+            if let hitID {
                 guard Date().timeIntervalSince(lastCollapseAt) > reopenCooldown,
                       openIntentWork == nil else { return }
                 let work = DispatchWorkItem { [weak self] in
                     guard let self else { return }
                     self.openIntentWork = nil
                     // Still there after the dwell, still collapsed?
-                    // Rechecked against the HIT display, since travel
-                    // has not happened yet.
                     guard self.viewModel.state == .collapsed,
                           let hitScreen = NSScreen.screens
                               .first(where: { $0.displayID == hitID }),
                           self.collapsedZone(on: hitScreen)
                               .contains(NSEvent.mouseLocation)
                     else { return }
-                    // Intent confirmed: bring the island here, then open.
-                    if hitID != self.notchScreen?.displayID {
-                        self.travel(to: hitScreen)
-                    }
                     self.lastOpenAt = Date()
-                    self.viewModel.hoverChanged(true)
+                    self.faces[hitID]?.isHovering = true
+                    self.viewModel.hoverChanged(true, on: hitID)
                 }
                 openIntentWork = work
                 DispatchQueue.main.asyncAfter(deadline: .now() + openDwell, execute: work)
@@ -635,19 +685,33 @@ final class NotchWindowController {
                 // (review-caught).
                 if pointerInside || viewModel.isHovering {
                     pointerInside = false
-                    viewModel.hoverChanged(false)
+                    if let hovered = viewModel.lastHoveredDisplayID {
+                        faces[hovered]?.isHovering = false
+                        viewModel.hoverChanged(false, on: hovered)
+                    }
                 }
             }
         case .expanded:
-            publishPointerUnit(location, zone: expandedZone(on: screen))
+            // Only one face is ever expanded; its own display is the
+            // only one hover has anything to say about here.
+            guard let ownerID = viewModel.expandedDisplayID,
+                  let ownerScreen = NSScreen.screens.first(where: { $0.displayID == ownerID }),
+                  let ownerFace = faces[ownerID]
+            else { return }
+            publishPointerUnit(
+                location, zone: expandedZone(on: ownerScreen, face: ownerFace), face: ownerFace)
+            for (id, face) in faces where id != ownerID {
+                if face.pointerUnit != nil { face.pointerUnit = nil }
+            }
             openIntentWork?.cancel()
             openIntentWork = nil
-            let inside = expandedZone(on: screen).contains(location)
+            let inside = expandedZone(on: ownerScreen, face: ownerFace).contains(location)
             guard inside != pointerInside else { return }
             // Freshly opened islands don't close; kills any fast cycle.
             if !inside, Date().timeIntervalSince(lastOpenAt) < minimumOpen { return }
             pointerInside = inside
-            viewModel.hoverChanged(inside)
+            ownerFace.isHovering = inside
+            viewModel.hoverChanged(inside, on: ownerID)
         case .listening:
             // Voice sessions are press-driven; hover keeps its hands off.
             break
@@ -659,7 +723,7 @@ final class NotchWindowController {
     /// whose Mission Control reveal fires after ~2s of dwell and
     /// cannot be disabled for file drags on this macOS. Held drags
     /// hover the bubble safely for as long as they like.
-    private func senseDrag(at location: NSPoint, on screen: NSScreen) {
+    private func senseDrag(at location: NSPoint, on screen: NSScreen, face: IslandFace) {
         guard Date() >= dockPinnedUntil else { return }
         let buttonDown = NSEvent.pressedMouseButtons & 1 != 0
         guard buttonDown else {
@@ -685,7 +749,7 @@ final class NotchWindowController {
             height: screen.frame.height * 0.5
         )
         // A drag already over the island uses the island itself.
-        if viewModel.isDropTargeted {
+        if face.isDropTargeted {
             hideDropDock()
         } else if zone.contains(location) {
             showDropDock(on: screen)
@@ -724,6 +788,15 @@ final class NotchWindowController {
         }
         hosting.onDrop = { [weak self] items in
             self?.hideDropDock()
+            // The dock is every island's other mouth, and a drag that
+            // opened one of them can end here without that island ever
+            // seeing an exit. `receiveDrop` used to clear this for
+            // every path at once; now that the flag lives on each face,
+            // every mouth clears it, and a stale true would let the
+            // next unrelated drag-exit collapse an island the user had
+            // opened on purpose (2026-08-02). Only one drag is ever in
+            // flight, so at most one face is actually true here.
+            self?.faces.values.forEach { $0.dragExpanded = false }
             self?.viewModel.receiveDrop(items, quietly: true)
         }
         panel.contentView = hosting
@@ -786,15 +859,15 @@ final class NotchWindowController {
     /// so the shell's specular light can follow the cursor. Quantized
     /// to 1/24 steps and set only on change: a normal sweep costs a
     /// handful of re-renders, not the full 20 Hz.
-    private func publishPointerUnit(_ location: NSPoint, zone: NSRect) {
+    private func publishPointerUnit(_ location: NSPoint, zone: NSRect, face: IslandFace) {
         guard zone.contains(location) else {
-            if viewModel.pointerUnit != nil { viewModel.pointerUnit = nil }
+            if face.pointerUnit != nil { face.pointerUnit = nil }
             return
         }
         let raw = (location.x - zone.minX) / zone.width
         let unit = min(max((raw * 24).rounded() / 24, 0), 1)
-        if viewModel.pointerUnit != unit {
-            viewModel.pointerUnit = unit
+        if face.pointerUnit != unit {
+            face.pointerUnit = unit
         }
     }
 
@@ -803,90 +876,104 @@ final class NotchWindowController {
     private func stateChanged(_ newState: NotchViewModel.IslandState) {
         openIntentWork?.cancel()
         openIntentWork = nil
-        // The bead yields while the island is open on its display and
-        // returns when it closes; signature-guarded, so cheap here.
-        rebuildSlivers()
+        // An expansion can change which islands draw (a pill with
+        // nothing to say renders differently collapsed than open on
+        // it), so re-derive; the diff makes this cheap when a display
+        // did not actually change.
+        rebuildIslands()
         // The light never survives a state morph; it fades back in on
         // the next poll if the pointer is still there.
-        viewModel.pointerUnit = nil
+        faces.values.forEach { $0.pointerUnit = nil }
         switch newState {
         case .collapsed:
             pointerInside = false
             lastCollapseAt = Date()
-            // A visiting island walks home once it has settled, unless
-            // the cursor is still on the visited door (re-hovering it
-            // must not yank the island out from under the pointer,
-            // review-caught).
-            if travelDisplayID != nil {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                    guard let self, self.viewModel.state == .collapsed,
-                          self.travelDisplayID != nil else { return }
-                    if let here = self.notchScreen,
-                       self.collapsedZone(on: here).contains(NSEvent.mouseLocation) {
-                        return
-                    }
-                    self.travelDisplayID = nil
-                    self.reposition()
-                    self.rebuildSlivers()
-                }
-            }
         case .expanded:
             lastOpenAt = Date()
-            if let screen = notchScreen {
-                pointerInside = expandedZone(on: screen).contains(NSEvent.mouseLocation)
+            if let id = viewModel.expandedDisplayID,
+               let screen = NSScreen.screens.first(where: { $0.displayID == id }),
+               let face = faces[id] {
+                pointerInside = expandedZone(on: screen, face: face).contains(NSEvent.mouseLocation)
             }
         case .listening:
             break
         }
     }
 
+    /// The door's size on a pill display: the same fixed size the
+    /// resting bead used to occupy before every display grew its own
+    /// island (W-C, 2026-08-02) — named rather than left inline so the
+    /// number survives that deletion.
+    private static let pillDoor = CGSize(width: 116, height: 20)
+
     /// Close reach only: the island opens when the cursor is on it
     /// or a hair away, not from half a menu bar out. The old 160 of
     /// slack opened it for passersby (user call, 2026-07-21).
     private func collapsedZone(on screen: NSScreen) -> NSRect {
-        // On a notchless display the door is exactly the bead's room:
-        // the island opens only when the cursor touches the thing the
-        // eye can see. The old notch-wide invisible strip kept catching
-        // runs at browser tabs on maximized windows and blooming
-        // uninvited (user, 2026-07-23). With the bead switched off the
-        // same small door remains, just invisible; R96's law that a
-        // door always exists survives at bead scale.
-        guard screen.safeAreaInsets.top > 0 else {
+        // Sized from the STYLE that display resolves to, not its raw
+        // hardware: the door and the shape it opens have to agree, or
+        // a door can sit under a shape too wide for it (an emulated
+        // notch on a screen with no cutout, EC-5) or a shape can draw
+        // with no door under it at all (Off, which used to still wear
+        // the hardware-shaped door and left a travelled island
+        // stranded there, EC-4, 2026-08-01).
+        switch viewModel.displays.resolvedStyle(for: screen) {
+        case .off:
+            // Every caller guards on contains() first, and
+            // CGRect.null.contains is false by definition: no caller
+            // needs to change for a display with no door at all.
+            return .null
+        case .pill:
+            // A small door, because a small door is right for a pill —
+            // not because a bead once lived here at exactly this size.
+            // The island opens only when the cursor touches the thing
+            // the eye can see. The old notch-wide invisible strip kept
+            // catching runs at browser tabs on maximized windows and
+            // blooming uninvited (user, 2026-07-23).
             return hoverZone(
                 on: screen,
-                width: Self.sliverRoom.width,
-                height: Self.sliverRoom.height
+                width: Self.pillDoor.width,
+                height: Self.pillDoor.height
+            )
+        case .notch, .auto:
+            // .auto never reaches here — resolvedStyle always resolves
+            // it — but the switch has to be whole. Sized from THIS
+            // screen's own cutout, never a single shared field: a
+            // shared "the notch size" once belonged to whichever
+            // display was measured last, so every other display's door
+            // inherited the wrong width and could miss the real notch
+            // (review-caught). And from the cutout specifically, not
+            // from whatever `IslandFace.notchSize` currently draws: a
+            // flush, quiet island shrinks to the hardware's own size
+            // (A2), and a door that shrank with it would make a flush
+            // island unreachable (C9, EC-2). Falls back to the
+            // configured emulated size only where there is no real
+            // cutout to ask.
+            let config = viewModel.displays.config(for: screen)
+            let notch = screen.cutout ?? CGSize(width: config.width, height: config.height)
+            return hoverZone(
+                on: screen,
+                width: notch.width + 116,
+                height: notch.height + 12
             )
         }
-        // Sized from THIS screen's own notch, not the display the
-        // island currently dresses: viewModel.notchSize is the
-        // dressed display's, so every other display's door inherited
-        // the wrong width and could miss the real notch (review-caught).
-        let notch = notchMetric(of: screen)
-        return hoverZone(
-            on: screen,
-            width: notch.width + 116,
-            height: notch.height + 12
-        )
     }
 
-    /// A screen's own notch, or the shared default for a notchless
-    /// one, so a door is correct on whichever display it hangs from.
-    private func notchMetric(of screen: NSScreen) -> CGSize {
-        guard screen.safeAreaInsets.top > 0,
-              let left = screen.auxiliaryTopLeftArea,
-              let right = screen.auxiliaryTopRightArea else {
-            return NotchViewModel.defaultNotchSize
-        }
-        return CGSize(
-            width: screen.frame.width - left.width - right.width,
-            height: screen.safeAreaInsets.top
-        )
-    }
-
-    private func expandedZone(on screen: NSScreen) -> NSRect {
-        let size = viewModel.expandedSize
-        return hoverZone(on: screen, width: size.width + 28, height: size.height + 16)
+    /// Width from the owner's own config, not the measured size: a
+    /// door sized from `viewModel.expandedSize` lands one layout pass
+    /// after a width-slider drag re-lays the content out, so for one
+    /// frame the door is still the old width and the pointer can fall
+    /// outside it and collapse the island mid-drag (EC-11). Height has
+    /// no such door, it only ever grows from content or a floor, both
+    /// already reflected in `expandedSize` by the time this runs, so
+    /// it still reads the measurement.
+    private func expandedZone(on screen: NSScreen, face: IslandFace) -> NSRect {
+        let chatFull = UserDefaults.standard.object(forKey: "chatFull") as? Bool ?? false
+        let width = NotchViewModel.expandedWidth(
+            configWidth: face.expandedWidth, tab: viewModel.tab, pane: viewModel.pane,
+            chatFull: chatFull)
+        let height = viewModel.expandedSize.height
+        return hoverZone(on: screen, width: width + 28, height: height + 16)
     }
 
     /// A rect hanging from the top-center of the screen, in the global
@@ -894,6 +981,38 @@ final class NotchWindowController {
     /// top edge: a cursor pinned to the top reports y == maxY exactly,
     /// and NSRect.contains excludes its max edge, without the overhang,
     /// hovering the notch itself counts as "outside".
+    /// Where reaching for a hidden island counts, which is a different
+    /// question from where hovering opens one.
+    ///
+    /// `collapsedZone` is deliberately tight on a pill: it sits exactly
+    /// under the shape the eye can see, because a notch-wide invisible
+    /// strip kept blooming at browser tabs (user, 2026-07-23). That
+    /// reasoning depends entirely on there being something to see, and
+    /// under "hide until I reach for it" there is nothing: the founder
+    /// turned it on and could not find the island at all
+    /// (2026-08-02). Hunting a 116pt invisible target on a 2560pt
+    /// screen is not a gesture, it is a guess.
+    ///
+    /// So this one is wide and very shallow. Wide, because the island
+    /// lives at the top centre and that is where a hand goes. Shallow,
+    /// because the top four points are somewhere a pointer only ends up
+    /// when it was thrown there on purpose, while tabs and toolbars sit
+    /// below the menu bar line where the old complaint came from.
+    /// Revealing is also cheaper than opening: it costs a shape
+    /// appearing, not a panel taking over, so it can afford to be
+    /// generous where opening cannot.
+    static let revealDoorWidth: CGFloat = 420
+
+    private func revealZone(on screen: NSScreen) -> NSRect {
+        guard viewModel.displays.resolvedStyle(for: screen) != .off else { return .null }
+        return NSRect(
+            x: screen.frame.midX - Self.revealDoorWidth / 2,
+            y: screen.frame.maxY - 4,
+            width: Self.revealDoorWidth,
+            height: 4
+        )
+    }
+
     private func hoverZone(on screen: NSScreen, width: CGFloat, height: CGFloat) -> NSRect {
         NSRect(
             x: screen.frame.midX - width / 2,
@@ -913,7 +1032,7 @@ final class NotchWindowController {
         }
         hoverTimer?.invalidate()
         showRetry?.cancel()
-        repositionRetry?.cancel()
+        rebuildRetry?.cancel()
         settleChecks.forEach { $0.cancel() }
         if let napActivity {
             ProcessInfo.processInfo.endActivity(napActivity)
@@ -921,33 +1040,49 @@ final class NotchWindowController {
     }
 }
 
-/// The resting handle on displays the island is not dressing: the
-/// sliver silhouette, pure hint, no content. Hovering it (the zone,
-/// not the pixels; it ignores the mouse) summons the island over.
-private struct SliverHint: View {
-    /// A miniature of the Mac's own notch pill (user, 2026-07-23,
-    /// "the same thing as it is on my Mac, but smaller"): flat top,
-    /// straight sides, the shoulder eave and rounded bottom of the
-    /// real hardware, at half scale. No arcs, no beads.
-    private var shape: IslandShape {
-        IslandShape(eave: 4, bottomRadius: 8, belly: 0.5)
-    }
-
-    var body: some View {
-        shape
-            .fill(Color.black)
-            .overlay(shape.strokeBorder(Theme.specularEdge, lineWidth: 1).opacity(0.75))
-            .overlay(shape.strokeBorder(Theme.lipLight, lineWidth: 1))
-            // The shape's own rect, hugging the panel's top edge; the
-            // panel's extra room lets the eave and belly draw uncut.
-            .frame(width: 100, height: 13)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-}
-
-private extension NSScreen {
+// Internal rather than private: DisplayConfigStore needs the same live
+// handle to look a screen up before filing its settings under the
+// stable UUID.
+extension NSScreen {
     var displayID: CGDirectDisplayID? {
         (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
             .uint32Value
+    }
+
+    /// The physical camera housing this screen wraps, if it has one.
+    /// nil on a screen with no housing at all — every external
+    /// measured tonight, and any screen with `safeAreaInsets.top == 0`
+    /// (W-A). Kept apart from whatever gets drawn: a real notch's
+    /// dimensions are the hardware's to state, never ours to invent.
+    var cutout: CGSize? {
+        Self.cutout(
+            safeAreaTop: safeAreaInsets.top,
+            left: auxiliaryTopLeftArea,
+            right: auxiliaryTopRightArea,
+            frameWidth: frame.width
+        )
+    }
+
+    /// Pulled out of the property above so the derivation is checkable
+    /// with no screen attached (T-A3, W-A). Width is the gap between
+    /// the two auxiliary areas, `right.minX - left.maxX`, not
+    /// `frame.width - left.width - right.width`, which silently
+    /// assumes both start exactly at the screen edges (EC-7). Height
+    /// comes from the safe area regardless of whether the aux areas
+    /// report at all: on a mirrored screen, or a chassis that reports
+    /// one and not the others, height is still real hardware and is
+    /// the dimension A2 is most sensitive to — the full frame width
+    /// stands in for the width nothing can measure, rather than losing
+    /// the housing's presence entirely (EC-3).
+    static func cutout(
+        safeAreaTop: CGFloat, left: CGRect?, right: CGRect?, frameWidth: CGFloat
+    ) -> CGSize? {
+        guard safeAreaTop > 0 else { return nil }
+        guard let left, let right else {
+            NotchViewModel.log.info(
+                "cutout height available with no aux areas to derive its width from")
+            return CGSize(width: frameWidth, height: safeAreaTop)
+        }
+        return CGSize(width: right.minX - left.maxX, height: safeAreaTop)
     }
 }

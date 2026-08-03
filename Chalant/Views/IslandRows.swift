@@ -25,15 +25,23 @@ struct MusicRow: View {
                 .help("Open \(playing.source.displayName)")
                 .background(
                     // The album's own light spilling out from under
-                    // the chalantr: the row warms to whatever plays,
+                    // the artwork: the row warms to whatever plays,
                     // without ever drawing a box around itself.
+                    //
+                    // endRadius must not outrun the frame's shorter
+                    // half. At 190 inside a box 150 tall the gradient
+                    // was still around 60% opaque where the frame
+                    // stopped, so it ended on a hard horizontal line
+                    // under the artwork instead of fading out. Matching
+                    // the radius to the half-height lands it exactly on
+                    // clear at the edge, in every direction.
                     RadialGradient(
                         colors: [accent.opacity(playing.isPlaying ? 0.22 : 0.10), .clear],
                         center: .center,
                         startRadius: 4,
-                        endRadius: 190
+                        endRadius: 80
                     )
-                    .frame(width: 380, height: 150)
+                    .frame(width: 360, height: 160)
                     .allowsHitTesting(false)
                 )
 
@@ -88,11 +96,17 @@ struct MusicRow: View {
                     }
                 }
 
-                VStack(spacing: Theme.Space.xs) {
+                // Trailing, not centred: the transport row changes width
+                // when a player that supports shuffle takes over, and
+                // centred rows made the volume slider slide sideways
+                // underneath the pointer as it did. Both rows hang off
+                // the same right edge instead.
+                VStack(alignment: .trailing, spacing: Theme.Space.xs) {
                     HStack(spacing: Theme.Space.s) {
                         if playing.supportsShuffle {
                             HoverGlyphButton(
                                 symbol: "shuffle",
+                                label: "Shuffle",
                                 scale: .xs,
                                 tint: playing.shuffling ? accent : Theme.textTertiary
                             ) {
@@ -100,7 +114,10 @@ struct MusicRow: View {
                             }
                             .help(playing.shuffling ? "Shuffle is on" : "Shuffle")
                         }
-                        HoverGlyphButton(symbol: "backward.fill", scale: .s, tint: Theme.textPrimary) {
+                        HoverGlyphButton(
+                            symbol: "backward.fill", label: "Previous track",
+                            scale: .s, tint: Theme.textPrimary
+                        ) {
                             music.previous()
                         }
                         Button {
@@ -118,7 +135,10 @@ struct MusicRow: View {
                                 .contentShape(Circle())
                         }
                         .buttonStyle(PressableStyle())
-                        HoverGlyphButton(symbol: "forward.fill", scale: .s, tint: Theme.textPrimary) {
+                        HoverGlyphButton(
+                            symbol: "forward.fill", label: "Next track",
+                            scale: .s, tint: Theme.textPrimary
+                        ) {
                             music.next()
                         }
                     }
@@ -374,15 +394,20 @@ struct AnswerView: View {
                     .foregroundStyle(Theme.danger)
                     .fixedSize(horizontal: false, vertical: true)
             } else if model.answer.isEmpty {
-                VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    Text(idleHint)
-                        .font(Theme.Fonts.reading)
-                        .foregroundStyle(Theme.textHint)
-                    Text("remind me to call amma at 6 · focus 25 · note: an idea · say help for the rest")
-                        .font(Theme.Fonts.label)
-                        .fontWeight(.regular)
-                        .foregroundStyle(Theme.textGhost)
-                }
+                // One line, not three. "Type below, or tap the mic and
+                // say it" said what the field below and the mic above
+                // already say, and the examples said it a third time.
+                // Idle is the island's most common state, so every row
+                // it spends here is height the whole surface carries
+                // ("too overwhelming and cluttered").
+                //
+                // Hint, not ghost: this is the only place the verbs are
+                // named, so it carries information, and Theme reserves
+                // ghost for marks that carry none.
+                Text("remind me to call amma at 6 · focus 25 · note: an idea · say help")
+                    .font(Theme.Fonts.label)
+                    .fontWeight(.regular)
+                    .foregroundStyle(Theme.textHint)
             } else if model.answer.count > 900 {
                 ScrollView {
                     answerText
@@ -408,7 +433,7 @@ struct AnswerView: View {
                 .onSubmit(submitDraft)
             if !model.draftPrompt.isEmpty {
                 HoverGlyphButton(
-                    symbol: "arrow.up.circle.fill", scale: .m, tint: accent
+                    symbol: "arrow.up.circle.fill", label: "Send", scale: .m, tint: accent
                 ) {
                     submitDraft()
                 }
@@ -426,12 +451,6 @@ struct AnswerView: View {
         model.draftPrompt = ""
         guard !typed.isEmpty else { return }
         model.submit(typed)
-    }
-
-    /// Two doors, no keyboard shortcut: the summon key retired
-    /// (2026-07-21, it fought macOS and lost twice).
-    private var idleHint: String {
-        "Type below, or tap the mic and say it."
     }
 
     private var answerText: some View {

@@ -32,7 +32,9 @@ final class NotchViewModel: ObservableObject {
         case expanded
     }
 
-    enum Tab {
+    /// Raw-valued so "reopen where I left off" can survive a relaunch
+    /// without a second parallel enum to keep in step.
+    enum Tab: String, CaseIterable {
         case today
         case ask
         case clipboard
@@ -41,34 +43,194 @@ final class NotchViewModel: ObservableObject {
         case notes
         case focus
         case chat
+        case sessions
+
+        /// The settings switch that hides this tab's tool, if it has
+        /// one. `today` and `ask` are the island itself and cannot be
+        /// switched off.
+        var toolKey: String? {
+            switch self {
+            case .today, .ask: return nil
+            case .clipboard: return "toolClips"
+            case .shelf: return "toolShelf"
+            case .links: return "toolGo"
+            case .notes: return "toolNotes"
+            case .focus: return "toolFocus"
+            case .chat: return "toolChat"
+            case .sessions: return "toolSessions"
+            }
+        }
     }
 
-    /// Settings slides over the island body; collapsing closes it.
+    /// The welcome tour slides over the island body; collapsing closes
+    /// it. Settings used to live here too and now has a window of its
+    /// own — see Dashboard.swift.
     enum Pane {
         case none
-        case settings
         case welcome
     }
 
-    @Published var state: IslandState = .collapsed
+    /// Cleared to nil the instant this becomes `.collapsed` (see the
+    /// `didSet` below), so a stale `expandedDisplayID` can never
+    /// outlive the state it was opened for.
+    @Published var state: IslandState = .collapsed {
+        didSet {
+            // One guard here beats a clear at every path that can
+            // collapse (`collapse()`, `cancelListening()`, and any
+            // future one): `expand(on:)`'s hand-off logic treats a
+            // non-nil `expandedDisplayID` as "someone else is open,
+            // collapse them first," and a stale id left behind by a
+            // path that forgot to clear it would wedge every later
+            // expand behind a hand-off to a display that was never
+            // actually open (2026-08-02).
+            if state == .collapsed { expandedDisplayID = nil }
+        }
+    }
+
+    /// Which display's island is open, when one is.
+    ///
+    /// `state` stays one value because only one island can ever be
+    /// open: there is one keyboard, one `WKWebView`
+    /// (`ChatController.swift:96`) and one `VoiceController`. What was
+    /// missing, once more than one display wears an island, was not a
+    /// second state, it was WHICH display the one state applies to —
+    /// without it, hovering one display expanded all of them, because
+    /// every face read the same `state` (2026-08-02).
+    @Published private(set) var expandedDisplayID: CGDirectDisplayID?
+
+    /// Which display last reported hovering true, remembered after the
+    /// hover itself ends: `defaultOwner` below falls back to it when
+    /// there is nothing more specific — the pointer's own display — to
+    /// go on (EC-12, 2026-08-02).
+    @Published private(set) var lastHoveredDisplayID: CGDirectDisplayID?
+
+    /// A display that vanished takes its last-hovered claim with it, so
+    /// a stale id can never outrank a screen that still exists in
+    /// `defaultOwner`'s fallback chain. The window controller calls
+    /// this when a panel is torn down.
+    func forgetHover(on display: CGDirectDisplayID) {
+        if lastHoveredDisplayID == display { lastHoveredDisplayID = nil }
+    }
+
+    /// What a given face should render as. The one function that turns
+    /// the shared `state` into a per-display one: a face reads
+    /// `.collapsed` unless it IS the one display holding the
+    /// expansion, however loud `shared` is (2026-08-02).
+    static func state(
+        _ shared: IslandState,
+        expandedOn: CGDirectDisplayID?,
+        face: CGDirectDisplayID?
+    ) -> IslandState {
+        guard let face, face == expandedOn else { return .collapsed }
+        return shared
+    }
+
     @Published var isHovering = false
     /// Which lower panel the switcher is showing. `.today` is home.
     @Published var tab: Tab = .today
     @Published var pane: Pane = .none
-    /// Settings section to scroll to when the pane opens, set by the
-    /// debug harness so screenshots can reach below the fold.
-    @Published var settingsScrollTarget: String?
 
     /// The island's expanded size, measured from the content itself,
     /// the island hugs what's shown instead of reserving a fixed void.
     @Published var expandedSize = CGSize(width: 520, height: 170)
 
-    /// A drag is hovering the island: light the accent edge.
-    @Published var isDropTargeted = false
+    /// The expanded island's width: the user's own dial, except while
+    /// full chat is open, where the chat site's desktop breakpoint at
+    /// 0.8 zoom needs 680 regardless of what the dial says (W-F,
+    /// 2026-08-02). A floor under the dial there, never a ceiling on
+    /// it: a wider dial than 680 still wins.
+    ///
+    /// Pulled out of `ExpandedView.islandWidth` so `expandedZone(on:)`
+    /// can compute the identical number before any layout pass runs:
+    /// a hover-out door sized from a stale, one-frame-late width could
+    /// let the pointer fall outside it mid-drag and collapse the
+    /// island out from under it (EC-11).
+    static func expandedWidth(
+        configWidth: CGFloat, tab: Tab, pane: Pane, chatFull: Bool
+    ) -> CGFloat {
+        tab == .chat && pane == .none && chatFull ? max(configWidth, 680) : configWidth
+    }
+
+    /// The expanded island's height: whatever the content measured,
+    /// unless the user's own floor asks for more. Never the other way
+    /// around, a ceiling here would clip the chat pane or the notes
+    /// list with no scrollbar and no sign anything was cut (EC-10,
+    /// W-F, 2026-08-02).
+    static func expandedHeight(measured: CGFloat, floor: CGFloat) -> CGFloat {
+        max(measured, floor)
+    }
+
+    /// The collapsed frame, in points. Flush with the cutout when
+    /// there is nothing to say and nobody reaching: on a MacBook the
+    /// cutout has no pixels, so an island exactly its size is eaten by
+    /// the hardware and is invisible by construction, which is the
+    /// whole of A2. The 8pt width tuck and the 3pt apron (founder,
+    /// 2026-07-22) are kept for every state where the island is
+    /// outside the hole anyway, and only for those: flush and apron
+    /// cannot both be true at once (founder, 2026-08-02,
+    /// notch-geometry-plan, W-C).
+    ///
+    /// `wings` is zero in exactly the states
+    /// `collapsedHasSomethingToSay` is false in too, bar one: ambience
+    /// alone, which draws with no wing width reserved for it either and
+    /// so is already tucked out of sight today regardless of whether
+    /// this frame is flush or -8. No second predicate is needed here
+    /// (C24) — `wings == 0` already is the "nothing to say" test this
+    /// frame cares about.
+    static func collapsedFrame(
+        cutout: CGSize?, base: CGSize, wings: CGFloat, hovering: Bool
+    ) -> CGSize {
+        if let cutout, wings == 0, !hovering {
+            return cutout
+        }
+        let growW: CGFloat = hovering ? 14 : 0
+        let growH: CGFloat = hovering ? 4 : 0
+        return CGSize(
+            width: base.width - 8 + wings + growW,
+            height: base.height + 3 + growH
+        )
+    }
+
+    /// The eave (meniscus flare) and belly (bottom sag) for the
+    /// collapsed `.notch` silhouette, driven by how far the frame
+    /// already overhangs the cutout rather than a fixed constant:
+    /// flush has nothing to flare over, which is A3's arc gone too,
+    /// and the shoulders grow back in step with whatever pushed the
+    /// frame past the hole. `overhang <= 0` folds in the flush case;
+    /// an emulated notch has no real cutout to measure an overhang
+    /// against and never hides inside one (EC-5), so its caller passes
+    /// a positive sentinel here instead of a computed overhang.
+    static func eaveAndBelly(overhang: CGFloat) -> (eave: CGFloat, belly: CGFloat) {
+        guard overhang > 0 else { return (0, 0) }
+        return (min(Theme.Island.eaveCollapsed, overhang), Theme.Island.bellyCollapsed)
+    }
+
+    /// The size the collapsed island draws as its base, before any of
+    /// the flush/grow arithmetic above runs: the hardware by default
+    /// (A1), unless the user has explicitly turned "follow the
+    /// hardware" off, in which case their own stored size wins.
+    /// Pulled out of `NotchWindowController.apply(_:to:)` so the rule
+    /// is checkable with no screen or face to build (W-D, EC-6): every
+    /// blob written before `sizeFollowsHardware` existed decodes to
+    /// `true`, which reproduces exactly today's behaviour on both a
+    /// real notch (measured wins) and a screen with none (nothing to
+    /// follow, the stored size wins regardless).
+    static func notchSize(
+        cutout: CGSize?, sizeFollowsHardware: Bool, configWidth: CGFloat, configHeight: CGFloat
+    ) -> CGSize {
+        (sizeFollowsHardware ? cutout : nil) ?? CGSize(width: configWidth, height: configHeight)
+    }
 
     /// Debug builds show the drop bubble on request; the window
     /// controller owns the panel, so it hangs the hook here.
     var onDebugDropDock: (() -> Void)?
+
+    /// Lets "debug droptarget" flash the same highlight a live drag
+    /// would. `isDropTargeted` lives on `IslandFace` now, and
+    /// `IslandFace` holds a reference back to the model, not the other
+    /// way around, so this is the one way a debug command here can
+    /// still reach it (2026-08-02).
+    var debugSetDropTargeted: ((Bool) -> Void)?
 
     /// Which page of the first-run tour is showing.
     @Published var welcomeStep = 0
@@ -116,15 +278,6 @@ final class NotchViewModel: ObservableObject {
         pane = .none
         collapse()
     }
-
-    /// The island opened itself for an incoming drag; if the drag
-    /// leaves without dropping it closes again.
-    var dragExpanded = false
-
-    /// Pointer position across the island, 0...1, published by the
-    /// window controller's hover poll, quantized so casual movement
-    /// costs a few re-renders per second, not twenty. nil = no light.
-    @Published var pointerUnit: CGFloat?
 
     /// Which way the next tab switch should slide, set by TabRow just
     /// before the tab changes so both land in the same transaction.
@@ -182,38 +335,305 @@ final class NotchViewModel: ObservableObject {
     let courier = MessageCourier()
     let activities = ActivityStore()
     let activityServer = ActivityServer()
+    /// Claude Code sessions on this Mac. Discovery reads the metadata
+    /// files Claude Code already writes, so sessions show up with no
+    /// setup and no hook contract — including ones that were already
+    /// running before Chalant launched.
+    let sessions = SessionStore()
+    private lazy var sessionDiscovery = SessionDiscovery(store: sessions)
+    /// The liveness overlay: busy/idle from the registry Claude Code
+    /// already writes, layered on top of the scraper above rather than
+    /// replacing it (notch-messaging-plan-2026-08-01.md).
+    private lazy var sessionRegistry = SessionRegistry(store: sessions)
+    private lazy var cursorDiscovery = CursorDiscovery(store: sessions)
     let updates = UpdateChecker()
     let crashWatch = CrashWatch()
     /// Hands the update ask to Sparkle (set by the AppDelegate, which
     /// owns the updater): download, install, relaunch, no browser.
     var installUpdate: (() -> Void)?
+    /// Opens the settings window, optionally at a named section (set by
+    /// the AppDelegate, which owns the window). Everything that used to
+    /// set `pane = .settings` calls this instead, so the island's gear
+    /// and the menu bar item open the one same window.
+    var openDashboard: ((DashboardSection?) -> Void)?
     /// Created on first open of the chat tab; the web view then lives
     /// for the app's lifetime so the conversation survives collapses.
     private(set) lazy var chat = ChatController()
     private(set) lazy var engine = ActionEngine(model: self)
 
-    /// Default pill for notch-less displays, so Chalant works on any Mac.
-    static let defaultNotchSize = CGSize(width: 196, height: 34)
+    // `defaultNotchSize` used to live here as `IslandFace.notchSize`'s
+    // starting value, a second hardcoded 196x34 next to `Config`'s own
+    // 196x38 that only ever differed for the moment between `init` and
+    // the first `apply(_:to:)` (EC-12). Deleted; `IslandFace.notchSize`
+    // now initialises from a plain `Config()` instead (W-A, 2026-08-02).
 
-    /// Physical notch size measured by NotchWindowController. Published
-    /// because the whole collapsed geometry is derived from it; it was
-    /// a plain var, and the controller compensated with a manual
-    /// objectWillChange *after* mutating, which is the wrong order and
-    /// left any other writer silently rendering stale geometry.
-    @Published var notchSize = NotchViewModel.defaultNotchSize
     /// Debug-driven request to open the shortcut add flow; the
     /// Shortcuts pane consumes and resets it.
     @Published var wantsShortcutAdd = false
     /// Same, straight into the Shortcuts.app library picker.
     @Published var wantsShortcutPick = false
+    /// The clipboard hotkey's second half: focus the search field once
+    /// the panel is open. The Clipboard pane consumes and resets it.
+    @Published var wantsClipboardSearch = false
 
-    /// True on the built-in display where hardware occupies the middle
-    /// of the island; external displays keep that space usable. Same
-    /// reason as notchSize above.
-    @Published var hasPhysicalNotch = false
+    /// Per-display island settings. `apply(_:to:)` is the one place a
+    /// screen turns into island geometry, and the only reader.
+    let displays = DisplayConfigStore()
+
+    /// How the island's contents are arranged, and the saved presets.
+    let layout = IslandLayoutStore()
+
+    // `islandStyle`, `notchSize`, `islandCornerRadius` and
+    // `islandContentPadding` used to live here too, dual-written by
+    // `apply(_:to:)` alongside the same values on `IslandFace` — a
+    // stopgap for the round where only one face existed. Now that
+    // every display gets its own face, a single shared copy of a
+    // per-display fact is exactly the bug class this branch exists to
+    // remove: every face would read whichever screen `apply(_:to:)`
+    // happened to run for last. Deleted; `IslandFace` is the only
+    // copy (island-per-display-plan, W-C, 2026-08-02).
 
     /// Set by the window controller so the panel can grab key focus.
     var onExpandChange: ((Bool) -> Void)?
+
+    // MARK: - What the resting island has to say
+    //
+    // Moved here from NotchRootView (2026-08-01). The bead
+    // (`NotchWindowController.rebuildSlivers`, now deleted) and the
+    // island's own opacity used to each carry a version of "is there
+    // anything to show" — the bead asked "collapsed with no toast",
+    // the island asked "nothing to say" — and a collapsed island with
+    // music playing satisfied the second without satisfying the
+    // first, so both drew on the same display. `islandIsShowing`
+    // below is the one place either can ask it now.
+    //
+    // These read UserDefaults directly rather than through
+    // `@AppStorage`, which only works as a SwiftUI `DynamicProperty`
+    // and does nothing outside a View — the same pattern already used
+    // elsewhere on this model (`isAvailable(_:in:)`, `hoverChanged`).
+    // NotchRootView keeps its own `@AppStorage` declarations for these
+    // same keys so it still re-renders the instant a glance switch
+    // flips in Settings.
+
+    /// The camera mark's earned width, one number for both pill
+    /// families (two hand-derived constants drifted apart once).
+    private static let cameraMarkWidth: CGFloat = 16
+
+    /// Agents running right now, and whether any wants an answer.
+    ///
+    /// `stale` is deliberately excluded: a session Chalant has only
+    /// inferred is quiet is not something to put a live mark next to.
+    /// `idle` is deliberately excluded too, on purpose and not an
+    /// oversight: the sessions strip lists an idle session (you cannot
+    /// pick what is not listed), but this count stays "things are
+    /// happening" rather than becoming "things exist" — a badge that
+    /// grows every time a terminal sits at its prompt would say less,
+    /// not more.
+    var agentGlance: (count: Int, waiting: Bool)? {
+        guard UserDefaults.standard.object(forKey: "glanceAgents") as? Bool ?? true else {
+            return nil
+        }
+        let live = sessions.sessions.filter { $0.state == .working || $0.state == .needsInput }
+        guard !live.isEmpty else { return nil }
+        return (live.count, live.contains { $0.state == .needsInput })
+    }
+
+    /// The event about to start, if the user lets the glance carry it.
+    var upcomingEvent: DayEvent? {
+        let glanceNextEvent = UserDefaults.standard.object(forKey: "glanceNextEvent") as? Bool ?? true
+        return glanceNextEvent ? events.nextEvent : nil
+    }
+
+    /// Anything counting: a pomodoro, a plain timer, the stopwatch.
+    var sessionActive: Bool {
+        focus.isActive || timer.isActive || stopwatch.isActive
+    }
+
+    /// Music and a session at once: the wave keeps the left wing and
+    /// the session mark takes the right (user, 2026-07-22).
+    var sessionOnRight: Bool {
+        let glanceSession = UserDefaults.standard.object(forKey: "glanceSession") as? Bool ?? true
+        return glanceSession && sessionActive && music.nowPlaying?.isPlaying == true
+    }
+
+    /// The song's name on the resting island, not just its bars.
+    ///
+    /// This reverses an earlier call. The collapsed island on a monitor
+    /// was stripped bare because content there "sat on top of someone's
+    /// window" (user, 2026-07-22) and because a wide pill did not match
+    /// the hardware (user, 2026-07-23). Both objections were about a
+    /// screen pretending to be a MacBook. Asked again for an island
+    /// rather than a notch on external displays, the user now wants the
+    /// song beside it, so this is on for pills and off for notches —
+    /// where the old reasoning still holds exactly.
+    ///
+    /// Style-and-state-shaped rather than reading `self.islandStyle`/
+    /// `self.state`, now that those are per-face facts and not a single
+    /// fact about the model: a caller passes its own face's `style` and
+    /// `state`, so four faces can answer this four different ways in
+    /// the same instant (island-per-display-plan, W-C, 2026-08-02).
+    func showsSongBeside(style: DisplayConfigStore.Style, state: IslandState) -> Bool {
+        let collapsedSong = UserDefaults.standard.object(forKey: "collapsedSong") as? Bool ?? true
+        return style == .pill
+            && collapsedSong
+            && state == .collapsed
+            && music.nowPlaying?.isPlaying == true
+    }
+
+    /// Each wing earns exactly what its content needs: the session
+    /// mark wants 26 on a notch (digits clipped at real pomodoro
+    /// widths, so the wing wears a symbol that cannot: the ring, or the
+    /// stopwatch glyph; user, 2026-07-22) and 90 on a pill, which has
+    /// the room for the digits themselves — a notch's narrow wing is
+    /// the only reason they were ever dropped (2026-08-02). The slimmed
+    /// wave takes 28. Quiet mode keeps the bare pill and lets the rim
+    /// carry it (both moods proved real within one day, so it's a
+    /// setting).
+    func leftWingNeed(style: DisplayConfigStore.Style, state: IslandState) -> CGFloat {
+        if showsSongBeside(style: style, state: state) { return Theme.Island.songGlanceWidth }
+        let playingSignal = UserDefaults.standard
+            .object(forKey: MusicController.playingSignalKey) as? String
+            ?? MusicController.playingSignalDefault
+        if playingSignal == "wave", music.nowPlaying?.isPlaying == true { return 28 }
+        let glanceSession = UserDefaults.standard.object(forKey: "glanceSession") as? Bool ?? true
+        if glanceSession, sessionActive, !sessionOnRight {
+            return style == .pill ? 90 : 26
+        }
+        return 0
+    }
+
+    /// The glance that has earned the space beside the notch.
+    ///
+    /// Precedence is the user's list rather than the order these
+    /// happen to be written in, since only one of them fits and which
+    /// one matters more is a matter of taste, not of code.
+    func winningCollapsedItem(style: DisplayConfigStore.Style) -> CollapsedItem? {
+        layout.layout.collapsed.first { collapsedWidth($0, style: style) > 0 }
+    }
+
+    /// What a glance needs, and nothing if it has nothing to say. One
+    /// function so the width and the decision to show it can never
+    /// disagree — a glance with no width has nowhere to sit, which is
+    /// how the charge shipped invisible.
+    ///
+    /// Style-shaped since 2026-08-02: a pill and a notch used to answer
+    /// "is there anything to show" from the same numbers here while a
+    /// monitor rendered from a separate, shorter list that disagreed
+    /// with them — an agent session with nothing else running grew the
+    /// pill to a 40x18 lozenge with nothing drawn in it. Threading style
+    /// through this one function is what makes that impossible now.
+    func collapsedWidth(_ item: CollapsedItem, style: DisplayConfigStore.Style) -> CGFloat {
+        switch item {
+        case .agents:
+            return agentGlance != nil ? 44 : 0
+        case .timers:
+            return Self.timersWidth(sessionOnRight: sessionOnRight, style: style)
+        // A session shows only its left-wing ring and countdown; the
+        // right-side FOCUS 1 OF 4 label was width without value
+        // (user call, 2026-07-21). A joinable meeting's camera mark
+        // earns its own width; stealing the marquee's sent titles
+        // into perpetual scroll.
+        case .event:
+            guard let next = upcomingEvent else { return 0 }
+            return 112 + (next.joinURL != nil ? Self.cameraMarkWidth : 0)
+        case .battery:
+            let glanceBattery = UserDefaults.standard.object(forKey: "glanceBattery") as? Bool ?? false
+            return glanceBattery && stats.battery != nil ? 44 : 0
+        }
+    }
+
+    /// The session mark's width when it has crossed to the right wing
+    /// (music is holding the left one): a notch's narrow side only has
+    /// room for the ring or the stopwatch glyph, never digits; a pill
+    /// has room for both (2026-08-02). Its own static, pulled out of
+    /// `collapsedWidth`, so the split is checkable with no `NotchViewModel`
+    /// to build (T-A2).
+    static func timersWidth(sessionOnRight: Bool, style: DisplayConfigStore.Style) -> CGFloat {
+        guard sessionOnRight else { return 0 }
+        return style == .pill ? 90 : 30
+    }
+
+    /// Width the right-of-camera glance needs.
+    func notchSideNeed(style: DisplayConfigStore.Style) -> CGFloat {
+        if glanceToast != nil { return 124 }
+        // Nothing beyond the user's list: the day, the streak, and the
+        // clock glances all duplicated surfaces that already exist (the
+        // menu bar clock sits an inch away), and every one of them
+        // stretched the pill past the hardware (user, 2026-07-23, "it
+        // should not be too wide on the Mac").
+        return winningCollapsedItem(style: style).map { collapsedWidth($0, style: style) } ?? 0
+    }
+
+    /// The resting island's total span, in points, or nil when it has
+    /// nothing to say. One function for "how wide" and "is there
+    /// anything", so they can never disagree again — a pill used to
+    /// answer the second question from these two numbers while
+    /// rendering from a shorter, separate list, which is how an agent
+    /// session with nothing else running grew a pill to a 40x18 lozenge
+    /// with nothing drawn in it and suppressed the bead that would at
+    /// least have been findable (2026-08-02).
+    ///
+    /// A notch widens symmetrically because the camera sits at the
+    /// screen's centre and content would otherwise slide under it. A
+    /// pill has no middle to clear, so its two wings sit adjacent.
+    static func collapsedSpan(
+        left: CGFloat, right: CGFloat, style: DisplayConfigStore.Style
+    ) -> CGFloat? {
+        guard left > 0 || right > 0 else { return nil }
+        return style == .notch ? 2 * max(left, right) : left + right
+    }
+
+    /// Something is asking for the user, right now.
+    ///
+    /// Hiding is a preference about clutter, never about silence: a
+    /// session that has stopped and wants an answer is the one moment
+    /// the island exists for, and a hidden island that stayed hidden
+    /// through it would be worse than no island (founder, 2026-08-02).
+    /// A pill that has already been shut away comes back on its own for
+    /// this, and goes away again when the asking is over.
+    var somethingWantsYou: Bool {
+        sessions.sessions.contains { session in
+            session.state == .needsInput
+                || (session.ask.map { $0.answer == nil } ?? false)
+        } || activities.activities.contains { $0.state == .needsInput }
+    }
+
+    /// Anything the resting island would actually draw.
+    func collapsedHasSomethingToSay(style: DisplayConfigStore.Style, state: IslandState) -> Bool {
+        let left = leftWingNeed(style: style, state: state)
+        let right = notchSideNeed(style: style)
+        return Self.collapsedSpan(left: left, right: right, style: style) != nil
+            || (ambience.active != nil && music.nowPlaying?.isPlaying != true)
+    }
+
+    /// Style-and-state-shaped so a rule about "is the island showing"
+    /// can be asked of any display, not only this model's own screen —
+    /// the whole of "hovering one display must not expand four"
+    /// (2026-08-02).
+    ///
+    /// Deliberately **not called** from `NotchRootView` any more, and
+    /// that is a real behaviour change, not an oversight: before W-C,
+    /// a quiet pill's own opacity went to 0 here and the bead
+    /// (`NotchWindowController.rebuildSlivers`, now deleted) drew the
+    /// visible resting sliver in its place. With no bead left to hand
+    /// off to, gating the shell on this would make a quiet pill show
+    /// nothing at all, which is exactly the "fully invisible island
+    /// reads as not installed" problem the sliver existed to solve —
+    /// and the founder's explicit call is the opposite: a quiet
+    /// display keeps its sliver. `collapsedIsEmpty` in `NotchRootView`
+    /// already shrinks the shell to that sliver instead of hiding it.
+    /// Kept and still tested (T-B2) as the rule it always was — an Off
+    /// display never shows, a notch always does — for whatever future
+    /// caller needs exactly that rule; there is none in this round.
+    static func islandIsShowing(
+        style: DisplayConfigStore.Style, expandedHere: Bool, hasSomethingToSay: Bool
+    ) -> Bool {
+        switch style {
+        case .off: return false
+        case .auto, .notch: return true
+        case .pill: return expandedHere || hasSomethingToSay
+        }
+    }
 
     init() {
         focus = FocusController(ambience: ambience)
@@ -247,7 +667,39 @@ final class NotchViewModel: ObservableObject {
         shortcuts.announce = { [weak self] message in
             self?.flashGlance(message)
         }
-        activityServer.start(store: activities)
+        activityServer.start(store: activities, sessions: sessions)
+        // Registry first: it lists four small JSON files and can paint
+        // a session row immediately. Discovery scrapes transcript tails
+        // and can walk the filesystem to resolve a cwd, which is slow
+        // enough to be visible (B3, founder 2026-08-02: "sometimes they
+        // take a second to load all the sessions"). Its own first scan
+        // is deferred so it decorates rows the registry already showed,
+        // rather than making everyone wait for it to go first.
+        sessionRegistry.start()
+        sessionDiscovery.start()
+        cursorDiscovery.start()
+        // EC-11: a session can exit with a message still queued while
+        // nobody has the composer open to see the row flip. The store
+        // has no glance to flash, so it hands the moment back here.
+        activities.onNeedsInput = { [weak self] title in
+            self?.flashGlance(title, seconds: 8)
+        }
+        sessions.onSessionWantsYou = { [weak self] title in
+            self?.flashGlance("\(title) wants you", seconds: 8)
+        }
+        sessions.onMessageUndelivered = { [weak self] title in
+            self?.flashGlance("\(title) ended before reading your message")
+        }
+        // scripts/chalant-hook posts a Claude Code session's pill as
+        // "claude-<session>" (only the pill is prefixed; the outbox and
+        // ask routes take the bare id), the same mapping
+        // ActivitiesStrip reverses to find a session for a tapped pill.
+        // Resolves a needs-input pill once its session actually ends
+        // (H5), rather than leaving it sitting there answerable to
+        // nobody.
+        sessions.onSessionGone = { [weak self] id in
+            self?.activities.resolveIfPending(id: "claude-\(id)")
+        }
         events.startGlanceTicker()
         updates.onNewVersion = { [weak self] version in
             self?.flashGlance("\(version) is out", seconds: 8)
@@ -442,15 +894,13 @@ final class NotchViewModel: ObservableObject {
                     }
                     return
                 }
-                // "debug settings" opens the settings pane for
-                // screenshots; an optional tail scrolls to a section,
+                // "debug settings" opens the settings window for
+                // screenshots; an optional tail picks a section,
                 // "debug settings island".
                 if text.hasPrefix("debug settings") {
                     let tail = text.dropFirst("debug settings".count)
                         .trimmingCharacters(in: .whitespaces)
-                    self.settingsScrollTarget = tail.isEmpty ? nil : tail.lowercased()
-                    self.pane = .settings
-                    self.expand()
+                    self.openDashboard?(tail.isEmpty ? nil : DashboardSection.named(tail))
                     return
                 }
                 // "debug dropdock" shows the mid-screen drop bubble.
@@ -462,9 +912,9 @@ final class NotchViewModel: ObservableObject {
                 // real drags cannot be synthesized.
                 if text == "debug droptarget" {
                     self.expand(takeKey: false)
-                    self.isDropTargeted = true
+                    self.debugSetDropTargeted?(true)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                        self?.isDropTargeted = false
+                        self?.debugSetDropTargeted?(false)
                     }
                     return
                 }
@@ -499,21 +949,115 @@ final class NotchViewModel: ObservableObject {
         }
     }
 
+    /// Where an island opens when nothing said which display.
+    ///
+    /// The pointer's own display, else the one last hovered, else the
+    /// main one, else whatever is attached. Written once rather than at
+    /// each of the fifteen callers of the old no-argument `expand()`:
+    /// fifteen answers to one question is how `hasPhysicalNotch` and
+    /// `islandStyle` once came to contradict each other (56cd56c).
+    static func defaultOwner(
+        pointerOn: CGDirectDisplayID?, lastHovered: CGDirectDisplayID?,
+        main: CGDirectDisplayID?, any: CGDirectDisplayID?
+    ) -> CGDirectDisplayID? {
+        pointerOn ?? lastHovered ?? main ?? any
+    }
+
+    /// `defaultOwner` fed from live AppKit state: wherever the pointer
+    /// currently sits, else the last display that reported hovering,
+    /// else the main screen, else the first attached one.
+    private func defaultOwnerDisplay() -> CGDirectDisplayID? {
+        let pointerOn = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) }?.displayID
+        return Self.defaultOwner(
+            pointerOn: pointerOn,
+            lastHovered: lastHoveredDisplayID,
+            main: NSScreen.main?.displayID,
+            any: NSScreen.screens.first?.displayID
+        )
+    }
+
     /// `takeKey: false` for drag-driven opens: grabbing key focus in
-    /// the middle of someone's drag yanks their app around.
+    /// the middle of someone's drag yanks their app around. No display
+    /// named, so `defaultOwnerDisplay()` picks one (EC-12).
     func expand(takeKey: Bool = true) {
+        expand(on: defaultOwnerDisplay(), takeKey: takeKey)
+    }
+
+    /// The one door into an expansion on a specific display.
+    ///
+    /// Handing the island from one display to another is a collapse
+    /// and an expansion, one run-loop turn apart, never a swap of
+    /// `expandedDisplayID` under a live view: `ExpandedView` holds
+    /// `ChatController`'s single `WKWebView` (`ChatController.swift:96`),
+    /// an `NSView` cannot be in two hierarchies, and the outgoing
+    /// panel keeps its content mounted for the removal fade
+    /// (`NotchRootView.swift`). Swapped in place, the chat went blank
+    /// on both (EC-9, 2026-08-02).
+    func expand(on display: CGDirectDisplayID?, takeKey: Bool = true) {
+        // Switched off on this screen, or the screen is gone. Refused
+        // here rather than hidden in the view: hover is tracked by the
+        // window controller against screen zones, not by the island's
+        // own hit testing, so an invisible island would still open
+        // under the pointer.
+        guard let display,
+              let screen = NSScreen.screens.first(where: { $0.displayID == display }),
+              displays.resolvedStyle(for: screen) != .off
+        else { return }
+        if let current = expandedDisplayID, current != display {
+            collapse()
+            DispatchQueue.main.async { [weak self] in
+                self?.expand(on: display, takeKey: takeKey)
+            }
+            return
+        }
         guard state != .expanded else { return }
+        expandedDisplayID = display
         state = .expanded
+        restoreLastTabIfWanted()
         music.expandedVisible = true
         if takeKey { onExpandChange?(true) }
     }
 
+    /// Reopen where the user left off, when they have asked for that.
+    /// A tool switched off in settings since is not a place to reopen
+    /// into, so a stored tab pointing at one is dropped rather than
+    /// opened onto a panel whose switcher icon is gone.
+    private func restoreLastTabIfWanted() {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: Self.rememberLastTabKey) else { return }
+        let stored = defaults.string(forKey: Self.lastTabKey).flatMap(Tab.init(rawValue:))
+        // Falls back to today rather than returning early, and that
+        // distinction is the whole bug: while remembering, `collapse()`
+        // never resets `tab`, so it still holds the closed-on value in
+        // memory. Bailing out left it there — switch a tool off while
+        // the island is shut and it reopened straight onto that tool's
+        // panel, the one case this guard exists to prevent.
+        tab = stored.flatMap { Self.isAvailable($0, in: defaults) ? $0 : nil } ?? .today
+    }
+
+    /// Whether a tab is somewhere the island can open onto right now:
+    /// its tool has not been switched off in settings.
+    static func isAvailable(_ tab: Tab, in defaults: UserDefaults = .standard) -> Bool {
+        guard let key = tab.toolKey else { return true }
+        // An unset flag means the tool ships on, matching the
+        // @AppStorage defaults the settings window declares.
+        return defaults.object(forKey: key) == nil || defaults.bool(forKey: key)
+    }
+
+    static let rememberLastTabKey = "rememberLastTab"
+    private static let lastTabKey = "lastTab"
+
     func collapse() {
         guard state == .expanded else { return }
         state = .collapsed
-        // The island always reopens small and clean.
         pane = .none
-        tab = .today
+        // The island always reopens small and clean, unless the user
+        // asked it to reopen where they left off.
+        if UserDefaults.standard.bool(forKey: Self.rememberLastTabKey) {
+            UserDefaults.standard.set(tab.rawValue, forKey: Self.lastTabKey)
+        } else {
+            tab = .today
+        }
         music.expandedVisible = false
         onExpandChange?(false)
     }
@@ -522,9 +1066,16 @@ final class NotchViewModel: ObservableObject {
 
     private var hoverCollapseWork: DispatchWorkItem?
 
-    func hoverChanged(_ hovering: Bool) {
+    /// `isHovering` stays the one shared flag the collapse guards below
+    /// read ("is the pointer on the island at all"); `on:` is which
+    /// display it is on, so hover-out only schedules a collapse when it
+    /// is the display actually holding the expansion that lost the
+    /// pointer, and hover-in expands that display specifically rather
+    /// than wherever `expandedDisplayID` used to point.
+    func hoverChanged(_ hovering: Bool, on display: CGDirectDisplayID) {
         isHovering = hovering
         if hovering {
+            lastHoveredDisplayID = display
             hoverCollapseWork?.cancel()
             hoverCollapseWork = nil
             // The reader arrived; the voice answer is theirs now.
@@ -532,8 +1083,8 @@ final class NotchViewModel: ObservableObject {
             answerCollapseWork = nil
             let expandOnHover = UserDefaults.standard
                 .object(forKey: "expandOnHover") as? Bool ?? true
-            if state == .collapsed, expandOnHover { expand() }
-        } else if state == .expanded {
+            if state == .collapsed, expandOnHover { expand(on: display) }
+        } else if state == .expanded, expandedDisplayID == display {
             scheduleHoverCollapse()
         }
     }
@@ -576,7 +1127,12 @@ final class NotchViewModel: ObservableObject {
             duckedMusicForVoice = true
             music.pause()
         }
-        if ambience.active != nil {
+        // Only duck once. A second quietTheRoom() before the matching
+        // restore would read the already-ducked 0 as "the volume to go
+        // back to", and the chip stays lit over silence forever with no
+        // way back but the slider. Two mic taps inside the 1.2s finalize
+        // window is all it takes.
+        if ambience.active != nil, duckedAmbienceVolume == nil {
             duckedAmbienceVolume = ambience.volume
             ambience.volume = 0
         }
@@ -593,16 +1149,45 @@ final class NotchViewModel: ObservableObject {
         }
     }
 
-    func beginListening() {
+    /// Where the next transcript goes. Passed in at every entrance
+    /// rather than stored as a mode: a sticky destination would send
+    /// the next reminder, note or text message into an agent's context
+    /// with nothing on screen having changed, the worst outcome named
+    /// in the plan (notch-messaging-plan-2026-08-01.md, EC-12).
+    enum VoiceDestination: Equatable {
+        case chalant
+        case session(id: String, title: String)
+    }
+
+    /// Set by whichever entrance started this listening session,
+    /// captured and reset by `endListening` before anything else runs.
+    /// Never read outside that capture and `listeningContent`, which
+    /// only names the destination while `state == .listening`.
+    @Published private(set) var voiceDestination: VoiceDestination = .chalant
+
+    /// Which session's compose card is open in the strip, if any. Lives
+    /// here rather than as the strip's own view state: the composer's
+    /// mic sends the whole island through `.listening`, which unmounts
+    /// `ExpandedView`, taking the strip with it, exactly as it does for
+    /// the persistent mic. View-local state does not survive that round
+    /// trip; `tab` and `draftPrompt` live here for the same reason.
+    @Published var composingSessionID: String?
+
+    func beginListening(to destination: VoiceDestination = .chalant) {
         guard state == .collapsed else { return }
+        voiceDestination = destination
         startListening()
     }
 
     /// Mic button in the expanded island: tap to talk, tap to run.
-    func toggleListening() {
+    /// `to:` defaults to `.chalant`, so the persistent media-row mic,
+    /// the `.talk` hotkey and the collapsed long press all keep their
+    /// exact behaviour without being touched.
+    func toggleListening(to destination: VoiceDestination = .chalant) {
         if state == .listening {
             endListening()
         } else {
+            voiceDestination = destination
             startListening()
         }
     }
@@ -619,6 +1204,17 @@ final class NotchViewModel: ObservableObject {
     /// inside 1.2 seconds and then click outside, and the app was deaf
     /// until relaunch.
     private func startListening() {
+        // A listening session needs an owner display too, just like an
+        // expansion — `state(_:expandedOn:face:)` treats `.listening`
+        // the same as `.expanded`, so with no owner every face would
+        // read `.collapsed` while the mic was live and the room ducked
+        // (EC-11, 2026-08-02). Only when nothing already owns this: the
+        // composer's mic and the persistent media-row mic both start
+        // listening while already expanded on a specific display, and
+        // must keep it, not have it reassigned here.
+        if expandedDisplayID == nil {
+            expandedDisplayID = defaultOwnerDisplay()
+        }
         quietTheRoom()
         state = .listening
         // Only the orphaned case clears the flag. A typed question
@@ -633,10 +1229,21 @@ final class NotchViewModel: ObservableObject {
 
     func endListening() {
         guard state == .listening else { return }
+        // Captured now and reset in the same statement, before any
+        // await below: the one invariant EC-12 exists to protect.
+        // Every entrance sets `voiceDestination` fresh right before it
+        // starts listening, so nothing downstream can carry a
+        // destination past the transcript it was captured for.
+        let destination = voiceDestination
+        voiceDestination = .chalant
         // Leave listening immediately, finalization can take a second
         // and lingering in the listening UI reads as "release didn't
         // work". Dots show while the transcript settles.
-        tab = .ask
+        //
+        // Only a Chalant-bound answer wants the Ask tab; jumping there
+        // mid-message to a session would pull the user off the
+        // composer they were just speaking into.
+        if case .chalant = destination { tab = .ask }
         state = .expanded
         onExpandChange?(true)
         isWorking = true
@@ -649,7 +1256,9 @@ final class NotchViewModel: ObservableObject {
                 self.lastHeard = nil
                 let why = self.voice.failure
                     ?? "Heard nothing. Hold a beat longer next time."
-                self.answer = why
+                if case .chalant = destination {
+                    self.answer = why
+                }
                 // Empty sessions were the only unlogged outcome, and
                 // exactly the ones every mystery report is made of.
                 self.logVoice(
@@ -658,8 +1267,33 @@ final class NotchViewModel: ObservableObject {
                         + " \(self.voice.deviceNote)]"
                 )
             } else {
-                self.submit(spoken)
-                self.lastHeard = spoken
+                switch destination {
+                case .chalant:
+                    self.submit(spoken)
+                    self.lastHeard = spoken
+                case .session(let id, let title):
+                    // Straight to the outbox, never through submit():
+                    // ActionEngine's verbs are Chalant's business, not
+                    // an agent's, and the body never reaches the trail
+                    // that follows (EC-13).
+                    //
+                    // The result is read, not discarded. `queue` refuses
+                    // a session that has ended, a row that cannot
+                    // receive, and anything past the cap, and a refusal
+                    // here means the user just spoke a sentence that
+                    // went nowhere. Dropping it silently while the trail
+                    // recorded "queued" would make the log lie about the
+                    // one thing it exists to answer.
+                    let queued = self.sessions.queue(message: spoken, for: id)
+                    if queued {
+                        let (heard, outcome) = Self.agentMessageLogLine(title: title, text: spoken)
+                        self.logVoice(heard, outcome: outcome)
+                    } else {
+                        self.flashGlance("\(title) did not take that message")
+                        let (heard, _) = Self.agentMessageLogLine(title: title, text: spoken)
+                        self.logVoice(heard, outcome: "refused, nothing was queued")
+                    }
+                }
             }
             // A voice answer opened the island without the cursor
             // ever visiting; give it a readable moment, then slip
@@ -713,6 +1347,17 @@ final class NotchViewModel: ObservableObject {
         return (heard, outcome)
     }
 
+    /// A message bound for an agent is the same class of thing as one
+    /// bound for a person: the user's own words, going somewhere else.
+    /// `voiceLog` is a preferences array that is never cleared, so the
+    /// body never reaches it at all here, not redacted after the fact
+    /// like `redactedForLog` above, simply never assembled. Only where
+    /// it went and how long it was.
+    static func agentMessageLogLine(title: String, text: String) -> (String, String) {
+        let words = text.split(separator: " ").count
+        return ("a message for \(title)", "queued, \(words) word\(words == 1 ? "" : "s")")
+    }
+
     private static func heldBack(_ words: Int) -> String {
         "[\(max(0, words)) words held back]"
     }
@@ -759,9 +1404,21 @@ final class NotchViewModel: ObservableObject {
     }
 
     /// Discard the recording without running anything.
+    ///
+    /// This is also EC-20's guard: the global click monitor
+    /// (`NotchWindowController`) already calls this the instant a click
+    /// lands outside the app while `state == .listening`, for any
+    /// destination, so a composer dismissed mid-dictation never has its
+    /// transcript delivered anywhere. It is simply never spoken into a
+    /// destination that outlives it.
     func cancelListening() {
         guard state == .listening else { return }
         voice.cancel()
+        // Defensive: nothing reads this outside a listening session,
+        // but a destination left pointed at a session between here and
+        // the next `beginListening`/`toggleListening` is exactly the
+        // kind of stored mode EC-12 exists to rule out.
+        voiceDestination = .chalant
         // cancel() drops the completion too, so this is the last hand
         // that can put the flag down.
         isWorking = false
@@ -779,7 +1436,9 @@ final class NotchViewModel: ObservableObject {
     func receiveDrop(_ items: [DroppedItem], quietly: Bool = false) {
         // The hosting view already refuses drags mid-voice; belt and braces.
         guard state != .listening else { return }
-        dragExpanded = false
+        // `dragExpanded` itself now lives on `IslandFace` (2026-08-02);
+        // the window controller clears it at the same `onDrop` call that
+        // reaches here, right beside where it is set.
         var landedShelf = false
         var landedClip = false
         for item in items {

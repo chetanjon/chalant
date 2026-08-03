@@ -1,3 +1,4 @@
+import AppKit
 import EventKit
 import Foundation
 
@@ -87,8 +88,6 @@ private extension String {
 @MainActor
 final class EventKitService: ObservableObject {
     private let store = EKEventStore()
-    private var remindersGranted = false
-    private var eventsGranted = false
 
     /// Live data for the Today glance. Empty until `refresh()` runs.
     @Published private(set) var events: [DayEvent] = []
@@ -104,11 +103,24 @@ final class EventKitService: ObservableObject {
     /// The change-notice token, kept so it can be handed back. Block
     /// observers are retained by the centre until it is.
     private var storeObserver: NSObjectProtocol?
+    /// Fires when the app regains focus, so a permission granted (or
+    /// revoked) in System Settings shows up on its own. `refresh()` is
+    /// cheap and idempotent; there is no reason a granted permission
+    /// should need a relaunch to be picked up (founder, 2026-08-02).
+    private var activationObserver: NSObjectProtocol?
 
     /// Access was asked for and refused; the glance says so instead
     /// of showing an empty day.
     @Published private(set) var calendarDenied = false
     @Published private(set) var remindersDenied = false
+    /// The fuller picture behind the two booleans above: already
+    /// granted, worth asking (the system will still prompt, nothing
+    /// has been decided yet), or denied (the system will never prompt
+    /// again; only System Settings can change it). A denied-state
+    /// view needs this distinction to choose the right one button —
+    /// "ask again" makes no sense once the answer is final.
+    @Published private(set) var calendarPermission: PermissionDecision = .ask
+    @Published private(set) var remindersPermission: PermissionDecision = .ask
 
     private static let formatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -116,17 +128,66 @@ final class EventKitService: ObservableObject {
         return formatter
     }()
 
+    /// The three raw EventKit statuses, collapsed to what the glance
+    /// actually has to decide. Pure and static on purpose: this is the
+    /// one piece of the permission machine worth a test that doesn't
+    /// need a store, an async call, or a real permission dialog.
+    enum PermissionDecision: Equatable {
+        case granted, ask, denied
+    }
+
+    static func decision(for status: EKAuthorizationStatus) -> PermissionDecision {
+        switch status {
+        case .fullAccess: return .granted
+        case .notDetermined: return .ask
+        default: return .denied
+        }
+    }
+
+    /// Live status is read fresh every call, never cached: a cached
+    /// "granted" would miss a later revoke, and a cached "denied" is
+    /// exactly the bug the glance shipped with (a grant made in System
+    /// Settings sat invisible until relaunch). The check itself is a
+    /// synchronous property read, so asking again costs nothing.
     private func ensureReminders() async -> Bool {
-        if remindersGranted { return true }
-        remindersGranted = (try? await store.requestFullAccessToReminders()) ?? false
-        return remindersGranted
+        switch Self.decision(for: EKEventStore.authorizationStatus(for: .reminder)) {
+        case .granted: return true
+        case .ask: return (try? await store.requestFullAccessToReminders()) ?? false
+        case .denied: return false
+        }
     }
 
     private func ensureEvents() async -> Bool {
-        if eventsGranted { return true }
-        eventsGranted = (try? await store.requestFullAccessToEvents()) ?? false
-        return eventsGranted
+        switch Self.decision(for: EKEventStore.authorizationStatus(for: .event)) {
+        case .granted: return true
+        case .ask: return (try? await store.requestFullAccessToEvents()) ?? false
+        case .denied: return false
+        }
     }
+
+    // MARK: - Permission recovery
+
+    /// One click into the exact privacy pane, instead of a sentence
+    /// telling the founder to find it themselves through System
+    /// Settings, Privacy & Security, Calendars.
+    static func openCalendarPrivacySettings() { openPrivacyPane("Privacy_Calendars") }
+
+    static func openRemindersPrivacySettings() { openPrivacyPane("Privacy_Reminders") }
+
+    private static func openPrivacyPane(_ anchor: String) {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)"
+        ) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// What actually disappears with each block off, said plainly
+    /// instead of a bare "access is off": the denied state should
+    /// name the cost, not just the setting.
+    static let calendarLossSummary =
+        "No events on the glance, no next-meeting countdown, no one-tap join."
+    static let remindersLossSummary =
+        "No open reminders on the glance, nothing to tick off from here."
 
     // MARK: - Live glance data
 
@@ -140,6 +201,7 @@ final class EventKitService: ObservableObject {
     private func reloadEvents() async {
         let granted = await ensureEvents()
         calendarDenied = !granted
+        calendarPermission = Self.decision(for: EKEventStore.authorizationStatus(for: .event))
         guard granted else { events = []; return }
         let calendar = Calendar.current
         let start = calendar.startOfDay(for: Date())
@@ -204,6 +266,14 @@ final class EventKitService: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in self?.recomputeNext() }
         }
+        // System Settings runs in its own process; nothing here hears
+        // a permission flip made over there. Coming back to Chalant is
+        // the one moment that reliably means "go check again."
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in await self?.refresh() }
+        }
     }
 
     func stopGlanceTicker() {
@@ -213,12 +283,19 @@ final class EventKitService: ObservableObject {
             NotificationCenter.default.removeObserver(storeObserver)
         }
         storeObserver = nil
+        if let activationObserver {
+            NotificationCenter.default.removeObserver(activationObserver)
+        }
+        activationObserver = nil
     }
 
     deinit {
         glanceTimer?.invalidate()
         if let storeObserver {
             NotificationCenter.default.removeObserver(storeObserver)
+        }
+        if let activationObserver {
+            NotificationCenter.default.removeObserver(activationObserver)
         }
     }
 
@@ -255,6 +332,7 @@ final class EventKitService: ObservableObject {
     private func reloadReminders() async {
         let granted = await ensureReminders()
         remindersDenied = !granted
+        remindersPermission = Self.decision(for: EKEventStore.authorizationStatus(for: .reminder))
         guard granted else { reminders = []; return }
         let predicate = store.predicateForIncompleteReminders(
             withDueDateStarting: nil, ending: nil, calendars: nil

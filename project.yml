@@ -22,6 +22,12 @@ targets:
         buildPhase: resources
       - path: Vendor/MediaRemoteAdapter/MediaRemoteAdapterTestClient
         buildPhase: resources
+      # Same script Claude Code's Notification and Stop hooks call into.
+      # Bundled so a shipped Chalant can tell a user exactly where it
+      # lives (2026-08-01: it was nowhere in the bundle, so the
+      # Sessions pane could not name a real path to paste).
+      - path: scripts/chalant-hook
+        buildPhase: resources
     dependencies:
       - framework: Vendor/MediaRemoteAdapter/MediaRemoteAdapter.framework
         embed: true

@@ -30,6 +30,31 @@ extension NoiseEngine.NoiseColor {
     }
 }
 
+/// What ambience needs from a sound source, and nothing beyond it.
+///
+/// A protocol for one reason. The focus/ambience coupling rules are
+/// about which object calls which method, and a real `NoiseEngine`
+/// drags a real audio device into proving them. A machine with no
+/// output, which is every CI runner, cannot start one: it reports the
+/// failure through `onSilence`, and `active` is cleared on a later
+/// main-actor hop. That raced `testAFocusSessionLeavesTheUsersOwnNoise`
+/// into failing with no code changing at all, red at 0ea7534 and green
+/// at 6910efa with a docs-only commit between them (2026-08-02).
+///
+/// The seam is the fix. Whether audio hardware exists is a fact about
+/// the machine, and it was being allowed to decide a question about
+/// this app's own wiring.
+protocol AmbienceSource: AnyObject {
+    var onSilence: ((String) -> Void)? { get set }
+    func start(_ color: NoiseEngine.NoiseColor)
+    func stop()
+    func pause()
+    func resume()
+    func setVolume(_ volume: Float)
+}
+
+extension NoiseEngine: AmbienceSource {}
+
 /// The one owner of ambient sound. The chips row, focus sessions, and
 /// voice commands all speak to this, so "what's playing" has exactly
 /// one answer, and the collapsed island can show it.
@@ -47,9 +72,12 @@ final class AmbienceController: ObservableObject {
         didSet { engine.setVolume(Float(volume)) }
     }
 
-    let engine = NoiseEngine()
+    let engine: AmbienceSource
 
-    init() {
+    /// Defaults to a real engine, so every caller in the app is
+    /// unchanged and only a test ever passes anything else.
+    init(engine: AmbienceSource = NoiseEngine()) {
+        self.engine = engine
         engine.onSilence = { [weak self] reason in
             Task { @MainActor in
                 guard let self else { return }
