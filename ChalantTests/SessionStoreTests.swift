@@ -710,6 +710,39 @@ final class SessionStoreTests: XCTestCase {
                        "vouched for again, so discovery is trusted again")
     }
 
+    /// The exact order a real sweep runs in: every live entry is marked,
+    /// then the whole list is held against that same set. A session the
+    /// registry just vouched for must survive the reconciliation that
+    /// follows it in the same pass, or the strip empties itself once a
+    /// second and the feature is worse than not having it.
+    func testASweepDoesNotDisownTheSessionsItJustMarked() {
+        let store = SessionStore()
+        store.markLive(id: "mine", name: "moai", cwd: "/a", pid: 1, kind: .interactive,
+                       hasTerminal: true, status: .working)
+        store.markLive(id: "other", name: "moai", cwd: "/b", pid: 2, kind: .interactive,
+                       hasTerminal: true, status: .idle)
+
+        store.reconcileLive(against: ["mine", "other"])
+
+        XCTAssertEqual(store.sessions.first { $0.id == "mine" }?.state, .working)
+        XCTAssertEqual(store.sessions.first { $0.id == "other" }?.state, .idle)
+        XCTAssertEqual(store.glanceable.map(\.id), ["mine"])
+    }
+
+    /// And it has to keep surviving. `reconcileLive` runs on every sweep,
+    /// five seconds apart, forever.
+    func testRepeatedSweepsLeaveALiveSessionAlone() {
+        let store = SessionStore()
+        store.markLive(id: "mine", name: "moai", cwd: "/a", pid: 1, kind: .interactive,
+                       hasTerminal: true, status: .working)
+        for _ in 0..<10 {
+            store.reconcileLive(against: ["mine"])
+            store.upsert(id: "mine", title: "moai", cwd: "/a", branch: nil,
+                         lastPrompt: nil, state: .working)
+        }
+        XCTAssertEqual(store.sessions.first?.state, .working)
+    }
+
     /// Cursor keeps no such directory, so Claude Code's registry has no
     /// standing to call a Cursor chat dead.
     func testTheRegistryHasNoOpinionAboutCursor() {

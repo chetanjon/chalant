@@ -108,7 +108,41 @@ struct AgentSessionsStrip: View {
             // (notch-messaging-plan-2026-08-01.md, W-C rationale).
             if model.composingSessionID == session.id {
                 ComposeCard(session: session, sessions: sessions, model: model)
+            } else if focused {
+                // What it said, on the row, once there is room for it.
+                //
+                // In the glance this lives inside the composer, because
+                // a strip four rows tall cannot afford it and a name
+                // alone is enough to pick from. Given the whole panel
+                // the trade reverses: a list of names in a room this
+                // size is a room with nothing in it, and the reason to
+                // open a session is almost always what it just said.
+                //
+                // Only when the composer is closed. Open, the composer
+                // shows the same words directly above its own field,
+                // and twice is worse than once.
+                lastWord(session)
             }
+        }
+    }
+
+    /// The agent's last words, trimmed to a glance's worth.
+    ///
+    /// Three lines, not the composer's four: this one repeats down a
+    /// list, so its job is to let you recognise a session rather than
+    /// to read it. Opening the composer is where reading happens.
+    @ViewBuilder
+    private func lastWord(_ session: SessionStore.Session) -> some View {
+        if let said = session.lastMessage, !said.isEmpty {
+            Text(said)
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textTertiary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.bottom, Theme.Space.xs)
+                .accessibilityLabel("It said: \(said)")
         }
     }
 
