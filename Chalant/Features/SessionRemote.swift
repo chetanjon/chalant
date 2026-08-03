@@ -79,24 +79,69 @@ enum SessionRemote {
     private static let terminals: Set<String> = ["com.apple.Terminal", "com.googlecode.iterm2"]
 
     /// Where a session's keystrokes would have to go, if anywhere.
-    static func target(for session: SessionStore.Session) -> Target? {
-        let table = SessionLocator.processTable()
-        let apps = Set(NSWorkspace.shared.runningApplications.map(\.processIdentifier))
-        // The registry's pid when it has one, else the process actually
-        // working in this folder. Same resolution `reveal` already does.
-        let agent = session.pid
-            ?? SessionLocator.agentProcess(
-                forCwd: session.cwd, in: table, agentNames: SessionLocator.agentNames)
-        guard let agent,
-              let tty = SessionLocator.tty(of: agent),
-              let ownerPID = SessionLocator.owningApplication(
-                of: agent, in: table, applications: apps),
-              let owner = NSRunningApplication(processIdentifier: ownerPID),
-              let bundleID = owner.bundleIdentifier
+    ///
+    /// Two things here were wrong on the first attempt and both cost a
+    /// real message (founder, 2026-08-03).
+    ///
+    /// It used to fall back to "the agent process working in this
+    /// folder" when the registry had no pid. **A working directory is
+    /// not an identity.** Three sessions in one repo share a cwd, so
+    /// that fallback happily matched a completely different session,
+    /// and a check meant to prove *this* session was alive proved that
+    /// *some* session was. Only the registry's pid names one session.
+    ///
+    /// And it used to find the owning app by walking the process tree,
+    /// which is how `reveal` picks a window to raise. For deciding
+    /// whether a tab can be *written to* that is both too weak and too
+    /// strong: a session launched detached has no app ancestor even
+    /// though Terminal owns its tty, and a session under VS Code has an
+    /// app ancestor that cannot address a tab at all. The question is
+    /// simply "does Terminal or iTerm have a tab on this tty", so that
+    /// is now the question asked, of them, directly.
+    static func target(for session: SessionStore.Session) async -> Target? {
+        guard let pid = session.pid, kill(pid, 0) == 0,
+              let tty = SessionLocator.tty(of: pid)
         else { return nil }
-        return Target(
-            tty: tty, bundleID: bundleID,
-            appName: owner.localizedName ?? bundleID)
+        let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+        for (bundleID, name) in [
+            ("com.apple.Terminal", "Terminal"), ("com.googlecode.iterm2", "iTerm2"),
+        ] where running.contains(bundleID) {
+            guard await owns(tty: tty, bundleID: bundleID) else { continue }
+            return Target(tty: tty, bundleID: bundleID, appName: name)
+        }
+        return nil
+    }
+
+    /// Ask an app whether one of its tabs is on this terminal device.
+    private static func owns(tty: String, bundleID: String) async -> Bool {
+        let script = bundleID == "com.apple.Terminal"
+            ? """
+              tell application "Terminal"
+                repeat with w in windows
+                  repeat with t in tabs of w
+                    try
+                      if (tty of t) is "\(escaped(tty))" then return "yes"
+                    end try
+                  end repeat
+                end repeat
+              end tell
+              return "no"
+              """
+            : """
+              tell application "iTerm2"
+                repeat with w in windows
+                  repeat with t in tabs of w
+                    repeat with s in sessions of t
+                      try
+                        if (tty of s) is "\(escaped(tty))" then return "yes"
+                      end try
+                    end repeat
+                  end repeat
+                end repeat
+              end tell
+              return "no"
+              """
+        return await runScript(script) == "yes"
     }
 
     /// Whether this target is one this app can address exactly.
@@ -112,14 +157,18 @@ enum SessionRemote {
     /// 2026-08-03: "I gave a text input in the island but I can't see it
     /// here"). A composer that accepts words it cannot deliver is worse
     /// than one that is greyed out, because it looks like it worked.
+    /// The registry's pid and nothing else. `kill(pid, 0)` asks "does
+    /// this process exist and may I signal it", and sends nothing.
+    ///
+    /// No cwd fallback. That fallback is what made this function lie:
+    /// it answered "yes, running" for a session that had ended, because
+    /// a *different* agent was working in the same folder. For "can this
+    /// message be delivered", a confident wrong yes is the worst
+    /// possible answer. Nil pid means nobody has vouched for this
+    /// session, which is honestly not the same as knowing it is alive.
     static func isRunning(_ session: SessionStore.Session) -> Bool {
-        // `kill(pid, 0)` asks "does this process exist and may I signal
-        // it", and sends nothing. The cheap answer first, since the
-        // registry's pid is right almost every time.
-        if let pid = session.pid, kill(pid, 0) == 0 { return true }
-        let table = SessionLocator.processTable()
-        return SessionLocator.agentProcess(
-            forCwd: session.cwd, in: table, agentNames: SessionLocator.agentNames) != nil
+        guard let pid = session.pid else { return false }
+        return kill(pid, 0) == 0
     }
 
     /// One line, always.

@@ -57,7 +57,7 @@ struct ComposeCard: View {
         .chalantCard(radius: Theme.Radius.row)
         .task(id: session.id) {
             while !Task.isCancelled {
-                measureReach()
+                await measureReach()
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
             }
         }
@@ -224,16 +224,23 @@ struct ComposeCard: View {
         let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         draft = ""
         guard !typed.isEmpty else { return }
+        // The field is already closed in this state; this is the second
+        // lock, for the return key.
         if case .nowhere = reach { return }
-        guard SessionRemote.sendsStraightToTerminal(),
-              let target = SessionRemote.target(for: session),
-              SessionRemote.canType(into: target)
-        else {
-            remoteNote = nil
-            sessions.queue(message: typed, for: session.id)
-            return
-        }
         Task {
+            // Re-asked at the moment of sending rather than trusting the
+            // measurement from up to three seconds ago: a window can be
+            // closed between reading the line under the field and
+            // pressing return, and that gap is where a message goes
+            // missing.
+            guard SessionRemote.sendsStraightToTerminal(),
+                  let target = await SessionRemote.target(for: session),
+                  SessionRemote.canType(into: target)
+            else {
+                remoteNote = nil
+                sessions.queue(message: typed, for: session.id)
+                return
+            }
             switch await SessionRemote.type(typed, into: target) {
             case .typed(let app):
                 remoteNote = "Typed into \(app)."
@@ -269,9 +276,9 @@ struct ComposeCard: View {
     /// halves of the answer go stale on their own: a terminal window can
     /// be closed, and a session can end, without anything telling this
     /// card.
-    private func measureReach() {
+    private func measureReach() async {
         if SessionRemote.sendsStraightToTerminal(),
-           let target = SessionRemote.target(for: session),
+           let target = await SessionRemote.target(for: session),
            SessionRemote.canType(into: target) {
             reach = .types(app: target.appName)
             return
@@ -284,6 +291,21 @@ struct ComposeCard: View {
         }
         guard hookInstalled else {
             reach = .nowhere("Claude Code isn't set up to collect these yet.")
+            return
+        }
+        // Alive, but sitting at its prompt with no turn to end.
+        //
+        // The outbox is collected by the Stop hook, which fires when a
+        // turn finishes. An idle session has no turn, so a message left
+        // here waits until somebody types into that window themselves,
+        // which is the errand this whole surface exists to save. Saying
+        // "arrives next time it runs" was true and useless; this says
+        // the part that changes what you do next.
+        if session.state == .idle {
+            reach = .nowhere(
+                "This session is idle, and Chalant can only type into Terminal or iTerm. "
+                + "Yours is somewhere else, so a message left here would wait until you go and "
+                + "type in that window yourself.")
             return
         }
         reach = .queues
