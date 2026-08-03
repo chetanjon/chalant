@@ -248,7 +248,7 @@ struct DashboardView: View {
                 case .sessions:
                     SessionsSection(sessions: model.sessions, activities: model.activities)
                 case .whatShows:
-                    WhatShowsSection(events: model.events)
+                    WhatShowsSection(events: model.events, stats: model.stats)
                 case .island:
                     IslandSection(music: model.music)
                 case .displays:

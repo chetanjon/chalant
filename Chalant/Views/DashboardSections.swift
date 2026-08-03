@@ -415,6 +415,12 @@ struct SessionsSection: View {
 
 struct WhatShowsSection: View {
     let events: EventKitService
+    /// Only consulted for `stats.battery != nil`, to leave the
+    /// Battery toggle out of a settings window on a Mac that can
+    /// never grow one: a switch nobody's hardware can act on is a
+    /// dead control, the same call made for the tab itself
+    /// (ExpandedView.swift).
+    @ObservedObject var stats: SystemStatsController
 
     @AppStorage("showMedia") private var showMedia = true
     @AppStorage("showAmbience") private var showAmbience = true
@@ -427,6 +433,7 @@ struct WhatShowsSection: View {
     @AppStorage("toolFocus") private var toolFocus = true
     @AppStorage("toolChat") private var toolChat = true
     @AppStorage("toolSessions") private var toolSessions = true
+    @AppStorage("toolBattery") private var toolBattery = true
     @AppStorage(ChatController.serviceKey) private var chatService = "claude"
     @AppStorage(EventKitService.reminderListKey) private var reminderListID = ""
 
@@ -475,6 +482,10 @@ struct WhatShowsSection: View {
                 SettingToggle(label: "Focus & timers", isOn: $toolFocus)
                 SettingDivider()
                 SettingToggle(label: "Sessions", isOn: $toolSessions)
+                if stats.battery != nil {
+                    SettingDivider()
+                    SettingToggle(label: "Battery", isOn: $toolBattery)
+                }
                 SettingDivider()
                 SettingToggle(label: "Chat", isOn: $toolChat)
                 if toolChat {
