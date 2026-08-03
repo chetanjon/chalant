@@ -708,7 +708,15 @@ final class NotchViewModel: ObservableObject {
             // screen away from whatever is already being typed into.
             guard self.state != .listening else { return }
             guard self.state != .expanded || !self.isMidInteraction else { return }
-            self.expand()
+            // takeKey: false, and this is the whole difference between a
+            // notification and an interruption. The default takes
+            // keyboard focus, which is right when a person just clicked
+            // the island and wrong when the island appeared on its own:
+            // the founder was typing in a terminal and their keystrokes
+            // stopped going there (2026-08-03). Nothing that opens
+            // without being asked may take the keyboard. Clicking into
+            // the composer still focuses it, because that is a click.
+            self.expand(takeKey: false)
             self.tab = .sessions
             // Straight to that session's own card, open, so its last
             // words and the box to answer them are the same surface.
@@ -728,7 +736,10 @@ final class NotchViewModel: ObservableObject {
             // that is merely open and idle, gets opened straight to it.
             guard self.state != .listening else { return }
             if self.state == .expanded, self.isMidInteraction { return }
-            self.expand()
+            // takeKey: false for the same reason the finished-turn path
+            // uses it: an island nobody asked to open must not take the
+            // keyboard away from whatever they were typing into.
+            self.expand(takeKey: false)
             // After expand(), never before: expand() runs
             // restoreLastTabIfWanted(), which would otherwise stomp this
             // the instant it ran (same bug and same fix as the shortcut

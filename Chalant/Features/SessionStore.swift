@@ -602,6 +602,7 @@ final class SessionStore: ObservableObject {
             sessions[index].state = .stale
             sessions[index].updatedAt = Date()
             failMessage(sessionID: id)
+            announcedRest[id] = nil
             expiryWork[id]?.cancel()
             expiryWork[id] = nil
             onSessionGone?(id)
@@ -641,10 +642,33 @@ final class SessionStore: ObservableObject {
     /// forever.
     var onSessionCameToRest: ((_ id: String, _ title: String) -> Void)?
 
+    /// The last words each session was already announced for, so the
+    /// same finished turn is never announced twice.
+    private var announcedRest: [String: String] = [:]
+
     /// One place decides what "came to rest" means, so the two writers
     /// that can move a session's state cannot drift on it.
+    ///
+    /// The transition alone was not enough, and the reason is worth
+    /// keeping: two writers move a session's state. The registry sees a
+    /// process sitting at its prompt and says idle; the scraper sees a
+    /// transcript that was written to recently and says working. They
+    /// disagree for a while after a turn ends, so the state flips back
+    /// and forth and `working -> idle` happens several times for one
+    /// finished turn. The island opened, collapsed and opened again
+    /// while the founder was trying to type into it (2026-08-03).
+    ///
+    /// So the thing announced is the turn, identified by the last words
+    /// it produced, not the edge. A new turn writes new words and is
+    /// announced; the same turn flapping between two writers' opinions
+    /// is announced once. A turn that ends with no text at all falls
+    /// back to the state it landed in, which still collapses repeats
+    /// because the value stops changing.
     private func noteTransition(from previous: State, to next: State, id: String, title: String) {
         guard previous == .working, next == .idle || next == .stale else { return }
+        let words = sessions.first { $0.id == id }?.lastMessage ?? "came to rest in \(next.rawValue)"
+        guard announcedRest[id] != words else { return }
+        announcedRest[id] = words
         onSessionCameToRest?(id, title)
     }
 
