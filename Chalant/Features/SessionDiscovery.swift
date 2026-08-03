@@ -165,7 +165,23 @@ final class SessionDiscovery {
             watchDirectory(dir.path)
         }
         let files = projectDirs.flatMap { jsonlFiles(in: $0) }
-        let freshest = files.sorted { $0.mtime > $1.mtime }.prefix(Self.maxFilesToTrack)
+        // Freshness alone is the wrong test for which transcripts are
+        // worth reading. The registry knows exactly which sessions are
+        // running, and a running session that fell outside the freshest
+        // dozen kept the placeholder name the registry gave it forever:
+        // it showed as "offseason-workspace-47" beside a sibling
+        // wearing its real title, because nothing was reading the file
+        // that holds the title (founder, 2026-08-02).
+        //
+        // A pid is the registry's mark: `markLive` is the only writer,
+        // and it only sets one for a process it confirmed alive. Those
+        // come first, then the freshest fill whatever room is left, so
+        // a machine with months of history still never opens all of it.
+        let live = Set(store.sessions.filter { $0.pid != nil }.map(\.id))
+        let byFreshness = files.sorted { $0.mtime > $1.mtime }
+        let liveFiles = byFreshness.filter { live.contains($0.id) }
+        let rest = byFreshness.filter { !live.contains($0.id) }
+        let freshest = liveFiles + rest.prefix(max(0, Self.maxFilesToTrack - liveFiles.count))
         var seenIds = Set<String>()
         for file in freshest {
             seenIds.insert(file.id)
