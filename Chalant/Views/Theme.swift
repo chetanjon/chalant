@@ -231,14 +231,40 @@ enum Theme {
         /// room the sidebar layout earns.
         static let chat: CGFloat = 330
         static let chatFull: CGFloat = 390
+        /// The window every island is drawn inside.
+        ///
+        /// Lived as a private `panelSize` in `NotchWindowController`
+        /// while comments in three other files reasoned about it, which
+        /// is how a number ends up being two numbers. One home now, and
+        /// the controller reads it.
+        static let panel: CGFloat = 720
+
+        /// The header row above a focused destination, plus the gap
+        /// under it. Named because `room` below has to subtract it and a
+        /// bare 34 in that arithmetic would be unreadable.
+        static let roomHeader: CGFloat = 34
+
         /// A destination that has been given the island's whole panel.
         ///
-        /// The panel the island already lives in is 720 tall and the
-        /// expanded island spends 288 of it, so this is not new room,
-        /// it is room that was being left on the floor. Header and
-        /// composer take the rest and the whole thing lands near 620,
-        /// clear of the panel with margin to spare.
-        static let focused: CGFloat = 480
+        /// Computed rather than constant, because every input is a user
+        /// dial: the notch can be emulated anywhere in 20...60, and
+        /// `contentPadding` runs 8...36. A fixed number safe for the
+        /// worst combination of those would leave room unused on every
+        /// ordinary Mac, and a fixed number sized for an ordinary Mac
+        /// would overflow the panel on the worst one. The predecessor
+        /// here was 480 flat, which did neither: it stranded roughly
+        /// 340pt of black under a two-row list and still read as a bug.
+        ///
+        /// Worked through: a real built-in notch (32) at default padding
+        /// (20) spends 98 on chrome and gets the full 620. The worst
+        /// combination anyone can dial in (60 and 36) spends 142 and
+        /// gets 578. The 420 floor is a backstop against a future panel
+        /// change producing an absurd room; nothing in today's ranges
+        /// comes near it.
+        static func room(topReserve: CGFloat, padding: CGFloat) -> CGFloat {
+            let chrome = topReserve + Space.notchClearance + roomHeader + padding
+            return min(620, max(420, panel - chrome))
+        }
     }
 
     /// Motion personality, user-selectable in settings. Serene is the

@@ -56,7 +56,8 @@ struct ExpandedView: View {
     /// floor under the dial there, never a ceiling on it.
     private var islandWidth: CGFloat {
         NotchViewModel.expandedWidth(
-            configWidth: face.expandedWidth, tab: model.tab, pane: model.pane, chatFull: chatFull)
+            configWidth: face.expandedWidth, tab: model.tab, pane: model.pane,
+            chatFull: chatFull, focused: model.focusedTab != nil)
     }
 
     private var enabledTools: [NotchViewModel.Tab] {
@@ -137,7 +138,14 @@ struct ExpandedView: View {
                 }
             }
             focusedPanel(destination)
-                .frame(height: Theme.Panel.focused)
+                // Sized from this display's own chrome rather than from
+                // a constant. `contentTopReserve` and `contentPadding`
+                // are both user dials, so the room they leave is a
+                // different number on every Mac, and the old flat 480
+                // was wrong on all of them: too short here, and it would
+                // have overflowed the panel had it been set for here.
+                .frame(height: Theme.Panel.room(
+                    topReserve: face.contentTopReserve, padding: face.contentPadding))
         }
     }
 

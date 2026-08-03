@@ -152,7 +152,11 @@ final class NotchWindowController {
     /// the Settings pane measures ~640pt) and its width the chat
     /// island's 840; clear areas hit-test through, so the extra room
     /// costs nothing.
-    private let panelSize = CGSize(width: 1000, height: 720)
+    // Height reads `Theme.Panel.panel` rather than repeating 720: the
+    // focused room sizes itself against the same number, and two copies
+    // of it is exactly how a room ends up taller than the window it is
+    // drawn in.
+    private let panelSize = CGSize(width: 1000, height: Theme.Panel.panel)
 
     /// Everything `apply(_:to:)` writes onto a face, as one comparable
     /// value. Kept together so adding a per-display setting cannot
@@ -971,7 +975,7 @@ final class NotchWindowController {
         let chatFull = UserDefaults.standard.object(forKey: "chatFull") as? Bool ?? false
         let width = NotchViewModel.expandedWidth(
             configWidth: face.expandedWidth, tab: viewModel.tab, pane: viewModel.pane,
-            chatFull: chatFull)
+            chatFull: chatFull, focused: viewModel.focusedTab != nil)
         let height = viewModel.expandedSize.height
         return hoverZone(on: screen, width: width + 28, height: height + 16)
     }

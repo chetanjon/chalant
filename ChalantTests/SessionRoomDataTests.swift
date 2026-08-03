@@ -260,3 +260,68 @@ final class SessionRoomDataTests: XCTestCase {
         )
     }
 }
+
+/// The room's arithmetic. Every input is a user dial, so the interesting
+/// cases are the ends of the ranges rather than the middle, and the one
+/// that matters is that no dialable combination overflows the panel the
+/// island is drawn in.
+@MainActor
+final class RoomGeometryTests: XCTestCase {
+    private typealias Panel = Theme.Panel
+
+    func testAnOrdinaryMacGetsTheFullRoom() {
+        // A real built-in notch at the default padding.
+        XCTAssertEqual(Panel.room(topReserve: 32, padding: 20), 620)
+    }
+
+    /// The check the flat 480 could never pass: the worst combination
+    /// anyone can dial in still fits inside the window.
+    func testNoDialableCombinationOverflowsThePanel() {
+        let notch = DisplayConfigStore.Config.heightRange
+        let padding = DisplayConfigStore.Config.paddingRange
+        for top in [notch.lowerBound, notch.upperBound] {
+            for pad in [padding.lowerBound, padding.upperBound] {
+                let room = Panel.room(topReserve: top, padding: pad)
+                let chrome = top + Theme.Space.notchClearance + Panel.roomHeader + pad
+                XCTAssertLessThanOrEqual(
+                    room + chrome, Panel.panel,
+                    "notch \(top), padding \(pad) overflows the panel")
+            }
+        }
+    }
+
+    func testTheWorstConfigurationStillBeatsTheOldFlatNumber() {
+        let worst = Panel.room(
+            topReserve: DisplayConfigStore.Config.heightRange.upperBound,
+            padding: DisplayConfigStore.Config.paddingRange.upperBound)
+        XCTAssertEqual(worst, 578)
+        XCTAssertGreaterThan(worst, 480)
+    }
+
+    func testTheRoomIsClampedAtBothEnds() {
+        XCTAssertEqual(Panel.room(topReserve: 0, padding: 0), 620)
+        XCTAssertEqual(Panel.room(topReserve: 900, padding: 900), 420)
+    }
+
+    // MARK: Width
+
+    func testTheRoomPutsAFloorUnderTheWidthDial() {
+        let narrow = NotchViewModel.expandedWidth(
+            configWidth: 520, tab: .sessions, pane: .none, chatFull: false, focused: true)
+        XCTAssertEqual(narrow, 820)
+    }
+
+    /// A floor, never an override. Somebody already running wider keeps
+    /// their width and the conversation column simply gets longer.
+    func testAWiderDialIsNeverShrunkByTheFloor() {
+        let wide = NotchViewModel.expandedWidth(
+            configWidth: 840, tab: .sessions, pane: .none, chatFull: false, focused: true)
+        XCTAssertEqual(wide, 840)
+    }
+
+    func testTheGlanceIsUntouchedByTheRoomFloor() {
+        let glance = NotchViewModel.expandedWidth(
+            configWidth: 520, tab: .sessions, pane: .none, chatFull: false, focused: false)
+        XCTAssertEqual(glance, 520)
+    }
+}
