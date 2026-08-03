@@ -89,6 +89,14 @@ struct AgentSessionsStrip: View {
             // question came from, which is the whole point: the island
             // already told you a session wants something.
             //
+            // Above the question card, because it outranks one: a
+            // question can wait, a held tool call is an agent standing
+            // still until it is answered.
+            if let approval = session.approval, approval.decision == nil {
+                ApprovalCard(approval: approval) { decision in
+                    sessions.decide(approvalID: approval.id, as: decision)
+                }
+            }
             // `isFullyAnswered`, never just the first question's answer:
             // a bundle two of three questions answered is still a
             // session that wants you, and the old single-question check
@@ -928,5 +936,68 @@ private struct AskCard: View {
                 + "next takes a turn. The terminal prompt still needs its own answer to move "
                 + "past it now."
         queuedOutcome = queue(summary) ? delivered : "Could not queue that; this session can't take a message right now."
+    }
+}
+
+/// A tool call held at the door.
+///
+/// The only card in this app whose buttons change what a running agent
+/// does. Everything else here reports, or leaves something for an agent
+/// to collect on its own schedule; this one has an agent standing still
+/// on the other side of it.
+///
+/// So it shows the call verbatim and never summarises: a paraphrase of
+/// a command you are being asked to authorise is a paraphrase of the
+/// wrong thing. And it says out loud that not answering is an option
+/// with a known outcome, because a dialog that looks like it might trap
+/// an agent forever is one people learn to avoid rather than use.
+private struct ApprovalCard: View {
+    let approval: SessionStore.Approval
+    let decide: (SessionStore.Approval.Decision) -> Void
+    @Environment(\.chalantAccent) private var accent
+
+    /// Matches the hook's own patience (`CHALANT_APPROVAL_WAIT`). Shown
+    /// rather than hidden: the countdown is the promise that this ends.
+    private static let patience: TimeInterval = 25
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("Wants to run \(approval.tool)")
+                .font(Theme.Fonts.bodyEmphasis)
+                .foregroundStyle(Theme.textPrimary)
+            if !approval.detail.isEmpty {
+                Text(approval.detail)
+                    .font(Theme.Fonts.captionMono)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack(spacing: Theme.Space.m) {
+                Button("Allow") { decide(.allow) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(accent)
+                Button("Deny") { decide(.deny) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                Spacer(minLength: 0)
+                TimelineView(.periodic(from: approval.askedAt, by: 1)) { context in
+                    let left = Int(
+                        (Self.patience - context.date.timeIntervalSince(approval.askedAt))
+                            .rounded(.down))
+                    Text(left > 0
+                         ? "\(left)s, then it asks the terminal"
+                         : "back to the terminal")
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                }
+            }
+        }
+        .rowInsets()
+        .chalantCard(radius: Theme.Radius.row)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(approval.tool) is waiting for your approval: \(approval.detail)")
     }
 }

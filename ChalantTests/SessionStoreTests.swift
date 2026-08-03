@@ -635,6 +635,97 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(SessionRegistry.processHasTerminal(999_999))
     }
 
+    // MARK: Holding a tool call at the door
+
+    /// A hook asks before every single tool call, so the answer for
+    /// anything ungated has to be an instant no. Anything else puts a
+    /// pause on work nobody asked to supervise.
+    func testAnUngatedToolIsNeverHeld() {
+        let store = storeWithSession()
+        XCTAssertFalse(store.holdForApproval(
+            sessionID: "s1", id: "call-1", tool: "Read", detail: "/etc/hosts", gated: ["Bash"]))
+        XCTAssertNil(store.sessions.first?.approval)
+    }
+
+    func testAGatedToolIsHeldAndShownVerbatim() {
+        let store = storeWithSession()
+        XCTAssertTrue(store.holdForApproval(
+            sessionID: "s1", id: "call-1", tool: "Bash",
+            detail: "rm -rf build && xcodebuild test", gated: ["Bash"]))
+
+        let approval = store.sessions.first?.approval
+        XCTAssertEqual(approval?.tool, "Bash")
+        XCTAssertEqual(approval?.detail, "rm -rf build && xcodebuild test",
+                       "the command is shown as written, never summarised")
+        XCTAssertNil(approval?.decision)
+    }
+
+    /// Nowhere to draw a card is a reason to decline, not to invent a
+    /// row: the agent falls through to its own permission layer, which
+    /// is exactly what it did before this existed.
+    func testAToolCallForAnUnknownSessionIsNotHeld() {
+        let store = SessionStore()
+        XCTAssertFalse(store.holdForApproval(
+            sessionID: "ghost", id: "c", tool: "Bash", detail: "ls", gated: ["Bash"]))
+        XCTAssertTrue(store.sessions.isEmpty)
+    }
+
+    /// Two cards racing for one row is worse than the second call going
+    /// to the terminal.
+    func testOnlyOneCallIsHeldPerSessionAtATime() {
+        let store = storeWithSession()
+        XCTAssertTrue(store.holdForApproval(
+            sessionID: "s1", id: "first", tool: "Bash", detail: "one", gated: ["Bash"]))
+        XCTAssertFalse(store.holdForApproval(
+            sessionID: "s1", id: "second", tool: "Bash", detail: "two", gated: ["Bash"]))
+        XCTAssertEqual(store.sessions.first?.approval?.id, "first")
+    }
+
+    /// Handed over exactly once, the same contract `/ask` and `/outbox`
+    /// keep: the agent has it now, and a card still offering a choice
+    /// already taken is a button that does nothing.
+    func testADecisionIsCollectedExactlyOnce() {
+        let store = storeWithSession()
+        _ = store.holdForApproval(
+            sessionID: "s1", id: "c", tool: "Bash", detail: "ls", gated: ["Bash"])
+        store.decide(approvalID: "c", as: .allow)
+
+        XCTAssertEqual(store.collectDecision(approvalID: "c"), .allow)
+        XCTAssertNil(store.collectDecision(approvalID: "c"))
+        XCTAssertNil(store.sessions.first?.approval)
+    }
+
+    func testAnUndecidedCallHandsBackNothing() {
+        let store = storeWithSession()
+        _ = store.holdForApproval(
+            sessionID: "s1", id: "c", tool: "Bash", detail: "ls", gated: ["Bash"])
+        XCTAssertNil(store.collectDecision(approvalID: "c"))
+        XCTAssertNotNil(store.sessions.first?.approval, "still waiting, still shown")
+    }
+
+    /// The hook gave up and the question went back to the terminal, so
+    /// the card has to go with it.
+    func testAnAbandonedCallLeavesNoCardBehind() {
+        let store = storeWithSession()
+        _ = store.holdForApproval(
+            sessionID: "s1", id: "c", tool: "Bash", detail: "ls", gated: ["Bash"])
+        store.abandonApproval(id: "c")
+        XCTAssertNil(store.sessions.first?.approval)
+    }
+
+    /// Off until asked for. An install that never opts in behaves
+    /// exactly as it did, and a hook talking to an older Chalant is told
+    /// no and gets out of the way.
+    func testNothingIsGatedByDefault() {
+        let empty = UserDefaults(suiteName: "chalant.tests.gates")!
+        empty.removePersistentDomain(forName: "chalant.tests.gates")
+        XCTAssertTrue(SessionStore.gatedTools(in: empty).isEmpty)
+
+        empty.set("Bash, Write ,", forKey: SessionStore.gatedToolsKey)
+        XCTAssertEqual(SessionStore.gatedTools(in: empty), ["Bash", "Write"],
+                       "spaces and stray commas are the user's, not a tool name")
+    }
+
     // MARK: A warm file is not a running process
 
     /// `SessionDiscovery` infers "still going" from a transcript's

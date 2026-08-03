@@ -117,6 +117,8 @@ final class SessionStore: ObservableObject {
         var agent: Agent = .claude
         var state: State          // working | needsInput | idle | done | failed | stale
         var ask: Ask?             // present iff a question is outstanding
+        /// A tool call held at the door, waiting on you.
+        var approval: Approval?
         /// The last thing the agent actually said, so a row can show
         /// what it wants rather than only that it wants something. Read
         /// from the transcript, which means it works whether or not the
@@ -167,6 +169,30 @@ final class SessionStore: ObservableObject {
     /// one. Both are this same array — the single-question shape is it
     /// holding one element, not a second type running alongside this
     /// one that everything would have to be kept in step with.
+    /// A tool call an agent is holding at the door, waiting to be told
+    /// yes or no.
+    ///
+    /// The one thing in this app that reaches into a running agent and
+    /// changes what it does. Everything else here watches, or leaves a
+    /// note for the agent to collect; this decides. It works because a
+    /// `PreToolUse` hook may return a `permissionDecision` and Claude
+    /// Code obeys it (verified 2026-08-02 against a throwaway session:
+    /// the deny landed and the command never ran).
+    struct Approval: Identifiable, Equatable {
+        enum Decision: String, Equatable { case allow, deny }
+
+        /// Claude Code's own `tool_use_id`: unique per call, so a hook
+        /// polling for its answer cannot be handed somebody else's.
+        let id: String
+        var tool: String
+        /// The command, path, or whatever else names what is about to
+        /// happen. Shown verbatim: a summary of a command you are being
+        /// asked to authorise is a summary of the wrong thing.
+        var detail: String
+        var askedAt: Date
+        var decision: Decision?
+    }
+
     struct Ask: Identifiable, Equatable {
         let id: String
         var questions: [Question]
@@ -597,6 +623,84 @@ final class SessionStore: ObservableObject {
     /// cannot know is the kind of lie it does not tell anywhere else.
     /// A message still waiting in the outbox flips to undelivered
     /// rather than vanishing (EC-11).
+    // MARK: Holding a tool call at the door
+
+    /// Which tools the island is allowed to hold. Empty by default, so
+    /// nothing about an existing install changes until someone asks for
+    /// it, and a hook talking to an older Chalant is told "not
+    /// interested" and gets out of the way.
+    ///
+    /// This is deliberately its own policy rather than a mirror of
+    /// Claude Code's. `PreToolUse` fires on every tool call and carries
+    /// no way to know whether Claude Code was going to prompt, so the
+    /// only honest thing to offer is "always ask me about these",
+    /// chosen by name and off until chosen.
+    static let gatedToolsKey = "gatedTools"
+
+    nonisolated static func gatedTools(in defaults: UserDefaults = .standard) -> Set<String> {
+        let raw = defaults.string(forKey: gatedToolsKey) ?? ""
+        return Set(
+            raw.split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty })
+    }
+
+    /// Hold a tool call and light the row, or decline to.
+    ///
+    /// Declining is the common case and has to be cheap: a hook asks
+    /// before every single tool call, and anything but an instant no
+    /// here would put a pause on work nobody asked to supervise.
+    ///
+    /// Also declines when the session is unknown (nowhere to show it),
+    /// and when one is already held for that session: two cards racing
+    /// for the same row is worse than the second call falling through
+    /// to the terminal, which is exactly what it did before any of this
+    /// existed.
+    func holdForApproval(
+        sessionID: String, id: String, tool: String, detail: String,
+        gated: Set<String> = SessionStore.gatedTools()
+    ) -> Bool {
+        guard gated.contains(tool) else { return false }
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return false }
+        guard sessions[index].approval == nil else { return false }
+        sessions[index].approval = Approval(
+            id: id, tool: tool, detail: detail, askedAt: Date(), decision: nil)
+        sessions[index].updatedAt = Date()
+        sort()
+        return true
+    }
+
+    func decide(approvalID: String, as decision: Approval.Decision) {
+        guard let index = sessions.firstIndex(where: { $0.approval?.id == approvalID })
+        else { return }
+        sessions[index].approval?.decision = decision
+        sessions[index].updatedAt = Date()
+    }
+
+    /// The hook's side: the answer, handed over exactly once.
+    ///
+    /// Cleared on the way out for the same reason `/ask` and `/outbox`
+    /// clear theirs. The agent has it now, and a card still sitting
+    /// there offering a choice that has already been taken is a button
+    /// that does nothing.
+    func collectDecision(approvalID: String) -> Approval.Decision? {
+        guard let index = sessions.firstIndex(where: { $0.approval?.id == approvalID }),
+              let decision = sessions[index].approval?.decision
+        else { return nil }
+        sessions[index].approval = nil
+        sessions[index].updatedAt = Date()
+        return decision
+    }
+
+    /// The agent stopped waiting. Its hook timed out and the question
+    /// went back to the terminal, so the card must go: a choice nobody
+    /// is listening for any more is worse than no choice at all.
+    func abandonApproval(id: String) {
+        guard let index = sessions.firstIndex(where: { $0.approval?.id == id }) else { return }
+        sessions[index].approval = nil
+        sessions[index].updatedAt = Date()
+    }
+
     /// What the registry can see about a process without having any
     /// opinion on what it is doing.
     ///

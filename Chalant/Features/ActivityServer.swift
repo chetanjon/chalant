@@ -257,14 +257,16 @@ final class ActivityServer: @unchecked Sendable {
         // browser's own same-origin policy; the writing routes refuse
         // anything wearing browser headers outright.
         //
-        // Two GETs are writes in disguise: `/outbox/<id>` and
-        // `/ask/<id>` each hand over something exactly once and clear
-        // it in the same breath, so a page that guessed a session id
-        // could otherwise consume a queued message or a pending answer
-        // that was never meant for it. Both need the real token too,
-        // but this is the second wall, not the only one (EC-14).
+        // Three GETs are writes in disguise: `/outbox/<id>`, `/ask/<id>`
+        // and `/permission/<id>` each hand over something exactly once
+        // and clear it in the same breath, so a page that guessed an id
+        // could otherwise consume a queued message, a pending answer, or
+        // an authorisation that was never meant for it. All three need
+        // the real token too, but this is the second wall, not the only
+        // one (EC-14).
         let consumesGET = request.method == "GET"
-            && (request.path.hasPrefix("/outbox/") || request.path.hasPrefix("/ask/"))
+            && (request.path.hasPrefix("/outbox/") || request.path.hasPrefix("/ask/")
+                || request.path.hasPrefix("/permission/"))
         if request.fromBrowser, request.method != "GET" || consumesGET {
             respond(connection, status: "403 Forbidden",
                     body: #"{"ok":false,"error":"cross-origin writes refused"}"#)
@@ -369,6 +371,95 @@ final class ActivityServer: @unchecked Sendable {
                         ? #"{"ok":true}"#
                         : #"{"ok":false,"error":"no such session, or the message was refused"}"#
                 )
+            }
+
+        // A tool call at the door. The one route in this app that can
+        // change what a running agent does, so it answers the common
+        // case first and fastest: "not interested", which is what every
+        // ungated tool gets, in one loopback round trip and no wait.
+        //
+        // Only a `gate: true` answer means the hook should stand there
+        // and poll. Anything else, including this app not running at
+        // all, and the call goes to Claude Code's own permission layer
+        // exactly as it always did.
+        case ("POST", "/permission"):
+            guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+                  let session = object["session"] as? String, !session.isEmpty,
+                  let id = object["id"] as? String, !id.isEmpty,
+                  let tool = object["tool"] as? String, !tool.isEmpty
+            else {
+                respond(connection, status: "400 Bad Request",
+                        body: #"{"ok":false,"error":"need session, id and tool"}"#)
+                return
+            }
+            let detail = object["detail"] as? String ?? ""
+            Task { @MainActor in
+                let held = self.sessions?.holdForApproval(
+                    sessionID: session, id: id, tool: tool, detail: detail) ?? false
+                self.respond(
+                    connection, status: "200 OK",
+                    body: held ? #"{"ok":true,"gate":true}"# : #"{"ok":true,"gate":false}"#)
+            }
+
+        // The hook standing at the door, asking whether it may come in
+        // yet. `null` means still waiting; the hook keeps polling until
+        // its own patience runs out, then withdraws the card itself.
+        case ("GET", let path) where path.hasPrefix("/permission/"):
+            let id = String(path.dropFirst("/permission/".count)).removingPercentEncoding ?? ""
+            Task { @MainActor in
+                guard let decision = self.sessions?.collectDecision(approvalID: id) else {
+                    self.respond(connection, status: "200 OK",
+                                 body: #"{"ok":true,"decision":null}"#)
+                    return
+                }
+                self.respond(connection, status: "200 OK",
+                             body: #"{"ok":true,"decision":"\#(decision.rawValue)"}"#)
+            }
+
+        // What is being held right now, and deciding it from outside the
+        // island. Here for the same reason `/outbox` is: everything else
+        // in this app can be driven from a terminal and checked, and a
+        // feature whose only proof is a person clicking a button is a
+        // feature nobody can test without spending somebody's real
+        // authorisation on it.
+        case ("GET", "/permissions"):
+            Task { @MainActor in
+                let held = (self.sessions?.sessions ?? []).compactMap { session -> [String: Any]? in
+                    guard let approval = session.approval, approval.decision == nil else { return nil }
+                    return [
+                        "id": approval.id, "session": session.id,
+                        "tool": approval.tool, "detail": approval.detail,
+                    ]
+                }
+                let body = (try? JSONSerialization.data(
+                    withJSONObject: ["ok": true, "held": held]
+                )).flatMap { String(data: $0, encoding: .utf8) } ?? #"{"ok":true,"held":[]}"#
+                self.respond(connection, status: "200 OK", body: body)
+            }
+
+        case ("PUT", let path) where path.hasPrefix("/permission/"):
+            let id = String(path.dropFirst("/permission/".count)).removingPercentEncoding ?? ""
+            guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+                  let raw = object["decision"] as? String,
+                  let decision = SessionStore.Approval.Decision(rawValue: raw)
+            else {
+                respond(connection, status: "400 Bad Request",
+                        body: #"{"ok":false,"error":"need decision: allow or deny"}"#)
+                return
+            }
+            Task { @MainActor in
+                self.sessions?.decide(approvalID: id, as: decision)
+                self.respond(connection, status: "200 OK", body: #"{"ok":true}"#)
+            }
+
+        // The hook gave up and handed the question back to the terminal.
+        // The card goes with it: a choice nobody is listening for is a
+        // button that does nothing.
+        case ("DELETE", let path) where path.hasPrefix("/permission/"):
+            let id = String(path.dropFirst("/permission/".count)).removingPercentEncoding ?? ""
+            Task { @MainActor in
+                self.sessions?.abandonApproval(id: id)
+                self.respond(connection, status: "200 OK", body: #"{"ok":true}"#)
             }
 
         case ("GET", let path) where path.hasPrefix("/ask/"):

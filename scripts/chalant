@@ -9,6 +9,9 @@
 #   chalant clear    [id]
 #   chalant list
 #   chalant ask <session-id> "Question?" [option ...]
+#   chalant pending                        what is held at the door
+#   chalant approve <call-id>
+#   chalant deny    <call-id>
 #
 # The id defaults to "cli"; give one to run several statuses at once.
 set -euo pipefail
@@ -50,6 +53,24 @@ case "${1:-}" in
   list)
     curl -sf "${AUTH[@]}" "$BASE/activities"
     echo
+    ;;
+  pending)
+    # Tool calls held at the door, waiting on a yes or no.
+    curl -sf "${AUTH[@]}" "$BASE/permissions"
+    echo
+    ;;
+  approve|deny)
+    # chalant approve <call-id> | chalant deny <call-id>
+    #
+    # The same decision the island's buttons make. Here so the whole
+    # path can be proved from a terminal without spending somebody's
+    # real authorisation on a screenshot.
+    CALL="${2:-}"
+    [ -n "$CALL" ] || { echo "usage: chalant $1 <call-id>" >&2; exit 2; }
+    VERDICT="allow"; [ "$1" = "deny" ] && VERDICT="deny"
+    curl -sf "${AUTH[@]}" -X PUT "$BASE/permission/$CALL" \
+      -d "{\"decision\":\"$VERDICT\"}" >/dev/null
+    echo "$VERDICT: $CALL"
     ;;
   message)
     # chalant message <session-id> "text"
