@@ -339,7 +339,13 @@ final class NotchViewModel: ObservableObject {
     /// files Claude Code already writes, so sessions show up with no
     /// setup and no hook contract — including ones that were already
     /// running before Chalant launched.
-    let sessions = SessionStore()
+    ///
+    /// The explicit directory is what turns on outbox persistence: a
+    /// queued message now survives a relaunch instead of vanishing with
+    /// it. `SessionStore`'s own default is nil (persistence off), so
+    /// this is the one real opt-in; every test still gets a bare,
+    /// disk-free store unless it asks for one.
+    let sessions = SessionStore(outboxDirectory: SessionStore.defaultOutboxDirectory())
     private lazy var sessionDiscovery = SessionDiscovery(store: sessions)
     /// The liveness overlay: busy/idle from the registry Claude Code
     /// already writes, layered on top of the scraper above rather than

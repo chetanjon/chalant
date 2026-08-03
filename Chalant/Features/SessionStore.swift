@@ -74,13 +74,27 @@ final class SessionStore: ObservableObject {
     /// cancellable on its own, each arriving as its own turn. Joining
     /// them lost the boundary and delivered a wall (founder,
     /// 2026-08-02, "same as sending it in the terminal").
-    struct QueuedMessage: Identifiable, Equatable {
+    /// `Codable` so the outbox can survive a relaunch (`saveOutbox`/
+    /// `loadOutbox` below); nothing about the shape changes for that.
+    struct QueuedMessage: Identifiable, Equatable, Codable {
         let id: String
         var text: String
         var queuedAt: Date
+
+        /// Past the point `collectMessage` will still hand this over.
+        ///
+        /// Computed, not a flag set once at load: "now" has to mean now,
+        /// whether this message rode out a relaunch or simply sat in a
+        /// live outbox while a turn ran long. `>=` at the boundary: a
+        /// message exactly `outboxExpiry` old reads as stale rather than
+        /// as one more tick of trust, because handing over a borderline
+        /// instruction is the wrong side to guess wrong on.
+        var isExpired: Bool {
+            -queuedAt.timeIntervalSinceNow >= SessionStore.outboxExpiry
+        }
     }
 
-    struct Outbox: Equatable {
+    struct Outbox: Equatable, Codable {
         /// In order. The head is what the next turn boundary collects;
         /// the rest wait their turn, exactly as a terminal queue does.
         var pending: [QueuedMessage] = []
@@ -239,13 +253,35 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    /// Outbox entries read off disk at launch, keyed by session id, not
+    /// yet attached to a row. A bare id on disk is not proof the session
+    /// is still running, so these wait here until `upsert` or `markLive`
+    /// rediscovers that exact session, or forever if it never comes back.
+    private var restoredOutbox: [String: Outbox] = [:]
+    /// Nil disables persistence outright: no read at `init`, no write on
+    /// any mutation. That is the default on purpose. Unlike
+    /// `ClipboardStore`, this type already had ~170 tests in
+    /// `SessionStoreTests` written against a bare `SessionStore()` that
+    /// never touched disk; defaulting this to the real Application
+    /// Support path the moment persistence shipped would have made every
+    /// one of them read and write a real install's file through nothing
+    /// but a plain, no-argument `SessionStore()`. Production opts in
+    /// explicitly, passing `SessionStore.defaultOutboxDirectory()`
+    /// (`NotchViewModel`); a persistence test opts in with its own
+    /// scratch directory, the seam `ClipboardStore`'s `clipsDirectory`
+    /// already uses. Neither path can reach a real install by accident.
+    private let outboxDir: URL?
+
     /// TTL and cap are constructor args rather than baked-in constants
     /// so a test can shrink the TTL to something it can actually wait
     /// out, instead of proving a 60-second timer fires 60 seconds at a
-    /// time.
-    init(maxSessions: Int = 20, finishedTTL: TimeInterval = 60) {
+    /// time. See `outboxDir` above for why `outboxDirectory` defaults to
+    /// nil rather than a real path.
+    init(maxSessions: Int = 20, finishedTTL: TimeInterval = 60, outboxDirectory: URL? = nil) {
         self.maxSessions = maxSessions
         self.finishedTTL = finishedTTL
+        self.outboxDir = outboxDirectory
+        loadOutbox()
     }
 
     /// Upsert keyed by Claude Code's own session id. `startedAt` is
@@ -264,13 +300,21 @@ final class SessionStore: ObservableObject {
         agent: Agent = .claude, updatedAt: Date = Date(), startedAt: Date = Date(),
         lastMessage: String? = nil
     ) {
-        var session = sessions.first { $0.id == id }
+        let alreadyKnown = sessions.first { $0.id == id }
+        var session = alreadyKnown
             ?? Session(
                 id: id, title: title, cwd: cwd, branch: branch,
                 lastPrompt: lastPrompt, activity: activity, agent: agent,
                 state: state, ask: nil, lastMessage: lastMessage,
                 startedAt: startedAt, updatedAt: updatedAt
             )
+        // A row appearing for the first time this launch is exactly the
+        // "session rediscovered" moment a restored outbox is waiting
+        // for. Discovery found a real transcript at this id, which is
+        // more than the persisted file alone could ever say.
+        if alreadyKnown == nil, let restored = restoredOutbox.removeValue(forKey: id) {
+            session.outbox = restored
+        }
         let previousState = session.state
         session.title = title
         session.cwd = cwd
@@ -532,12 +576,17 @@ final class SessionStore: ObservableObject {
             }
             sessions[index].updatedAt = Date()
         } else {
-            sessions.append(Session(
+            var fresh = Session(
                 id: id, title: name, cwd: cwd, branch: nil, lastPrompt: nil,
                 activity: nil, agent: .claude, state: status, ask: nil,
                 pid: pid, kind: kind, hasTerminal: hasTerminal,
                 startedAt: Date(), updatedAt: Date()
-            ))
+            )
+            // Same rediscovery rule `upsert` follows: a row born here is
+            // the registry vouching for a real, running process at this
+            // id, which is what a restored outbox was waiting for.
+            fresh.outbox = restoredOutbox.removeValue(forKey: id)
+            sessions.append(fresh)
         }
         sort()
     }
@@ -685,6 +734,23 @@ final class SessionStore: ObservableObject {
     /// with eight things to say.
     static let maxQueued = 8
 
+    /// How long a queued message is trusted to still mean something.
+    ///
+    /// Persisting the outbox with no limit would be the exact failure
+    /// the original decision to lose it on quit was avoiding (EC-9): a
+    /// message typed Monday, injected into a turn on Thursday, when the
+    /// person who wrote it has moved on and the agent has no way to
+    /// know the instruction is stale. Twenty minutes, the founder's own
+    /// suggestion, covers "Chalant relaunched between typing and the
+    /// agent's next turn boundary," the case that was costing real
+    /// messages, without covering "I stepped away for the afternoon."
+    /// Measured from `queuedAt`, never from when this app happened to
+    /// load the file: reopening Chalant does not refresh the clock on a
+    /// message that was already stale, and a message queued and left
+    /// untouched in a still-running app ages out on the same clock a
+    /// restored one does, one rule, not two.
+    static let outboxExpiry: TimeInterval = 20 * 60
+
     /// Queues a message for a session to collect at its next turn
     /// boundary. Validation mirrors `attach()`'s above: trimmed,
     /// refused empty, refused for a session this store cannot reach,
@@ -715,6 +781,7 @@ final class SessionStore: ObservableObject {
             QueuedMessage(id: UUID().uuidString, text: cleaned, queuedAt: Date())
         )
         sessions[index].outbox = outbox
+        saveOutbox()
         return true
     }
 
@@ -725,6 +792,20 @@ final class SessionStore: ObservableObject {
         if sessions[index].outbox?.pending.isEmpty == true {
             sessions[index].outbox = nil
         }
+        saveOutbox()
+    }
+
+    /// The user re-confirmed a message that aged out before a turn
+    /// boundary came to collect it: its clock restarts here, exactly as
+    /// if just typed, so the next boundary can hand it over. Only ever
+    /// reached from the card's own "Send now" button, never automatic,
+    /// because aging out is silent by nature and un-aging it should not be.
+    func resendMessage(id: String, for sessionID: String) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }),
+              let msgIndex = sessions[index].outbox?.pending.firstIndex(where: { $0.id == id })
+        else { return }
+        sessions[index].outbox?.pending[msgIndex].queuedAt = Date()
+        saveOutbox()
     }
 
     private static func sanitizeMessage(_ raw: String) -> String {
@@ -747,15 +828,24 @@ final class SessionStore: ObservableObject {
     /// together is one confusing instruction. The rest stay queued and
     /// arrive at the turns after this, which is what a terminal queue
     /// does.
+    ///
+    /// Refuses the head once it is `isExpired`, whether it rode out a
+    /// relaunch or just aged out in a still-running app: this is the
+    /// other half of persisting the outbox at all. Handing over a stale
+    /// instruction silently is precisely the failure a lost message used
+    /// to avoid by disappearing instead. The queue stays put, in order,
+    /// until the card's own resend or drop resolves the head.
     func collectMessage(sessionID: String) -> String? {
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }),
               var outbox = sessions[index].outbox,
               !outbox.undelivered,
-              !outbox.pending.isEmpty
+              !outbox.pending.isEmpty,
+              !outbox.pending[0].isExpired
         else { return nil }
         let next = outbox.pending.removeFirst()
         outbox.deliveredAt = Date()
         sessions[index].outbox = outbox
+        saveOutbox()
         return next.text
     }
 
@@ -769,6 +859,7 @@ final class SessionStore: ObservableObject {
         else { return }
         sessions[index].outbox?.undelivered = true
         onMessageUndelivered?(sessions[index].title)
+        saveOutbox()
     }
 
     /// Drops whatever is in a session's outbox — queued, delivered or
@@ -777,5 +868,84 @@ final class SessionStore: ObservableObject {
     func clearMessage(sessionID: String) {
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
         sessions[index].outbox = nil
+        saveOutbox()
+    }
+
+    // MARK: Outbox persistence
+
+    /// Same shape `ClipboardStore` uses: one JSON file under Application
+    /// Support, written atomically so a crash mid-write cannot leave a
+    /// torn file, read back with a graceful fallback to empty rather
+    /// than a crash on anything that fails to parse. Not `private`:
+    /// production passes this explicitly to opt in (see `outboxDir`).
+    static func defaultOutboxDirectory() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Chalant/Outbox", isDirectory: true)
+    }
+
+    /// Nil when this store was built with no `outboxDirectory`, which
+    /// means persistence is off: nothing to read, nothing to write.
+    private func outboxFile() -> URL? {
+        guard let outboxDir else { return nil }
+        try? FileManager.default.createDirectory(at: outboxDir, withIntermediateDirectories: true)
+        return outboxDir.appendingPathComponent("outbox.json")
+    }
+
+    /// What a file read from disk is allowed to inject: exactly what
+    /// `queue(message:for:)` already allows a message typed into the
+    /// composer, no more. This file was never in front of the composer
+    /// and this app did not write every byte of it: a hand-edited or
+    /// corrupted entry must not be able to push oversized, control-
+    /// character-laden, or arbitrarily deep text into an agent's
+    /// context. Oversized text is dropped outright, same as a live
+    /// queue refuses it, never silently truncated (EC-16); depth beyond
+    /// `maxQueued` is dropped from the tail, the same limit a live queue
+    /// enforces one message at a time.
+    private static func boundedPending(_ raw: [QueuedMessage]) -> [QueuedMessage] {
+        Array(raw.compactMap { message -> QueuedMessage? in
+            let cleaned = sanitizeMessage(message.text)
+            guard !cleaned.isEmpty, cleaned.count <= maxMessage else { return nil }
+            return QueuedMessage(id: message.id, text: cleaned, queuedAt: message.queuedAt)
+        }.prefix(maxQueued))
+    }
+
+    /// Reads whatever survived the last launch into `restoredOutbox`,
+    /// bounded exactly as a live message would be. Nothing here attaches
+    /// to a `Session` row yet: there are none at `init`, that only
+    /// happens once `upsert` or `markLive` rediscovers the same id.
+    private func loadOutbox() {
+        guard let file = outboxFile(), let data = try? Data(contentsOf: file) else { return }
+        guard let decoded = try? JSONDecoder().decode([String: Outbox].self, from: data) else {
+            Self.log.error("outbox failed to decode, starting empty")
+            return
+        }
+        for (id, outbox) in decoded {
+            let bounded = Self.boundedPending(outbox.pending)
+            guard !bounded.isEmpty else { continue }
+            var restored = outbox
+            restored.pending = bounded
+            restoredOutbox[id] = restored
+        }
+    }
+
+    /// Rewrites the whole file on every change, same as
+    /// `ClipboardStore.saveIndex`, fine at the size an outbox reaches.
+    /// Persists every live session's non-empty outbox, plus whatever in
+    /// `restoredOutbox` has not yet been reattached to a rediscovered
+    /// session, so a message from a session that has not reappeared yet
+    /// this launch is not dropped out of the file just because some
+    /// other session's outbox changed.
+    private func saveOutbox() {
+        guard let file = outboxFile() else { return }
+        var toSave = restoredOutbox
+        for session in sessions where session.outbox?.pending.isEmpty == false {
+            toSave[session.id] = session.outbox
+        }
+        do {
+            let data = try JSONEncoder().encode(toSave)
+            try data.write(to: file, options: .atomic)
+        } catch {
+            Self.log.error("outbox failed to save: \(error, privacy: .public)")
+        }
     }
 }

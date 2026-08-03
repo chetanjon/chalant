@@ -905,6 +905,100 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(flashed, "t")
     }
 
+    // MARK: The outbox survives a relaunch (persist, but refuse a stale one)
+
+    /// A scratch directory per test, never the real Application Support
+    /// folder: a persistence test must not be able to touch an actual
+    /// install's queued messages.
+    private func outboxScratchDirectory() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("chalant-outbox-test-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    func testAQueuedMessageSurvivesARelaunchAndReattachesOnlyOnceTheSessionIsRediscovered() {
+        let dir = outboxScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let store = SessionStore(outboxDirectory: dir)
+        store.upsert(id: "s1", title: "t", cwd: "/a", branch: nil, lastPrompt: nil, state: .working)
+        XCTAssertTrue(store.queue(message: "still here after a restart", for: "s1"))
+
+        // A fresh instance stands in for a relaunch: nothing here can
+        // come from the in-memory copy above.
+        let reloaded = SessionStore(outboxDirectory: dir)
+        XCTAssertNil(reloaded.sessions.first?.outbox,
+                     "a bare id on disk is not proof the session is still running")
+        reloaded.upsert(id: "s1", title: "t", cwd: "/a", branch: nil, lastPrompt: nil, state: .working)
+        XCTAssertEqual(reloaded.sessions.first?.outbox?.pending.map(\.text),
+                       ["still here after a restart"],
+                       "rediscovering the same session id reattaches what survived")
+    }
+
+    /// The other half of persisting at all: a message old enough to be
+    /// stale must never reach an agent, restored or not. `collectMessage`
+    /// is the one path text turns into model context, so this is where
+    /// the refusal has to hold.
+    func testAMessageThatAgedOutIsRefusedNotDeliveredEvenAfterRediscovery() throws {
+        let dir = outboxScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let staleQueuedAt = Date().addingTimeInterval(-SessionStore.outboxExpiry - 60)
+        let onDisk: [String: SessionStore.Outbox] = [
+            "s1": SessionStore.Outbox(pending: [
+                SessionStore.QueuedMessage(id: "m1", text: "do the thing", queuedAt: staleQueuedAt),
+            ]),
+        ]
+        try JSONEncoder().encode(onDisk).write(to: dir.appendingPathComponent("outbox.json"))
+
+        let store = SessionStore(outboxDirectory: dir)
+        store.upsert(id: "s1", title: "t", cwd: "/a", branch: nil, lastPrompt: nil, state: .working)
+
+        XCTAssertEqual(store.sessions.first?.outbox?.pending.first?.text, "do the thing",
+                       "kept, with the text still there, not dropped silently")
+        XCTAssertTrue(store.sessions.first?.outbox?.pending.first?.isExpired ?? false)
+        XCTAssertNil(store.collectMessage(sessionID: "s1"),
+                     "a stale instruction must never reach the agent silently")
+
+        // Resend restarts the clock, the same as if just typed, and it
+        // becomes deliverable again at the next turn boundary.
+        store.resendMessage(id: "m1", for: "s1")
+        XCTAssertFalse(store.sessions.first?.outbox?.pending.first?.isExpired ?? true)
+        XCTAssertEqual(store.collectMessage(sessionID: "s1"), "do the thing")
+    }
+
+    /// A hand-edited or corrupted file gets exactly the bounding a live
+    /// `queue(message:for:)` call already enforces: oversized text
+    /// refused outright, control characters stripped, depth capped at
+    /// `maxQueued`, never trusted just because it came from disk.
+    func testACorruptedOutboxFileCannotInjectUnboundedOrUncleanTextIntoASession() throws {
+        let dir = outboxScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let tooLong = String(repeating: "x", count: SessionStore.maxMessage + 500)
+        var messages: [SessionStore.QueuedMessage] = [
+            SessionStore.QueuedMessage(id: "too-long", text: tooLong, queuedAt: Date()),
+            SessionStore.QueuedMessage(id: "control", text: "hi\u{0007}there", queuedAt: Date()),
+        ]
+        for i in 0..<(SessionStore.maxQueued + 5) {
+            messages.append(SessionStore.QueuedMessage(id: "m\(i)", text: "msg \(i)", queuedAt: Date()))
+        }
+        let onDisk: [String: SessionStore.Outbox] = ["s1": SessionStore.Outbox(pending: messages)]
+        try JSONEncoder().encode(onDisk).write(to: dir.appendingPathComponent("outbox.json"))
+
+        let store = SessionStore(outboxDirectory: dir)
+        store.upsert(id: "s1", title: "t", cwd: "/a", branch: nil, lastPrompt: nil, state: .working)
+        let pending = store.sessions.first?.outbox?.pending ?? []
+
+        XCTAssertEqual(pending.count, SessionStore.maxQueued,
+                       "a hand-edited file cannot claim a deeper queue than a live one could")
+        XCTAssertFalse(pending.contains { $0.id == "too-long" },
+                       "oversized text is refused, never truncated, same as a live queue")
+        XCTAssertEqual(pending.first { $0.id == "control" }?.text, "hithere",
+                       "control characters are stripped exactly as a live message's are")
+    }
+
     // MARK: The Stop hook's install state (T6)
 
     func testTheHookReadsAsInstalledOnlyWhenAStopHookPointsAtIt() {
@@ -1261,9 +1355,11 @@ final class SessionStoreTests: XCTestCase {
         // and view bodies where no build step can find them, which is
         // exactly why they need pinning.
         let symbols = [
-            // Session rows and their states
+            // Session rows and their states. Filled, matching
+            // ActivityStore.State.symbol: the same idea, done or
+            // failed, wears the same weight in both lists.
             "exclamationmark.circle.fill", "circle.dashed", "clock",
-            "checkmark.circle", "xmark.circle", "cursorarrow",
+            "checkmark.circle.fill", "xmark.circle.fill", "cursorarrow",
             // Displays pane
             "laptopcomputer", "display", "checkmark",
             // Glances
@@ -1276,6 +1372,12 @@ final class SessionStoreTests: XCTestCase {
             "line.3.horizontal", "doc.on.doc", "square.and.arrow.up",
             "dot.radiowaves.left.and.right", "arrow.up.circle.fill",
             "chevron.left", "plus", "paperclip",
+            // Shortcuts chip's hover-remove badge: not the xmark that
+            // means failed, the same remove idea as minus.circle above.
+            "minus.circle.fill",
+            // Ambience scenes (fire and cafe), not the flame/cup glyphs
+            // the focus streak and Keep Awake already own.
+            "fireplace.fill", "takeoutbag.and.cup.and.straw.fill",
         ]
         for symbol in symbols {
             assertSymbolExists(symbol, "A view")
