@@ -67,6 +67,20 @@ esac
 
 PAYLOAD="$(cat)"
 
+# Capture the raw payload when asked, and only when asked. Chalant can
+# only render what an agent actually sends it, and the field names for
+# anything richer than a session id are not documented anywhere: the
+# only honest way to find out whether Claude Code hands a hook the text
+# and the options of a question is to look at one.
+#   defaults write com.cj.chalant hookPayloadLog -bool true
+# Off by default, appends to a file under the app's own support folder,
+# and never runs in the normal path.
+if [ "$(defaults read com.cj.chalant hookPayloadLog 2>/dev/null)" = "1" ]; then
+  LOGDIR="$HOME/Library/Application Support/Chalant"
+  mkdir -p "$LOGDIR" 2>/dev/null
+  printf '%s\n' "$PAYLOAD" >> "$LOGDIR/hook-payloads.jsonl" 2>/dev/null
+fi
+
 # python3 rather than sed: this is JSON from another program, and a
 # message with a quote or a newline in it would take a regex apart.
 # Every field is tried under several candidate names and falls back to
