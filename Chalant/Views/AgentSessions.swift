@@ -278,6 +278,9 @@ private struct ComposeCard: View {
     @ObservedObject var model: NotchViewModel
 
     @State private var draft = ""
+    /// Whether the agent's last message is showing in full. Collapsed
+    /// is the resting state; the toggle below it is the way through.
+    @State private var showingFullMessage = false
     @Environment(\.chalantAccent) private var accent
 
     /// Read fresh on every render rather than cached, same as the
@@ -308,21 +311,80 @@ private struct ComposeCard: View {
     /// hook, so it is there whether or not the hook is installed and
     /// for sessions that were already running.
     ///
-    /// Four lines, because this is a glance surface and an agent can
-    /// write an essay. The whole thing is one tap away in the terminal,
-    /// which the row itself already reaches.
+    /// Four lines at rest, all of it on request.
+    ///
+    /// A glance surface cannot open with an essay in it, but truncating
+    /// with no way through is its own fault: the founder hit a message
+    /// cut at "matched it against the Dockerfil..." with nowhere to go
+    /// (2026-08-03). Shortened is a starting state now, not a ceiling.
     @ViewBuilder
     private var lastWord: some View {
         if let said = session.lastMessage, !said.isEmpty {
-            Text(said)
-                .font(Theme.Fonts.caption)
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(4)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityLabel("It said: \(said)")
+            let rendered = Self.rendered(said)
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                if showingFullMessage {
+                    // Scrolls rather than growing without limit: an
+                    // agent's last turn can be pages, and an island that
+                    // grew to hold one would push its own controls off
+                    // the screen.
+                    ScrollView {
+                        Text(rendered)
+                            .font(Theme.Fonts.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: Theme.Panel.list)
+                    .scrollIndicators(.never)
+                } else {
+                    Text(rendered)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                // Offered only when there is genuinely more to see, so
+                // it never invites a tap that changes nothing.
+                if showingFullMessage || said.count > Self.shortMessage {
+                    Button(showingFullMessage ? "Show less" : "Show everything") {
+                        withAnimation(Theme.Motion.content) { showingFullMessage.toggle() }
+                    }
+                    .buttonStyle(.plain)
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(accent)
+                }
+            }
+            .accessibilityLabel("It said: \(said)")
         }
+    }
+
+    /// Roughly four lines of caption text. Only a threshold for whether
+    /// to offer the toggle: `lineLimit` still decides what is drawn, so
+    /// being a little out either way costs nothing.
+    private static let shortMessage = 260
+
+    /// Agents write markdown, so the island renders it rather than
+    /// showing the punctuation. Bold, italics, inline code and links
+    /// arrive constantly; before this, a message came through wearing
+    /// its asterisks and backticks (founder, 2026-08-03).
+    ///
+    /// `inlineOnlyPreservingWhitespace` on purpose: it keeps the line
+    /// breaks an agent wrote, which the full interpretation throws away
+    /// by reflowing into paragraphs, and this is a surface where a list
+    /// losing its lines would read as one run-on sentence. Fenced code
+    /// blocks are beyond it either way, and their fences are left
+    /// visible rather than silently swallowed, which at least says
+    /// plainly that something was code.
+    ///
+    /// Falls back to the raw text: malformed markdown is still a
+    /// message, and showing it unstyled beats showing nothing.
+    static func rendered(_ markdown: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: markdown,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(markdown)
     }
 
     // MARK: Composing, nothing queued yet
