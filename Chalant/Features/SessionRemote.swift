@@ -102,6 +102,26 @@ enum SessionRemote {
     /// Whether this target is one this app can address exactly.
     static func canType(into target: Target) -> Bool { terminals.contains(target.bundleID) }
 
+    /// Is there actually a process behind this row, right now.
+    ///
+    /// The store's `state` is an inference: discovery reads an mtime,
+    /// the registry reports on a sweep, and both can be a while behind.
+    /// This asks the kernel. It exists because a message was queued for
+    /// a session whose transcript had been cold for half an hour, and
+    /// sat there forever with nothing left to collect it (founder,
+    /// 2026-08-03: "I gave a text input in the island but I can't see it
+    /// here"). A composer that accepts words it cannot deliver is worse
+    /// than one that is greyed out, because it looks like it worked.
+    static func isRunning(_ session: SessionStore.Session) -> Bool {
+        // `kill(pid, 0)` asks "does this process exist and may I signal
+        // it", and sends nothing. The cheap answer first, since the
+        // registry's pid is right almost every time.
+        if let pid = session.pid, kill(pid, 0) == 0 { return true }
+        let table = SessionLocator.processTable()
+        return SessionLocator.agentProcess(
+            forCwd: session.cwd, in: table, agentNames: SessionLocator.agentNames) != nil
+    }
+
     /// One line, always.
     ///
     /// A newline inside the text would submit early and send the rest as

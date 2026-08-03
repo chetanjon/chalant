@@ -55,6 +55,12 @@ struct ComposeCard: View {
         }
         .rowInsets()
         .chalantCard(radius: Theme.Radius.row)
+        .task(id: session.id) {
+            while !Task.isCancelled {
+                measureReach()
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            }
+        }
     }
 
     /// What the agent last said, above the box you answer in.
@@ -198,7 +204,11 @@ struct ComposeCard: View {
         // Unless the words are going straight into the terminal, which
         // needs no hook at all: that path is the keyboard, and the
         // keyboard was never waiting on a Stop event.
-        .disabled(!hookInstalled && remoteTarget == nil)
+        //
+        // And closed outright when there is nowhere for the words to go
+        // at all, which is the state that let a message be queued for a
+        // session that had ended half an hour earlier.
+        .disabled({ if case .nowhere = reach { return true }; return false }())
         .animation(Theme.Motion.hover, value: draft.isEmpty)
     }
 
@@ -214,6 +224,7 @@ struct ComposeCard: View {
         let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         draft = ""
         guard !typed.isEmpty else { return }
+        if case .nowhere = reach { return }
         guard SessionRemote.sendsStraightToTerminal(),
               let target = SessionRemote.target(for: session),
               SessionRemote.canType(into: target)
@@ -233,20 +244,54 @@ struct ComposeCard: View {
         }
     }
 
-    /// Whether this session can be typed into right now, which decides
-    /// what the line under the field is allowed to promise.
+    /// Where this session's next message would actually go.
     ///
-    /// Recomputed on each render rather than cached: it walks the
-    /// process table, but only for the one session whose composer is
-    /// open, and being wrong about this is worse than the walk. A window
-    /// closed since the card opened must not leave "sends straight to
-    /// Terminal" sitting there.
-    private var remoteTarget: SessionRemote.Target? {
-        guard SessionRemote.sendsStraightToTerminal() else { return nil }
-        guard let target = SessionRemote.target(for: session),
-              SessionRemote.canType(into: target)
-        else { return nil }
-        return target
+    /// Three answers, and the third one is why this type exists: a
+    /// message was once queued for a session whose transcript had been
+    /// cold for half an hour, and it sat there forever because nothing
+    /// was left to collect it. The composer looked like it had worked.
+    enum Reach: Equatable {
+        /// Straight into a real terminal, now.
+        case types(app: String)
+        /// The outbox, collected at this session's next turn. Only
+        /// offered when a process is actually there to have one.
+        case queues
+        /// Nowhere, and this is why. The field is closed in this state.
+        case nowhere(String)
+    }
+
+    /// Held rather than computed per render: answering it walks the
+    /// process table, and SwiftUI redraws far more often than a process
+    /// starts or stops. Refreshed by the task below.
+    @State private var reach: Reach = .queues
+
+    /// Recomputed on open and every few seconds after, because both
+    /// halves of the answer go stale on their own: a terminal window can
+    /// be closed, and a session can end, without anything telling this
+    /// card.
+    private func measureReach() {
+        if SessionRemote.sendsStraightToTerminal(),
+           let target = SessionRemote.target(for: session),
+           SessionRemote.canType(into: target) {
+            reach = .types(app: target.appName)
+            return
+        }
+        guard SessionRemote.isRunning(session) else {
+            reach = .nowhere(
+                "This session isn't running any more, so there's nothing left to read a message. "
+                + "Anything sent now would wait forever.")
+            return
+        }
+        guard hookInstalled else {
+            reach = .nowhere("Claude Code isn't set up to collect these yet.")
+            return
+        }
+        reach = .queues
+    }
+
+    private var remoteTarget: String? {
+        if case .types(let app) = reach { return app }
+        return nil
     }
 
     @ViewBuilder
@@ -258,10 +303,15 @@ struct ComposeCard: View {
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-        } else if let target = remoteTarget {
-            Text("Goes straight into \(target.appName), the way typing does.")
+        } else if let app = remoteTarget {
+            Text("Goes straight into \(app), the way typing does.")
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(Theme.textTertiary)
+        } else if case .nowhere(let why) = reach {
+            Text(why)
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.danger)
+                .fixedSize(horizontal: false, vertical: true)
         } else if !hookInstalled {
             HStack(spacing: Theme.Space.s) {
                 Text("Claude Code is not set up to receive these yet.")
