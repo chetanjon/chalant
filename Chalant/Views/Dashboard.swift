@@ -43,7 +43,9 @@ enum DashboardSection: String, CaseIterable, Identifiable {
         case .general: return "gearshape"
         case .sessions: return "chevron.left.forwardslash.chevron.right"
         case .whatShows: return "square.stack"
-        case .island: return "macwindow"
+        // The island's own shape, not a generic window: "Pick an
+        // app..." in Shortcuts is the one that opens a window.
+        case .island: return "capsule"
         case .displays: return "display.2"
         case .layout: return "rectangle.3.group"
         case .glance: return "eye"

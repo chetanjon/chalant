@@ -384,14 +384,18 @@ struct SessionsSection: View {
         .accessibilityLabel("\(session.title), \(session.cwd), \(Self.label(session.state))")
     }
 
+    /// Filled for done and failed, matching `ActivityStore.State.symbol`:
+    /// the same idea (a run that finished, one way or the other) wears
+    /// the same weight everywhere it's shown, not a quieter unfilled
+    /// pair here that just happened to read as this row mattering less.
     private static func symbol(_ state: SessionStore.State) -> String {
         switch state {
         case .needsInput: return "exclamationmark.circle.fill"
         case .working: return "circle.dashed"
         case .idle: return "pause.circle"
         case .stale: return "clock"
-        case .done: return "checkmark.circle"
-        case .failed: return "xmark.circle"
+        case .done: return "checkmark.circle.fill"
+        case .failed: return "xmark.circle.fill"
         }
     }
 

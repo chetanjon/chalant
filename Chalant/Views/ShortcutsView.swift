@@ -345,13 +345,18 @@ private struct ShortcutChip: View {
                 Button {
                     store.remove(shortcut)
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
+                    // Same idea as the arrangement editor's row removal
+                    // (DashboardLayout's `minus.circle`), not the xmark
+                    // that means "failed" on an activity or session row.
+                    Image(systemName: "minus.circle.fill")
                         .font(Theme.Fonts.icon(.s))
                         .foregroundStyle(Theme.textTertiary)
                         .frame(minWidth: 22, minHeight: 22)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(PressableStyle())
+                .help("Remove \(shortcut.title)")
+                .accessibilityLabel("Remove \(shortcut.title)")
             }
         }
         .onHover { hovered = $0 }
