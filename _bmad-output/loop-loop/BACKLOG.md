@@ -128,6 +128,14 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
   picked up without a relaunch.
 - [x] **F4b. Accessibility labels.** `label:` is required on both glyph
   buttons now, so the compiler asks at every new call site.
+- [!] **F4d. Icon collisions.** All six resolved, chosen on meaning. The
+  filled-versus-unfilled check marks were drift, not intent, and now match.
+  Every replacement checked against this machine's SF Symbols availability
+  data, which rejected one tagged 2024.
+- [!] **F4e. Battery panel.** Shipped. Time to empty or to full is the reason
+  it exists; the percentage was already in the menu bar. No extra polling,
+  health fetched only when the panel opens, and the tab does not exist on a
+  Mac with no battery.
 - [!] **F4c. Icon audit and shortcuts.** Done. One mechanical fault in 47 call
   sites (the sidebar toggle was off the icon scale entirely). Chat and Sessions
   gained shortcuts; the clipboard's existing one now opens with search focused,
@@ -136,6 +144,20 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
   same symbol carrying two ideas in Shortcuts/Tools, Island/app-picker, and
   focus-streak/ambience. Each needs a chosen replacement, which is a design
   call, not an audit's.
+
+## Outbox durability, reversed 2026-08-03
+
+EC-9 said a queued message should be lost on restart, because one typed Monday
+and injected Thursday is worse than none. That held for a stale message and
+was wrong about the common case: it cost the founder three real messages in
+one day, every time to a relaunch between typing and collection, and read to
+them as the feature being broken rather than as a decision.
+
+- [!] Persisted, with a twenty minute expiry measured from when it was queued.
+  An expired head blocks the queue rather than being skipped, since an ordered
+  queue where the second message explains the first breaks if you jump ahead.
+  Nothing vanishes; it says it waited too long and offers to resend or drop.
+  A file read off disk gets the composer's own bounds in one place.
 
 ## G. NotchBox parity - assessed 2026-08-02, and two of three are blocked
 
@@ -149,7 +171,7 @@ Scoped properly rather than assumed. What NotchBox has that Chalant does not:
 - **Web view.** Largely already here twice: the Chat tab IS a `WKWebView`, and
   the Links tab is an app and shortcut launcher. A third general browser panel
   would be a fourth door onto the same job. **Recommend not building.**
-- **Battery panel.** Genuinely buildable and small: `SystemStatsController`
+- **Battery panel.** DONE, see F4e. Was: genuinely buildable and small: `SystemStatsController`
   already publishes level and charging, and time-to-empty is one IOKit call
   away. It is currently a glance, not a panel. **The only one of the three
   worth doing, and nobody has asked for it specifically.**
