@@ -321,32 +321,34 @@ private struct ComposeCard: View {
     private var lastWord: some View {
         if let said = session.lastMessage, !said.isEmpty {
             let rendered = Self.rendered(said)
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                if showingFullMessage {
-                    // Scrolls rather than growing without limit: an
-                    // agent's last turn can be pages, and an island that
-                    // grew to hold one would push its own controls off
-                    // the screen.
-                    ScrollView {
-                        Text(rendered)
-                            .font(Theme.Fonts.caption)
-                            .foregroundStyle(Theme.textSecondary)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                // What it said is quoted, not just placed: a wall of
+                // grey text running to both edges with the reply box
+                // under it read as one undifferentiated block, and it is
+                // two different things (founder, 2026-08-03). A rule
+                // down the leading edge says where the agent's words
+                // start and stop without drawing a second card inside a
+                // card.
+                HStack(alignment: .top, spacing: Theme.Space.m) {
+                    Capsule(style: .continuous)
+                        .fill(Theme.textGhost)
+                        .frame(width: 2)
+                    if showingFullMessage {
+                        // Scrolls rather than growing without limit: an
+                        // agent's last turn can run to pages, and an
+                        // island that stretched to hold one would push
+                        // its own controls off the screen.
+                        ScrollView {
+                            messageText(rendered, clamped: false)
+                                .padding(.trailing, Theme.Space.xs)
+                        }
+                        .frame(maxHeight: Theme.Panel.list)
+                        .scrollIndicators(.never)
+                    } else {
+                        messageText(rendered, clamped: true)
                     }
-                    .frame(maxHeight: Theme.Panel.list)
-                    .scrollIndicators(.never)
-                } else {
-                    Text(rendered)
-                        .font(Theme.Fonts.caption)
-                        .foregroundStyle(Theme.textSecondary)
-                        .lineLimit(4)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                // Offered only when there is genuinely more to see, so
-                // it never invites a tap that changes nothing.
+                .frame(maxWidth: .infinity, alignment: .leading)
                 if showingFullMessage || Self.mayBeClipped(said) {
                     Button(showingFullMessage ? "Show less" : "Show everything") {
                         withAnimation(Theme.Motion.content) { showingFullMessage.toggle() }
@@ -354,10 +356,28 @@ private struct ComposeCard: View {
                     .buttonStyle(.plain)
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(accent)
+                    .padding(.leading, Theme.Space.m + 2)
                 }
+                // The agent's words end here and yours begin below. A
+                // hairline is cheaper than a second card and says the
+                // same thing.
+                Divider().overlay(Theme.hairline)
             }
             .accessibilityLabel("It said: \(said)")
         }
+    }
+
+    /// One place decides how the agent's words are set, so the clamped
+    /// and the full versions cannot drift apart in font or colour.
+    private func messageText(_ rendered: AttributedString, clamped: Bool) -> some View {
+        Text(rendered)
+            .font(Theme.Fonts.caption)
+            .foregroundStyle(Theme.textSecondary)
+            .lineSpacing(2)
+            .lineLimit(clamped ? 4 : nil)
+            .fixedSize(horizontal: false, vertical: clamped)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Whether four lines might not be all of it.
