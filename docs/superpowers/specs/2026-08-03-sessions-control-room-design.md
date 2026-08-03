@@ -445,6 +445,22 @@ proof comes back "this kills the session," the button does not ship and
 the action row carries two items. Section 12 records this as a gate, not
 a task.
 
+> **Result, 2026-08-03: the gate closed. Stop does not ship.**
+>
+> Two throwaway sessions were started under a pty and signalled: once
+> with `SIGINT` to the pid, once with `SIGINT` to the process group,
+> which is what a terminal actually sends on Ctrl-C. **Both killed the
+> process.** Claude Code holds the tty in raw mode and reads Ctrl-C as a
+> keystroke, never as a signal, so the interrupt everyone has in mind
+> has no out-of-band equivalent at all. A Stop button would not have
+> ended a turn, it would have destroyed whatever the agent had not yet
+> written down.
+>
+> The action row ships with two items. The verb that genuinely stops an
+> agent from outside already exists and already works: a `PreToolUse`
+> rule holds the call at the door and Deny refuses it. Anyone looking
+> for "stop" should be pointed at the approval card.
+
 ## 7. Keyboard
 
 The panel is already `canBecomeKey`, and a room entered by a click is
@@ -584,8 +600,10 @@ seam already enforces this).
 
 ## 12. Gates before this ships
 
-1. **SIGINT semantics proven** against a real throwaway Claude Code
-   session, in both directions, or Stop does not ship (section 6).
+1. ~~**SIGINT semantics proven** against a real throwaway Claude Code
+   session, in both directions, or Stop does not ship (section 6).~~
+   **Closed 2026-08-03: SIGINT kills the process, to the pid and to the
+   process group alike. Stop does not ship.** See section 6.
 2. **The computed room measured in pixels** on both a real notched
    display and an emulated one at `heightRange` maximum with padding at
    `paddingRange` maximum, since the arithmetic is a prediction until

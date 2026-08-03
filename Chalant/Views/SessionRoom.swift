@@ -692,6 +692,29 @@ private struct SessionActions: View {
             .controlSize(.small)
             Spacer(minLength: 0)
         }
+        // There is no Stop here, and it is not an oversight.
+        //
+        // The design specified one: SIGINT to the pid, two-step, on the
+        // theory that SIGINT is what Ctrl-C sends and Ctrl-C interrupts
+        // a turn without ending the session. It was gated on proving
+        // that against a real session before being wired to a button,
+        // and the proof came back the other way (2026-08-03, two
+        // throwaway sessions under a pty): SIGINT kills the Claude Code
+        // process outright, sent to the pid and sent to the process
+        // group alike.
+        //
+        // The reason is that Ctrl-C in Claude Code's own terminal is
+        // never a signal at all. The TUI holds the tty in raw mode and
+        // reads it as a keystroke, so the interrupt everybody has in
+        // mind has no out-of-band equivalent to reach for. A button here
+        // would not have stopped a turn, it would have destroyed
+        // whatever the agent had not yet written down.
+        //
+        // The thing that does stop an agent from outside is already in
+        // this app and already works: a `PreToolUse` rule holds the call
+        // at the door and Deny refuses it. That is the honest verb, it
+        // lives on the approval card, and it is where anyone looking for
+        // "stop" should be pointed.
         .animation(Theme.Motion.hover, value: copied)
         .onChange(of: session.id) { _, _ in copied = false }
     }
