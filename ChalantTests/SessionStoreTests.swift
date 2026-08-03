@@ -2274,6 +2274,35 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(announced, ["a turn"], "a resting session must not re-announce")
     }
 
+    func testTwoWritersFlappingOverOneFinishedTurnAnnounceItOnce() {
+        let store = SessionStore()
+        var announced: [String] = []
+        store.onSessionCameToRest = { _, title in announced.append(title) }
+
+        // The scraper sees a transcript written to a moment ago and says
+        // working; the registry sees the process sitting at its prompt
+        // and says idle. They disagree for a while after a turn ends, so
+        // the edge happens several times for one finished turn. This
+        // opened the island, collapsed it and opened it again while the
+        // founder was typing (2026-08-03).
+        store.upsert(id: "s1", title: "one turn", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .working, lastMessage: "here is what I did")
+        for _ in 0..<4 {
+            store.markLive(id: "s1", name: "one turn", cwd: "/a", pid: 1,
+                           kind: .interactive, hasTerminal: true, status: .idle)
+            store.upsert(id: "s1", title: "one turn", cwd: "/a", branch: nil,
+                         lastPrompt: nil, state: .working, lastMessage: "here is what I did")
+        }
+        XCTAssertEqual(announced, ["one turn"], "one finished turn is one announcement")
+
+        // A genuinely new turn produces new words, and is announced.
+        store.upsert(id: "s1", title: "one turn", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .working, lastMessage: "and then this")
+        store.markLive(id: "s1", name: "one turn", cwd: "/a", pid: 1,
+                       kind: .interactive, hasTerminal: true, status: .idle)
+        XCTAssertEqual(announced.count, 2, "new words are a new turn")
+    }
+
     func testAQuestionOutstandingHoldsBackTheFinishedAnnouncement() {
         let store = SessionStore()
         var announced: [String] = []
