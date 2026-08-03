@@ -130,6 +130,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // assignment is the only thing that happens.
                 model.expand()
                 model.tab = tab
+                // A destination with a room lands in the room.
+                //
+                // Same reasoning as the comment above about skipping the
+                // switcher, one step further on: a shortcut is a
+                // deliberate act, exactly like clicking "Open full", and
+                // a deliberate act should land where deliberate acts
+                // land. Nothing is lost, because hovering the notch
+                // still gives the glance for free. Written against
+                // `canFocus` rather than `== .sessions` so a second
+                // focusable destination inherits it rather than being a
+                // second place to remember.
+                if tab.canFocus { model.focus(on: tab) }
                 // The clipboard's own binding covers both halves the
                 // founder asked for: opening it, and searching within
                 // it once open. A second destination just for search

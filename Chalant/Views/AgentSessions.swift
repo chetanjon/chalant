@@ -16,17 +16,20 @@ import SwiftUI
 /// Named for agents rather than sessions because "session" is already
 /// taken here by the focus/timer strip (`SessionStrip`); the store keeps
 /// Claude Code's own vocabulary, the surface uses the island's.
+///
+/// The glance, and only the glance. Clicking through opens `SessionRoom`,
+/// which is where the record of what has finished, the conversation and
+/// the verbs live. This one stayed deliberately small: it is what a hover
+/// gets, and a hover is somebody asking "is anything happening", not
+/// "let me work in here". The law in the first paragraph is this view's
+/// alone for the same reason; the room is allowed a bounded record
+/// because opening it was a decision.
 struct AgentSessionsStrip: View {
     @ObservedObject var sessions: SessionStore
     /// Only reached for `composingSessionID` and the voice pipeline;
     /// see that property's doc for why it lives on the model rather
     /// than as this view's own `@State`.
     @ObservedObject var model: NotchViewModel
-    /// Given the island's whole panel rather than a slice of it. The
-    /// rows are the same; what changes is that there is room for all of
-    /// them and for a composer under one, at once, without the list
-    /// collapsing to two lines and a scrollbar.
-    var focused = false
     @Environment(\.chalantAccent) private var accent
 
     /// Working, waiting, or idle — anything actually alive. `stale` is
@@ -51,19 +54,6 @@ struct AgentSessionsStrip: View {
         Group {
             if live.isEmpty {
                 EmptyPaneHint(message: "Nothing running. Start Claude Code in any terminal and it shows up here.")
-            } else if focused {
-                // Top-aligned rather than hugging: a list given the
-                // whole panel must not centre two rows in the middle of
-                // it, which reads as a layout mistake rather than as
-                // room to grow into.
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        ForEach(live) { session in
-                            row(session)
-                        }
-                    }
-                }
-                .frame(maxHeight: .infinity, alignment: .top)
             } else {
                 HuggingList {
                     ForEach(live) { session in
@@ -116,41 +106,7 @@ struct AgentSessionsStrip: View {
             // (notch-messaging-plan-2026-08-01.md, W-C rationale).
             if model.composingSessionID == session.id {
                 ComposeCard(session: session, sessions: sessions, model: model)
-            } else if focused {
-                // What it said, on the row, once there is room for it.
-                //
-                // In the glance this lives inside the composer, because
-                // a strip four rows tall cannot afford it and a name
-                // alone is enough to pick from. Given the whole panel
-                // the trade reverses: a list of names in a room this
-                // size is a room with nothing in it, and the reason to
-                // open a session is almost always what it just said.
-                //
-                // Only when the composer is closed. Open, the composer
-                // shows the same words directly above its own field,
-                // and twice is worse than once.
-                lastWord(session)
             }
-        }
-    }
-
-    /// The agent's last words, trimmed to a glance's worth.
-    ///
-    /// Three lines, not the composer's four: this one repeats down a
-    /// list, so its job is to let you recognise a session rather than
-    /// to read it. Opening the composer is where reading happens.
-    @ViewBuilder
-    private func lastWord(_ session: SessionStore.Session) -> some View {
-        if let said = session.lastMessage, !said.isEmpty {
-            Text(said)
-                .font(Theme.Fonts.caption)
-                .foregroundStyle(Theme.textTertiary)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Theme.Space.m)
-                .padding(.bottom, Theme.Space.xs)
-                .accessibilityLabel("It said: \(said)")
         }
     }
 
@@ -291,19 +247,13 @@ struct AgentSessionsStrip: View {
         return nil
     }
 
-    /// A session that never earned a title from its transcript falls
-    /// back to its folder name, and for a headless process that folder
-    /// is an implementation detail of whatever spawned it. Naming it
-    /// for what it is beats naming it after a directory the person has
-    /// never opened.
-    ///
-    /// Only the fallback is replaced. A headless session that does have
-    /// a real title keeps it, because that title is the one thing on
-    /// the row that was worth reading.
+    /// What to call this session, which the store decides: the record
+    /// stores the same answer, and two places computing it separately is
+    /// how the same session ended up with two different names in one
+    /// rail. Kept as a forwarder rather than replaced at every call site
+    /// because "the strip's title" is what those call sites mean.
     static func title(_ session: SessionStore.Session) -> String {
-        guard session.hasTerminal == false, session.title == folder(session)
-        else { return session.title }
-        return "Background task"
+        SessionStore.displayTitle(for: session)
     }
 
     /// What it is doing, where it lives, and why you cannot write to it,

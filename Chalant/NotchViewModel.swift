@@ -1349,6 +1349,21 @@ final class NotchViewModel: ObservableObject {
     /// trip; `tab` and `draftPrompt` live here for the same reason.
     @Published var composingSessionID: String?
 
+    /// Which session the room has open on its right-hand side.
+    ///
+    /// An id, never an index. The store re-sorts the instant any
+    /// session's state changes, and it changes constantly: a session
+    /// moving from Working to Needs you would pull a different row under
+    /// the pointer of somebody who was about to click, and an
+    /// index-keyed selection would silently start showing them a
+    /// different conversation than the one they were reading.
+    ///
+    /// Lives here rather than in the room for the same reason
+    /// `composingSessionID` does: the composer's mic sends the island
+    /// through `.listening`, which unmounts `ExpandedView` and every
+    /// piece of view-local state under it.
+    @Published var selectedSessionID: String?
+
     func beginListening(to destination: VoiceDestination = .chalant) {
         guard state == .collapsed else { return }
         voiceDestination = destination

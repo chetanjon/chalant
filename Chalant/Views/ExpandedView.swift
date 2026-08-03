@@ -137,15 +137,13 @@ struct ExpandedView: View {
                     model.openDashboard?(nil)
                 }
             }
+            // No frame here. Each destination is handed the room its
+            // display leaves (`Theme.Panel.room`, computed from this
+            // face's own chrome rather than from a constant) and decides
+            // whether to fill it. A frame at this level would force the
+            // full height onto an empty room, which is the exact void
+            // this surface was rebuilt to stop drawing.
             focusedPanel(destination)
-                // Sized from this display's own chrome rather than from
-                // a constant. `contentTopReserve` and `contentPadding`
-                // are both user dials, so the room they leave is a
-                // different number on every Mac, and the old flat 480
-                // was wrong on all of them: too short here, and it would
-                // have overflowed the panel had it been set for here.
-                .frame(height: Theme.Panel.room(
-                    topReserve: face.contentTopReserve, padding: face.contentPadding))
         }
     }
 
@@ -153,7 +151,10 @@ struct ExpandedView: View {
     private func focusedPanel(_ destination: NotchViewModel.Tab) -> some View {
         switch destination {
         case .sessions:
-            AgentSessionsStrip(sessions: model.sessions, model: model, focused: true)
+            SessionRoom(
+                sessions: model.sessions, model: model,
+                height: Theme.Panel.room(
+                    topReserve: face.contentTopReserve, padding: face.contentPadding))
         default:
             // Nothing else claims `canFocus` yet, so nothing else can
             // reach here. An empty panel beats a crash if one ever does.

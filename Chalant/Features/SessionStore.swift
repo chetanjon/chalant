@@ -510,6 +510,8 @@ final class SessionStore: ObservableObject {
         // is refused there.
         if resolved == .done || resolved == .failed {
             remember(session, leaving: previousState, as: resolved == .done ? .done : .failed)
+        } else if resolved.isLive {
+            revive(id)
         }
         sessions.removeAll { $0.id == id }
         sessions.append(session)
@@ -718,7 +720,7 @@ final class SessionStore: ObservableObject {
         finished.removeAll { $0.id == session.id }
         finished.insert(
             Finished(
-                id: session.id, title: session.title, cwd: session.cwd,
+                id: session.id, title: Self.displayTitle(for: session), cwd: session.cwd,
                 branch: session.branch, agent: session.agent, outcome: outcome,
                 lastMessage: session.lastMessage,
                 transcriptPath: session.transcriptPath, finishedAt: Date()
@@ -726,6 +728,44 @@ final class SessionStore: ObservableObject {
             at: 0
         )
         prune(window: window)
+    }
+
+    /// What to call a session on screen.
+    ///
+    /// A session that never earned a title from its transcript falls
+    /// back to its folder name, and for a headless process that folder
+    /// is an implementation detail of whatever spawned it. Naming it for
+    /// what it is beats naming it after a directory the person has never
+    /// opened.
+    ///
+    /// A data rule rather than a view rule, and it lives here because
+    /// two surfaces read it and a third writes it: the strip, the room's
+    /// live rows, and `remember` below. It was the view's alone, and the
+    /// record consequently stored the raw folder name, so the same
+    /// session read "Background task" while running and
+    /// "observer-sessions" once finished, four rows apart in the same
+    /// rail (observed 2026-08-03).
+    ///
+    /// Only the fallback is replaced. A headless session that does have
+    /// a real title keeps it, because that title is the one thing on the
+    /// row worth reading.
+    nonisolated static func displayTitle(for session: Session) -> String {
+        let folder = session.cwd.split(separator: "/").last.map(String.init) ?? session.cwd
+        guard session.hasTerminal == false, session.title == folder else { return session.title }
+        return "Background task"
+    }
+
+    /// Take a session back out of the record, because it is alive again.
+    ///
+    /// The registry loses a session and finds it again more often than
+    /// the word "finished" suggests: a transcript goes quiet through a
+    /// long turn, `reconcileLive` disowns it, and the next sweep vouches
+    /// for the same pid. Without this the room showed one session in
+    /// Working and in Finished at the same moment, four rows apart
+    /// (caught in pixels, 2026-08-03). Whatever else is true, a session
+    /// that is running now has not finished.
+    private func revive(_ id: String) {
+        finished.removeAll { $0.id == id }
     }
 
     /// Drops what has aged out and what falls off the end of the cap.
@@ -867,8 +907,12 @@ final class SessionStore: ObservableObject {
         hasTerminal: Bool = true, status: State
     ) {
         // Vouched for, so whatever the registry concluded last time it
-        // could not find this session no longer holds.
+        // could not find this session no longer holds. Including the row
+        // it wrote into the record when it lost it: this is the same
+        // registry saying the same process is there after all, and a
+        // session cannot be both running and finished.
         disownedByRegistry.remove(id)
+        if status.isLive { revive(id) }
         if let index = sessions.firstIndex(where: { $0.id == id }) {
             sessions[index].pid = pid
             sessions[index].kind = kind

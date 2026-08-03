@@ -178,6 +178,37 @@ final class SessionRoomDataTests: XCTestCase {
         XCTAssertEqual(store.finished.first?.branch, "main")
     }
 
+    /// The registry loses a session through a long quiet turn and finds
+    /// it again on the next sweep. Before this the room drew the same
+    /// session in Working and in Finished at once, four rows apart
+    /// (caught in pixels, 2026-08-03).
+    func testASessionThatComesBackToLifeLeavesTheRecord() {
+        let store = store()
+        live(store, "s", .working)
+        store.markGone(["s"])
+        XCTAssertEqual(store.finished.map(\.id), ["s"])
+        live(store, "s", .working)
+        XCTAssertTrue(store.finished.isEmpty)
+    }
+
+    func testTheRegistryVouchingForALostSessionAlsoRevivesIt() {
+        let store = store()
+        live(store, "s", .working)
+        store.markGone(["s"])
+        XCTAssertEqual(store.finished.count, 1)
+        store.markLive(id: "s", name: "s", cwd: "/a", pid: 4242, kind: .interactive, status: .idle)
+        XCTAssertTrue(store.finished.isEmpty)
+    }
+
+    /// Reviving is for the living only. A row arriving already done must
+    /// not clear the record entry that was just written for it.
+    func testFinishingDoesNotReviveTheRowItJustWrote() {
+        let store = store()
+        live(store, "s", .working)
+        live(store, "s", .done)
+        XCTAssertEqual(store.finished.map(\.id), ["s"])
+    }
+
     // MARK: Grouping
 
     func testEachLiveStateLandsInItsOwnBand() {

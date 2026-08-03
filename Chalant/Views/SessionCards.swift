@@ -23,6 +23,11 @@ struct ComposeCard: View {
     let session: SessionStore.Session
     @ObservedObject var sessions: SessionStore
     @ObservedObject var model: NotchViewModel
+    /// The room turns this off: it draws the whole conversation above
+    /// the composer, so quoting the last message here would be the same
+    /// words twice, six points apart. The glance keeps it, because there
+    /// the composer is the only place those words appear at all.
+    var showsLastWord = true
 
     @State private var draft = ""
     /// Whether the agent's last message is showing in full. Collapsed
@@ -66,7 +71,7 @@ struct ComposeCard: View {
     /// (2026-08-03). Shortened is a starting state now, not a ceiling.
     @ViewBuilder
     private var lastWord: some View {
-        if let said = session.lastMessage, !said.isEmpty {
+        if showsLastWord, let said = session.lastMessage, !said.isEmpty {
             let rendered = Self.rendered(said)
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 // What it said is quoted, not just placed: a wall of
