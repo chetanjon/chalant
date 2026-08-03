@@ -30,6 +30,9 @@ struct ComposeCard: View {
     var showsLastWord = true
 
     @State private var draft = ""
+    /// What became of the last send, when it went somewhere other than
+    /// the outbox or failed to. Cleared on the next ordinary send.
+    @State private var remoteNote: String?
     /// Whether the agent's last message is showing in full. Collapsed
     /// is the resting state; the toggle below it is the way through.
     @State private var showingFullMessage = false
@@ -191,20 +194,75 @@ struct ComposeCard: View {
         // Sending here is pointless before the hook exists to collect
         // it, and a live field that quietly does nothing reads as
         // broken rather than as "not set up yet" (EC-18).
-        .disabled(!hookInstalled)
+        //
+        // Unless the words are going straight into the terminal, which
+        // needs no hook at all: that path is the keyboard, and the
+        // keyboard was never waiting on a Stop event.
+        .disabled(!hookInstalled && remoteTarget == nil)
         .animation(Theme.Motion.hover, value: draft.isEmpty)
     }
 
+    /// Straight into the running session where that is possible and the
+    /// user has asked for it, and into the outbox otherwise.
+    ///
+    /// The fallback is never silent. A message that quietly became a
+    /// note-for-later when the person meant "say this now" is the same
+    /// class of failure as a button that does nothing, so every path
+    /// that cannot type says why, in `remoteNote`, right under the
+    /// field.
     private func send() {
         let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         draft = ""
         guard !typed.isEmpty else { return }
-        sessions.queue(message: typed, for: session.id)
+        guard SessionRemote.sendsStraightToTerminal(),
+              let target = SessionRemote.target(for: session),
+              SessionRemote.canType(into: target)
+        else {
+            remoteNote = nil
+            sessions.queue(message: typed, for: session.id)
+            return
+        }
+        Task {
+            switch await SessionRemote.type(typed, into: target) {
+            case .typed(let app):
+                remoteNote = "Typed into \(app)."
+            case .cannot(let reason):
+                remoteNote = reason
+                sessions.queue(message: typed, for: session.id)
+            }
+        }
+    }
+
+    /// Whether this session can be typed into right now, which decides
+    /// what the line under the field is allowed to promise.
+    ///
+    /// Recomputed on each render rather than cached: it walks the
+    /// process table, but only for the one session whose composer is
+    /// open, and being wrong about this is worse than the walk. A window
+    /// closed since the card opened must not leave "sends straight to
+    /// Terminal" sitting there.
+    private var remoteTarget: SessionRemote.Target? {
+        guard SessionRemote.sendsStraightToTerminal() else { return nil }
+        guard let target = SessionRemote.target(for: session),
+              SessionRemote.canType(into: target)
+        else { return nil }
+        return target
     }
 
     @ViewBuilder
     private var statusLine: some View {
-        if !hookInstalled {
+        if let note = remoteNote {
+            // What actually happened to the last one, which outranks
+            // any general statement about what usually happens.
+            Text(note)
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if let target = remoteTarget {
+            Text("Goes straight into \(target.appName), the way typing does.")
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textTertiary)
+        } else if !hookInstalled {
             HStack(spacing: Theme.Space.s) {
                 Text("Claude Code is not set up to receive these yet.")
                     .font(Theme.Fonts.caption)

@@ -168,6 +168,10 @@ struct SessionsSection: View {
     @AppStorage(SessionStore.historyWindowKey) private var historyWindow = "default"
     @AppStorage(SessionRoomSettings.toolActivityKey) private var showsToolActivity = true
     @AppStorage(SessionRoomSettings.densityKey) private var rowDensity = SessionRoomSettings.defaultDensity
+    @AppStorage(SessionRemote.straightToTerminalKey) private var straightToTerminal = false
+    /// What the last Arm/Disarm actually did, held so the card can say
+    /// so instead of the button going quiet and the user wondering.
+    @State private var armOutcome: HookInstall.ArmOutcome?
 
     /// Read from the stored string rather than through
     /// `SessionStore.approvalRules()`, so editing a rule redraws this
@@ -249,15 +253,75 @@ struct SessionsSection: View {
                     .foregroundStyle(Theme.textTertiary)
                 WrappingRules(rules: unused) { add($0) }
             }
+            SettingDivider()
+            armRow(armed: armed)
             if !rules.isEmpty, !armed {
-                SettingDivider()
                 SettingNote(
-                    "These are not armed yet. Holding a call needs one more hook than posting a "
+                    "Or do it by hand. Holding a call needs one more hook than posting a "
                     + "pill does, because PreToolUse is the only event whose answer can stop a "
                     + "command from running. Merge this into ~/.claude/settings.json."
                 )
                 holdSnippet
             }
+        }
+    }
+
+    /// The one button that turns rules into a feature.
+    ///
+    /// Until this existed, arming meant pasting JSON into
+    /// ~/.claude/settings.json by hand, and the founder had rules
+    /// configured for a day without one of them ever firing. A feature
+    /// whose setup step nobody completes is not a shipped feature.
+    ///
+    /// The whole safety story is said out loud rather than promised:
+    /// what it adds, that the old file is copied aside first, and that
+    /// it can be taken back out.
+    @ViewBuilder
+    private func armRow(armed: Bool) -> some View {
+        HStack(spacing: Theme.Space.m) {
+            Image(systemName: armed ? "checkmark.circle.fill" : "exclamationmark.circle")
+                .font(Theme.Fonts.icon(.m))
+                .foregroundStyle(armed ? Theme.positive : Theme.textTertiary)
+            Text(armed
+                 ? "Armed. Anything matching a rule above stops and asks you."
+                 : "Not armed. These rules hold nothing until Chalant's PreToolUse hook is in place.")
+                .font(Theme.Fonts.body)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: Theme.Space.m)
+            if armed {
+                Button("Disarm") { armOutcome = HookInstall.disarm() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            } else {
+                Button("Arm it") { armOutcome = HookInstall.arm() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(accent)
+            }
+        }
+        if let armOutcome {
+            switch armOutcome {
+            case .armed(let backup):
+                SettingNote(
+                    (armed ? "Written. " : "Taken back out. ")
+                    + (backup.map { "Your old settings file is at \($0)." }
+                       ?? "There was no settings file to back up.")
+                    + " Claude Code picks this up on its next session; ones already running keep "
+                    + "the hooks they started with.")
+            case .alreadyArmed:
+                SettingNote("It was already there. Nothing was written.")
+            case .refused(let why):
+                Text(why)
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else if !armed {
+            SettingNote(
+                "Arm it adds one PreToolUse hook to ~/.claude/settings.json, merging with the "
+                + "hooks already there rather than replacing them, and copies the old file aside "
+                + "first. Disarm takes only that one line back out.")
         }
     }
 
@@ -274,6 +338,16 @@ struct SessionsSection: View {
                 "Press the Sessions shortcut, or click the arrow in the island's tool row, to "
                 + "open every agent on this Mac beside the one you have picked."
             )
+            SettingToggle(label: "Send straight to the terminal", isOn: $straightToTerminal)
+            SettingNote(
+                "On, what you type goes into the running session now, the way typing into its "
+                + "window does, and you do not wait for its next turn. Chalant finds the exact "
+                + "tab by the terminal device that session is attached to, so it can only ever "
+                + "land in that one window. Terminal and iTerm only: an editor's built-in "
+                + "terminal cannot be named from outside, and typing blind into an editor would "
+                + "land in whatever file is open, so those keep the queue."
+            )
+            SettingDivider()
             SettingPicker(
                 label: "Keep finished sessions for",
                 selection: $historyWindow,

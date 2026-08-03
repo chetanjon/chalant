@@ -512,7 +512,9 @@ private struct FinishedDetail: View {
                     Text("This session's transcript is gone. The last thing it said:")
                         .font(Theme.Fonts.caption)
                         .foregroundStyle(Theme.textTertiary)
-                    QuotedBlock(text: said)
+                    // Unfolded: this is the only thing left of the
+                    // session, so there is nothing for it to crowd out.
+                    QuotedBlock(text: said, foldable: false)
                 }
                 .frame(maxHeight: .infinity, alignment: .top)
             } else {
@@ -648,19 +650,48 @@ private struct TurnRow: View {
 struct QuotedBlock: View {
     let text: String
     var tint: Color = Theme.textGhost
+    /// Long turns start folded. A conversation is twenty of these
+    /// stacked, and an agent's turn routinely runs to pages: unfolded,
+    /// one of them fills the pane and everything around it becomes
+    /// scrollback. The founder's word for the result was that it was not
+    /// readable (2026-08-03).
+    ///
+    /// Folded, never truncated. The toggle is always there when there is
+    /// more, which is the rule `ComposeCard` already settled: text cut
+    /// off with no way through is its own bug.
+    var foldable = true
+
+    @State private var open = false
+    @Environment(\.chalantAccent) private var accent
+
+    private static let foldedLines = 6
+
+    private var long: Bool { ComposeCard.mayBeClipped(text) }
 
     var body: some View {
-        HStack(alignment: .top, spacing: Theme.Space.m) {
-            Capsule(style: .continuous)
-                .fill(tint)
-                .frame(width: 2)
-            Text(ComposeCard.rendered(text))
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            HStack(alignment: .top, spacing: Theme.Space.m) {
+                Capsule(style: .continuous)
+                    .fill(tint)
+                    .frame(width: 2)
+                Text(ComposeCard.rendered(text))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineSpacing(2)
+                    .lineLimit(foldable && long && !open ? Self.foldedLines : nil)
+                    .fixedSize(horizontal: false, vertical: !(foldable && long && !open))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if foldable, long {
+                Button(open ? "Show less" : "Show everything") {
+                    withAnimation(Theme.Motion.content) { open.toggle() }
+                }
+                .buttonStyle(.plain)
                 .font(Theme.Fonts.caption)
-                .foregroundStyle(Theme.textSecondary)
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .foregroundStyle(accent)
+                .padding(.leading, Theme.Space.m + 2)
+            }
         }
     }
 }

@@ -3,11 +3,24 @@ import Foundation
 /// Whether Claude Code, Cursor or Codex is set up to hand this app an
 /// event. Each keeps its own live `hooks.json` (Cursor and Codex) or
 /// `settings.json` (Claude Code), already pointed at another tool the
-/// founder runs, so this only ever reads, never writes, never merges,
-/// never backs up (founder decision, W-E; reaffirmed for the other two
-/// agents in cursor-codex-hooks-evidence-2026-08-02.md: both files are
-/// "already in use," and Chalant "adds itself alongside" or does
-/// nothing).
+/// founder runs.
+///
+/// This file used to only ever read: never write, never merge, never
+/// back up (founder decision, W-E; reaffirmed for the other two agents
+/// in cursor-codex-hooks-evidence-2026-08-02.md). **That was reversed
+/// for Claude Code on 2026-08-03**, and the reason is worth keeping: the
+/// founder had approval rules configured for a day and not one of them
+/// ever fired, because arming them meant hand-pasting JSON into
+/// settings.json and nobody does that. A feature whose setup step no
+/// user completes has not shipped.
+///
+/// So `arm()` and `disarm()` write, and they do the whole list the old
+/// decision was avoiding rather than a convenient subset: refuse on
+/// JSON this app cannot parse, merge into the hooks already configured
+/// instead of replacing them, copy the old file aside first, write
+/// atomically, and follow a symlink rather than replacing it. Cursor and
+/// Codex are still read-only, because nobody has asked for those and the
+/// reversal was specific.
 enum HookInstall {
     /// The three tools this app knows how to be notified by. Kept here
     /// rather than reusing `SessionStore.Agent`: that enum names who a
@@ -163,11 +176,147 @@ enum HookInstall {
 
     private static var settingsURL: URL { Agent.claude.fileURL }
 
-    /// Reads the real file fresh on every call — never cached, and
-    /// never written by this app. A one-click install is a real feature
-    /// with a real way to ruin somebody's config (a backup, an atomic
-    /// write, a symlinked settings.json, merging with hooks already
-    /// there); this round only ever reads (founder decision, W-E).
+    // MARK: Arming the door
+
+    /// What happened when we tried to write somebody's settings file.
+    enum ArmOutcome: Equatable {
+        /// Written. The backup path is carried so the surface can say
+        /// where the old file went rather than "trust me".
+        case armed(backup: String?)
+        case alreadyArmed
+        /// Nothing was written, and this is why. Every failure here
+        /// leaves the file exactly as it was.
+        case refused(String)
+    }
+
+    /// The `PreToolUse` entry this app installs, and the only one it
+    /// will ever remove.
+    private static func holdEntry() -> [String: Any]? {
+        guard let path = bundledScriptPath else { return nil }
+        return ["hooks": [["type": "command", "command": path, "timeout": 40]]]
+    }
+
+    /// Add the hook that lets the island hold a tool call.
+    ///
+    /// Everything here is in service of one rule: a settings file this
+    /// app does not fully understand is a settings file it does not
+    /// touch. It refuses on unparseable JSON rather than "fixing" it,
+    /// it merges into whatever hooks are already configured instead of
+    /// replacing them (this machine runs pixel-agents hooks on five
+    /// events, and losing those would be an outrage), it copies the old
+    /// file aside first, and it writes through a symlink rather than
+    /// replacing the link.
+    ///
+    /// `at:` is a testing seam and nothing else, the same shape
+    /// `SessionStore`'s `outboxDirectory` is: a test must never be one
+    /// typo away from rewriting the real install's Claude config.
+    @discardableResult
+    static func arm(at url: URL? = nil) -> ArmOutcome {
+        let settingsURL = url ?? Self.settingsURL
+        guard let entry = holdEntry() else {
+            return .refused("Chalant can't find its own hook script inside the app bundle.")
+        }
+        var settings: [String: Any]
+        switch fileState(at: settingsURL) {
+        case .parsed(let object):
+            settings = object
+        case .missing:
+            // No file is not a problem: Claude Code makes one when it
+            // needs one, and so can this.
+            settings = [:]
+        case .unreadable:
+            return .refused(
+                "Your ~/.claude/settings.json has something in it that isn't valid JSON. "
+                + "Chalant won't rewrite a file it can't read. Fix the file and try again.")
+        }
+        if holdsToolCalls(settings: settings) { return .alreadyArmed }
+
+        var hooks = settings["hooks"] as? [String: Any] ?? [:]
+        var preToolUse = hooks["PreToolUse"] as? [[String: Any]] ?? []
+        preToolUse.append(entry)
+        hooks["PreToolUse"] = preToolUse
+        settings["hooks"] = hooks
+
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
+        else { return .refused("Chalant could not build the new settings file.") }
+
+        let backup = backUpSettings(settingsURL)
+        // Through the symlink, not over it: some people keep their
+        // Claude config in a dotfiles repo and point at it from here,
+        // and replacing the link would quietly disconnect them from
+        // their own versioned file.
+        let destination = settingsURL.resolvingSymlinksInPath()
+        do {
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            try data.write(to: destination, options: .atomic)
+        } catch {
+            return .refused("Chalant could not write \(destination.path): \(error.localizedDescription)")
+        }
+        return .armed(backup: backup)
+    }
+
+    /// Take the hook back out, leaving every other hook alone.
+    ///
+    /// Matches on the command containing `chalant-hook`, the same test
+    /// `holdsToolCalls` uses, so an entry somebody wrote themselves
+    /// pointing at this app's script is removed too. That is the right
+    /// answer: they asked for it gone.
+    @discardableResult
+    static func disarm(at url: URL? = nil) -> ArmOutcome {
+        let settingsURL = url ?? Self.settingsURL
+        guard case .parsed(var settings) = fileState(at: settingsURL) else {
+            return .refused("Chalant can't read your ~/.claude/settings.json.")
+        }
+        guard var hooks = settings["hooks"] as? [String: Any],
+              var preToolUse = hooks["PreToolUse"] as? [[String: Any]]
+        else { return .armed(backup: nil) }
+        preToolUse.removeAll { entry in
+            (entry["hooks"] as? [[String: Any]])?.allSatisfy {
+                ($0["command"] as? String)?.contains("chalant-hook") ?? false
+            } ?? false
+        }
+        if preToolUse.isEmpty { hooks.removeValue(forKey: "PreToolUse") } else { hooks["PreToolUse"] = preToolUse }
+        settings["hooks"] = hooks
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
+        else { return .refused("Chalant could not build the new settings file.") }
+        let backup = backUpSettings(settingsURL)
+        do {
+            try data.write(to: settingsURL.resolvingSymlinksInPath(), options: .atomic)
+        } catch {
+            return .refused("Chalant could not write your settings: \(error.localizedDescription)")
+        }
+        return .armed(backup: backup)
+    }
+
+    /// A dated copy beside the original, so undo never depends on this
+    /// app still running or on anybody trusting it.
+    private static func backUpSettings(_ settingsURL: URL) -> String? {
+        let source = settingsURL.resolvingSymlinksInPath()
+        guard FileManager.default.fileExists(atPath: source.path) else { return nil }
+        let stamp = ISO8601DateFormatter()
+        stamp.formatOptions = [.withYear, .withMonth, .withDay, .withTime]
+        let name = "settings.chalant-backup-"
+            + stamp.string(from: Date()).replacingOccurrences(of: ":", with: "")
+            + ".json"
+        let destination = source.deletingLastPathComponent().appendingPathComponent(name)
+        try? FileManager.default.copyItem(at: source, to: destination)
+        return FileManager.default.fileExists(atPath: destination.path) ? destination.path : nil
+    }
+
+    /// Reads the real file fresh on every call, never cached.
+    ///
+    /// This app used to refuse to write it at all, and the list of what
+    /// a safe write would have to handle was the reason (a backup, an
+    /// atomic write, a symlinked settings.json, merging with hooks
+    /// already there). That refusal was reversed on 2026-08-03: the
+    /// founder had approval rules configured for a day and not one of
+    /// them ever fired, because arming them meant hand-pasting JSON and
+    /// nobody does that. `arm()` below does the whole list rather than
+    /// skipping it.
     ///
     /// A settings file that does not exist yet reads as `.missing`
     /// rather than `.unreadable`: there being no file is not a decoding
