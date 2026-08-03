@@ -169,6 +169,7 @@ struct SessionsSection: View {
     @AppStorage(SessionRoomSettings.toolActivityKey) private var showsToolActivity = true
     @AppStorage(SessionRoomSettings.densityKey) private var rowDensity = SessionRoomSettings.defaultDensity
     @AppStorage(SessionRemote.straightToTerminalKey) private var straightToTerminal = false
+    @AppStorage(SessionRemote.startsInKey) private var startsIn = "terminal"
     /// What the last Arm/Disarm actually did, held so the card can say
     /// so instead of the button going quiet and the user wondering.
     @State private var armOutcome: HookInstall.ArmOutcome?
@@ -338,6 +339,20 @@ struct SessionsSection: View {
                 "Press the Sessions shortcut, or click the arrow in the island's tool row, to "
                 + "open every agent on this Mac beside the one you have picked."
             )
+            if SessionRemote.isInstalled("com.googlecode.iterm2") {
+                SettingPicker(
+                    label: "Start new sessions in",
+                    selection: $startsIn,
+                    options: [("Terminal", "terminal"), ("iTerm", "iterm")],
+                    width: 200
+                )
+            }
+            SettingNote(
+                "The + in the room's header opens a terminal in a folder you pick and runs "
+                + "Claude Code in it. A session started that way can be driven from the island "
+                + "straight away, which one started inside an editor's built-in terminal cannot."
+            )
+            SettingDivider()
             SettingToggle(label: "Send straight to the terminal", isOn: $straightToTerminal)
             SettingNote(
                 "On, what you type goes into the running session now, the way typing into its "

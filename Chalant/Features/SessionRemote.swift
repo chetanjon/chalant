@@ -167,8 +167,74 @@ enum SessionRemote {
     /// possible answer. Nil pid means nobody has vouched for this
     /// session, which is honestly not the same as knowing it is alive.
     static func isRunning(_ session: SessionStore.Session) -> Bool {
-        guard let pid = session.pid else { return false }
-        return kill(pid, 0) == 0
+        // A pid is the only answer that is actually knowledge.
+        if let pid = session.pid { return kill(pid, 0) == 0 }
+        // Without one, fall back to what the store already inferred from
+        // the transcript, and no further. There is a real window at the
+        // start of a session where it is running and the registry has
+        // not written its file yet (Claude Code registers after its own
+        // trust prompt), and calling that "not running" would close the
+        // composer on a session somebody just opened. What this must
+        // never do is go looking for *some* process in the same folder:
+        // that is what confused three sessions in one repo for each
+        // other and swallowed a message.
+        return session.state.isLive
+    }
+
+    // MARK: Starting one you can actually reach
+
+    /// Which terminal new sessions are started in.
+    ///
+    /// The point of starting a session from here is that it lands
+    /// somewhere addressable: an agent begun this way is remote
+    /// controllable by construction, and nobody has to know that an
+    /// editor's built-in terminal is a dead end before they choose where
+    /// to work.
+    static let startsInKey = "startSessionsIn"
+
+    static func startsIn(_ defaults: UserDefaults = .standard) -> String {
+        let choice = defaults.string(forKey: startsInKey) ?? "terminal"
+        // Falls back rather than failing: somebody who chose iTerm and
+        // has since removed it should still get a session.
+        return choice == "iterm" && isInstalled("com.googlecode.iterm2") ? "iterm" : "terminal"
+    }
+
+    static func isInstalled(_ bundleID: String) -> Bool {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil
+    }
+
+    /// Open a terminal in this folder and run the agent in it.
+    ///
+    /// `cd` and then `claude`, exactly what a person types, so there is
+    /// nothing here that behaves differently from a session they started
+    /// themselves. The path is single-quoted because folders have spaces
+    /// and apostrophes in them and a broken `cd` would silently start
+    /// the agent in the wrong place.
+    static func newSession(in folder: URL) async -> Outcome {
+        let quoted = "'" + folder.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        let command = "cd \(quoted) && claude"
+        let iterm = startsIn() == "iterm"
+        let script = iterm
+            ? """
+              tell application "iTerm2"
+                activate
+                set w to (create window with default profile)
+                tell current session of w to write text "\(escaped(command))"
+              end tell
+              return "ok"
+              """
+            : """
+              tell application "Terminal"
+                activate
+                do script "\(escaped(command))"
+              end tell
+              return "ok"
+              """
+        let name = iterm ? "iTerm2" : "Terminal"
+        guard await runScript(script) == "ok" else {
+            return .cannot("\(name) would not open a new session.")
+        }
+        return .typed(into: name)
     }
 
     /// One line, always.

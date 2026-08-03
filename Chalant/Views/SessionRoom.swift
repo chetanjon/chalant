@@ -116,8 +116,10 @@ private struct SessionRoomEmpty: View {
     var body: some View {
         VStack(spacing: Theme.Space.l) {
             EmptyPaneHint(
-                message: "No agents running.\nStart Claude Code in any terminal and it appears here."
-            )
+                message: "No agents running.\nStart one here and you can drive it from the island."
+            ) {
+                NewSessionButton(compact: false)
+            }
             if HookInstall.status() != .installed {
                 VStack(spacing: Theme.Space.s) {
                     Text("Chalant can also carry their questions, hold risky commands, "
@@ -691,6 +693,55 @@ struct QuotedBlock: View {
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(accent)
                 .padding(.leading, Theme.Space.m + 2)
+            }
+        }
+    }
+}
+
+/// Start an agent somewhere Chalant can actually reach.
+///
+/// The gap this closes: an agent started in an editor's built-in
+/// terminal cannot be typed into from outside, and nobody knows that
+/// before they choose where to work. A session begun here lands in
+/// Terminal or iTerm, which means it is remote controllable from the
+/// moment it exists, and the choice is made for the user rather than
+/// explained to them.
+struct NewSessionButton: View {
+    var compact = true
+    @State private var note: String?
+    @Environment(\.chalantAccent) private var accent
+
+    var body: some View {
+        Group {
+            if compact {
+                HoverGlyphButton(
+                    symbol: "plus", label: "Start a session Chalant can reach",
+                    scale: .m, tint: Theme.textTertiary
+                ) { pick() }
+            } else {
+                Button("Start a session") { pick() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(accent)
+            }
+        }
+        .help(note ?? "Opens a terminal here and runs Claude Code in it")
+    }
+
+    private func pick() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Start here"
+        panel.message = "Pick the folder to run the agent in."
+        // A background app's panel opens behind everything otherwise,
+        // and reads as the button having done nothing.
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        Task {
+            if case .cannot(let why) = await SessionRemote.newSession(in: folder) {
+                note = why
             }
         }
     }

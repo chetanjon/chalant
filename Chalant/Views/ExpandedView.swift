@@ -130,6 +130,12 @@ struct ExpandedView: View {
                     .font(Theme.Fonts.bodyEmphasis)
                     .foregroundStyle(Theme.textPrimary)
                 Spacer(minLength: 0)
+                // Beside the gear rather than buried in the rail: this
+                // is the answer to "why can't I type into my agent", and
+                // the answer should be one reach away from the question.
+                if destination == .sessions {
+                    NewSessionButton()
+                }
                 HoverGlyphButton(
                     symbol: "gearshape", label: "Settings", scale: .m, tint: Theme.textTertiary
                 ) {
