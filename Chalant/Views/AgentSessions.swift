@@ -347,7 +347,7 @@ private struct ComposeCard: View {
                 }
                 // Offered only when there is genuinely more to see, so
                 // it never invites a tap that changes nothing.
-                if showingFullMessage || said.count > Self.shortMessage {
+                if showingFullMessage || Self.mayBeClipped(said) {
                     Button(showingFullMessage ? "Show less" : "Show everything") {
                         withAnimation(Theme.Motion.content) { showingFullMessage.toggle() }
                     }
@@ -360,10 +360,19 @@ private struct ComposeCard: View {
         }
     }
 
-    /// Roughly four lines of caption text. Only a threshold for whether
-    /// to offer the toggle: `lineLimit` still decides what is drawn, so
-    /// being a little out either way costs nothing.
-    private static let shortMessage = 260
+    /// Whether four lines might not be all of it.
+    ///
+    /// A length alone was the wrong test: a short message with four
+    /// line breaks in it is clipped and offered nothing, while a long
+    /// unbroken one is offered a toggle it may not need. Counting the
+    /// breaks the agent actually wrote catches the first, and the
+    /// length still catches the second. Erring towards offering it is
+    /// the right way to be wrong here: a toggle that opens the same
+    /// text is a small waste, and text with no way to reach it is the
+    /// thing that was reported (founder, 2026-08-03).
+    static func mayBeClipped(_ text: String) -> Bool {
+        text.count > 180 || text.split(separator: "\n", omittingEmptySubsequences: false).count > 4
+    }
 
     /// Agents write markdown, so the island renders it rather than
     /// showing the punctuation. Bold, italics, inline code and links

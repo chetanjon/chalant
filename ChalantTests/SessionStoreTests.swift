@@ -2245,4 +2245,50 @@ final class SessionStoreTests: XCTestCase {
         let metadata = SessionDiscovery.parseMetadata(text, path: "test.jsonl")
         XCTAssertEqual(metadata.mode, "normal")
     }
+    // MARK: An agent finishing reaches the island (2026-08-03)
+
+    func testComingToRestFiresOnceForTheTransitionNotForTheState() {
+        let store = SessionStore()
+        var announced: [String] = []
+        store.onSessionCameToRest = { _, title in announced.append(title) }
+
+        store.upsert(id: "s1", title: "a turn", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .working)
+        // The registry confirming it alive and working is not an ending.
+        store.markLive(id: "s1", name: "a turn", cwd: "/a", pid: 1,
+                       kind: .interactive, hasTerminal: true, status: .working)
+        XCTAssertTrue(announced.isEmpty)
+
+        // Working to idle is the turn ending, and is worth saying once.
+        store.markLive(id: "s1", name: "a turn", cwd: "/a", pid: 1,
+                       kind: .interactive, hasTerminal: true, status: .idle)
+        XCTAssertEqual(announced, ["a turn"])
+
+        // Idle is idle on every rescan and every five second sweep. A
+        // rule written against the state rather than the change would
+        // announce this same finished turn for as long as it sat there.
+        store.markLive(id: "s1", name: "a turn", cwd: "/a", pid: 1,
+                       kind: .interactive, hasTerminal: true, status: .idle)
+        store.markLive(id: "s1", name: "a turn", cwd: "/a", pid: 1,
+                       kind: .interactive, hasTerminal: true, status: .idle)
+        XCTAssertEqual(announced, ["a turn"], "a resting session must not re-announce")
+    }
+
+    func testAQuestionOutstandingHoldsBackTheFinishedAnnouncement() {
+        let store = SessionStore()
+        var announced: [String] = []
+        store.onSessionCameToRest = { _, title in announced.append(title) }
+        store.upsert(id: "s1", title: "asking", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .working)
+        XCTAssertTrue(store.attach(askID: "q", to: "s1", header: "H",
+                                   question: "Which?", options: ["a", "b"], multiSelect: false))
+        // An unanswered question already owns the row's state, so the
+        // registry never writes over it and there is no transition to
+        // report: the question is the louder event and says its own
+        // piece.
+        store.markLive(id: "s1", name: "asking", cwd: "/a", pid: 1,
+                       kind: .interactive, hasTerminal: true, status: .idle)
+        XCTAssertTrue(announced.isEmpty)
+    }
+
 }
