@@ -138,14 +138,56 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    /// One or several questions asked together and answered one at a
+    /// time. `AskUserQuestion` routinely bundles two to four questions
+    /// into a single call; the scripted `chalant ask` only ever sends
+    /// one. Both are this same array — the single-question shape is it
+    /// holding one element, not a second type running alongside this
+    /// one that everything would have to be kept in step with.
     struct Ask: Identifiable, Equatable {
         let id: String
-        var header: String
-        var question: String
-        var options: [String]
-        var multiSelect: Bool
-        var answer: [String]?     // set when the user taps; hook polls for this
+        var questions: [Question]
         var askedAt: Date
+        /// True for a question Claude Code asked itself (its own
+        /// `AskUserQuestion` tool call, read from the transcript), false
+        /// for the scripted `chalant ask`. There is no supported way to
+        /// resolve a native one from outside the process, so the island
+        /// never calls `answer()` for these: it can only queue a pick
+        /// through the outbox, arriving at a later turn boundary rather
+        /// than answering the prompt itself. `AskCard` reads this to
+        /// decide which of the two it is doing, and to say so.
+        var native: Bool = false
+
+        /// One question inside an ask: what it asks, what it offers,
+        /// and what got picked, once it has been. `answer` lives here
+        /// rather than once on the whole `Ask` so a bundle can be
+        /// answered one question at a time — two of three answered is a
+        /// real, intermediate state, not a rounding error toward zero
+        /// or all.
+        struct Question: Equatable {
+            var header: String
+            var question: String
+            var options: [String]
+            var multiSelect: Bool
+            var answer: [String]? = nil     // set when the user taps; hook polls for this
+        }
+
+        /// True once every question in the bundle has an answer. For a
+        /// single-question ask this is exactly what `answer != nil`
+        /// always meant before bundles existed.
+        var isFullyAnswered: Bool { questions.allSatisfy { $0.answer != nil } }
+
+        // MARK: Single-question compatibility
+        //
+        // `ActivityServer`'s `/ask` routes and `scripts/chalant ask` both
+        // predate bundled asks and both only ever carry one question.
+        // These proxy the first (and, for them, only) question so
+        // neither had to change to learn about the rest.
+        var header: String { questions.first?.header ?? "" }
+        var question: String { questions.first?.question ?? "" }
+        var options: [String] { questions.first?.options ?? [] }
+        var multiSelect: Bool { questions.first?.multiSelect ?? false }
+        var answer: [String]? { questions.first?.answer }
     }
 
     private static let log = Logger(subsystem: "com.cj.chalant", category: "sessions")
@@ -214,7 +256,7 @@ final class SessionStore: ObservableObject {
         // and the island's waiting mark one rescan after the question
         // arrived — while the question itself stayed answerable, so
         // nothing looked broken.
-        let questionOutstanding = session.ask.map { $0.answer == nil } ?? false
+        let questionOutstanding = session.ask.map { !$0.isFullyAnswered } ?? false
         session.state = questionOutstanding ? .needsInput : state
         session.updatedAt = updatedAt
         sessions.removeAll { $0.id == id }
@@ -250,33 +292,45 @@ final class SessionStore: ObservableObject {
     /// push the island off the screen.
     static let askFieldLimit = 200
     static let maxOptions = 6
+    /// A bundle this deep is already more questions than the island can
+    /// show without becoming the whole point of looking at it. Real
+    /// `AskUserQuestion` calls run to three or four
+    /// (native-questions-evidence-2026-08-03.md); this is a ceiling
+    /// against a runaway payload, not a limit anyone should reach.
+    static let maxQuestions = 6
 
-    /// Attaches a question to a session and lifts it to needs-input.
+    /// Attaches one or several questions to a session as a single ask,
+    /// and lifts it to needs-input. Every other `attach` is sugar over
+    /// this one — the single-question shape is this array holding one
+    /// element, so there is exactly one place that trims, bounds and
+    /// stores a question, whether there is one of them or several.
     ///
-    /// Trimmed and bounded on the way in: everything here came off a
-    /// socket. An empty question is refused outright, since a row that
-    /// says a session wants something without saying what is worse than
-    /// no row at all.
+    /// Each question is trimmed and bounded on the way in: everything
+    /// here came off a socket or a transcript this app does not control.
+    /// A question whose text is blank after trimming is dropped from the
+    /// bundle rather than shown blank; if that empties the bundle
+    /// entirely, the whole attach is refused — a row that says a session
+    /// wants something without saying what is worse than no row at all.
     @discardableResult
     func attach(
-        askID: String, to sessionID: String, header: String, question: String,
-        options: [String], multiSelect: Bool
+        askID: String, to sessionID: String, questions rawQuestions: [Ask.Question], native: Bool = false
     ) -> Bool {
-        let question = String(question.prefix(Self.askFieldLimit))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !question.isEmpty, let index = sessions.firstIndex(where: { $0.id == sessionID })
+        let questions: [Ask.Question] = rawQuestions.prefix(Self.maxQuestions).compactMap { raw in
+            let question = String(raw.question.prefix(Self.askFieldLimit))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !question.isEmpty else { return nil }
+            return Ask.Question(
+                header: String(raw.header.prefix(Self.askFieldLimit)),
+                question: question,
+                options: raw.options.prefix(Self.maxOptions)
+                    .map { String($0.prefix(Self.askFieldLimit)) }
+                    .filter { !$0.isEmpty },
+                multiSelect: raw.multiSelect
+            )
+        }
+        guard !questions.isEmpty, let index = sessions.firstIndex(where: { $0.id == sessionID })
         else { return false }
-        sessions[index].ask = Ask(
-            id: askID,
-            header: String(header.prefix(Self.askFieldLimit)),
-            question: question,
-            options: options.prefix(Self.maxOptions)
-                .map { String($0.prefix(Self.askFieldLimit)) }
-                .filter { !$0.isEmpty },
-            multiSelect: multiSelect,
-            answer: nil,
-            askedAt: Date()
-        )
+        sessions[index].ask = Ask(id: askID, questions: questions, askedAt: Date(), native: native)
         let wasAlreadyAsking = sessions[index].state == .needsInput
         sessions[index].state = .needsInput
         sessions[index].updatedAt = Date()
@@ -292,19 +346,53 @@ final class SessionStore: ObservableObject {
         return true
     }
 
-    /// Records what the user chose. The agent polls for this.
+    /// The single-question shape everything before bundled asks used:
+    /// `ActivityServer`'s `POST /ask`, `scripts/chalant ask`, and every
+    /// test written against one question. Builds the one-element array
+    /// the overload above expects, so none of those callers change.
     @discardableResult
-    func answer(sessionID: String, with choices: [String]) -> Bool {
+    func attach(
+        askID: String, to sessionID: String, header: String, question: String,
+        options: [String], multiSelect: Bool, native: Bool = false
+    ) -> Bool {
+        attach(
+            askID: askID, to: sessionID,
+            questions: [Ask.Question(header: header, question: question, options: options, multiSelect: multiSelect)],
+            native: native
+        )
+    }
+
+    /// Records what the user chose for one question inside the ask,
+    /// independent of the others. A bundle two of three questions
+    /// answered stays right there — needs-input — until the last one
+    /// lands: `isFullyAnswered` below is what decides that, not this
+    /// single question's own answer. Only once every question has one
+    /// does the session go back to working, and even then only for a
+    /// non-native ask — a native one waits for the transcript to say the
+    /// real prompt was resolved, exactly as a single native question
+    /// always did (see `Ask.native`; `AskCard` never calls this for one).
+    @discardableResult
+    func answerQuestion(sessionID: String, questionIndex: Int, with choices: [String]) -> Bool {
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }),
-              sessions[index].ask != nil
+              var ask = sessions[index].ask,
+              ask.questions.indices.contains(questionIndex)
         else { return false }
-        sessions[index].ask?.answer = choices
-        // Back to working: the question is answered, and leaving the row
-        // at needs-input would keep claiming the top of the list.
-        sessions[index].state = .working
+        ask.questions[questionIndex].answer = choices
+        sessions[index].ask = ask
+        if ask.isFullyAnswered, !ask.native {
+            sessions[index].state = .working
+        }
         sessions[index].updatedAt = Date()
         sort()
         return true
+    }
+
+    /// The scripted `chalant ask` shape: always exactly one question,
+    /// so answering it is answering the whole ask. The agent polls for
+    /// this over `/ask/<session>`.
+    @discardableResult
+    func answer(sessionID: String, with choices: [String]) -> Bool {
+        answerQuestion(sessionID: sessionID, questionIndex: 0, with: choices)
     }
 
     func pendingAsk(sessionID: String) -> Ask? {
@@ -382,7 +470,7 @@ final class SessionStore: ObservableObject {
             sessions[index].pid = pid
             sessions[index].kind = kind
             sessions[index].hasTerminal = hasTerminal
-            let questionOutstanding = sessions[index].ask.map { $0.answer == nil } ?? false
+            let questionOutstanding = sessions[index].ask.map { !$0.isFullyAnswered } ?? false
             if !questionOutstanding {
                 sessions[index].state = status
             }

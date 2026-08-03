@@ -97,9 +97,23 @@ case "${1:-}" in
       REPLY_JSON=$(curl -sf "${AUTH[@]}" "$BASE/ask/$SESSION" || true)
       case "$REPLY_JSON" in
         *'"answered":true'*)
-          printf '%s' "$REPLY_JSON" \
-            | sed -n 's/.*"answer":\[\(.*\)\].*/\1/p' \
-            | tr ',' '\n' | sed 's/^ *"//; s/"$//'
+          # python3, not sed and tr. The old form split the answer
+          # array on every comma, so an option whose own label contained
+          # one came back torn in half: picking "Multi-question asks, so
+          # a bundled call shows all of them" printed two lines, and a
+          # caller reading one choice per line got two choices that were
+          # never offered (2026-08-03, caught answering a real question
+          # from the island). JSON is not a comma-separated string and
+          # cannot be parsed as one.
+          printf '%s' "$REPLY_JSON" | python3 -c '
+import json, sys
+try:
+    body = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+for choice in body.get("answer") or []:
+    print(choice)
+'
           exit 0
           ;;
         '') echo "chalant: the island stopped answering" >&2; exit 1 ;;

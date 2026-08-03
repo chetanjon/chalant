@@ -594,8 +594,21 @@ final class NotchViewModel: ObservableObject {
     var somethingWantsYou: Bool {
         sessions.sessions.contains { session in
             session.state == .needsInput
-                || (session.ask.map { $0.answer == nil } ?? false)
+                || (session.ask.map { !$0.isFullyAnswered } ?? false)
         } || activities.activities.contains { $0.state == .needsInput }
+    }
+
+    /// Whether an already-expanded island is in the middle of something:
+    /// the same set of guards `scheduleHoverCollapse` already trusts not
+    /// to be interrupted by a grazing cursor, reused here for a louder
+    /// interruption. A question landing must yank nothing out from under
+    /// mid-conversation chat, an attachment waiting to be sent, the
+    /// welcome tour, a half-typed line in the Do box, or a message being
+    /// composed to a session, so it marks and flashes instead of
+    /// expanding over any of them.
+    var isMidInteraction: Bool {
+        isWorking || pendingContext != nil || pane != .none || tab == .chat
+            || composingSessionID != nil || !draftPrompt.isEmpty
     }
 
     /// Anything the resting island would actually draw.
@@ -685,7 +698,25 @@ final class NotchViewModel: ObservableObject {
             self?.flashGlance(title, seconds: 8)
         }
         sessions.onSessionWantsYou = { [weak self] title in
-            self?.flashGlance("\(title) wants you", seconds: 8)
+            guard let self else { return }
+            self.flashGlance("\(title) wants you", seconds: 8)
+            // Founder's explicit call: a question opens the island by
+            // itself rather than waiting to be found (2026-08-03,
+            // "Auto-open" -> "Yes, always open"). Two things still
+            // outrank it: a live voice capture, which this would yank
+            // the microphone out from under, and an island already open
+            // on something the user is actively doing, which the flash
+            // above is enough to point at without taking over their
+            // screen mid-task. Everything else, including an island
+            // that is merely open and idle, gets opened straight to it.
+            guard self.state != .listening else { return }
+            if self.state == .expanded, self.isMidInteraction { return }
+            self.expand()
+            // After expand(), never before: expand() runs
+            // restoreLastTabIfWanted(), which would otherwise stomp this
+            // the instant it ran (same bug and same fix as the shortcut
+            // handler in ChalantApp.swift).
+            self.tab = .sessions
         }
         sessions.onMessageUndelivered = { [weak self] title in
             self?.flashGlance("\(title) ended before reading your message")

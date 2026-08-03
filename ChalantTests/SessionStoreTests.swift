@@ -394,6 +394,90 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertNil(store.pendingAsk(sessionID: "s1"))
     }
 
+    // MARK: Bundled asks — several questions, answered one at a time
+
+    private func bundledQuestions() -> [SessionStore.Ask.Question] {
+        [
+            SessionStore.Ask.Question(header: "Logo", question: "Which one?", options: ["A", "B"], multiSelect: false),
+            SessionStore.Ask.Question(header: "Mic", question: "Move it?", options: ["Yes", "No"], multiSelect: false),
+            SessionStore.Ask.Question(header: "Drag", question: "Scope?", options: ["One", "Per display"], multiSelect: false),
+        ]
+    }
+
+    /// The core the two `attach` overloads share: a bundle attaches as
+    /// one ask carrying every question, in order, none dropped — the gap
+    /// this whole feature exists to close (`parseNativeAsk` used to keep
+    /// only `questions.first`).
+    func testABundleAttachesAsOneAskCarryingEveryQuestion() {
+        let store = storeWithSession()
+        XCTAssertTrue(store.attach(askID: "bundle", to: "s1", questions: bundledQuestions(), native: true))
+        let ask = store.pendingAsk(sessionID: "s1")
+        XCTAssertEqual(ask?.questions.count, 3)
+        XCTAssertEqual(ask?.questions.map(\.header), ["Logo", "Mic", "Drag"])
+        XCTAssertEqual(store.sessions.first?.state, .needsInput)
+    }
+
+    /// The partly-answered rule: two of three questions answered is
+    /// neither answered nor unanswered, and must read as outstanding —
+    /// `isFullyAnswered` false, state still needs-input — exactly as
+    /// zero of three does. Only the last answer changes that.
+    func testABundleTwoOfThreeAnsweredIsStillOutstanding() {
+        let store = storeWithSession()
+        store.attach(askID: "bundle", to: "s1", questions: bundledQuestions(), native: false)
+
+        XCTAssertTrue(store.answerQuestion(sessionID: "s1", questionIndex: 0, with: ["A"]))
+        XCTAssertFalse(store.pendingAsk(sessionID: "s1")?.isFullyAnswered ?? true)
+        XCTAssertEqual(store.sessions.first?.state, .needsInput, "one of three answered is still outstanding")
+
+        XCTAssertTrue(store.answerQuestion(sessionID: "s1", questionIndex: 1, with: ["Yes"]))
+        XCTAssertFalse(store.pendingAsk(sessionID: "s1")?.isFullyAnswered ?? true)
+        XCTAssertEqual(store.sessions.first?.state, .needsInput, "two of three answered is still outstanding")
+
+        XCTAssertTrue(store.answerQuestion(sessionID: "s1", questionIndex: 2, with: ["One"]))
+        let ask = store.pendingAsk(sessionID: "s1")
+        XCTAssertEqual(ask?.questions.map(\.answer), [["A"], ["Yes"], ["One"]])
+        XCTAssertTrue(ask?.isFullyAnswered ?? false)
+        // Non-native: a fully-answered bundle goes back to working, the
+        // same rule a single-question answer always followed.
+        XCTAssertEqual(store.sessions.first?.state, .working)
+    }
+
+    /// A native bundle's own row never flips back to working just
+    /// because every question got tapped in the card: there is no
+    /// supported way to resolve the real `AskUserQuestion` prompt from
+    /// here, so the row stays needs-input until the transcript itself
+    /// says the question was resolved — same rule a single native
+    /// question always followed.
+    func testANativeBundleFullyAnsweredLeavesTheRowNeedingInput() {
+        let store = storeWithSession()
+        store.attach(askID: "bundle", to: "s1", questions: bundledQuestions(), native: true)
+        for index in 0..<3 {
+            store.answerQuestion(sessionID: "s1", questionIndex: index, with: ["pick"])
+        }
+        XCTAssertTrue(store.pendingAsk(sessionID: "s1")?.isFullyAnswered ?? false)
+        XCTAssertEqual(store.sessions.first?.state, .needsInput)
+    }
+
+    /// Answering an index outside the bundle, or a session with no ask
+    /// at all, is refused rather than silently accepted.
+    func testAnsweringAQuestionIndexOutOfRangeIsRefused() {
+        let store = storeWithSession()
+        store.attach(askID: "bundle", to: "s1", questions: bundledQuestions(), native: false)
+        XCTAssertFalse(store.answerQuestion(sessionID: "s1", questionIndex: 3, with: ["x"]))
+        XCTAssertFalse(store.answerQuestion(sessionID: "ghost", questionIndex: 0, with: ["x"]))
+    }
+
+    /// `answer()`, the scripted `chalant ask` shape, is exactly
+    /// `answerQuestion` at index 0 — unchanged behaviour, expressed
+    /// through the one function that now does all of this.
+    func testLegacyAnswerIsQuestionZeroOfASingleQuestionBundle() {
+        let store = storeWithSession()
+        store.attach(askID: "q", to: "s1", header: "h", question: "q?", options: ["A"], multiSelect: false)
+        XCTAssertTrue(store.answer(sessionID: "s1", with: ["A"]))
+        XCTAssertEqual(store.pendingAsk(sessionID: "s1")?.answer, ["A"])
+        XCTAssertEqual(store.sessions.first?.state, .working)
+    }
+
     // MARK: Registry liveness (T1-T3, T8)
 
     private func registryEntryJSON(
@@ -862,6 +946,99 @@ final class SessionStoreTests: XCTestCase {
         // An unmapped tool keeps its name: still more use than a shrug,
         // and new tools appear faster than this table is updated.
         XCTAssertEqual(SessionDiscovery.activityPhrase(forTool: "SomeNewTool"), "SomeNewTool")
+    }
+
+    // MARK: Claude Code's own AskUserQuestion, read from the transcript
+
+    func testAnAskUserQuestionToolCallIsReadAsAPendingNativeAsk() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"Pick","question":"Which one?","multiSelect":false,"options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]}]}}]}}
+        """
+        let ask = SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk
+        XCTAssertEqual(ask?.id, "toolu_1")
+        XCTAssertEqual(ask?.questions.first?.header, "Pick")
+        XCTAssertEqual(ask?.questions.first?.question, "Which one?")
+        // Only the label travels; description and preview are dropped,
+        // the same options shape the scripted `chalant ask` already sends.
+        XCTAssertEqual(ask?.questions.first?.options, ["A", "B"])
+        XCTAssertEqual(ask?.questions.first?.multiSelect, false)
+    }
+
+    /// `AskUserQuestion` routinely bundles several questions into one
+    /// call (a real one, in this app's own transcript, asked about the
+    /// logo, the microphone and drag scope together) — every one of
+    /// them is kept now, in order, none dropped.
+    func testABundledAskKeepsEveryQuestionInOrder() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"First","question":"q1?","options":[{"label":"A"}],"multiSelect":false},{"header":"Second","question":"q2?","options":[{"label":"B"},{"label":"C"}],"multiSelect":true},{"header":"Third","question":"q3?","options":[{"label":"D"}]}]}}]}}
+        """
+        let ask = SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk
+        XCTAssertEqual(ask?.questions.map(\.header), ["First", "Second", "Third"])
+        XCTAssertEqual(ask?.questions.map(\.question), ["q1?", "q2?", "q3?"])
+        XCTAssertEqual(ask?.questions[1].options, ["B", "C"])
+        XCTAssertEqual(ask?.questions[1].multiSelect, true)
+    }
+
+    /// A question with blank text is not worth showing and is dropped
+    /// from the bundle rather than shown blank; the rest of a real
+    /// bundle survives one malformed entry.
+    func testABundledAskDropsAQuestionWithNoText() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"First","question":"q1?","options":[{"label":"A"}]},{"header":"Blank","question":"   ","options":[{"label":"B"}]}]}}]}}
+        """
+        let ask = SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk
+        XCTAssertEqual(ask?.questions.map(\.header), ["First"])
+    }
+
+    /// The one thing this whole feature turned on: whether a live
+    /// question can be told apart from an already-answered one. Verified
+    /// against a real transcript (native-questions-evidence-2026-08-03.md):
+    /// the answer lands as a `tool_result` wearing the tool_use's own
+    /// id, as the very next record.
+    func testAToolResultAnsweringTheSameIdClearsThePendingAsk() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"Pick","question":"Which one?","options":[{"label":"A"}]}]}}]}}
+        {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"answered"}]}}
+        """
+        XCTAssertNil(SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk,
+                     "a matching tool_result means this question stopped being live")
+    }
+
+    func testAToolResultForADifferentIdLeavesThePendingAskAlone() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"Pick","question":"Which one?","options":[{"label":"A"}]}]}}]}}
+        {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_something_else","content":"unrelated"}]}}
+        """
+        XCTAssertEqual(SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk?.id, "toolu_1")
+    }
+
+    /// A newer AskUserQuestion replaces an older pending one, same
+    /// last-write-wins rule the rest of this fold already follows.
+    func testANewerAskUserQuestionReplacesAnOlderPendingOne() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"First","question":"q1?","options":[{"label":"A"}]}]}}]}}
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_2","name":"AskUserQuestion","input":{"questions":[{"header":"Second","question":"q2?","options":[{"label":"B"}]}]}}]}}
+        """
+        XCTAssertEqual(SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk?.id, "toolu_2")
+    }
+
+    /// A `SessionStore.attach` carrying `native: true` is what
+    /// `SessionDiscovery` calls for one of these; `AskCard` reads the
+    /// flag to know it can only queue a pick, never answer.
+    func testANativeAskIsMarkedAsSuchOnTheStore() {
+        let store = storeWithSession()
+        store.attach(askID: "toolu_1", to: "s1", header: "Pick", question: "Which one?",
+                     options: ["A"], multiSelect: false, native: true)
+        XCTAssertEqual(store.pendingAsk(sessionID: "s1")?.native, true)
+    }
+
+    /// The scripted `chalant ask` path is unaffected: it never passes
+    /// `native`, and must keep defaulting to false.
+    func testAnUnmarkedAttachIsNotNative() {
+        let store = storeWithSession()
+        store.attach(askID: "q", to: "s1", header: "h", question: "q?",
+                     options: ["A"], multiSelect: false)
+        XCTAssertEqual(store.pendingAsk(sessionID: "s1")?.native, false)
     }
 
     // MARK: A window that comes back to a changed desk
