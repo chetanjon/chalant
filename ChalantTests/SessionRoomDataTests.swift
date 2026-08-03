@@ -1,0 +1,262 @@
+import XCTest
+@testable import Chalant
+
+/// The data the room stands on: when a session entered the state it is
+/// in, which band it belongs to, and the bounded record of what ended
+/// while this app was watching.
+///
+/// Its own file rather than more of `SessionStoreTests`, which is
+/// already 2700 lines. Nothing here touches a real install: the store's
+/// `defaults` seam takes a scratch suite exactly the way `outboxDir`
+/// takes a scratch directory.
+@MainActor
+final class SessionRoomDataTests: XCTestCase {
+    private var suiteName = ""
+    private var defaults = UserDefaults.standard
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "chalant.tests.room.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)!
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suiteName)
+        super.tearDown()
+    }
+
+    private func store() -> SessionStore {
+        SessionStore(defaults: defaults)
+    }
+
+    private func live(_ store: SessionStore, _ id: String, _ state: SessionStore.State = .working) {
+        store.upsert(id: id, title: id, cwd: "/a/\(id)", branch: nil,
+                     lastPrompt: nil, state: state)
+    }
+
+    // MARK: stateSince, the number that used to mean nothing
+
+    /// The row's trailing column read `RelativeAge.short(updatedAt)`,
+    /// and discovery rewrites `updatedAt` on every sweep, so every live
+    /// row said "now" forever. This is the timestamp that only moves
+    /// when something happens.
+    func testStateSinceMovesWhenTheStateActuallyChanges() {
+        let store = store()
+        live(store, "s", .working)
+        let before = store.sessions[0].stateSince
+        live(store, "s", .idle)
+        XCTAssertGreaterThan(store.sessions[0].stateSince, before)
+    }
+
+    /// The whole bug, in one assertion: a rescan re-asserting the same
+    /// state is not an event, and must not restart the clock.
+    func testStateSinceHoldsWhenARescanReassertsTheSameState() {
+        let store = store()
+        live(store, "s", .working)
+        let before = store.sessions[0].stateSince
+        live(store, "s", .working)
+        live(store, "s", .working)
+        XCTAssertEqual(store.sessions[0].stateSince, before)
+    }
+
+    /// `updatedAt` is a testing seam and `stateSince` deliberately is
+    /// not: it measures elapsed wall time in front of a person, so a
+    /// test faking discovery's clock into the past must not be able to
+    /// make a session claim it has been working for an hour.
+    func testStateSinceIgnoresAFakedDiscoveryClock() {
+        let store = store()
+        store.upsert(id: "s", title: "s", cwd: "/a", branch: nil, lastPrompt: nil,
+                     state: .working, updatedAt: Date().addingTimeInterval(-3600))
+        XCTAssertGreaterThan(store.sessions[0].stateSince, Date().addingTimeInterval(-5))
+    }
+
+    // MARK: The record
+
+    func testTheRegistryLosingASessionPutsItInTheRecordAsLost() {
+        let store = store()
+        live(store, "s", .working)
+        store.markGone(["s"])
+        XCTAssertEqual(store.finished.map(\.id), ["s"])
+        XCTAssertEqual(store.finished.first?.outcome, .lost)
+    }
+
+    func testALiveSessionFinishingIsRecordedWithItsRealOutcome() {
+        let store = store()
+        live(store, "a", .working)
+        live(store, "a", .done)
+        live(store, "b", .working)
+        live(store, "b", .failed)
+        XCTAssertEqual(Set(store.finished.map(\.id)), ["a", "b"])
+        XCTAssertEqual(store.finished.first(where: { $0.id == "a" })?.outcome, .done)
+        XCTAssertEqual(store.finished.first(where: { $0.id == "b" })?.outcome, .failed)
+    }
+
+    /// The bound that does the real work. A developer's machine carries
+    /// months of transcripts; none of them were watched ending, so none
+    /// of them may appear.
+    func testASessionFirstSeenAlreadyDeadNeverEntersTheRecord() {
+        let store = store()
+        live(store, "cold", .done)
+        live(store, "colder", .failed)
+        live(store, "quiet", .stale)
+        XCTAssertTrue(store.finished.isEmpty)
+    }
+
+    /// `markGone` is not private, so the live check belongs inside it
+    /// rather than in the one caller that happens to do it today.
+    func testMarkGoneOnAnAlreadyDeadSessionAddsNothing() {
+        let store = store()
+        live(store, "s", .working)
+        store.markGone(["s"])
+        store.markGone(["s"])
+        XCTAssertEqual(store.finished.count, 1)
+    }
+
+    func testTheRecordIsDedupedByID() {
+        let store = store()
+        live(store, "s", .working)
+        live(store, "s", .done)
+        live(store, "s", .working)
+        live(store, "s", .done)
+        XCTAssertEqual(store.finished.count, 1)
+    }
+
+    func testTheRecordIsCappedAndNewestFirst() {
+        let store = store()
+        for index in 0..<(SessionStore.historyCap + 4) {
+            live(store, "s\(index)", .working)
+            live(store, "s\(index)", .done)
+        }
+        XCTAssertEqual(store.finished.count, SessionStore.historyCap)
+        XCTAssertEqual(store.finished.first?.id, "s\(SessionStore.historyCap + 3)")
+    }
+
+    /// The window is what "catch up" means. An hour ago is not this
+    /// morning, and a room left open overnight must not still be
+    /// showing yesterday.
+    func testTheRecordDropsRowsPastTheChosenWindow() {
+        defaults.set("hour", forKey: SessionStore.historyWindowKey)
+        let store = store()
+        live(store, "s", .working)
+        live(store, "s", .done)
+        XCTAssertEqual(store.history.count, 1)
+        // Reach past the API to age the row, which is the one thing a
+        // test cannot do by waiting.
+        store.ageFinishedForTesting(id: "s", to: Date().addingTimeInterval(-3700))
+        XCTAssertTrue(store.history.isEmpty)
+    }
+
+    /// Off means not kept, not merely not shown. A record nobody can
+    /// reach is not a record, it is a leak.
+    func testHistoryOffKeepsNothingAtAll() {
+        defaults.set("off", forKey: SessionStore.historyWindowKey)
+        let store = store()
+        live(store, "s", .working)
+        live(store, "s", .done)
+        XCTAssertTrue(store.finished.isEmpty)
+        XCTAssertTrue(store.history.isEmpty)
+    }
+
+    /// The reason the record is its own array: `clear(id:)` is exactly
+    /// the call that would delete it.
+    func testTheRecordSurvivesTheSessionBeingCleared() {
+        let store = store()
+        live(store, "s", .working)
+        live(store, "s", .done)
+        store.clear(id: "s")
+        XCTAssertTrue(store.sessions.isEmpty)
+        XCTAssertEqual(store.finished.map(\.id), ["s"])
+    }
+
+    func testTheRecordRemembersWhatTheSessionLastSaid() {
+        let store = store()
+        store.upsert(id: "s", title: "s", cwd: "/a", branch: "main", lastPrompt: nil,
+                     state: .working, lastMessage: "rebased clean", transcriptPath: "/t/s.jsonl")
+        store.markGone(["s"])
+        XCTAssertEqual(store.finished.first?.lastMessage, "rebased clean")
+        XCTAssertEqual(store.finished.first?.transcriptPath, "/t/s.jsonl")
+        XCTAssertEqual(store.finished.first?.branch, "main")
+    }
+
+    // MARK: Grouping
+
+    func testEachLiveStateLandsInItsOwnBand() {
+        XCTAssertEqual(SessionStore.group(for: session(state: .needsInput)), .needsYou)
+        XCTAssertEqual(SessionStore.group(for: session(state: .working)), .working)
+        XCTAssertEqual(SessionStore.group(for: session(state: .idle)), .atPrompt)
+    }
+
+    /// A session can be mid-turn and still be the thing standing still
+    /// waiting for a human. That row is the whole reason the rail
+    /// exists, so the hold outranks the state.
+    func testAHeldApprovalPullsAWorkingSessionIntoNeedsYou() {
+        let store = store()
+        live(store, "s", .working)
+        XCTAssertTrue(
+            store.holdForApproval(sessionID: "s", id: "call-1", tool: "Bash",
+                                  detail: "rm -rf build", rules: ["Bash(rm *)"]))
+        XCTAssertEqual(SessionStore.group(for: store.sessions[0]), .needsYou)
+    }
+
+    func testAnUnansweredQuestionPullsASessionIntoNeedsYou() {
+        let store = store()
+        live(store, "s", .working)
+        XCTAssertTrue(
+            store.attach(askID: "ask-1", to: "s", header: "Pick", question: "Which?",
+                         options: ["a", "b"], multiSelect: false))
+        XCTAssertEqual(SessionStore.group(for: store.sessions[0]), .needsYou)
+    }
+
+    func testGroupsOmitsEmptyBands() {
+        let store = store()
+        live(store, "w", .working)
+        let bands = store.groups().map(\.group)
+        XCTAssertEqual(bands, [.working])
+    }
+
+    func testGroupsOrdersBandsNeedsYouFirstAndFinishedLast() {
+        let store = store()
+        live(store, "idle", .idle)
+        live(store, "gone", .working)
+        live(store, "gone", .done)
+        live(store, "work", .working)
+        live(store, "want", .needsInput)
+        XCTAssertEqual(store.groups().map(\.group), [.needsYou, .working, .atPrompt, .finished])
+    }
+
+    /// Dead rows discovery still has in hand are not the record. Showing
+    /// them beside rows this app watched end would break the one bound
+    /// that makes the record honest.
+    func testAStaleRowInSessionsIsNotDrawnAsFinished() {
+        let store = store()
+        live(store, "cold", .stale)
+        XCTAssertTrue(store.groups().isEmpty)
+    }
+
+    func testABandTheUserSwitchedOffIsNotDrawn() {
+        defaults.set(false, forKey: SessionStore.Group.atPrompt.settingKey)
+        let store = store()
+        live(store, "idle", .idle)
+        live(store, "work", .working)
+        XCTAssertEqual(store.groups().map(\.group), [.working])
+    }
+
+    /// A band whose entire purpose is "something is blocked on you"
+    /// being switchable off is a way to make this app quietly fail at
+    /// its one job.
+    func testNeedsYouCannotBeSwitchedOff() {
+        defaults.set(false, forKey: SessionStore.Group.needsYou.settingKey)
+        let store = store()
+        live(store, "want", .needsInput)
+        XCTAssertFalse(SessionStore.Group.needsYou.canBeHidden)
+        XCTAssertEqual(store.groups().map(\.group), [.needsYou])
+    }
+
+    private func session(state: SessionStore.State) -> SessionStore.Session {
+        SessionStore.Session(
+            id: "s", title: "s", cwd: "/a", branch: nil, lastPrompt: nil,
+            activity: nil, agent: .claude, state: state, ask: nil,
+            startedAt: Date(), updatedAt: Date()
+        )
+    }
+}

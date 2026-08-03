@@ -11,7 +11,7 @@ import os
 /// is a proxy for "alive," not proof of it.
 @MainActor
 final class SessionDiscovery {
-    private static let log = Logger(subsystem: "com.cj.chalant", category: "sessions")
+    nonisolated private static let log = Logger(subsystem: "com.cj.chalant", category: "sessions")
 
     /// One JSON object per line, `type` tagged, last write per field
     /// wins. Unknown fields and unknown types both stay nil / skipped:
@@ -123,7 +123,7 @@ final class SessionDiscovery {
     /// against this machine's sessions, 256 KB carries all of them with
     /// room to spare; a session whose last turn was larger than that
     /// simply falls back to naming itself after its folder.
-    private static let tailBytes = 256 * 1024
+    nonisolated private static let tailBytes = 256 * 1024
 
     private let store: SessionStore
     private let fileManager: FileManager
@@ -270,7 +270,7 @@ final class SessionDiscovery {
             id: id, title: entry.title, cwd: entry.cwd, branch: entry.branch,
             lastPrompt: entry.lastPrompt, state: state,
             activity: entry.activity, updatedAt: mtime,
-            lastMessage: entry.lastMessage
+            lastMessage: entry.lastMessage, transcriptPath: path
         )
     }
 
@@ -345,25 +345,37 @@ final class SessionDiscovery {
     /// which is the only reason watching a live agent's transcript is
     /// affordable at all.
     private func loadMetadata(at path: String) -> ParsedMetadata? {
+        guard let tail = Self.tail(at: path) else { return nil }
+        return Self.parseMetadata(
+            tail.text, path: path, skippingFirstLine: tail.beganMidLine
+        )
+    }
+
+    /// The last `tailBytes` of a file, and whether the cut landed inside
+    /// a line.
+    ///
+    /// Pulled out of `loadMetadata` so the conversation reader
+    /// (`turns(atTranscript:)`) reads a transcript exactly the way the
+    /// metadata fold does rather than growing a second, subtly different
+    /// way of doing the same thing. `beganMidLine` is the caller's cue
+    /// to drop the first line: a tail almost always starts partway
+    /// through one, and cutting inside a multi-byte character would
+    /// otherwise throw the whole decode away.
+    nonisolated static func tail(at path: String) -> (text: String, beganMidLine: Bool)? {
         guard let handle = FileHandle(forReadingAtPath: path) else {
-            Self.log.error("transcript could not be opened: \(path, privacy: .public)")
+            log.error("transcript could not be opened: \(path, privacy: .public)")
             return nil
         }
         defer { try? handle.close() }
         guard let size = try? handle.seekToEnd() else { return nil }
-        let offset = size > UInt64(Self.tailBytes) ? size - UInt64(Self.tailBytes) : 0
+        let offset = size > UInt64(tailBytes) ? size - UInt64(tailBytes) : 0
         guard (try? handle.seek(toOffset: offset)) != nil,
               let data = try? handle.readToEnd()
         else {
-            Self.log.error("transcript tail could not be read: \(path, privacy: .public)")
+            log.error("transcript tail could not be read: \(path, privacy: .public)")
             return nil
         }
-        // A tail almost always begins mid-line, and cutting inside a
-        // multi-byte character would otherwise throw the decode away
-        // wholesale; the first line is discarded either way.
-        return Self.parseMetadata(
-            String(decoding: data, as: UTF8.self), path: path, skippingFirstLine: offset > 0
-        )
+        return (String(decoding: data, as: UTF8.self), offset > 0)
     }
 
     /// Folds every line into one value. Lines can repeat and arrive in

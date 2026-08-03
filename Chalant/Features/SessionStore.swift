@@ -115,7 +115,36 @@ final class SessionStore: ObservableObject {
         /// Nil while nothing has been reached for yet.
         var activity: String?
         var agent: Agent = .claude
-        var state: State          // working | needsInput | idle | done | failed | stale
+        // working | needsInput | idle | done | failed | stale
+        //
+        // `didSet` rather than a timestamp maintained at the call
+        // sites: six different places in this file write state
+        // (`upsert`, `attach`, `clearAsk`, `markLive`, `markGone`, and
+        // the ask path), and a clock kept in step by convention across
+        // six sites is a clock that drifts. This way the two cannot
+        // disagree, and a seventh writer added later gets it for free.
+        var state: State {
+            didSet {
+                guard state != oldValue else { return }
+                stateSince = Date()
+            }
+        }
+        /// When this session entered the state it is in now.
+        ///
+        /// The row's trailing number used to be
+        /// `RelativeAge.short(updatedAt)`, which discovery rewrites on
+        /// every sweep, so every live row read "now" forever: it was
+        /// reporting how recently this app looked rather than anything
+        /// about the session. This is the timestamp that moves when
+        /// something actually happens, so "running 4m" means the turn
+        /// has run four minutes.
+        ///
+        /// Deliberately real-clock rather than carrying `upsert`'s
+        /// `updatedAt` seam. What it measures is elapsed wall time in
+        /// front of a person, and a test faking discovery's clock an
+        /// hour into the past must not be able to make a session claim
+        /// it has been working for an hour.
+        private(set) var stateSince = Date()
         var ask: Ask?             // present iff a question is outstanding
         /// A tool call held at the door, waiting on you.
         var approval: Approval?
@@ -145,6 +174,16 @@ final class SessionStore: ObservableObject {
         /// A message queued here, waiting to be collected. Nil means
         /// nothing is waiting.
         var outbox: Outbox?
+        /// Where this session's transcript lives on disk.
+        ///
+        /// Discovery has always known it (`jsonlFiles(in:)` returns one
+        /// per session) and has always thrown it away after reading the
+        /// tail. It is kept now so a session can still be read after it
+        /// has left `sessions` for the finished record, which is what
+        /// makes a finished row worth selecting rather than only worth
+        /// counting. Nil for a row the registry made without discovery
+        /// ever finding a file.
+        var transcriptPath: String?
         var startedAt: Date
         var updatedAt: Date
 
@@ -161,6 +200,50 @@ final class SessionStore: ObservableObject {
         var canReceiveMessages: Bool {
             agent == .claude && state != .stale && hasTerminal != false
         }
+    }
+
+    /// A session this app watched end.
+    ///
+    /// The strip's own doc carries a law against exactly this: "a
+    /// developer's machine carries months of history, and listing all of
+    /// it would push a wall of finished work into a surface whose whole
+    /// premise is calm." The law is kept. What changes is that a bounded
+    /// record is not a wall, and the bound that does the work is the
+    /// first one: a row only ever lands here on an observed transition
+    /// out of a live state. A session discovered from a cold transcript
+    /// was never live in this store's eyes, never transitions, and so
+    /// can never enter the record however many of them are on the disk.
+    ///
+    /// The other two bounds (`historyCap`, and the window the user
+    /// chooses) are ordinary and enforced in `remember`.
+    ///
+    /// Its own array rather than letting `sessions` hold the dead:
+    /// `sessions` goes on meaning "what I am tracking now", which every
+    /// other reader already relies on, and the record has to survive
+    /// `clear(id:)`, which is the very call that would delete it.
+    struct Finished: Identifiable, Equatable {
+        /// What became of it, as far as this store can honestly say.
+        enum Outcome: String, Equatable {
+            case done
+            case failed
+            /// The registry stopped seeing the process. Deliberately not
+            /// `done`: `markGone` already refuses to claim an outcome it
+            /// cannot know ("a killed session did not finish"), and the
+            /// record is not where that starts being a lie.
+            case lost
+        }
+
+        let id: String
+        var title: String
+        var cwd: String
+        var branch: String?
+        var agent: Agent
+        var outcome: Outcome
+        /// Its final words, so the rail has something to say about a row
+        /// whose transcript has since been rotated away.
+        var lastMessage: String?
+        var transcriptPath: String?
+        var finishedAt: Date
     }
 
     /// One or several questions asked together and answered one at a
@@ -246,6 +329,35 @@ final class SessionStore: ObservableObject {
     /// through, same contract as ActivityStore.activities.
     @Published private(set) var sessions: [Session] = []
 
+    /// What ended while this app was watching, newest first.
+    ///
+    /// Never rendered in the glance: `AgentSessionsStrip` filters to
+    /// live and goes on doing so, so the calm surface is exactly as calm
+    /// as it was. This is for the room somebody deliberately opened.
+    @Published private(set) var finished: [Finished] = []
+
+    /// Most rows the record ever holds. Small on purpose: the point is
+    /// "what happened while I was away", and the eleventh most recent
+    /// thing to finish is not that.
+    static let historyCap = 8
+
+    /// How far back the record goes, in seconds. Nil means the user
+    /// turned it off, which stops rows being kept at all rather than
+    /// merely hiding them: a record nobody can see is not a record, it
+    /// is a leak.
+    static let historyWindowKey = "sessionHistoryWindow"
+
+    nonisolated static func historyWindow(in defaults: UserDefaults = .standard) -> TimeInterval? {
+        // Absent means never set, which is the default rather than off.
+        guard let raw = defaults.string(forKey: historyWindowKey) else { return 2 * 3600 }
+        switch raw {
+        case "off": return nil
+        case "hour": return 3600
+        case "today": return 24 * 3600
+        default: return 2 * 3600
+        }
+    }
+
     private let maxSessions: Int
     /// Terminal rows linger just long enough to be seen before they
     /// clear themselves — same idea, same window ActivityStore uses
@@ -303,10 +415,21 @@ final class SessionStore: ObservableObject {
     /// out, instead of proving a 60-second timer fires 60 seconds at a
     /// time. See `outboxDir` above for why `outboxDirectory` defaults to
     /// nil rather than a real path.
-    init(maxSessions: Int = 20, finishedTTL: TimeInterval = 60, outboxDirectory: URL? = nil) {
+    /// Where the user's own choices are read from. Injectable for the
+    /// same reason `finishedTTL` is: a test needs to say "history is off"
+    /// or "history is one hour" without writing to the real install's
+    /// defaults, and the window is read on every append rather than
+    /// cached so flipping the setting takes effect at once.
+    private let defaults: UserDefaults
+
+    init(
+        maxSessions: Int = 20, finishedTTL: TimeInterval = 60,
+        outboxDirectory: URL? = nil, defaults: UserDefaults = .standard
+    ) {
         self.maxSessions = maxSessions
         self.finishedTTL = finishedTTL
         self.outboxDir = outboxDirectory
+        self.defaults = defaults
         loadOutbox()
     }
 
@@ -324,7 +447,7 @@ final class SessionStore: ObservableObject {
         id: String, title: String, cwd: String, branch: String?,
         lastPrompt: String?, state: State, activity: String? = nil,
         agent: Agent = .claude, updatedAt: Date = Date(), startedAt: Date = Date(),
-        lastMessage: String? = nil
+        lastMessage: String? = nil, transcriptPath: String? = nil
     ) {
         let alreadyKnown = sessions.first { $0.id == id }
         var session = alreadyKnown
@@ -352,6 +475,9 @@ final class SessionStore: ObservableObject {
         // tail with no text block in it must not blank what the row is
         // already showing.
         if let lastMessage, !lastMessage.isEmpty { session.lastMessage = lastMessage }
+        // Same rule, same reason: the registry can upsert a row it made
+        // itself, and it has no path to offer. Never blank a real one.
+        if let transcriptPath { session.transcriptPath = transcriptPath }
         // An outstanding question outranks whatever discovery inferred.
         //
         // Discovery reads working-or-stale off a file's mtime every
@@ -377,6 +503,14 @@ final class SessionStore: ObservableObject {
         }
         session.state = resolved
         session.updatedAt = updatedAt
+        // The record's second entrance. `remember` decides whether this
+        // qualifies; all this has to do is be honest about what state
+        // was being left. A session that arrives already `.done` because
+        // discovery found a cold file has a non-live `previousState` and
+        // is refused there.
+        if resolved == .done || resolved == .failed {
+            remember(session, leaving: previousState, as: resolved == .done ? .done : .failed)
+        }
         sessions.removeAll { $0.id == id }
         sessions.append(session)
         sort()
@@ -559,6 +693,154 @@ final class SessionStore: ObservableObject {
                 ? rank($0.state) < rank($1.state)
                 : $0.startedAt > $1.startedAt
         }
+    }
+
+    // MARK: The record
+
+    /// Put a session into the record, if it is the kind of ending the
+    /// record is allowed to hold.
+    ///
+    /// Called from the two places a session can be observed leaving a
+    /// live state, and from nowhere else. Both callers pass the state
+    /// being left behind rather than checking it themselves, so the one
+    /// rule that makes the record bounded ("only what this app watched
+    /// end") lives in one place instead of being re-derived by each
+    /// caller and eventually got wrong by one of them.
+    private func remember(_ session: Session, leaving previous: State, as outcome: Finished.Outcome) {
+        // The bound that does the real work. A session discovered from
+        // a cold transcript is never live here, so it never reaches this
+        // with a live `previous`, so a disk full of old transcripts
+        // produces no rows at all.
+        guard previous.isLive else { return }
+        // Off means not kept, not merely not shown. A record nobody can
+        // reach is not a record.
+        guard let window = Self.historyWindow(in: defaults) else { return }
+        finished.removeAll { $0.id == session.id }
+        finished.insert(
+            Finished(
+                id: session.id, title: session.title, cwd: session.cwd,
+                branch: session.branch, agent: session.agent, outcome: outcome,
+                lastMessage: session.lastMessage,
+                transcriptPath: session.transcriptPath, finishedAt: Date()
+            ),
+            at: 0
+        )
+        prune(window: window)
+    }
+
+    /// Drops what has aged out and what falls off the end of the cap.
+    /// Run on every append and on every read, because a room left open
+    /// overnight must not still be showing yesterday: nothing else is
+    /// firing on this array's behalf.
+    private func prune(window: TimeInterval) {
+        let cutoff = Date().addingTimeInterval(-window)
+        finished.removeAll { $0.finishedAt < cutoff }
+        if finished.count > Self.historyCap {
+            finished.removeSubrange(Self.historyCap...)
+        }
+    }
+
+    /// Backdate a row in the record.
+    ///
+    /// A testing seam and nothing else, the same shape `upsert`'s
+    /// `updatedAt` and `startedAt` arguments are: aging out is the one
+    /// behaviour here a test cannot reach by calling the real API, since
+    /// the alternative is waiting an hour. Named so it cannot be
+    /// mistaken for something production is allowed to call.
+    func ageFinishedForTesting(id: String, to moment: Date) {
+        guard let index = finished.firstIndex(where: { $0.id == id }) else { return }
+        finished[index].finishedAt = moment
+    }
+
+    /// The record as a reader should see it: pruned first, so an expired
+    /// row cannot be rendered by a view that happened to look before any
+    /// append did the pruning.
+    var history: [Finished] {
+        guard let window = Self.historyWindow(in: defaults) else { return [] }
+        let cutoff = Date().addingTimeInterval(-window)
+        return finished.filter { $0.finishedAt >= cutoff }.prefix(Self.historyCap).map { $0 }
+    }
+
+    // MARK: Grouping
+
+    /// The four bands the room's rail draws, in the order it draws them.
+    enum Group: String, CaseIterable, Identifiable {
+        case needsYou
+        case working
+        case atPrompt
+        case finished
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .needsYou: return "Needs you"
+            case .working: return "Working"
+            // The app's own existing phrasing, already in the row's
+            // accessibility label. "Idle" is accurate and reads like a
+            // complaint about the session.
+            case .atPrompt: return "At its prompt"
+            case .finished: return "Finished"
+            }
+        }
+
+        /// Which of these a user is allowed to switch off.
+        ///
+        /// Needs you is not one of them. A band whose entire purpose is
+        /// "something is blocked on you" being switchable off is a way
+        /// to make this app quietly fail at its one job, so the setting
+        /// renders disabled with a reason rather than silently missing.
+        var canBeHidden: Bool { self != .needsYou }
+
+        var settingKey: String { "sessionGroup.\(rawValue)" }
+    }
+
+    /// Which band a live session belongs in.
+    ///
+    /// A held approval or an unanswered question outranks the state:
+    /// a session can be mid-turn and still be the thing standing still
+    /// waiting for a human, and that is exactly the row the rail exists
+    /// to float to the top.
+    static func group(for session: Session) -> Group {
+        if session.approval?.decision == nil, session.approval != nil { return .needsYou }
+        if let ask = session.ask, !ask.isFullyAnswered { return .needsYou }
+        switch session.state {
+        case .needsInput: return .needsYou
+        case .working: return .working
+        case .idle: return .atPrompt
+        // Not drawn from `sessions` at all. A dead row that discovery
+        // still has in hand is not the record, and showing it beside
+        // rows this app watched end would break the one bound that
+        // makes the record honest.
+        case .done, .failed, .stale: return .finished
+        }
+    }
+
+    /// The rail's contents: only non-empty bands, only ones the user
+    /// left switched on, in `Group.allCases` order.
+    ///
+    /// The first three are cut out of `sessions`, which `sort()` has
+    /// already put in an order that agrees with this one by
+    /// construction, so nothing is sorted twice. Finished comes from the
+    /// record and is already newest-first.
+    func groups() -> [(group: Group, live: [Session], ended: [Finished])] {
+        let banded = Dictionary(grouping: sessions.filter { $0.state.isLive }, by: Self.group(for:))
+        let ended = history
+        return Group.allCases.compactMap { group in
+            guard shows(group) else { return nil }
+            if group == .finished {
+                return ended.isEmpty ? nil : (group, [], ended)
+            }
+            let live = banded[group] ?? []
+            return live.isEmpty ? nil : (group, live, [])
+        }
+    }
+
+    /// Whether the user left this band switched on. Absent means on:
+    /// nobody has opened the setting, and every band ships visible.
+    func shows(_ group: Group) -> Bool {
+        guard group.canBeHidden else { return true }
+        return defaults.object(forKey: group.settingKey) as? Bool ?? true
     }
 
     // MARK: Liveness (the registry)
@@ -818,9 +1100,16 @@ final class SessionStore: ObservableObject {
         guard !ids.isEmpty else { return }
         for id in ids {
             guard let index = sessions.firstIndex(where: { $0.id == id }) else { continue }
+            // Read before the write, and handed to `remember` rather
+            // than checked here. The caller in `reconcile` already
+            // filters to live ids, but this method is not private and a
+            // second caller passing an already-dead id must not be able
+            // to put a duplicate row in the record.
+            let leaving = sessions[index].state
             sessions[index].pid = nil
             sessions[index].state = .stale
             sessions[index].updatedAt = Date()
+            remember(sessions[index], leaving: leaving, as: .lost)
             failMessage(sessionID: id)
             announcedRest[id] = nil
             expiryWork[id]?.cancel()
