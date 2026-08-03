@@ -38,7 +38,9 @@ enum IslandElement: String, Codable, CaseIterable, Identifiable, Sendable {
         case .activities: return "circle.dashed"
         case .ambience: return "waveform"
         case .timers: return "timer"
-        case .switcher: return "square.grid.2x2"
+        // Not the Shortcuts tab's grid glyph: that one is a grid of
+        // launchable tiles, this is the switcher itself, a toolbar.
+        case .switcher: return "wrench.and.screwdriver"
         case .input: return "text.cursor"
         }
     }

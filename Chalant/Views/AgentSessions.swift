@@ -552,17 +552,30 @@ private struct ComposeCard: View {
             // leaving next and the rest are honestly behind it.
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 ForEach(Array(outbox.pending.enumerated()), id: \.element.id) { index, queued in
+                    let expiredHead = index == 0 && queued.isExpired
                     HStack(alignment: .top, spacing: Theme.Space.m) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(queued.text)
                                 .font(Theme.Fonts.body)
                                 .foregroundStyle(Theme.textPrimary)
                                 .fixedSize(horizontal: false, vertical: true)
-                            Text(index == 0 ? "Next" : "Queued")
+                            Text(statusLabel(index: index, queued: queued))
                                 .font(Theme.Fonts.caption)
-                                .foregroundStyle(Theme.textTertiary)
+                                .foregroundStyle(expiredHead ? Theme.textSecondary : Theme.textTertiary)
                         }
                         Spacer(minLength: Theme.Space.s)
+                        // Only the head can ever be collected, so only
+                        // the head gets a reason and a second chance.
+                        // An aged-out message further back is still just
+                        // "queued" until it is the one being asked for.
+                        if expiredHead {
+                            Button("Send now") {
+                                sessions.resendMessage(id: queued.id, for: session.id)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .tint(accent)
+                        }
                         Button {
                             sessions.cancelMessage(id: queued.id, for: session.id)
                         } label: {
@@ -571,12 +584,26 @@ private struct ComposeCard: View {
                         }
                         .buttonStyle(.borderless)
                         .foregroundStyle(Theme.textTertiary)
-                        .help("Cancel this message")
-                        .accessibilityLabel("Cancel this message")
+                        .help(expiredHead ? "Drop this message" : "Cancel this message")
+                        .accessibilityLabel(expiredHead ? "Drop this message" : "Cancel this message")
                     }
                 }
             }
         }
+    }
+
+    /// "Next" or "Queued" as before, plus how long it has actually been
+    /// waiting: a message that rode out a relaunch is not the same as
+    /// one just typed, and the card must not pretend otherwise. The head
+    /// of a queue that aged out says so outright instead of "Next":
+    /// handing it to the agent silently is exactly the failure
+    /// persisting the outbox at all is meant to avoid.
+    private func statusLabel(index: Int, queued: SessionStore.QueuedMessage) -> String {
+        guard !(index == 0 && queued.isExpired) else {
+            return "Expired, waited too long to send safely"
+        }
+        let ago = RelativeAge.short(queued.queuedAt)
+        return "\(index == 0 ? "Next" : "Queued") · \(ago == "now" ? "just now" : "\(ago) ago")"
     }
 }
 

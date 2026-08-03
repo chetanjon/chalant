@@ -24,8 +24,13 @@ extension NoiseEngine.NoiseColor {
         case .white: return "waveform"
         case .pink: return "waveform.path"
         case .rain: return "cloud.rain.fill"
-        case .fire: return "flame.fill"
-        case .cafe: return "cup.and.saucer.fill"
+        // Not `flame.fill`: that one is the focus streak counter's, and
+        // a streak means something different from a crackling fireplace
+        // track. A fireplace is a scene, not a flame.
+        case .fire: return "fireplace.fill"
+        // Not `cup.and.saucer.fill`: that one is Keep Awake's, the
+        // coffee-cup-as-caffeine trope. This is the scene, not the cup.
+        case .cafe: return "takeoutbag.and.cup.and.straw.fill"
         }
     }
 }
