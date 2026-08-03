@@ -128,14 +128,36 @@ Status: `[ ]` not started · `[~]` in flight · `[x]` done and seen · `[!]` don
   picked up without a relaunch.
 - [x] **F4b. Accessibility labels.** `label:` is required on both glyph
   buttons now, so the compiler asks at every new call site.
-- [ ] **F4c. Icon audit and shortcuts.** The wave doing this died mid-refactor
-  on a network error; the a11y half was finished by hand, the audit itself and
-  the shortcut coverage were not done.
+- [!] **F4c. Icon audit and shortcuts.** Done. One mechanical fault in 47 call
+  sites (the sidebar toggle was off the icon scale entirely). Chat and Sessions
+  gained shortcuts; the clipboard's existing one now opens with search focused,
+  rather than adding a second binding and breaking the one-per-destination
+  rule. **Six glyph collisions are recorded and deliberately unfixed** - the
+  same symbol carrying two ideas in Shortcuts/Tools, Island/app-picker, and
+  focus-streak/ambience. Each needs a chosen replacement, which is a design
+  call, not an audit's.
 
-## G. Later, explicitly
+## G. NotchBox parity - assessed 2026-08-02, and two of three are blocked
 
-- Notion integration.
-- NotchBox parity: snippets, web view, translate, per-style pickers.
+Scoped properly rather than assumed. What NotchBox has that Chalant does not:
+
+- **Translate.** Not buildable as a native panel today. Apple's Translation
+  framework is macOS 15, this app targets 14.0, and raising the floor drops
+  every macOS 14 user for one panel. A webview pointed at a translation site
+  would work and would be worse than the Ask surface already here. **Blocked
+  on a deliberate decision to raise the deployment target.**
+- **Web view.** Largely already here twice: the Chat tab IS a `WKWebView`, and
+  the Links tab is an app and shortcut launcher. A third general browser panel
+  would be a fourth door onto the same job. **Recommend not building.**
+- **Battery panel.** Genuinely buildable and small: `SystemStatsController`
+  already publishes level and charging, and time-to-empty is one IOKit call
+  away. It is currently a glance, not a panel. **The only one of the three
+  worth doing, and nobody has asked for it specifically.**
+- **Snippets** already exist in the clipboard store.
+
+## Later, explicitly
+
+- Notion integration. Not in this branch.
 
 ## Verification owed
 
