@@ -152,7 +152,20 @@ struct AgentSessionsStrip: View {
                 }
             }
             Spacer(minLength: 0)
-            Text(RelativeAge.short(session.updatedAt))
+            // `stateSince`, not `updatedAt`. Discovery rewrites
+            // `updatedAt` on every sweep, so this column said "now" on
+            // every live row forever: it was reporting how recently this
+            // app looked rather than anything about the session. It now
+            // says what the row's own state measures, so a session that
+            // has been mid-turn for four minutes says so.
+            //
+            // No state dot here, unlike the room's rail. The room needs
+            // one because it draws four bands and has to say which; this
+            // strip is live-only and already carries the one mark worth
+            // carrying. A pair of rings said the state a second time
+            // here once and were deleted for it (founder, 2026-08-02),
+            // and a dot would be the same mistake in a smaller shape.
+            Text(RelativeAge.short(session.stateSince))
                 .font(Theme.Fonts.microMono)
                 .foregroundStyle(Theme.textGhost)
             composeAffordance(session)
