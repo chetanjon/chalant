@@ -625,25 +625,92 @@ final class SessionStore: ObservableObject {
     /// rather than vanishing (EC-11).
     // MARK: Holding a tool call at the door
 
-    /// Which tools the island is allowed to hold. Empty by default, so
-    /// nothing about an existing install changes until someone asks for
-    /// it, and a hook talking to an older Chalant is told "not
-    /// interested" and gets out of the way.
+    /// Which calls the island is allowed to hold, one rule per line.
+    /// Empty by default, so nothing about an existing install changes
+    /// until someone asks for it, and a hook talking to an older
+    /// Chalant is told "not interested" and gets out of the way.
     ///
-    /// This is deliberately its own policy rather than a mirror of
-    /// Claude Code's. `PreToolUse` fires on every tool call and carries
-    /// no way to know whether Claude Code was going to prompt, so the
-    /// only honest thing to offer is "always ask me about these",
-    /// chosen by name and off until chosen.
-    static let gatedToolsKey = "gatedTools"
+    /// Deliberately its own policy rather than a mirror of Claude
+    /// Code's. `PreToolUse` fires on every tool call and carries no way
+    /// to know whether Claude Code was going to prompt, so the only
+    /// honest thing to offer is "always ask me about these".
+    ///
+    /// Newline-separated rather than comma, because a pattern is
+    /// allowed to contain a comma and a separator that can appear
+    /// inside the thing it separates is a bug waiting for the first
+    /// person who writes one.
+    static let approvalRulesKey = "approvalRules"
 
-    nonisolated static func gatedTools(in defaults: UserDefaults = .standard) -> Set<String> {
-        let raw = defaults.string(forKey: gatedToolsKey) ?? ""
-        return Set(
-            raw.split(separator: ",")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty })
+    nonisolated static func approvalRules(in defaults: UserDefaults = .standard) -> [String] {
+        (defaults.string(forKey: approvalRulesKey) ?? "")
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
     }
+
+    /// Whether one rule wants to hold one call.
+    ///
+    /// `Bash` holds every Bash call. `Bash(rm *)` holds only the ones
+    /// whose command starts with `rm`. That is Claude Code's own
+    /// permission-rule shape, on purpose: it is already in these users'
+    /// settings files and already in their heads, and a second syntax
+    /// for the same idea is a second thing to be wrong about.
+    ///
+    /// Gating by tool name alone is what made the first version of this
+    /// unlivable. An agent runs dozens of `ls` and `grep` calls for
+    /// every `rm`, and holding all of them to catch one means approving
+    /// so much that you stop reading.
+    nonisolated static func rule(_ rule: String, holds tool: String, _ detail: String) -> Bool {
+        let trimmed = rule.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return false }
+        guard let open = trimmed.firstIndex(of: "("), trimmed.hasSuffix(")") else {
+            return trimmed == tool
+        }
+        guard trimmed[trimmed.startIndex..<open] == tool else { return false }
+        let pattern = String(trimmed[trimmed.index(after: open)..<trimmed.index(before: trimmed.endIndex)])
+        return glob(pattern, matches: detail)
+    }
+
+    /// `*` stands for any run of characters, and nothing else does
+    /// anything. No regex: these rules are typed by hand into a small
+    /// field, and a language where a stray `.` or `?` quietly changes
+    /// what gets held is the wrong language for deciding whether a
+    /// command runs.
+    nonisolated static func glob(_ pattern: String, matches text: String) -> Bool {
+        // "git *" holds a bare "git" too, the way Claude Code's own
+        // rules do: the space-star means "and anything after", not
+        // "and something after".
+        if pattern.hasSuffix(" *"), text == String(pattern.dropLast(2)) { return true }
+        // Iterative rather than recursive, so a pattern that is mostly
+        // stars cannot take the stack with it.
+        let p = Array(pattern), t = Array(text)
+        var pi = 0, ti = 0, star = -1, mark = 0
+        while ti < t.count {
+            if pi < p.count, p[pi] == "*" {
+                star = pi; pi += 1; mark = ti
+            } else if pi < p.count, p[pi] == t[ti] {
+                pi += 1; ti += 1
+            } else if star >= 0 {
+                pi = star + 1; mark += 1; ti = mark
+            } else {
+                return false
+            }
+        }
+        while pi < p.count, p[pi] == "*" { pi += 1 }
+        return pi == p.count
+    }
+
+    /// The rules a fresh install is offered, not the rules it gets.
+    /// Every one of these is a thing that is hard to take back: it
+    /// leaves the machine, rewrites history, or deletes something.
+    nonisolated static let suggestedApprovalRules = [
+        "Bash(rm *)",
+        "Bash(sudo *)",
+        "Bash(git push *)",
+        "Bash(git reset --hard *)",
+        "Bash(npm publish *)",
+        "Bash(curl *)",
+    ]
 
     /// Hold a tool call and light the row, or decline to.
     ///
@@ -658,9 +725,9 @@ final class SessionStore: ObservableObject {
     /// existed.
     func holdForApproval(
         sessionID: String, id: String, tool: String, detail: String,
-        gated: Set<String> = SessionStore.gatedTools()
+        rules: [String] = SessionStore.approvalRules()
     ) -> Bool {
-        guard gated.contains(tool) else { return false }
+        guard rules.contains(where: { Self.rule($0, holds: tool, detail) }) else { return false }
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return false }
         guard sessions[index].approval == nil else { return false }
         sessions[index].approval = Approval(

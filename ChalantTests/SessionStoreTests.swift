@@ -643,7 +643,7 @@ final class SessionStoreTests: XCTestCase {
     func testAnUngatedToolIsNeverHeld() {
         let store = storeWithSession()
         XCTAssertFalse(store.holdForApproval(
-            sessionID: "s1", id: "call-1", tool: "Read", detail: "/etc/hosts", gated: ["Bash"]))
+            sessionID: "s1", id: "call-1", tool: "Read", detail: "/etc/hosts", rules: ["Bash"]))
         XCTAssertNil(store.sessions.first?.approval)
     }
 
@@ -651,7 +651,7 @@ final class SessionStoreTests: XCTestCase {
         let store = storeWithSession()
         XCTAssertTrue(store.holdForApproval(
             sessionID: "s1", id: "call-1", tool: "Bash",
-            detail: "rm -rf build && xcodebuild test", gated: ["Bash"]))
+            detail: "rm -rf build && xcodebuild test", rules: ["Bash"]))
 
         let approval = store.sessions.first?.approval
         XCTAssertEqual(approval?.tool, "Bash")
@@ -666,7 +666,7 @@ final class SessionStoreTests: XCTestCase {
     func testAToolCallForAnUnknownSessionIsNotHeld() {
         let store = SessionStore()
         XCTAssertFalse(store.holdForApproval(
-            sessionID: "ghost", id: "c", tool: "Bash", detail: "ls", gated: ["Bash"]))
+            sessionID: "ghost", id: "c", tool: "Bash", detail: "ls", rules: ["Bash"]))
         XCTAssertTrue(store.sessions.isEmpty)
     }
 
@@ -675,9 +675,9 @@ final class SessionStoreTests: XCTestCase {
     func testOnlyOneCallIsHeldPerSessionAtATime() {
         let store = storeWithSession()
         XCTAssertTrue(store.holdForApproval(
-            sessionID: "s1", id: "first", tool: "Bash", detail: "one", gated: ["Bash"]))
+            sessionID: "s1", id: "first", tool: "Bash", detail: "one", rules: ["Bash"]))
         XCTAssertFalse(store.holdForApproval(
-            sessionID: "s1", id: "second", tool: "Bash", detail: "two", gated: ["Bash"]))
+            sessionID: "s1", id: "second", tool: "Bash", detail: "two", rules: ["Bash"]))
         XCTAssertEqual(store.sessions.first?.approval?.id, "first")
     }
 
@@ -687,7 +687,7 @@ final class SessionStoreTests: XCTestCase {
     func testADecisionIsCollectedExactlyOnce() {
         let store = storeWithSession()
         _ = store.holdForApproval(
-            sessionID: "s1", id: "c", tool: "Bash", detail: "ls", gated: ["Bash"])
+            sessionID: "s1", id: "c", tool: "Bash", detail: "ls", rules: ["Bash"])
         store.decide(approvalID: "c", as: .allow)
 
         XCTAssertEqual(store.collectDecision(approvalID: "c"), .allow)
@@ -698,7 +698,7 @@ final class SessionStoreTests: XCTestCase {
     func testAnUndecidedCallHandsBackNothing() {
         let store = storeWithSession()
         _ = store.holdForApproval(
-            sessionID: "s1", id: "c", tool: "Bash", detail: "ls", gated: ["Bash"])
+            sessionID: "s1", id: "c", tool: "Bash", detail: "ls", rules: ["Bash"])
         XCTAssertNil(store.collectDecision(approvalID: "c"))
         XCTAssertNotNil(store.sessions.first?.approval, "still waiting, still shown")
     }
@@ -708,7 +708,7 @@ final class SessionStoreTests: XCTestCase {
     func testAnAbandonedCallLeavesNoCardBehind() {
         let store = storeWithSession()
         _ = store.holdForApproval(
-            sessionID: "s1", id: "c", tool: "Bash", detail: "ls", gated: ["Bash"])
+            sessionID: "s1", id: "c", tool: "Bash", detail: "ls", rules: ["Bash"])
         store.abandonApproval(id: "c")
         XCTAssertNil(store.sessions.first?.approval)
     }
@@ -716,14 +716,83 @@ final class SessionStoreTests: XCTestCase {
     /// Off until asked for. An install that never opts in behaves
     /// exactly as it did, and a hook talking to an older Chalant is told
     /// no and gets out of the way.
-    func testNothingIsGatedByDefault() {
+    func testNothingIsHeldByDefault() {
         let empty = UserDefaults(suiteName: "chalant.tests.gates")!
         empty.removePersistentDomain(forName: "chalant.tests.gates")
-        XCTAssertTrue(SessionStore.gatedTools(in: empty).isEmpty)
+        XCTAssertTrue(SessionStore.approvalRules(in: empty).isEmpty)
 
-        empty.set("Bash, Write ,", forKey: SessionStore.gatedToolsKey)
-        XCTAssertEqual(SessionStore.gatedTools(in: empty), ["Bash", "Write"],
-                       "spaces and stray commas are the user's, not a tool name")
+        empty.set("Bash(rm *)\n\n  Write  \n", forKey: SessionStore.approvalRulesKey)
+        XCTAssertEqual(SessionStore.approvalRules(in: empty), ["Bash(rm *)", "Write"],
+                       "blank lines and stray spacing are typing, not rules")
+    }
+
+    // MARK: Which calls a rule actually wants
+
+    /// A bare tool name holds everything it names, which is the blunt
+    /// instrument the pattern form exists to replace.
+    func testABareToolNameHoldsEveryCallToIt() {
+        XCTAssertTrue(SessionStore.rule("Bash", holds: "Bash", "ls"))
+        XCTAssertTrue(SessionStore.rule("Bash", holds: "Bash", "rm -rf /"))
+        XCTAssertFalse(SessionStore.rule("Bash", holds: "Write", "anything"))
+    }
+
+    /// The whole point: an agent runs dozens of reads for every delete,
+    /// and holding all of them to catch one means approving so much that
+    /// you stop reading.
+    func testAPatternHoldsOnlyWhatItNames() {
+        let rule = "Bash(rm *)"
+        XCTAssertTrue(SessionStore.rule(rule, holds: "Bash", "rm -rf build"))
+        XCTAssertFalse(SessionStore.rule(rule, holds: "Bash", "ls -la"))
+        XCTAssertFalse(SessionStore.rule(rule, holds: "Bash", "echo rm"),
+                       "the pattern anchors at the start, so a mention is not a use")
+        XCTAssertFalse(SessionStore.rule(rule, holds: "Write", "rm -rf build"),
+                       "the tool has to match too")
+    }
+
+    /// Claude Code's own rules treat "git *" as matching a bare "git",
+    /// and a syntax borrowed for familiarity has to behave the same or
+    /// it is worse than a new one.
+    func testTrailingStarAlsoHoldsTheBareCommand() {
+        XCTAssertTrue(SessionStore.rule("Bash(git push *)", holds: "Bash", "git push"))
+        XCTAssertTrue(SessionStore.rule("Bash(git push *)", holds: "Bash", "git push --force"))
+        XCTAssertFalse(SessionStore.rule("Bash(git push *)", holds: "Bash", "git pushover"),
+                       "the space is part of the pattern")
+    }
+
+    func testAStarMatchesAnywhereItIsWritten() {
+        XCTAssertTrue(SessionStore.glob("*prod*", matches: "deploy to prod now"))
+        XCTAssertTrue(SessionStore.glob("*", matches: ""))
+        XCTAssertTrue(SessionStore.glob("a*b*c", matches: "axxbyyc"))
+        XCTAssertFalse(SessionStore.glob("a*b*c", matches: "axxbyy"))
+        XCTAssertFalse(SessionStore.glob("", matches: "x"))
+    }
+
+    /// No regex, on purpose. A field where a stray dot silently widens
+    /// what gets held is the wrong field for deciding whether a command
+    /// runs.
+    func testRegexCharactersAreJustCharacters() {
+        XCTAssertFalse(SessionStore.rule("Bash(.*)", holds: "Bash", "rm -rf /"))
+        XCTAssertTrue(SessionStore.rule("Bash(.*)", holds: "Bash", ".anything"))
+    }
+
+    /// Malformed rules hold nothing rather than everything. Getting this
+    /// backwards would turn a typo into a stalled agent.
+    func testAMalformedRuleHoldsNothing() {
+        for bad in ["", "   ", "Bash(", "(rm *)", "Bash)rm *("] {
+            XCTAssertFalse(SessionStore.rule(bad, holds: "Bash", "rm -rf /"), bad)
+        }
+    }
+
+    /// Every suggestion the UI offers has to be a rule the matcher
+    /// actually understands, or the button ships a dud.
+    func testEverySuggestedRuleParses() {
+        for rule in SessionStore.suggestedApprovalRules {
+            XCTAssertTrue(rule.hasPrefix("Bash("), rule)
+            let sample = String(rule.dropFirst("Bash(".count).dropLast())
+                .replacingOccurrences(of: "*", with: "something")
+            XCTAssertTrue(SessionStore.rule(rule, holds: "Bash", sample),
+                          "\(rule) does not match its own shape")
+        }
     }
 
     // MARK: A warm file is not a running process

@@ -159,6 +159,121 @@ struct SessionsSection: View {
     let activities: ActivityStore
     @Environment(\.chalantAccent) private var accent
 
+    @AppStorage(SessionStore.approvalRulesKey) private var approvalRulesRaw = ""
+    @State private var draftRule = ""
+
+    /// Read from the stored string rather than through
+    /// `SessionStore.approvalRules()`, so editing a rule redraws this
+    /// list. The parsing is the same; only the reactivity differs.
+    private var rules: [String] {
+        approvalRulesRaw
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func add(_ rule: String) {
+        let trimmed = rule.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !rules.contains(trimmed) else { return }
+        approvalRulesRaw = (rules + [trimmed]).joined(separator: "\n")
+    }
+
+    private func remove(_ rule: String) {
+        approvalRulesRaw = rules.filter { $0 != rule }.joined(separator: "\n")
+    }
+
+    /// Rules, and the honest state of whether they are armed.
+    ///
+    /// The two halves are shown together because either alone is a
+    /// half-truth. Rules with no `PreToolUse` hook sit there looking
+    /// like a policy and hold nothing; the hook with no rules is a
+    /// round trip that always answers "not interested". Only both is
+    /// the feature.
+    private var approvalCard: some View {
+        let armed = HookInstall.holdsToolCalls()
+        return SettingCard(title: "Hold for approval") {
+            SettingNote(
+                "When an agent is about to do one of these, Chalant stops it and asks you on the "
+                + "island. Everything else runs as usual. If Chalant is not running, or you do "
+                + "not answer, the agent falls back to asking in its own terminal."
+            )
+            if rules.isEmpty {
+                Text("Nothing is held.")
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textSecondary)
+            } else {
+                ForEach(rules, id: \.self) { rule in
+                    HStack(spacing: Theme.Space.m) {
+                        Text(rule)
+                            .font(Theme.Fonts.captionMono)
+                            .foregroundStyle(Theme.textPrimary)
+                        Spacer(minLength: 0)
+                        HoverGlyphButton(
+                            symbol: "xmark", label: "Stop holding \(rule)",
+                            scale: .s, tint: Theme.textTertiary
+                        ) { remove(rule) }
+                    }
+                }
+            }
+            SettingDivider()
+            HStack(spacing: Theme.Space.s) {
+                TextField("Bash(rm *)", text: $draftRule)
+                    .textFieldStyle(.plain)
+                    .font(Theme.Fonts.captionMono)
+                    .onSubmit { add(draftRule); draftRule = "" }
+                    .padding(Theme.Space.m)
+                    .chalantField()
+                Button("Add") { add(draftRule); draftRule = "" }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(accent)
+                    .disabled(draftRule.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            SettingNote(
+                "A tool name on its own holds every call to it, which for Bash is dozens a "
+                + "minute. A pattern holds only what it names: Bash(rm *) is the deletes and "
+                + "nothing else. Same shape as Claude Code's own permission rules, and * is the "
+                + "only special character."
+            )
+            let unused = SessionStore.suggestedApprovalRules.filter { !rules.contains($0) }
+            if !unused.isEmpty {
+                Text("Suggested")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                WrappingRules(rules: unused) { add($0) }
+            }
+            if !rules.isEmpty, !armed {
+                SettingDivider()
+                SettingNote(
+                    "These are not armed yet. Holding a call needs one more hook than posting a "
+                    + "pill does, because PreToolUse is the only event whose answer can stop a "
+                    + "command from running. Merge this into ~/.claude/settings.json."
+                )
+                holdSnippet
+            }
+        }
+    }
+
+    private var holdSnippet: some View {
+        let text = HookInstall.holdSnippet
+        return VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text(text)
+                .font(Theme.Fonts.captionMono)
+                .foregroundStyle(Theme.textSecondary)
+                .textSelection(.enabled)
+                .padding(Theme.Space.m)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: Theme.Radius.row).fill(Theme.surface))
+            Button("Copy") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(accent)
+        }
+    }
+
     var body: some View {
         // Read once per appearance rather than once per reference below:
         // these are live file reads, and the banner's placement and the
@@ -196,6 +311,8 @@ struct SessionsSection: View {
                     }
                 }
             }
+
+            approvalCard
 
             // Real path, not a faked pill (H4, founder 2026-08-02: "I
             // want to test the notification and everything"): posts an
@@ -699,6 +816,52 @@ struct AboutSection: View {
                     "Chat opens your own accounts in a small built-in browser. Chalant is not "
                     + "affiliated with the services it opens."
                 )
+            }
+        }
+    }
+}
+
+/// Suggested rules laid out in rows that wrap.
+///
+/// Hand-wrapped rather than a `LazyVGrid`, because these are chips of
+/// wildly different widths and a grid gives every one the width of the
+/// longest, which left "Bash(rm *)" floating in the middle of a column
+/// sized for "Bash(git reset --hard *)".
+private struct WrappingRules: View {
+    let rules: [String]
+    let add: (String) -> Void
+    @Environment(\.chalantAccent) private var accent
+
+    /// Two per row. A measured flow layout is the right answer and a
+    /// much bigger one; this panel is a fixed width and these strings
+    /// are known, so the cheap version is honest here.
+    private var rows: [[String]] {
+        stride(from: 0, to: rules.count, by: 2).map {
+            Array(rules[$0..<min($0 + 2, rules.count)])
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            ForEach(rows, id: \.self) { row in
+                HStack(spacing: Theme.Space.s) {
+                    ForEach(row, id: \.self) { rule in
+                        Button {
+                            add(rule)
+                        } label: {
+                            HStack(spacing: Theme.Space.xs) {
+                                Image(systemName: "plus")
+                                    .font(Theme.Fonts.icon(.s))
+                                Text(rule)
+                                    .font(Theme.Fonts.captionMono)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(accent)
+                    }
+                    Spacer(minLength: 0)
+                }
             }
         }
     }

@@ -99,6 +99,53 @@ enum HookInstall {
         return installed ? .installed : .missing
     }
 
+    /// Whether Claude Code is set up to let this app hold a tool call.
+    ///
+    /// A separate question from `status(settings:)`, and a separate
+    /// hook. `Stop` carries a message back at a turn boundary;
+    /// `PreToolUse` is the only event whose answer can stop a call from
+    /// running at all. Somebody can perfectly well have one and not the
+    /// other, and telling them the whole thing is installed when the
+    /// deciding half is missing would be the worst kind of wrong: the
+    /// rules would sit there looking armed.
+    static func holdsToolCalls(settings: [String: Any]?) -> Bool {
+        guard let settings,
+              let hooks = settings["hooks"] as? [String: Any],
+              let entries = hooks["PreToolUse"] as? [[String: Any]]
+        else { return false }
+        return entries.contains { entry in
+            (entry["hooks"] as? [[String: Any]])?.contains {
+                ($0["command"] as? String)?.contains("chalant-hook") ?? false
+            } ?? false
+        }
+    }
+
+    static func holdsToolCalls() -> Bool {
+        guard case .parsed(let object) = fileState(at: settingsURL) else { return false }
+        return holdsToolCalls(settings: object)
+    }
+
+    /// The line that arms the rules. Its own snippet rather than a
+    /// bigger version of the main one: this hook can stop a command
+    /// from running, so adding it is a decision of its own and should
+    /// read like one.
+    ///
+    /// The generous timeout is the hook's patience plus room to answer.
+    /// A shorter one than the hook waits would have Claude Code kill it
+    /// mid-question and the card would outlive the agent asking.
+    static var holdSnippet: String {
+        let path = bundledScriptPath ?? "/path/to/scripts/chalant-hook"
+        return """
+        {
+          "hooks": {
+            "PreToolUse": [
+              { "hooks": [ { "type": "command", "command": "\(path)", "timeout": 40 } ] }
+            ]
+          }
+        }
+        """
+    }
+
     /// Cursor's own shape: `hooks.stop[]`, lower-case event name, each
     /// entry a bare `{"command": ...}` with no inner `hooks` key,
     /// flatter than Claude Code's, per the evidence. Pure for the same
