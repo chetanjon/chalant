@@ -841,9 +841,18 @@ final class SessionStore: ObservableObject {
     /// a session can be mid-turn and still be the thing standing still
     /// waiting for a human, and that is exactly the row the rail exists
     /// to float to the top.
+    /// Something on this row is waiting on a person: a tool call held at
+    /// the door, or a question with no answer yet. One predicate, read
+    /// by both the band a row lands in and whether it may be hidden at
+    /// all, so the two cannot come to different conclusions.
+    static func wantsAHuman(_ session: Session) -> Bool {
+        if let approval = session.approval, approval.decision == nil { return true }
+        if let ask = session.ask, !ask.isFullyAnswered { return true }
+        return false
+    }
+
     static func group(for session: Session) -> Group {
-        if session.approval?.decision == nil, session.approval != nil { return .needsYou }
-        if let ask = session.ask, !ask.isFullyAnswered { return .needsYou }
+        if wantsAHuman(session) { return .needsYou }
         switch session.state {
         case .needsInput: return .needsYou
         case .working: return .working
@@ -864,8 +873,19 @@ final class SessionStore: ObservableObject {
     /// construction, so nothing is sorted twice. Finished comes from the
     /// record and is already newest-first.
     func groups() -> [(group: Group, live: [Session], ended: [Finished])] {
-        let banded = Dictionary(grouping: sessions.filter { $0.state.isLive }, by: Self.group(for:))
-        let ended = history
+        // `isLive`, or waiting on a human, which is a kind of alive this
+        // store's state enum cannot express: `holdForApproval` and
+        // `attach` both keep a row live now, but the belt is here as
+        // well as the braces. A call held at the door or an unanswered
+        // question is never allowed to be invisible, whatever any other
+        // signal currently believes about the process.
+        let visible = sessions.filter { $0.state.isLive || Self.wantsAHuman($0) }
+        let banded = Dictionary(grouping: visible, by: Self.group(for:))
+        // A session cannot be in two bands at once. Anything showing as
+        // live wins over its own record row, which exists only because
+        // some earlier sweep gave up on it.
+        let liveIDs = Set(visible.map(\.id))
+        let ended = history.filter { !liveIDs.contains($0.id) }
         return Group.allCases.compactMap { group in
             guard shows(group) else { return nil }
             if group == .finished {
@@ -1059,6 +1079,21 @@ final class SessionStore: ObservableObject {
         sessions[index].approval = Approval(
             id: id, tool: tool, detail: detail, askedAt: Date(), decision: nil)
         sessions[index].updatedAt = Date()
+        // A held call is the strongest proof of life this store ever
+        // gets: a `PreToolUse` hook is standing at the door right now,
+        // in that process, waiting on an answer. It outranks the
+        // registry, which reports on a sweep and can be a sweep behind,
+        // and it certainly outranks a quiet transcript.
+        //
+        // Without this the room drew a session with a call held at the
+        // door under "Finished" and its approval card was nowhere on
+        // screen (observed 2026-08-03): the registry had lost the
+        // process, the row was `.stale`, and an agent stood there until
+        // its hook gave up. Whatever else is uncertain, a session asking
+        // permission has not finished.
+        disownedByRegistry.remove(sessionID)
+        revive(sessionID)
+        if !sessions[index].state.isLive { sessions[index].state = .needsInput }
         sort()
         return true
     }

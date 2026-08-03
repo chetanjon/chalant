@@ -283,6 +283,35 @@ final class SessionRoomDataTests: XCTestCase {
         XCTAssertEqual(store.groups().map(\.group), [.needsYou])
     }
 
+    /// The one a real hold caught: the registry had lost the process,
+    /// the row was stale, and an agent stood at the door with its
+    /// approval card nowhere on screen (observed 2026-08-03). A
+    /// PreToolUse hook waiting on an answer is the strongest proof of
+    /// life this store ever gets.
+    func testAHeldCallIsNeverInvisible() {
+        let store = store()
+        live(store, "s", .working)
+        store.markGone(["s"])
+        XCTAssertEqual(store.groups().map(\.group), [.finished])
+        XCTAssertTrue(
+            store.holdForApproval(sessionID: "s", id: "call-1", tool: "Bash",
+                                  detail: "rm -rf build", rules: ["Bash(rm *)"]))
+        XCTAssertEqual(store.groups().map(\.group), [.needsYou])
+        XCTAssertTrue(store.finished.isEmpty)
+    }
+
+    /// A row cannot be running and finished in the same rail. Anything
+    /// showing as live wins over a record entry an earlier sweep wrote.
+    func testARowIsNeverInTwoBandsAtOnce() {
+        let store = store()
+        live(store, "s", .working)
+        store.markGone(["s"])
+        live(store, "s", .working)
+        let bands = store.groups()
+        XCTAssertEqual(bands.map(\.group), [.working])
+        XCTAssertTrue(bands.flatMap(\.ended).isEmpty)
+    }
+
     private func session(state: SessionStore.State) -> SessionStore.Session {
         SessionStore.Session(
             id: "s", title: "s", cwd: "/a", branch: nil, lastPrompt: nil,
