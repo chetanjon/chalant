@@ -506,6 +506,11 @@ private struct AskCard: View {
     /// Only used when several may be picked. A single-choice question
     /// answers (or queues) on the tap and never reads this.
     @State private var picked: Set<String> = []
+    /// The free-text answer, and whether its field is open. Kept apart
+    /// from `picked` because "something else" is not one of the
+    /// options: it replaces them.
+    @State private var writingOther = false
+    @State private var otherText = ""
     /// Set once a native ask has been queued, replacing the options with
     /// what actually happened. Never cleared back: the tap already
     /// happened, and offering the buttons again would invite a second,
@@ -552,6 +557,7 @@ private struct AskCard: View {
                     ForEach(ask.options, id: \.self) { option in
                         optionRow(option)
                     }
+                    otherRow
                 }
                 if ask.multiSelect {
                     Button("Send") {
@@ -567,6 +573,64 @@ private struct AskCard: View {
                 }
             }
         }
+    }
+
+    /// The answer that is not on the list.
+    ///
+    /// Claude Code's own picker always offers one, and a question in
+    /// the notch that only offered the options would quietly be a
+    /// narrower question than the one being asked (founder,
+    /// 2026-08-03). A scripted `chalant ask` is answered with whatever
+    /// text is chosen, so free text was always allowed on the wire;
+    /// only the surface lacked a way to type it.
+    @ViewBuilder
+    private var otherRow: some View {
+        if writingOther {
+            HStack(spacing: Theme.Space.s) {
+                TextField("Something else", text: $otherText)
+                    .textFieldStyle(.plain)
+                    .font(Theme.Fonts.body)
+                    .onSubmit(sendOther)
+                HoverGlyphButton(
+                    symbol: "arrow.up.circle.fill", label: "Send this answer",
+                    scale: .m, tint: accent
+                ) {
+                    sendOther()
+                }
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, Theme.Space.s)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                    .fill(Theme.field)
+            )
+        } else {
+            Button { writingOther = true } label: {
+                HStack(alignment: .top, spacing: Theme.Space.m) {
+                    Image(systemName: "square.and.pencil")
+                        .font(Theme.Fonts.icon(.m))
+                        .foregroundStyle(Theme.textTertiary)
+                    Text("Something else")
+                        .font(Theme.Fonts.body)
+                        .foregroundStyle(Theme.textSecondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, Theme.Space.s)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressableStyle())
+            .accessibilityLabel("Answer with your own words")
+        }
+    }
+
+    private func sendOther() {
+        let text = otherText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        respond(with: [text], label: text)
+        otherText = ""
+        writingOther = false
     }
 
     /// One real row per option: a selection glyph, the full label
