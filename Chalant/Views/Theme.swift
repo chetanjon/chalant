@@ -231,6 +231,14 @@ enum Theme {
         /// room the sidebar layout earns.
         static let chat: CGFloat = 330
         static let chatFull: CGFloat = 390
+        /// A destination that has been given the island's whole panel.
+        ///
+        /// The panel the island already lives in is 720 tall and the
+        /// expanded island spends 288 of it, so this is not new room,
+        /// it is room that was being left on the floor. Header and
+        /// composer take the rest and the whole thing lands near 620,
+        /// clear of the panel with margin to spare.
+        static let focused: CGFloat = 480
     }
 
     /// Motion personality, user-selectable in settings. Serene is the

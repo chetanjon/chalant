@@ -22,6 +22,11 @@ struct AgentSessionsStrip: View {
     /// see that property's doc for why it lives on the model rather
     /// than as this view's own `@State`.
     @ObservedObject var model: NotchViewModel
+    /// Given the island's whole panel rather than a slice of it. The
+    /// rows are the same; what changes is that there is room for all of
+    /// them and for a composer under one, at once, without the list
+    /// collapsing to two lines and a scrollbar.
+    var focused = false
     @Environment(\.chalantAccent) private var accent
 
     /// Working, waiting, or idle — anything actually alive. `stale` is
@@ -46,6 +51,19 @@ struct AgentSessionsStrip: View {
         Group {
             if live.isEmpty {
                 EmptyPaneHint(message: "Nothing running. Start Claude Code in any terminal and it shows up here.")
+            } else if focused {
+                // Top-aligned rather than hugging: a list given the
+                // whole panel must not centre two rows in the middle of
+                // it, which reads as a layout mistake rather than as
+                // room to grow into.
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Theme.Space.s) {
+                        ForEach(live) { session in
+                            row(session)
+                        }
+                    }
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
             } else {
                 HuggingList {
                     ForEach(live) { session in

@@ -46,6 +46,14 @@ final class NotchViewModel: ObservableObject {
         case sessions
         case battery
 
+        /// Whether this destination has a full-height form worth giving
+        /// the island's whole panel to.
+        ///
+        /// Sessions first, and alone for now: it is the destination
+        /// most starved of room, and the one this pattern is being
+        /// proven on before it is spent anywhere else.
+        var canFocus: Bool { self == .sessions }
+
         /// The settings switch that hides this tab's tool, if it has
         /// one. `today` and `ask` are the island itself and cannot be
         /// switched off.
@@ -130,6 +138,26 @@ final class NotchViewModel: ObservableObject {
     @Published var isHovering = false
     /// Which lower panel the switcher is showing. `.today` is home.
     @Published var tab: Tab = .today
+
+    /// The one destination the island has given its whole height to,
+    /// or nil for the ordinary expanded island.
+    ///
+    /// Hover opens a glance; a click opens this. Those two gestures are
+    /// the difference between "what is happening" and "I am working in
+    /// here", and only the second one has any business being tall. The
+    /// island already lives inside a 720pt panel and spends 288 of it,
+    /// so the room this needs is room it has been leaving on the floor.
+    @Published var focusedTab: Tab?
+
+    /// Give a destination the whole panel. Sets `tab` too, so leaving
+    /// again lands on the thing that was being worked in rather than
+    /// wherever the island happened to be before.
+    func focus(on destination: Tab) {
+        tab = destination
+        focusedTab = destination
+    }
+
+    func unfocus() { focusedTab = nil }
     @Published var pane: Pane = .none
 
     /// The island's expanded size, measured from the content itself,
@@ -1175,6 +1203,7 @@ final class NotchViewModel: ObservableObject {
         guard state == .expanded else { return }
         state = .collapsed
         pane = .none
+        focusedTab = nil
         // The island always reopens small and clean, unless the user
         // asked it to reopen where they left off.
         if UserDefaults.standard.bool(forKey: Self.rememberLastTabKey) {
@@ -1209,6 +1238,13 @@ final class NotchViewModel: ObservableObject {
                 .object(forKey: "expandOnHover") as? Bool ?? true
             if state == .collapsed, expandOnHover { expand(on: display) }
         } else if state == .expanded, expandedDisplayID == display {
+            // A focused island was opened on purpose and closes on
+            // purpose. Letting the pointer drift out of it would break
+            // the one thing it exists for: reading something long and
+            // typing a reply, neither of which can be done inside a
+            // rectangle you must not leave. The click-away monitor and
+            // the back button are its exits.
+            guard focusedTab == nil else { return }
             scheduleHoverCollapse()
         }
     }
@@ -1227,8 +1263,14 @@ final class NotchViewModel: ObservableObject {
             // A half-typed draft, though, survives collapse (model
             // state, waiting on the next open) and must never pin
             // the island to the screen; it did, and it read as stuck.
+            // The focused island is exempt for the same reason Chat is,
+            // only more so: it was opened by a click rather than a
+            // hover, and nothing a pointer does should end it. Guarded
+            // here as well as at the call site, because a timer that
+            // was already in flight does not care what the call site
+            // decided afterwards.
             guard self.state == .expanded, !self.isHovering,
-                  !self.isWorking,
+                  !self.isWorking, self.focusedTab == nil,
                   self.pendingContext == nil, self.pane == .none,
                   self.tab != .chat else { return }
             self.collapse()
@@ -1519,7 +1561,7 @@ final class NotchViewModel: ObservableObject {
                 return
             }
             guard self.state == .expanded, !self.isHovering,
-                  self.pendingContext == nil,
+                  self.pendingContext == nil, self.focusedTab == nil,
                   self.pane == .none, self.tab != .chat else { return }
             self.collapse()
         }

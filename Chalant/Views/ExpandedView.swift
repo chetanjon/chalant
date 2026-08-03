@@ -78,7 +78,9 @@ struct ExpandedView: View {
         return tools
     }
 
-    var body: some View {
+    /// The island you get by reaching for it: everything at once, small,
+    /// and gone the moment you look away.
+    private var glanceContent: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
             // Rows come from the layout rather than being written here,
             // so rearranging one is data rather than a code change.
@@ -104,6 +106,59 @@ struct ExpandedView: View {
             // edge and its Mission Control hot zone.
             if face.isDropTargeted {
                 Color.clear.frame(height: 150)
+            }
+        }
+    }
+
+    /// The island you get by asking for it: one destination, the whole
+    /// panel, and it stays until you leave.
+    ///
+    /// Everything the glance carries is gone here on purpose. Music,
+    /// soundscapes and the switcher are what you look at when you have
+    /// not decided what you came for; once you have, they are furniture
+    /// between you and it.
+    private func focusedContent(_ destination: NotchViewModel.Tab) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            HStack(spacing: Theme.Space.s) {
+                HoverGlyphButton(
+                    symbol: "chevron.left", label: "Back", scale: .m, tint: Theme.textSecondary
+                ) {
+                    withAnimation(Theme.Motion.content) { model.unfocus() }
+                }
+                Text(Switcher.label(destination))
+                    .font(Theme.Fonts.bodyEmphasis)
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer(minLength: 0)
+                HoverGlyphButton(
+                    symbol: "gearshape", label: "Settings", scale: .m, tint: Theme.textTertiary
+                ) {
+                    model.collapse()
+                    model.openDashboard?(nil)
+                }
+            }
+            focusedPanel(destination)
+                .frame(height: Theme.Panel.focused)
+        }
+    }
+
+    @ViewBuilder
+    private func focusedPanel(_ destination: NotchViewModel.Tab) -> some View {
+        switch destination {
+        case .sessions:
+            AgentSessionsStrip(sessions: model.sessions, model: model, focused: true)
+        default:
+            // Nothing else claims `canFocus` yet, so nothing else can
+            // reach here. An empty panel beats a crash if one ever does.
+            EmptyPaneHint(message: "Nothing to show here yet.")
+        }
+    }
+
+    var body: some View {
+        Group {
+            if let focused = model.focusedTab {
+                focusedContent(focused)
+            } else {
+                glanceContent
             }
         }
         .padding(.horizontal, face.contentPadding)

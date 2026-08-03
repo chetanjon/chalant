@@ -34,6 +34,19 @@ struct Switcher: View {
             .padding(.horizontal, Theme.Space.xs)
             .background(Capsule().fill(Theme.surface))
             Spacer(minLength: 0)
+            // The door into the full-height island, and only on the
+            // destinations that have one. A visible button rather than
+            // a second meaning loaded onto a tab you already tapped:
+            // this app has spent long enough hiding answers in tooltips
+            // and gestures nobody goes looking for.
+            if model.tab.canFocus {
+                HoverGlyphButton(
+                    symbol: "arrow.up.left.and.arrow.down.right",
+                    label: "Open full", scale: .m, tint: Theme.textTertiary
+                ) {
+                    withAnimation(Theme.Motion.content) { model.focus(on: model.tab) }
+                }
+            }
             // A new version announces itself once, in a glance that
             // lives eight seconds. Miss it and nothing on screen said
             // so any more: the button that installs it sits in the
