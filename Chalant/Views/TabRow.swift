@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// The lower-panel switcher: Today (when your day is turned on) plus
-/// whichever tools you keep, and the settings gear. Every item wears its
-/// name, so the features are findable at a glance, not guessed from an
-/// icon.
+/// whichever tools you keep, and the settings gear. The selected tool
+/// wears its name and the hovered one says its own, so the row can be
+/// read by running along it rather than guessed at or clicked through.
 struct Switcher: View {
     @ObservedObject var model: NotchViewModel
     /// Observed in its own right: a nested ObservableObject does not
@@ -85,7 +85,10 @@ struct Switcher: View {
         case .notes: return "note.text"
         case .focus: return "timer"
         case .chat: return "bubble.left.and.bubble.right"
-        case .sessions: return "chevron.left.forwardslash.chevron.right"
+        // A terminal, not angle brackets. These are agents running in
+        // terminals; `</>` says "code", which is what they work on
+        // rather than what they are.
+        case .sessions: return "apple.terminal"
         case .battery: return "battery.100"
         }
     }
@@ -106,9 +109,19 @@ struct Switcher: View {
     }
 }
 
-/// One switcher pill. Only the active tab wears its name; the rest
-/// are quiet glyphs that lift on hover and answer with a tooltip, so
-/// six tools sit comfortably where three used to.
+/// One switcher pill. The active tab wears its name, and so does the
+/// one under the cursor, so a sweep across the row reads it out.
+///
+/// Every name at once needs about 780pt and the island is 518, which is
+/// why they were glyphs to begin with. But the answer was living only in
+/// a tooltip, and a tooltip is a place nobody looks before deciding a
+/// feature is not there: the row was unlearnable without clicking all of
+/// it. The name arrives on hover instead, immediately, where the eye
+/// already is.
+///
+/// It grows rightward from a left edge that does not move, so the pill
+/// under the cursor stays under the cursor and the row cannot chase
+/// itself.
 private struct SwitcherItem: View {
     let tab: NotchViewModel.Tab
     @ObservedObject var model: NotchViewModel
@@ -133,9 +146,11 @@ private struct SwitcherItem: View {
                 // tools read at a glance now (user call, 2026-07-22,
                 // "looks too small").
                 GlyphImage(symbol: Switcher.symbol(tab), scale: .m)
-                if on {
+                if on || hovered {
                     Text(Switcher.label(tab))
-                        .font(Theme.Fonts.bodyEmphasis)
+                        // Emphasised only where it means "you are here".
+                        // On hover it is a label, not a selection.
+                        .font(on ? Theme.Fonts.bodyEmphasis : Theme.Fonts.body)
                         .fixedSize()
                         .transition(.opacity)
                 }

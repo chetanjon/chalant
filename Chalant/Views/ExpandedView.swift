@@ -326,7 +326,8 @@ struct ExpandedView: View {
                 TodayView(
                     events: model.events,
                     showCalendar: showCalendar,
-                    showReminders: showReminders
+                    showReminders: showReminders,
+                    onLeaveForSettings: { model.collapse() }
                 )
             } else {
                 AnswerView(model: model)
@@ -598,6 +599,10 @@ struct TodayView: View {
     @ObservedObject var events: EventKitService
     let showCalendar: Bool
     let showReminders: Bool
+    /// System Settings is about to take focus, so the island gets out of
+    /// the way first rather than sitting lit over the window it sent you
+    /// to. Same move the gear makes.
+    var onLeaveForSettings: () -> Void = {}
     @Environment(\.chalantAccent) private var accent
 
     private static let dateFormatter: DateFormatter = {
@@ -611,15 +616,28 @@ struct TodayView: View {
         // emptiness; a fully clear day gets one graceful line.
         let hasEvents = showCalendar && !events.calendarDenied && !events.events.isEmpty
         let hasReminders = showReminders && !events.remindersDenied && !events.reminders.isEmpty
-        let denials = deniedLines
+        let denials = denials
         let rowCount = (hasEvents ? events.events.count : 0)
             + (hasReminders ? events.reminders.count : 0)
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             header
-            ForEach(denials, id: \.self) { line in
-                Text(line)
-                    .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.textHint)
+            ForEach(denials) { denial in
+                HStack(spacing: Theme.Space.s) {
+                    Text(denial.text)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textHint)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    // Says what it does, not what you want: it opens the
+                    // pane, macOS still asks you to flip the switch.
+                    Button("Open Settings") {
+                        onLeaveForSettings()
+                        denial.open()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(accent)
+                }
             }
             // A short day sits inline; a crowded one scrolls inside a
             // fixed box instead of pushing the island past the panel
@@ -634,7 +652,14 @@ struct TodayView: View {
             } else {
                 dayRows(hasEvents: hasEvents, hasReminders: hasReminders)
             }
-            if !hasEvents, !hasReminders, denials.isEmpty {
+            // Speaks for the sources that can actually see. It used to
+            // fall silent the moment anything was denied, so a granted
+            // reminders list with nothing due said nothing at all and
+            // the whole panel was one denial line. With every source
+            // denied there is still nothing to report: "the day is
+            // yours" over a permission wall is a guess dressed as a
+            // fact, and the denial above is the whole story.
+            if !hasEvents, !hasReminders, canSeeAnything {
                 clearDay
             }
         }
@@ -664,28 +689,64 @@ struct TodayView: View {
         }
     }
 
-    private var deniedLines: [String] {
-        var lines: [String] = []
-        if showCalendar, events.calendarDenied {
-            lines.append("Calendar access is off. System Settings, Privacy, Calendars.")
-        }
-        if showReminders, events.remindersDenied {
-            lines.append("Reminders access is off. System Settings, Privacy, Reminders.")
-        }
-        return lines
+    /// A denial with the way out attached.
+    ///
+    /// This used to be a sentence naming three places to click, on the
+    /// tab the island opens onto, which made a set of directions the
+    /// most-read screen in the app. The directions were even correct.
+    /// They were still directions.
+    struct Denial: Identifiable {
+        let id: String
+        let text: String
+        let open: () -> Void
     }
 
+    private var denials: [Denial] {
+        var out: [Denial] = []
+        if showCalendar, events.calendarDenied {
+            out.append(Denial(
+                id: "calendar",
+                text: "Calendar access is off, so today's events stay hidden.",
+                open: EventKitService.openCalendarPrivacySettings))
+        }
+        if showReminders, events.remindersDenied {
+            out.append(Denial(
+                id: "reminders",
+                text: "Reminders access is off, so nothing due shows here.",
+                open: EventKitService.openRemindersPrivacySettings))
+        }
+        return out
+    }
+
+    private var seesCalendar: Bool { showCalendar && !events.calendarDenied }
+    private var seesReminders: Bool { showReminders && !events.remindersDenied }
+    private var canSeeAnything: Bool { seesCalendar || seesReminders }
+
     /// The empty moment, in the island's own voice.
+    ///
+    /// Claims only what it looked at. Half a view of the day cannot say
+    /// the day is yours, and saying it anyway beside a line admitting
+    /// the calendar is hidden is the app contradicting itself in two
+    /// consecutive sentences.
     private var clearDay: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             Text("Clear water.")
                 .font(Theme.Fonts.reading)
                 .foregroundStyle(Theme.textSecondary)
-            Text("Nothing scheduled, nothing due. The day is yours.")
+            Text(Self.clearDayDetail(seesCalendar: seesCalendar, seesReminders: seesReminders))
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(Theme.textHint)
         }
         .padding(.vertical, Theme.Space.s)
+    }
+
+    static func clearDayDetail(seesCalendar: Bool, seesReminders: Bool) -> String {
+        switch (seesCalendar, seesReminders) {
+        case (true, true): return "Nothing scheduled, nothing due. The day is yours."
+        case (true, false): return "Nothing scheduled."
+        case (false, true): return "Nothing due."
+        case (false, false): return ""
+        }
     }
 
     private var eventRows: some View {

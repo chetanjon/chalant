@@ -2282,6 +2282,76 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(Set(keys).count, keys.count)
     }
 
+    // MARK: The front door
+
+    /// Every open of the island landed on Today, and Today with no
+    /// calendar access is a sentence telling you to go somewhere else.
+    /// The most-seen screen in the app was an error state.
+    func testTheIslandDoesNotOpenOntoATodayThatCanShowNothing() {
+        let defaults = Self.emptyDefaults()
+        XCTAssertEqual(NotchViewModel.landingTab(todayCanSee: false, in: defaults), .clipboard)
+    }
+
+    /// One working source is enough. A denial line beside real content
+    /// is information, not a dead end, and moving the front door on
+    /// anything less would be diverting people away from a tab that
+    /// works.
+    func testTodayStaysTheFrontDoorWheneverItHasAnythingToShow() {
+        let defaults = Self.emptyDefaults()
+        XCTAssertEqual(NotchViewModel.landingTab(todayCanSee: true, in: defaults), .today)
+    }
+
+    /// "Nothing due" is only sayable about a list this app can read.
+    /// The line used to vanish entirely whenever anything was denied, so
+    /// a granted reminders list with nothing in it said nothing at all
+    /// and the panel was one denial and a date.
+    func testTheEmptyDayClaimsOnlyWhatItActuallyLookedAt() {
+        XCTAssertEqual(
+            TodayView.clearDayDetail(seesCalendar: true, seesReminders: true),
+            "Nothing scheduled, nothing due. The day is yours.")
+        XCTAssertEqual(
+            TodayView.clearDayDetail(seesCalendar: false, seesReminders: true), "Nothing due.")
+        XCTAssertEqual(
+            TodayView.clearDayDetail(seesCalendar: true, seesReminders: false), "Nothing scheduled.")
+        XCTAssertTrue(
+            TodayView.clearDayDetail(seesCalendar: false, seesReminders: false).isEmpty,
+            "with nothing visible there is nothing to report")
+    }
+
+    /// Not simply the next tab along. `ask` sits second in the switcher
+    /// and is empty until something asks, so falling through to it would
+    /// trade one blank screen for another.
+    func testTheFallbackSkipsTabsThatAreAlsoEmptyByNature() {
+        let defaults = Self.emptyDefaults()
+        let landing = NotchViewModel.landingTab(todayCanSee: false, in: defaults)
+        XCTAssertNotEqual(landing, .ask)
+        XCTAssertNotEqual(landing, .today)
+    }
+
+    /// A tool switched off is not somewhere to open onto, exactly as
+    /// `restoreLastTabIfWanted` already refuses to reopen into one.
+    func testTheFallbackSkipsToolsTheUserSwitchedOff() {
+        let defaults = Self.emptyDefaults()
+        defaults.set(false, forKey: NotchViewModel.Tab.clipboard.toolKey!)
+        XCTAssertEqual(NotchViewModel.landingTab(todayCanSee: false, in: defaults), .sessions)
+    }
+
+    /// And if every tool is off, Today is still the only place left. A
+    /// blank Today beats no tab at all.
+    func testWithEveryToolOffTodayIsStillTheAnswer() {
+        let defaults = Self.emptyDefaults()
+        for tab in NotchViewModel.Tab.allCases {
+            if let key = tab.toolKey { defaults.set(false, forKey: key) }
+        }
+        XCTAssertEqual(NotchViewModel.landingTab(todayCanSee: false, in: defaults), .today)
+    }
+
+    private static func emptyDefaults() -> UserDefaults {
+        let suite = "chalant.tests.landing"
+        UserDefaults().removePersistentDomain(forName: suite)
+        return UserDefaults(suiteName: suite)!
+    }
+
     // MARK: Tab persistence
 
     func testEveryTabRoundTripsThroughItsRawValue() {

@@ -1101,7 +1101,46 @@ final class NotchViewModel: ObservableObject {
         // panel, the one case this guard exists to prevent.
         tab = stored.flatMap {
             Self.isAvailable($0, in: defaults, batteryPresent: stats.battery != nil) ? $0 : nil
-        } ?? .today
+        } ?? landing
+    }
+
+    /// The front door, asked fresh each time: a grant given since the
+    /// last open should bring Today straight back.
+    private var landing: Tab {
+        let defaults = UserDefaults.standard
+        // Both ship off, matching the @AppStorage declarations the
+        // settings window makes, so an unset key means off here too.
+        let seesCalendar = defaults.bool(forKey: "showCalendar") && !events.calendarDenied
+        let seesReminders = defaults.bool(forKey: "showReminders") && !events.remindersDenied
+        return Self.landingTab(todayCanSee: seesCalendar || seesReminders, in: defaults)
+    }
+
+    /// Where the island opens when nothing else decides it.
+    ///
+    /// Today, almost always. But Today with no calendar and no reminders
+    /// is a sentence telling you to go and change a setting, and that
+    /// was the most-seen screen in the app: every open landed on it. A
+    /// front door should have something behind it.
+    ///
+    /// Diverted only on positive knowledge of both denials, the same
+    /// rule the session registry follows. One of the two still granted
+    /// leaves Today with real content and one honest line beside it,
+    /// which is information rather than a dead end.
+    ///
+    /// The fallback is a preference order rather than the next tab
+    /// along: `ask` sits second in the switcher and is empty until
+    /// something asks, so falling through to it would trade one blank
+    /// screen for another. Clipboard leads because it is the one surface
+    /// that fills itself.
+    /// `todayCanSee` is whether any source Today draws from is both
+    /// switched on and permitted. Not merely "not denied": a calendar
+    /// the user turned off in settings is just as invisible as one macOS
+    /// is withholding, and either way Today has nothing behind it.
+    static func landingTab(todayCanSee: Bool, in defaults: UserDefaults = .standard) -> Tab {
+        if todayCanSee, isAvailable(.today, in: defaults) { return .today }
+        let preferred: [Tab] = [.clipboard, .sessions, .focus, .notes, .shelf, .links, .chat]
+        return preferred.first { isAvailable($0, in: defaults) } ?? .today
+
     }
 
     /// Whether a tab is somewhere the island can open onto right now:
@@ -1141,7 +1180,7 @@ final class NotchViewModel: ObservableObject {
         if UserDefaults.standard.bool(forKey: Self.rememberLastTabKey) {
             UserDefaults.standard.set(tab.rawValue, forKey: Self.lastTabKey)
         } else {
-            tab = .today
+            tab = landing
         }
         music.expandedVisible = false
         onExpandChange?(false)
