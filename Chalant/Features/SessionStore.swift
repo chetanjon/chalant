@@ -523,7 +523,12 @@ final class SessionStore: ObservableObject {
             sessions[index].hasTerminal = hasTerminal
             let questionOutstanding = sessions[index].ask.map { !$0.isFullyAnswered } ?? false
             if !questionOutstanding {
+                let previous = sessions[index].state
                 sessions[index].state = status
+                noteTransition(
+                    from: previous, to: status,
+                    id: sessions[index].id, title: sessions[index].title
+                )
             }
             sessions[index].updatedAt = Date()
         } else {
@@ -621,6 +626,27 @@ final class SessionStore: ObservableObject {
     /// (founder, 2026-08-02, "I didn't get a notification that it
     /// stopped working").
     var onSessionWantsYou: ((String) -> Void)?
+
+    /// Fired when a session stops working and comes to rest, which is
+    /// the moment its turn ended and it is waiting on you.
+    ///
+    /// Not the same event as `onSessionWantsYou`: that one is a
+    /// question, this one is an agent that simply finished. The founder
+    /// wants both to reach them, since most turns end with an answer to
+    /// read rather than a question to pick (2026-08-03).
+    ///
+    /// The transition is the event, never the state: a session sitting
+    /// idle is idle on every rescan and every five second sweep, and
+    /// firing on the state would announce the same finished turn
+    /// forever.
+    var onSessionCameToRest: ((_ id: String, _ title: String) -> Void)?
+
+    /// One place decides what "came to rest" means, so the two writers
+    /// that can move a session's state cannot drift on it.
+    private func noteTransition(from previous: State, to next: State, id: String, title: String) {
+        guard previous == .working, next == .idle || next == .stale else { return }
+        onSessionCameToRest?(id, title)
+    }
 
     /// Fired once per id in `markGone`, so anything keyed off the same
     /// session (the ActivityStore pill the Claude Code hook posts) can

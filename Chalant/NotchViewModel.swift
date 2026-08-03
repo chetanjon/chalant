@@ -694,6 +694,26 @@ final class NotchViewModel: ObservableObject {
         activities.onNeedsInput = { [weak self] title in
             self?.flashGlance(title, seconds: 8)
         }
+        // An agent that simply finished is the common case, and until
+        // now only a question reached the island. The founder wants the
+        // turn's last words in front of them the moment it ends, with
+        // the reply box under them, so answering is one place rather
+        // than a hunt (2026-08-03).
+        sessions.onSessionCameToRest = { [weak self] id, title in
+            guard let self, self.opensWhenAnAgentFinishes else { return }
+            self.flashGlance("\(title) finished", seconds: 6)
+            // Same restraint as a question: never over a live mic, and
+            // never over an island already busy with something. A turn
+            // ending is worth showing, and it is not worth taking the
+            // screen away from whatever is already being typed into.
+            guard self.state != .listening else { return }
+            guard self.state != .expanded || !self.isMidInteraction else { return }
+            self.expand()
+            self.tab = .sessions
+            // Straight to that session's own card, open, so its last
+            // words and the box to answer them are the same surface.
+            self.composingSessionID = id
+        }
         sessions.onSessionWantsYou = { [weak self] title in
             guard let self else { return }
             self.flashGlance("\(title) wants you", seconds: 8)
@@ -1070,6 +1090,15 @@ final class NotchViewModel: ObservableObject {
         // An unset flag means the tool ships on, matching the
         // @AppStorage defaults the settings window declares.
         return defaults.object(forKey: key) == nil || defaults.bool(forKey: key)
+    }
+
+    /// Whether a finished turn opens the island. On by default: it is
+    /// the behaviour that was asked for, and an agent finishing is the
+    /// event this app exists to catch. Off is for anyone who would
+    /// rather glance than be shown.
+    static let openOnFinishKey = "openWhenAnAgentFinishes"
+    var opensWhenAnAgentFinishes: Bool {
+        UserDefaults.standard.object(forKey: Self.openOnFinishKey) as? Bool ?? true
     }
 
     static let rememberLastTabKey = "rememberLastTab"

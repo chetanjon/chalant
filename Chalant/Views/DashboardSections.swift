@@ -10,6 +10,7 @@ struct GeneralSection: View {
 
     @AppStorage(UpdateChecker.settingKey) private var updateCheckOn = true
     @AppStorage("showInDock") private var showInDock = false
+    @AppStorage(NotchViewModel.openOnFinishKey) private var openOnFinish = true
     @AppStorage(NotchViewModel.rememberLastTabKey) private var rememberLastTab = false
     @AppStorage("expandOnHover") private var expandOnHover = true
     @AppStorage("openDelay") private var openDelay = 0.18
@@ -65,6 +66,13 @@ struct GeneralSection: View {
             }
 
             SettingCard(title: "Opening the island") {
+                SettingToggle(label: "Open when an agent finishes", isOn: $openOnFinish)
+                SettingNote(
+                    "The island opens on the session that just finished, showing what it said "
+                    + "with the reply box under it. It stays out of the way while you are "
+                    + "dictating or already typing in it."
+                )
+                SettingDivider()
                 SettingToggle(label: "Remember last tab", isOn: $rememberLastTab)
                 SettingNote(
                     "On, the island reopens on whatever you were last looking at. Off, it always "
