@@ -97,6 +97,12 @@ final class SessionStore: ObservableObject {
         /// The live process, when the registry knows of one. Nil means
         /// "discovered from a transcript only", which is not proof of
         /// life.
+        /// The last thing the agent actually said, so a row can show
+        /// what it wants rather than only that it wants something. Read
+        /// from the transcript, which means it works whether or not the
+        /// Stop hook is installed (founder, 2026-08-02: "is there a way
+        /// to see the message that the AI sent").
+        var lastMessage: String?
         var pid: pid_t?
         /// A background agent has no terminal to go to, unlike an
         /// interactive one; nil means the registry has never reported
@@ -161,13 +167,15 @@ final class SessionStore: ObservableObject {
     func upsert(
         id: String, title: String, cwd: String, branch: String?,
         lastPrompt: String?, state: State, activity: String? = nil,
-        agent: Agent = .claude, updatedAt: Date = Date(), startedAt: Date = Date()
+        agent: Agent = .claude, updatedAt: Date = Date(), startedAt: Date = Date(),
+        lastMessage: String? = nil
     ) {
         var session = sessions.first { $0.id == id }
             ?? Session(
                 id: id, title: title, cwd: cwd, branch: branch,
                 lastPrompt: lastPrompt, activity: activity, agent: agent,
-                state: state, ask: nil, startedAt: startedAt, updatedAt: updatedAt
+                state: state, ask: nil, lastMessage: lastMessage,
+                startedAt: startedAt, updatedAt: updatedAt
             )
         let previousState = session.state
         session.title = title
@@ -176,6 +184,10 @@ final class SessionStore: ObservableObject {
         session.lastPrompt = lastPrompt
         session.activity = activity
         session.agent = agent
+        // Only ever replaced by something real: a rescan that read a
+        // tail with no text block in it must not blank what the row is
+        // already showing.
+        if let lastMessage, !lastMessage.isEmpty { session.lastMessage = lastMessage }
         // An outstanding question outranks whatever discovery inferred.
         //
         // Discovery reads working-or-stale off a file's mtime every

@@ -225,6 +225,7 @@ private struct ComposeCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
+            lastWord
             if let outbox = session.outbox {
                 outboxStatus(outbox)
             } else {
@@ -234,6 +235,32 @@ private struct ComposeCard: View {
         }
         .rowInsets()
         .chalantCard(radius: Theme.Radius.row)
+    }
+
+    /// What the agent last said, above the box you answer in.
+    ///
+    /// Being told a session wants you and not being told what it wants
+    /// is half a notification: the founder asked, plainly, whether
+    /// there was a way to see the message before replying, and there
+    /// was not (2026-08-02). Read from the transcript rather than the
+    /// hook, so it is there whether or not the hook is installed and
+    /// for sessions that were already running.
+    ///
+    /// Four lines, because this is a glance surface and an agent can
+    /// write an essay. The whole thing is one tap away in the terminal,
+    /// which the row itself already reaches.
+    @ViewBuilder
+    private var lastWord: some View {
+        if let said = session.lastMessage, !said.isEmpty {
+            Text(said)
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(4)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel("It said: \(said)")
+        }
     }
 
     // MARK: Composing, nothing queued yet

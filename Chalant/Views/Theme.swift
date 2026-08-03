@@ -191,8 +191,21 @@ enum Theme {
         // 44/10 read as a long empty chin under the last row; the
         // droplet keeps a hint of belly without the sag.
         static let radiusExpanded: CGFloat = 34
-        static let bellyCollapsed: CGFloat = 1.5
-        static let bellyExpanded: CGFloat = 5
+        /// Flat, both of them. The bottom edge used to bow below
+        /// straight, a point and a half at rest and five when open, as
+        /// a droplet flourish. The founder read it as a fault twice,
+        /// once as "remove the slight arc at the bottom, make it clean"
+        /// and once as "a small bend to the line, the line is not
+        /// normal", which is the answer: a long horizontal edge is
+        /// exactly where the eye measures straightness, and a five
+        /// point sag across an expanded island is not subtle there
+        /// (2026-08-02).
+        ///
+        /// Kept as named constants rather than deleted so the curve is
+        /// one number away if it is ever wanted back, and so the eave
+        /// keeps its own separate say.
+        static let bellyCollapsed: CGFloat = 0
+        static let bellyExpanded: CGFloat = 0
         /// The song title beside the wave on a quiet pill: one number
         /// for how much width is reserved and how much is drawn.
         /// `leftWingNeed` used to reserve 156 while `songBeside` drew

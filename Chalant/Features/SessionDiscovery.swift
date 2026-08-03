@@ -22,6 +22,10 @@ final class SessionDiscovery {
     struct ParsedMetadata: Equatable {
         var aiTitle: String?
         var lastPrompt: String?
+        /// The last plain-text thing the assistant said, as opposed to
+        /// the last tool it reached for. Both ride the same content
+        /// blocks; this is the half a person would want to read.
+        var lastMessage: String?
         var mode: String?
         var permissionMode: String?
         /// Recorded by Claude Code on every message record, so a live
@@ -61,6 +65,7 @@ final class SessionDiscovery {
         var branch: String?
         var lastPrompt: String?
         var activity: String?
+        var lastMessage: String?
     }
 
     /// A burst of fs events for one file (title, then prompt, then mode
@@ -211,7 +216,8 @@ final class SessionDiscovery {
             tracked[id] = TrackedFile(
                 mtime: mtime, title: title, cwd: cwd, branch: branch,
                 lastPrompt: metadata.lastPrompt,
-                activity: metadata.lastTool.map(Self.activityPhrase(forTool:))
+                activity: metadata.lastTool.map(Self.activityPhrase(forTool:)),
+                lastMessage: metadata.lastMessage
             )
         }
         guard let entry = tracked[id] else { return }
@@ -220,7 +226,8 @@ final class SessionDiscovery {
         store.upsert(
             id: id, title: entry.title, cwd: entry.cwd, branch: entry.branch,
             lastPrompt: entry.lastPrompt, state: state,
-            activity: entry.activity, updatedAt: mtime
+            activity: entry.activity, updatedAt: mtime,
+            lastMessage: entry.lastMessage
         )
     }
 
@@ -351,10 +358,22 @@ final class SessionDiscovery {
             if type == "assistant",
                let message = object["message"] as? [String: Any],
                let blocks = message["content"] as? [[String: Any]] {
-                for block in blocks
-                where block["type"] as? String == "tool_use" {
-                    if let name = block["name"] as? String, !name.isEmpty {
-                        metadata.lastTool = name
+                for block in blocks {
+                    switch block["type"] as? String {
+                    case "tool_use":
+                        if let name = block["name"] as? String, !name.isEmpty {
+                            metadata.lastTool = name
+                        }
+                    case "text":
+                        // File order is turn order, so the last one
+                        // standing is what it said most recently.
+                        if let text = (block["text"] as? String)?
+                            .trimmingCharacters(in: .whitespacesAndNewlines),
+                           !text.isEmpty {
+                            metadata.lastMessage = text
+                        }
+                    default:
+                        break
                     }
                 }
             }
