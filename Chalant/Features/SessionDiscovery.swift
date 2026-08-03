@@ -44,17 +44,16 @@ final class SessionDiscovery {
         var pendingNativeAsk: NativeAsk?
     }
 
-    /// One question from Claude Code's own `AskUserQuestion` tool call,
-    /// read straight out of the transcript rather than a hook payload:
-    /// the hook's `Notification` event carries no question text or
-    /// options at all (native-questions-evidence-2026-08-03.md), only
-    /// the assistant's own `tool_use` block has them.
+    /// Claude Code's own `AskUserQuestion` tool call, read straight out
+    /// of the transcript rather than a hook payload: the hook's
+    /// `Notification` event carries no question text or options at all
+    /// (native-questions-evidence-2026-08-03.md), only the assistant's
+    /// own `tool_use` block has them.
     ///
-    /// `AskUserQuestion` can bundle several questions into one call;
-    /// only the first is kept. Modelling the rest would mean giving
-    /// `SessionStore.Ask` an array of questions instead of one, which
-    /// nothing else here needs yet: a batched ask is rare, and showing
-    /// its first question is still more than showing nothing.
+    /// `AskUserQuestion` routinely bundles two to four questions into
+    /// one call (a real one, in this app's own transcript, asked about
+    /// the logo, the microphone and drag scope together); every one of
+    /// them is kept, in `SessionStore.Ask`'s own question-array shape.
     struct NativeAsk: Equatable {
         /// The tool_use block's own id, not a freshly minted one: this
         /// is what a later `tool_result` names when the question is
@@ -62,10 +61,7 @@ final class SessionDiscovery {
         /// question from a spent one (verified against a real
         /// transcript; see `parseMetadata` below).
         let id: String
-        let header: String
-        let question: String
-        let options: [String]
-        let multiSelect: Bool
+        let questions: [SessionStore.Ask.Question]
     }
 
     /// What a tool name means to someone glancing at a row.
@@ -260,10 +256,7 @@ final class SessionDiscovery {
         // sitting on the row right now to decide whether an outstanding
         // question outranks the state this rescan would otherwise set.
         if let native = entry.pendingNativeAsk {
-            store.attach(
-                askID: native.id, to: id, header: native.header, question: native.question,
-                options: native.options, multiSelect: native.multiSelect, native: true
-            )
+            store.attach(askID: native.id, to: id, questions: native.questions, native: true)
         } else if store.pendingAsk(sessionID: id)?.native == true {
             // The tail no longer shows this one pending: either a
             // tool_result resolved it, or it fell out of the window this
@@ -467,31 +460,38 @@ final class SessionDiscovery {
         return metadata
     }
 
-    /// Reads the first question out of an `AskUserQuestion` tool_use
-    /// block's `input.questions`, or nil for any other tool (including a
-    /// malformed `AskUserQuestion`, which is not a question worth
-    /// showing). Options arrive as objects (`label`, `description`,
-    /// `preview`); only the label is kept, the same shape the scripted
-    /// `chalant ask` already sends over the socket.
+    /// Reads every question out of an `AskUserQuestion` tool_use block's
+    /// `input.questions`, or nil for any other tool. Options arrive as
+    /// objects (`label`, `description`, `preview`); only the label is
+    /// kept, the same shape the scripted `chalant ask` already sends
+    /// over the socket. A question whose own text is missing or blank
+    /// is dropped rather than shown blank; if that drops all of them,
+    /// this is nil — a malformed `AskUserQuestion` is not a question
+    /// worth showing, and `SessionStore.attach` applies the same rule
+    /// again regardless, so a bundle mangled some other way is still
+    /// caught there.
     private static func nativeAsk(from block: [String: Any]) -> NativeAsk? {
         guard block["name"] as? String == "AskUserQuestion",
               let id = block["id"] as? String, !id.isEmpty,
               let input = block["input"] as? [String: Any],
-              let questions = input["questions"] as? [[String: Any]],
-              let first = questions.first,
-              let question = (first["question"] as? String)?
-                  .trimmingCharacters(in: .whitespacesAndNewlines),
-              !question.isEmpty
+              let rawQuestions = input["questions"] as? [[String: Any]],
+              !rawQuestions.isEmpty
         else { return nil }
-        let options = (first["options"] as? [[String: Any]])?
-            .compactMap { $0["label"] as? String } ?? []
-        return NativeAsk(
-            id: id,
-            header: (first["header"] as? String) ?? "Question",
-            question: question,
-            options: options,
-            multiSelect: first["multiSelect"] as? Bool ?? false
-        )
+        let questions: [SessionStore.Ask.Question] = rawQuestions.compactMap { raw in
+            guard let question = (raw["question"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !question.isEmpty
+            else { return nil }
+            let options = (raw["options"] as? [[String: Any]])?
+                .compactMap { $0["label"] as? String } ?? []
+            return SessionStore.Ask.Question(
+                header: (raw["header"] as? String) ?? "Question",
+                question: question,
+                options: options,
+                multiSelect: raw["multiSelect"] as? Bool ?? false
+            )
+        }
+        guard !questions.isEmpty else { return nil }
+        return NativeAsk(id: id, questions: questions)
     }
 
     static func title(metadata: ParsedMetadata, resolvedCwd: String?, slug: String) -> String {

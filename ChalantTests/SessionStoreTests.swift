@@ -394,6 +394,90 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertNil(store.pendingAsk(sessionID: "s1"))
     }
 
+    // MARK: Bundled asks — several questions, answered one at a time
+
+    private func bundledQuestions() -> [SessionStore.Ask.Question] {
+        [
+            SessionStore.Ask.Question(header: "Logo", question: "Which one?", options: ["A", "B"], multiSelect: false),
+            SessionStore.Ask.Question(header: "Mic", question: "Move it?", options: ["Yes", "No"], multiSelect: false),
+            SessionStore.Ask.Question(header: "Drag", question: "Scope?", options: ["One", "Per display"], multiSelect: false),
+        ]
+    }
+
+    /// The core the two `attach` overloads share: a bundle attaches as
+    /// one ask carrying every question, in order, none dropped — the gap
+    /// this whole feature exists to close (`parseNativeAsk` used to keep
+    /// only `questions.first`).
+    func testABundleAttachesAsOneAskCarryingEveryQuestion() {
+        let store = storeWithSession()
+        XCTAssertTrue(store.attach(askID: "bundle", to: "s1", questions: bundledQuestions(), native: true))
+        let ask = store.pendingAsk(sessionID: "s1")
+        XCTAssertEqual(ask?.questions.count, 3)
+        XCTAssertEqual(ask?.questions.map(\.header), ["Logo", "Mic", "Drag"])
+        XCTAssertEqual(store.sessions.first?.state, .needsInput)
+    }
+
+    /// The partly-answered rule: two of three questions answered is
+    /// neither answered nor unanswered, and must read as outstanding —
+    /// `isFullyAnswered` false, state still needs-input — exactly as
+    /// zero of three does. Only the last answer changes that.
+    func testABundleTwoOfThreeAnsweredIsStillOutstanding() {
+        let store = storeWithSession()
+        store.attach(askID: "bundle", to: "s1", questions: bundledQuestions(), native: false)
+
+        XCTAssertTrue(store.answerQuestion(sessionID: "s1", questionIndex: 0, with: ["A"]))
+        XCTAssertFalse(store.pendingAsk(sessionID: "s1")?.isFullyAnswered ?? true)
+        XCTAssertEqual(store.sessions.first?.state, .needsInput, "one of three answered is still outstanding")
+
+        XCTAssertTrue(store.answerQuestion(sessionID: "s1", questionIndex: 1, with: ["Yes"]))
+        XCTAssertFalse(store.pendingAsk(sessionID: "s1")?.isFullyAnswered ?? true)
+        XCTAssertEqual(store.sessions.first?.state, .needsInput, "two of three answered is still outstanding")
+
+        XCTAssertTrue(store.answerQuestion(sessionID: "s1", questionIndex: 2, with: ["One"]))
+        let ask = store.pendingAsk(sessionID: "s1")
+        XCTAssertEqual(ask?.questions.map(\.answer), [["A"], ["Yes"], ["One"]])
+        XCTAssertTrue(ask?.isFullyAnswered ?? false)
+        // Non-native: a fully-answered bundle goes back to working, the
+        // same rule a single-question answer always followed.
+        XCTAssertEqual(store.sessions.first?.state, .working)
+    }
+
+    /// A native bundle's own row never flips back to working just
+    /// because every question got tapped in the card: there is no
+    /// supported way to resolve the real `AskUserQuestion` prompt from
+    /// here, so the row stays needs-input until the transcript itself
+    /// says the question was resolved — same rule a single native
+    /// question always followed.
+    func testANativeBundleFullyAnsweredLeavesTheRowNeedingInput() {
+        let store = storeWithSession()
+        store.attach(askID: "bundle", to: "s1", questions: bundledQuestions(), native: true)
+        for index in 0..<3 {
+            store.answerQuestion(sessionID: "s1", questionIndex: index, with: ["pick"])
+        }
+        XCTAssertTrue(store.pendingAsk(sessionID: "s1")?.isFullyAnswered ?? false)
+        XCTAssertEqual(store.sessions.first?.state, .needsInput)
+    }
+
+    /// Answering an index outside the bundle, or a session with no ask
+    /// at all, is refused rather than silently accepted.
+    func testAnsweringAQuestionIndexOutOfRangeIsRefused() {
+        let store = storeWithSession()
+        store.attach(askID: "bundle", to: "s1", questions: bundledQuestions(), native: false)
+        XCTAssertFalse(store.answerQuestion(sessionID: "s1", questionIndex: 3, with: ["x"]))
+        XCTAssertFalse(store.answerQuestion(sessionID: "ghost", questionIndex: 0, with: ["x"]))
+    }
+
+    /// `answer()`, the scripted `chalant ask` shape, is exactly
+    /// `answerQuestion` at index 0 — unchanged behaviour, expressed
+    /// through the one function that now does all of this.
+    func testLegacyAnswerIsQuestionZeroOfASingleQuestionBundle() {
+        let store = storeWithSession()
+        store.attach(askID: "q", to: "s1", header: "h", question: "q?", options: ["A"], multiSelect: false)
+        XCTAssertTrue(store.answer(sessionID: "s1", with: ["A"]))
+        XCTAssertEqual(store.pendingAsk(sessionID: "s1")?.answer, ["A"])
+        XCTAssertEqual(store.sessions.first?.state, .working)
+    }
+
     // MARK: Registry liveness (T1-T3, T8)
 
     private func registryEntryJSON(
@@ -872,22 +956,38 @@ final class SessionStoreTests: XCTestCase {
         """
         let ask = SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk
         XCTAssertEqual(ask?.id, "toolu_1")
-        XCTAssertEqual(ask?.header, "Pick")
-        XCTAssertEqual(ask?.question, "Which one?")
+        XCTAssertEqual(ask?.questions.first?.header, "Pick")
+        XCTAssertEqual(ask?.questions.first?.question, "Which one?")
         // Only the label travels; description and preview are dropped,
         // the same options shape the scripted `chalant ask` already sends.
-        XCTAssertEqual(ask?.options, ["A", "B"])
-        XCTAssertEqual(ask?.multiSelect, false)
+        XCTAssertEqual(ask?.questions.first?.options, ["A", "B"])
+        XCTAssertEqual(ask?.questions.first?.multiSelect, false)
     }
 
-    /// `AskUserQuestion` can bundle several questions into one call; only
-    /// the first is surfaced, since `SessionStore.Ask` models one.
-    func testOnlyTheFirstQuestionOfABatchedAskIsKept() {
+    /// `AskUserQuestion` routinely bundles several questions into one
+    /// call (a real one, in this app's own transcript, asked about the
+    /// logo, the microphone and drag scope together) — every one of
+    /// them is kept now, in order, none dropped.
+    func testABundledAskKeepsEveryQuestionInOrder() {
         let text = """
-        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"First","question":"q1?","options":[{"label":"A"}]},{"header":"Second","question":"q2?","options":[{"label":"B"}]}]}}]}}
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"First","question":"q1?","options":[{"label":"A"}],"multiSelect":false},{"header":"Second","question":"q2?","options":[{"label":"B"},{"label":"C"}],"multiSelect":true},{"header":"Third","question":"q3?","options":[{"label":"D"}]}]}}]}}
         """
         let ask = SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk
-        XCTAssertEqual(ask?.header, "First")
+        XCTAssertEqual(ask?.questions.map(\.header), ["First", "Second", "Third"])
+        XCTAssertEqual(ask?.questions.map(\.question), ["q1?", "q2?", "q3?"])
+        XCTAssertEqual(ask?.questions[1].options, ["B", "C"])
+        XCTAssertEqual(ask?.questions[1].multiSelect, true)
+    }
+
+    /// A question with blank text is not worth showing and is dropped
+    /// from the bundle rather than shown blank; the rest of a real
+    /// bundle survives one malformed entry.
+    func testABundledAskDropsAQuestionWithNoText() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"First","question":"q1?","options":[{"label":"A"}]},{"header":"Blank","question":"   ","options":[{"label":"B"}]}]}}]}}
+        """
+        let ask = SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk
+        XCTAssertEqual(ask?.questions.map(\.header), ["First"])
     }
 
     /// The one thing this whole feature turned on: whether a live

@@ -594,7 +594,7 @@ final class NotchViewModel: ObservableObject {
     var somethingWantsYou: Bool {
         sessions.sessions.contains { session in
             session.state == .needsInput
-                || (session.ask.map { $0.answer == nil } ?? false)
+                || (session.ask.map { !$0.isFullyAnswered } ?? false)
         } || activities.activities.contains { $0.state == .needsInput }
     }
 

@@ -379,7 +379,15 @@ final class ActivityServer: @unchecked Sendable {
                                  body: #"{"ok":false,"error":"no question outstanding"}"#)
                     return
                 }
-                guard let answer = ask.answer else {
+                // A bundled ask (several questions in one `AskUserQuestion`
+                // call) is only ever resolved through the outbox, one
+                // queued message once every question in it is done —
+                // never through this route. Reporting one "answered" here
+                // before all of them are would hand a hook polling for a
+                // single pick a half-filled one, and this shape has only
+                // ever meant one question's answer. So this only ever
+                // resolves the scripted `chalant ask` shape: exactly one.
+                guard ask.questions.count == 1, let answer = ask.answer else {
                     self.respond(connection, status: "200 OK", body: #"{"ok":true,"answered":false}"#)
                     return
                 }

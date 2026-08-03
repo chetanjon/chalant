@@ -70,9 +70,16 @@ struct AgentSessionsStrip: View {
             // Answering happens here rather than in the terminal the
             // question came from, which is the whole point: the island
             // already told you a session wants something.
-            if let ask = session.ask, ask.answer == nil {
+            //
+            // `isFullyAnswered`, never just the first question's answer:
+            // a bundle two of three questions answered is still a
+            // session that wants you, and the old single-question check
+            // would have hidden the card the moment question one landed.
+            if let ask = session.ask, !ask.isFullyAnswered {
                 AskCard(ask: ask, answer: { choices in
                     sessions.answer(sessionID: session.id, with: choices)
+                }, answerQuestion: { index, choices in
+                    sessions.answerQuestion(sessionID: session.id, questionIndex: index, with: choices)
                 }, queue: { label in
                     sessions.queue(message: label, for: session.id)
                 })
@@ -482,7 +489,8 @@ private struct ComposeCard: View {
     }
 }
 
-/// A question an agent is waiting on, answerable in place.
+/// A question — or several, bundled into one `AskUserQuestion` call — an
+/// agent is waiting on, answerable in place.
 ///
 /// A leading accent rule and the header sitting right above the question
 /// tie this to the row it hangs off, rather than reading as a second,
@@ -491,10 +499,25 @@ private struct ComposeCard: View {
 /// selection glyph rather than capsule chips: a chip crushes a real
 /// `AskUserQuestion` option, which is routinely a full sentence, into a
 /// pill built for a word.
+///
+/// A bundle is shown one question at a time with a progress line, never
+/// all at once: a real bundle runs three or four questions deep, each
+/// with several sentence-length options (native-questions-evidence-
+/// 2026-08-03.md — logo direction, then the microphone, then drag scope,
+/// each unrelated to the last), and stacking all of it would make the
+/// card the entire reason to look at the island rather than a glance off
+/// it. One question keeps this exactly the size it already was for a
+/// single question; only the progress line is new.
 private struct AskCard: View {
     let ask: SessionStore.Ask
     let answer: ([String]) -> Void
-    /// Native asks only: queues the label through the session's outbox
+    /// Records one question's answer inside a bundle, independent of the
+    /// rest — `SessionStore.answerQuestion`, keyed by index into
+    /// `ask.questions`. Kept separate from `answer` above because that
+    /// one still means "answer the whole (single-question) ask" for the
+    /// scripted `chalant ask` path, and must go on meaning exactly that.
+    let answerQuestion: (Int, [String]) -> Void
+    /// Native asks only: queues a label through the session's outbox
     /// instead of answering. There is no supported way to resolve
     /// Claude Code's own `AskUserQuestion` from outside the process, so
     /// this is the honest alternative rather than a button that looks
@@ -504,21 +527,34 @@ private struct AskCard: View {
     let queue: (String) -> Bool
 
     /// Only used when several may be picked. A single-choice question
-    /// answers (or queues) on the tap and never reads this.
+    /// answers (or advances) on the tap and never reads this.
     @State private var picked: Set<String> = []
     /// The free-text answer, and whether its field is open. Kept apart
     /// from `picked` because "something else" is not one of the
     /// options: it replaces them.
     @State private var writingOther = false
     @State private var otherText = ""
-    /// Set once a native ask has been queued, replacing the options with
-    /// what actually happened. Never cleared back: the tap already
-    /// happened, and offering the buttons again would invite a second,
-    /// different pick queued behind the one Claude Code is still
-    /// waiting on in its terminal.
+    /// Set once a native ask's last question has been queued, replacing
+    /// the options with what actually happened. Never cleared back: the
+    /// tap already happened, and offering the buttons again would invite
+    /// a second, different pick queued behind the one Claude Code is
+    /// still waiting on in its terminal.
     @State private var queuedOutcome: String?
 
     @Environment(\.chalantAccent) private var accent
+
+    /// The first question in the bundle without an answer yet, straight
+    /// off the store rather than tracked separately here: `ask` is
+    /// rebuilt from `SessionStore` on every answer, so this is always
+    /// exactly where answering left off, even if this view is recreated
+    /// mid-bundle.
+    private var currentIndex: Int {
+        ask.questions.firstIndex(where: { $0.answer == nil }) ?? max(ask.questions.count - 1, 0)
+    }
+
+    private var currentQuestion: SessionStore.Ask.Question {
+        ask.questions[currentIndex]
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -534,8 +570,13 @@ private struct AskCard: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            SectionHeader(title: ask.header.isEmpty ? "Question" : ask.header, tint: accent)
-            Text(ask.question)
+            SectionHeader(title: currentQuestion.header.isEmpty ? "Question" : currentQuestion.header, tint: accent)
+            if ask.questions.count > 1, queuedOutcome == nil {
+                Text("Question \(currentIndex + 1) of \(ask.questions.count)")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            Text(currentQuestion.question)
                 .font(Theme.Fonts.body)
                 .foregroundStyle(Theme.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -554,13 +595,18 @@ private struct AskCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    ForEach(ask.options, id: \.self) { option in
+                    ForEach(currentQuestion.options, id: \.self) { option in
                         optionRow(option)
                     }
                     otherRow
                 }
-                if ask.multiSelect {
-                    Button("Send") {
+                if currentQuestion.multiSelect {
+                    // Hoisted rather than inlined into the Button call:
+                    // a ternary inline in a SwiftUI modifier chain is
+                    // exactly the shape that has hung this project's
+                    // type-checker before.
+                    let isLastQuestion = currentIndex == ask.questions.count - 1
+                    Button(isLastQuestion ? "Send" : "Next") {
                         respond(with: Array(picked), label: picked.sorted().joined(separator: ", "))
                     }
                     .buttonStyle(.bordered)
@@ -639,14 +685,14 @@ private struct AskCard: View {
     private func optionRow(_ option: String) -> some View {
         let on = picked.contains(option)
         return Button {
-            guard ask.multiSelect else {
+            guard currentQuestion.multiSelect else {
                 respond(with: [option], label: option)
                 return
             }
             if on { picked.remove(option) } else { picked.insert(option) }
         } label: {
             HStack(alignment: .top, spacing: Theme.Space.m) {
-                Image(systemName: ask.multiSelect ? (on ? "checkmark.square.fill" : "square") : "circle")
+                Image(systemName: currentQuestion.multiSelect ? (on ? "checkmark.square.fill" : "square") : "circle")
                     .font(Theme.Fonts.icon(.m))
                     .foregroundStyle(on ? accent : Theme.textTertiary)
                 Text(option)
@@ -675,17 +721,42 @@ private struct AskCard: View {
     }
 
     /// Where a tap actually goes: a real answer for the scripted
-    /// `chalant ask`, which the agent polls for and collects, or a
-    /// queued message for one Claude Code asked on its own, which
-    /// cannot be answered from here at all (see `ask.native`).
+    /// `chalant ask` — always exactly one question, so answering it is
+    /// answering the whole ask, unchanged from before bundles existed —
+    /// or, for one Claude Code asked on its own, this question's answer
+    /// recorded on its own (see `ask.native`), and only once every
+    /// question in the bundle has one, a single queued message carrying
+    /// all of them together. There is no supported way to resolve the
+    /// real `AskUserQuestion` prompt from outside the process, so a
+    /// native bundle is never "answered" here, only ever queued.
     private func respond(with choices: [String], label: String) {
         guard ask.native else {
             answer(choices)
             return
         }
-        queuedOutcome = queue(label)
-            ? "Queued \u{201C}\(label)\u{201D}. Arrives when this session next takes a turn. "
+        let index = currentIndex
+        answerQuestion(index, choices)
+        picked = []
+        writingOther = false
+        otherText = ""
+        // Not the last question: the next render picks up wherever
+        // `currentIndex` now points, straight off the store.
+        guard index == ask.questions.count - 1 else { return }
+        // Every earlier answer already lives on `ask.questions` — set by
+        // this same function, on an earlier render — except this last
+        // one, which `ask` will not reflect until the next render.
+        let summary = ask.questions.count == 1 ? label
+            : ask.questions.enumerated().map { i, question -> String in
+                let header = question.header.isEmpty ? "Q\(i + 1)" : question.header
+                let text = i == index ? label : (question.answer?.joined(separator: ", ") ?? "")
+                return "\(header): \(text)"
+            }.joined(separator: "\n")
+        let delivered = ask.questions.count == 1
+            ? "Queued \u{201C}\(summary)\u{201D}. Arrives when this session next takes a turn. "
                 + "The terminal prompt still needs its own answer to move past it now."
-            : "Could not queue that; this session can't take a message right now."
+            : "Queued all \(ask.questions.count) answers together. Arrives when this session "
+                + "next takes a turn. The terminal prompt still needs its own answer to move "
+                + "past it now."
+        queuedOutcome = queue(summary) ? delivered : "Could not queue that; this session can't take a message right now."
     }
 }
