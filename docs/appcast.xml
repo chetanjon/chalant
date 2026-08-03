@@ -3,6 +3,54 @@
     <channel>
         <title>Chalant</title>
         <item>
+            <title>1.3.9</title>
+            <pubDate>Sun, 02 Aug 2026 15:41:44 -0700</pubDate>
+            <sparkle:version>126</sparkle:version>
+            <sparkle:shortVersionString>1.3.9</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/chetanjon/chalant/releases/download/v1.3.9/Chalant-1.3.9.zip" length="16284335" type="application/octet-stream" sparkle:edSignature="9qSAF3sMiZHbVF58VcqbApOzyiewoHlA7dwfP6XqOXlv12kNmA3wAoDqN/7KElDppopBmcWyZ30l5CBlYGa3Cg=="/>
+        </item>
+        <item>
+            <title>1.3.8</title>
+            <pubDate>Sun, 02 Aug 2026 13:14:07 -0700</pubDate>
+            <sparkle:version>125</sparkle:version>
+            <sparkle:shortVersionString>1.3.8</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/chetanjon/chalant/releases/download/v1.3.8/Chalant-1.3.8.zip" length="16216436" type="application/octet-stream" sparkle:edSignature="tsiBfHczFe6kSLLec7E2NbIacESp735JL2FN03IPXDSR99lxK6qV/3CsOz3gWKHdrSW1JeMHGKcVl2ELMqJjAQ=="/>
+        </item>
+        <item>
+            <title>1.3.7</title>
+            <pubDate>Sun, 02 Aug 2026 12:49:24 -0700</pubDate>
+            <sparkle:version>124</sparkle:version>
+            <sparkle:shortVersionString>1.3.7</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/chetanjon/chalant/releases/download/v1.3.7/Chalant-1.3.7.zip" length="9412048" type="application/octet-stream" sparkle:edSignature="HQOv1S9LZ7dG5gScMi3419qn4F3yvMhal2OxiRrekub08hgWltE2DI6gwRgrE3t1yVA3g+t/KphGokzQ6GycBA=="/>
+        </item>
+        <item>
+            <title>1.3.6</title>
+            <pubDate>Sun, 02 Aug 2026 03:34:43 -0700</pubDate>
+            <sparkle:version>123</sparkle:version>
+            <sparkle:shortVersionString>1.3.6</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/chetanjon/chalant/releases/download/v1.3.6/Chalant-1.3.6.zip" length="16192046" type="application/octet-stream" sparkle:edSignature="Qeo6A3B3keGa0izeE1PCzkU05d2bhKIbGGlW25J8cehr+BRK24CiIVsIQpBv7M88RAIsxyvJEWkMBell4LNRDg=="/>
+        </item>
+        <item>
+            <title>1.3.5</title>
+            <pubDate>Sat, 01 Aug 2026 16:47:53 -0700</pubDate>
+            <sparkle:version>122</sparkle:version>
+            <sparkle:shortVersionString>1.3.5</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/chetanjon/chalant/releases/download/v1.3.5/Chalant-1.3.5.zip" length="16215412" type="application/octet-stream" sparkle:edSignature="/SdA+/ki+eYMwEhEF+qH7iAN/yVvamu8Sy6r1/iqVMQonvKkx/iQAAODhnfmOW9hoVEUojIQRbrErdulXOoOBg=="/>
+        </item>
+        <item>
+            <title>1.3.4</title>
+            <pubDate>Fri, 31 Jul 2026 16:56:00 -0700</pubDate>
+            <sparkle:version>121</sparkle:version>
+            <sparkle:shortVersionString>1.3.4</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/chetanjon/chalant/releases/download/v1.3.4/Chalant-1.3.4.zip" length="16195963" type="application/octet-stream" sparkle:edSignature="bExK6kssKKeNDJryEev26RLTFuHxYK9LSXszD3mmVlPANHW2cFMZUsA36pX1kqQtfByTEWE3oCN7T/TrEeC5CQ=="/>
+        </item>
+        <item>
             <title>1.3.3</title>
             <pubDate>Tue, 28 Jul 2026 17:05:23 -0700</pubDate>
             <link>https://chetanjon.github.io/chalant/</link>

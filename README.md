@@ -23,11 +23,11 @@ Homebrew is the quiet route: the flag above skips the first-open challenge, beca
 - `remind me to call amma at 6` becomes a real Reminder with an alarm.
 - `schedule lunch with sarah friday at 1` becomes a real Calendar event.
 - `agenda` or `today` drops today's calendar out of the notch. `join` opens the next meeting's video link (Zoom, Meet, Teams, Webex, FaceTime); the Today rows carry a tap-to-join chip, and the glance marks a joinable meeting with a small camera.
-- `focus 25` starts a pomodoro with synthesized brown noise, its progress ring live beside the notch. `stop focus` ends it.
+- `focus 25` starts a pomodoro, its progress ring live beside the notch. `stop focus` ends it. Sound stays yours: a session never starts, ducks, or stops ambience on its own.
 - `timer 10` runs a countdown, its ring beside the notch. `stopwatch` counts up; `stop stopwatch` holds the reading on screen, `stopwatch` again rolls on, `reset stopwatch` clears. Also a chip in the Focus tab, with pause and reset buttons.
 - `how much time left` reads the running sessions back; `cancel the timer` and its article-carrying kin stop the right thing, honestly ("No timer running." when there is none).
 - Running sessions mark the closed pill with a small symbol (the progress ring, or a stopwatch glyph), never digits; numbers live in the open island.
-- `brown noise` / `white noise` / `pink noise`, generated live, no audio files, works offline.
+- `brown noise` / `white noise` / `pink noise`, synthesized live in stereo, no audio files, works offline. `rain` / `fire` / `cafe` are recordings.
 - `note: something` captures locally. `notes` lists. `clear notes` wipes.
 - `play`, `pause`, `skip`, `previous` control music. `what's playing` names the track and where it plays; `volume up`, `turn the volume down a bit`, or `volume 30` turn the same knob the row's slider does (the player's own volume when it has one, the Mac's otherwise).
 - `text amma: on my way` or `tell amma i'm on my way` reads the message back; only the word `send` fires it, as an iMessage through Messages. Nothing ever sends unconfirmed, and any other command drops the staged text. (`tell me ...` stays a question.)
@@ -147,8 +147,8 @@ The honest version, since you are running an unsigned app that can touch a lot.
 - Self-updates: [Sparkle](https://github.com/sparkle-project/Sparkle) (MIT), with archives signed by the project's own EdDSA key.
 - Now-playing: the vendored [mediaremote-adapter](https://github.com/ungive/mediaremote-adapter) (BSD 3-Clause).
 - Rain ambience: derived from ["Calm rain.wav"](https://commons.wikimedia.org/wiki/File:Calm_rain.wav) (Wikimedia Commons, CC BY-SA 4.0), trimmed, normalized, edge-faded.
-- Cafe ambience: derived from ["Cafe ambiance.ogg"](https://commons.wikimedia.org/wiki/File:Cafe_ambiance.ogg) (Wikimedia Commons, CC0), low-pass filtered and level-reduced for a calmer room.
+- Cafe ambience: derived from ["Cafe ambiance.ogg"](https://commons.wikimedia.org/wiki/File:Cafe_ambiance.ogg) (Wikimedia Commons, CC0), level-reduced and seam-crossfaded for a calmer room.
 - Fire ambience: derived from ["Campfire sound ambience.ogg"](https://commons.wikimedia.org/wiki/File:Campfire_sound_ambience.ogg) by Glaneur de sons (Wikimedia Commons, CC BY 3.0), normalized, softened, edge-faded.
-- Brown/white/pink noise are synthesized in real time.
+- Brown, white and pink noise are synthesized in real time, in stereo.
 
 Chalant is free, and its source is public so the trust above is checkable. The code is not licensed for reuse; all rights stay with the author.

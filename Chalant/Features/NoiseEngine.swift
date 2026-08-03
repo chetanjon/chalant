@@ -95,29 +95,44 @@ final class NoiseEngine {
         }
     }
 
-    // Filter state
-    private var brownLast: Float = 0
-    // Refined Kellet pink (seven poles): the old economy filter left
-    // the top octave hissing, which read as harsh (user, 2026-07-23).
-    private var pinkB0: Float = 0
-    private var pinkB1: Float = 0
-    private var pinkB2: Float = 0
-    private var pinkB3: Float = 0
-    private var pinkB4: Float = 0
-    private var pinkB5: Float = 0
-    private var pinkB6: Float = 0
-    private var whiteLast: Float = 0
-    // A gentle two-pole smoothing lowpass on the two synth colors that
-    // sounded harsh; brown lands warm (1.4 kHz), pink keeps more mid
-    // (2.4 kHz). Cascaded one-poles, so no resonance. Coefficients
-    // and make-up gains derived to hold the old loudness (RMS) while
-    // shedding ~15-23 dB of the top two octaves.
-    private var smoothA: Float = 0
-    private var smoothB: Float = 0
-    private static let brownAlpha: Float = 0.16745
-    private static let brownGain: Float = 1.0772
-    private static let pinkAlpha: Float = 0.26960
-    private static let pinkGain: Float = 0.1384
+    /// Every generated sound, built once and kept. They hold filter and
+    /// voice state, so they must outlive a single click: rebuilding one
+    /// per start would restart its bed from silence every time. Held as
+    /// five properties rather than a dictionary because the render
+    /// thread reads them, and a switch costs no hashing.
+    private let brownScape = ColorNoise(.brown)
+    private let pinkScape = ColorNoise(.pink)
+    private let whiteScape = ColorNoise(.white)
+    private let rainScape = RainScape()
+    private let fireScape = FireScape()
+
+    /// Rain and fire are BACK ON THE RECORDINGS as of 1.3.8. The
+    /// generated versions shipped in 1.3.7 and the user's verdict was
+    /// that they were not rain and fire at all: the droplets and
+    /// crackles were struck resonators, which are tuned tones, and real
+    /// water and real wood are broadband. The generators stay in the
+    /// tree because the beds and the placement were right and the event
+    /// design is being rebuilt; nothing routes to them until it sounds
+    /// like weather.
+    private func scape(for color: NoiseColor) -> Soundscape? {
+        switch color {
+        case .brown: return brownScape
+        case .pink: return pinkScape
+        case .white: return whiteScape
+        case .rain, .fire, .cafe: return nil
+        }
+    }
+
+    /// Scratch the render callback fills, sized for a generous block.
+    /// Allocated once: the render thread does not get to allocate.
+    private static let scratchCapacity = 4096
+    private let scratchLeft = UnsafeMutablePointer<Float>.allocate(capacity: scratchCapacity)
+    private let scratchRight = UnsafeMutablePointer<Float>.allocate(capacity: scratchCapacity)
+
+    deinit {
+        scratchLeft.deallocate()
+        scratchRight.deallocate()
+    }
 
     private(set) var isRunning = false
 
@@ -152,6 +167,13 @@ final class NoiseEngine {
         var rate: Float
         var pitch: Float
         var trim: Float
+        /// Makeup, in dB, before the trim. Measured through this exact
+        /// chain, cafe arrived about 10 dB under the generated sounds:
+        /// the recording is quiet to begin with and the voicing filters
+        /// take more out of it. One slider serves every chip, so a chip
+        /// that arrives 10 dB down is a chip the user has to correct by
+        /// hand every time they pick it.
+        var gainDB: Float = 0
         /// (filter, frequency, gain dB, bandwidth octaves)
         var bands: [(AVAudioUnitEQFilterType, Float, Float, Float)]
     }
@@ -168,17 +190,6 @@ final class NoiseEngine {
                     (.parametric, 350, 2, 1.2),
                 ]
             )
-        case .cafe:
-            // The far corner of a small cafe, not the middle of a
-            // crowd: slowed, softened highs, a little room warmth.
-            return Voicing(
-                rate: 0.78, pitch: -80, trim: 0.8,
-                bands: [
-                    (.lowPass, 3000, 0, 0.8),
-                    (.highShelf, 1500, -7, 1),
-                    (.lowShelf, 250, 2.5, 1),
-                ]
-            )
         case .fire:
             // A hearth heard from the sofa: the lows are cut, not
             // boosted (the old +6.5dB shelf boomed), the crackle sits
@@ -189,6 +200,21 @@ final class NoiseEngine {
                     (.lowShelf, 200, -8, 1),
                     (.parametric, 2400, 2, 1.5),
                     (.highShelf, 6000, -4, 1),
+                ]
+            )
+        case .cafe:
+            // The far corner of a small cafe, not the middle of a crowd.
+            // Played at its own speed: it used to run at 0.78x, and
+            // stretching a recording smears every transient in it, which
+            // is most of what "fake" sounded like (user, 2026-08-02).
+            // The room reads as distant now through level and a high
+            // shelf, not through a 3 kHz cliff.
+            return Voicing(
+                rate: 1.0, pitch: 0, trim: 0.8, gainDB: 10.5,
+                bands: [
+                    (.lowPass, 7000, 0, 0.7),
+                    (.highShelf, 2200, -4.5, 1),
+                    (.lowShelf, 200, -2, 1),
                 ]
             )
         default:
@@ -361,7 +387,48 @@ final class NoiseEngine {
         guard conversionError == nil, status != .error, converted.frameLength > 0 else {
             return nil
         }
-        return converted
+        return makeSeamless(converted)
+    }
+
+    /// Fold the tail back over the head so the loop has no seam.
+    ///
+    /// `scheduleBuffer(.loops)` splices the last sample straight onto
+    /// the first, and a two-minute chunk cut out of a six-minute
+    /// recording has no reason to meet itself cleanly: the join was
+    /// audible every cycle. Blending the final seconds into the opening
+    /// ones with an equal-power crossfade makes the ends genuinely
+    /// continuous, at the cost of the crossfade's length.
+    private static func makeSeamless(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer {
+        let total = Int(buffer.frameLength)
+        let fade = min(Int(3 * buffer.format.sampleRate), total / 4)
+        guard fade > 0, total - fade > fade,
+              let source = buffer.floatChannelData,
+              let looped = AVAudioPCMBuffer(
+                  pcmFormat: buffer.format,
+                  frameCapacity: AVAudioFrameCount(total - fade)
+              ),
+              let destination = looped.floatChannelData
+        else { return buffer }
+
+        let length = total - fade
+        let channels = Int(buffer.format.channelCount)
+        for channel in 0..<channels {
+            let input = source[channel]
+            let output = destination[channel]
+            for frame in 0..<fade {
+                // Equal power, so uncorrelated room noise does not dip
+                // through the middle of the blend the way a linear
+                // crossfade makes it.
+                let position = Float(frame) / Float(fade) * .pi / 2
+                output[frame] = input[frame] * sinf(position)
+                    + input[length + frame] * cosf(position)
+            }
+            for frame in fade..<length {
+                output[frame] = input[frame]
+            }
+        }
+        looped.frameLength = AVAudioFrameCount(length)
+        return looped
     }
 
     private func startFile(_ color: NoiseColor) {
@@ -388,6 +455,7 @@ final class NoiseEngine {
             let voice = Self.voicing(for: color)
             pitch.rate = voice.rate
             pitch.pitch = voice.pitch
+            eq.globalGain = voice.gainDB
             for (index, band) in eq.bands.enumerated() {
                 if index < voice.bands.count {
                     let (type, frequency, gainDB, width) = voice.bands[index]
@@ -476,22 +544,39 @@ final class NoiseEngine {
         // weak capture takes the runtime's side-table lock once per
         // buffer, on the audio thread, which is the one place that must
         // never wait on a lock the rest of the app can hold.
-        let node = AVAudioSourceNode { [unowned(unsafe) self] _, _, frameCount, audioBufferList -> OSStatus in
+        // Stereo by declaration. The node used to take whatever format
+        // it was handed, which was fine while every color wrote the same
+        // sample to every channel and is not fine now that left and
+        // right differ.
+        let node = AVAudioSourceNode(format: Self.chainFormat) { [unowned(unsafe) self] _, _, frameCount, audioBufferList -> OSStatus in
             self.refreshRenderControls()
             let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
-            for frame in 0..<Int(frameCount) {
-                let sample = self.nextSample()
-                for buffer in buffers {
+            let total = Int(frameCount)
+            var offset = 0
+            while offset < total {
+                let frames = min(Self.scratchCapacity, total - offset)
+                self.renderBlock(frames: frames)
+                // Channel 0 takes the left render and channel 1 the
+                // right. They used to take the SAME sample, which is
+                // why every color sat in a point between the listener's
+                // ears (user, 2026-08-02, "thin and small"). Anything
+                // past two channels doubles the left, which is only
+                // reachable on odd hardware.
+                for (index, buffer) in buffers.enumerated() {
                     guard let data = buffer.mData else { continue }
                     let pointer = data.assumingMemoryBound(to: Float.self)
-                    pointer[frame] = sample
+                    let source = index == 1 ? self.scratchRight : self.scratchLeft
+                    for frame in 0..<frames {
+                        pointer[offset + frame] = source[frame]
+                    }
                 }
+                offset += frames
             }
             return noErr
         }
         let attached = AudioGuard.succeeds("attach the synth") {
             engine.attach(node)
-            engine.connect(node, to: engine.mainMixerNode, format: nil)
+            engine.connect(node, to: engine.mainMixerNode, format: Self.chainFormat)
         }
         guard attached else {
             isRunning = false
@@ -501,49 +586,36 @@ final class NoiseEngine {
         source = node
     }
 
-    private func nextSample() -> Float {
-        // ~50ms exponential ramp at 48k, click-free starts, stops,
-        // pauses, and color changes.
-        let target = renderControls.target
-        gain += (target - gain) * 0.0004
-        if target == 0, gain < 0.0005 { return 0 }
-
-        let white = Float.random(in: -1...1)
-        let value: Float
-        switch renderControls.color {
-        case .white:
-            // Softened: raw full-band white is piercing.
-            whiteLast += 0.45 * (white - whiteLast)
-            value = whiteLast * 0.8
-        case .pink:
-            // Refined Kellet pink, then the smoothing lowpass.
-            pinkB0 = 0.99886 * pinkB0 + white * 0.0555179
-            pinkB1 = 0.99332 * pinkB1 + white * 0.0750759
-            pinkB2 = 0.96900 * pinkB2 + white * 0.1538520
-            pinkB3 = 0.86650 * pinkB3 + white * 0.3104856
-            pinkB4 = 0.55000 * pinkB4 + white * 0.5329522
-            pinkB5 = -0.7616 * pinkB5 - white * 0.0168980
-            let pink = pinkB0 + pinkB1 + pinkB2 + pinkB3
-                + pinkB4 + pinkB5 + pinkB6 + white * 0.5362
-            pinkB6 = white * 0.115926
-            value = smoothed(pink, alpha: Self.pinkAlpha) * Self.pinkGain
-        case .brown:
-            brownLast = (brownLast + 0.02 * white) / 1.02
-            value = smoothedBrown(brownLast * 3.2)
-        case .rain, .fire, .cafe:
-            value = 0
+    /// Ask the current soundscape for a block, then ride the ramp and
+    /// the user's volume over it. The ramp stays per sample: it is what
+    /// makes starts, stops, pauses and color changes click-free, and a
+    /// per-block ramp would step audibly.
+    private func renderBlock(frames: Int) {
+        let controls = renderControls
+        guard let scape = scape(for: controls.color) else {
+            for frame in 0..<frames {
+                scratchLeft[frame] = 0
+                scratchRight[frame] = 0
+            }
+            return
         }
-        return max(-1, min(1, value)) * gain * renderControls.volume
-    }
-
-    /// The shared two-pole smoothing lowpass, cascaded one-poles.
-    private func smoothed(_ input: Float, alpha: Float) -> Float {
-        smoothA += alpha * (input - smoothA)
-        smoothB += alpha * (smoothA - smoothB)
-        return smoothB
-    }
-
-    private func smoothedBrown(_ input: Float) -> Float {
-        smoothed(input, alpha: Self.brownAlpha) * Self.brownGain
+        // Fully faded out and asked to stay there: hand back silence
+        // without waking the generator.
+        if controls.target == 0, gain < 0.0005 {
+            gain = 0
+            for frame in 0..<frames {
+                scratchLeft[frame] = 0
+                scratchRight[frame] = 0
+            }
+            return
+        }
+        scape.render(left: scratchLeft, right: scratchRight, frames: frames)
+        for frame in 0..<frames {
+            // ~50ms exponential ramp at 48k.
+            gain += (controls.target - gain) * 0.0004
+            let level = gain * controls.volume
+            scratchLeft[frame] = max(-1, min(1, scratchLeft[frame])) * level
+            scratchRight[frame] = max(-1, min(1, scratchRight[frame])) * level
+        }
     }
 }

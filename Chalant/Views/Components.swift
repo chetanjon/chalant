@@ -393,59 +393,6 @@ struct PressableStyle: ButtonStyle {
 /// around the icon, a tint lift and faint halo on hover, and a press
 /// sink. Every bare-glyph control in the app routes through this.
 
-/// A rounded quadrilateral: each corner cut back by its own radius
-/// and bridged with a quad curve. Used for the mark's tapered body,
-/// crisp at the top, rounder at the bottom.
-private func roundedQuad(_ pts: [CGPoint], radii: [CGFloat]) -> Path {
-    var path = Path()
-    func unit(_ from: CGPoint, _ to: CGPoint) -> CGPoint {
-        let dx = to.x - from.x, dy = to.y - from.y
-        let len = max(hypot(dx, dy), 0.0001)
-        return CGPoint(x: dx / len, y: dy / len)
-    }
-    for i in 0..<4 {
-        let cur = pts[i], prev = pts[(i + 3) % 4], next = pts[(i + 1) % 4]
-        let r = radii[i]
-        let up = unit(cur, prev), un = unit(cur, next)
-        let p1 = CGPoint(x: cur.x + up.x * r, y: cur.y + up.y * r)
-        let p2 = CGPoint(x: cur.x + un.x * r, y: cur.y + un.y * r)
-        if i == 0 { path.move(to: p1) } else { path.addLine(to: p1) }
-        path.addQuadCurve(to: p2, control: cur)
-    }
-    path.closeSubpath()
-    return path
-}
-
-/// The house mark: the little watcher (brand v0.3), reproduced from
-/// the brand SVG in its own 512 space and mapped into `rect`. A wide
-/// bar above a body that flares from a narrow top to a wide base
-/// (sharp top corners, rounded bottom), with one low eye. "It watches
-/// so you don't have to." Even-odd fill keeps the eye open. Identical
-/// geometry to the app icon and the menu bar glyph.
-struct ChalantMarkShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        // Emblem bbox in 512 space is 264 x 272, centered at (256,256).
-        let d = min(rect.width, rect.height)
-        let s = 0.94 * d / 272
-        func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-            CGPoint(x: rect.midX + (x - 256) * s, y: rect.midY + (y - 256) * s)
-        }
-        var p = Path()
-        let bar = P(148, 120)
-        p.addRoundedRect(
-            in: CGRect(x: bar.x, y: bar.y, width: 216 * s, height: 68 * s),
-            cornerSize: CGSize(width: 34 * s, height: 34 * s)
-        )
-        p.addPath(roundedQuad(
-            [P(172, 202), P(340, 202), P(387.95, 392), P(124.05, 392)],
-            radii: [0, 0, 20 * s, 20 * s]
-        ))
-        let eye = P(256, 330), er = 28 * s
-        p.addEllipse(in: CGRect(x: eye.x - er, y: eye.y - er, width: er * 2, height: er * 2))
-        return p
-    }
-}
-
 /// Samples an SVG circular arc (rx == ry) into `path` as a polyline,
 /// via the standard endpoint-to-center parameterization. Kept as an
 /// explicit sample so arc direction can never be held backwards the
@@ -537,8 +484,7 @@ struct GlyphImage: View {
                 .font(Theme.Fonts.icon(scale, weight: weight))
                 .hidden()
                 .overlay(
-                    ChalantMarkShape()
-                        .fill(style: FillStyle(eoFill: true))
+                    ChalantMarkView()
                         .frame(width: scale.rawValue + 2, height: scale.rawValue + 2)
                 )
         } else {

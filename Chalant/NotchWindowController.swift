@@ -357,8 +357,43 @@ final class NotchWindowController {
 
         // Displays come and go; every island follows. Without this a
         // panel stayed on a screen layout that no longer existed.
+        // The immediate reposition is not enough on a hot plug: the
+        // layout settles in stages, so re-checks follow (below).
         observers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.rebuildIslands()
+                self?.scheduleSettleChecks()
+            }
+        })
+        // The window server moves windows around during a display
+        // shuffle, sometimes after the last screen-parameters
+        // notification has already fired, which left an island sitting
+        // mid-screen on a freshly plugged monitor until some unrelated
+        // event nudged it home. A panel never moves legitimately except
+        // through apply(_:to:), so any move that leaves a frame wrong
+        // gets snapped straight back; when every frame is already
+        // right, rebuildIslands() is a no-op. Observed on nil rather
+        // than one panel: there is no single panel to watch any more,
+        // and the handler filters to ours (main, ported to per-display).
+        observers.append(NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            Task { @MainActor in
+                guard let self, let moved = note.object as? NotchPanel,
+                      self.panels.values.contains(where: { $0 === moved })
+                else { return }
+                self.rebuildIslands()
+            }
+        })
+        // The "Show edge when idle" switch governs what draws at rest.
+        observers.append(NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
@@ -382,6 +417,7 @@ final class NotchWindowController {
                         guard let self else { return }
                         self.rebuildIslands()
                         self.panels.values.forEach { $0.orderFrontRegardless() }
+                        self.scheduleSettleChecks()
                     }
                 }
             )
@@ -414,6 +450,29 @@ final class NotchWindowController {
         }
         return frames
     }
+
+    /// A hot plug settles in stages: a brief mirror, a mode switch,
+    /// then the saved arrangement lands, and the window server can
+    /// still be moving windows after the last notification. One
+    /// rebuild at notification time reads geometry that is still in
+    /// flux, so a couple of delayed re-checks follow every display
+    /// change. `rebuildIslands()` diffs before it touches anything, so
+    /// these are free once nothing is moving (from main, ported off
+    /// the single-panel reposition it was written against).
+    private var settleChecks: [DispatchWorkItem] = []
+
+    private func scheduleSettleChecks() {
+        settleChecks.forEach { $0.cancel() }
+        settleChecks.removeAll()
+        for delay: TimeInterval in [1.0, 2.5] {
+            let work = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated { self?.rebuildIslands() }
+            }
+            settleChecks.append(work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
+    }
+
 
     /// The three-way diff between the panels that exist and the panels
     /// that should: which displays are new, which are gone, and which
@@ -974,6 +1033,7 @@ final class NotchWindowController {
         hoverTimer?.invalidate()
         showRetry?.cancel()
         rebuildRetry?.cancel()
+        settleChecks.forEach { $0.cancel() }
         if let napActivity {
             ProcessInfo.processInfo.endActivity(napActivity)
         }

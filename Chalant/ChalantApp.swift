@@ -134,49 +134,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Tiny menu bar item so the agent app can be quit
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        // The house mark, drawn by hand: the little watcher. A floating
-        // bar over a tapered body with one eye, its ember punched
-        // through. Even-odd fill keeps the eye open. Matches the app
-        // icon exactly; no capsule, so it can't read as a toggle.
-        let icon = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            // The brand-SVG emblem (512 space) mapped into 18pt, y
-            // flipped (AppKit is y-up): the bar sits high, the flared
-            // body hangs below, eye low. Same geometry as the app icon.
-            let s = 15.6 / 272.0
-            func P(_ x: Double, _ y: Double) -> NSPoint {
-                NSPoint(x: 9.0 + (x - 256) * s, y: 9.0 + (256 - y) * s)
+        // The house mark: the island with an echo around it, in the same
+        // bold cut the in-app glyph uses and off the same constants, so
+        // the two can never drift. Two fills rather than one, because the
+        // echo is half opaque and the island is solid. A template image
+        // keeps its alpha, so the half stays half.
+        let icon = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { bounds in
+            let rect = CGRect(x: 0, y: 0, width: 18, height: 18)
+            // AppKit counts y upward and the artwork counts it downward,
+            // so every rect is flipped about the frame's middle.
+            func placed(_ item: CGRect) -> NSRect {
+                let fitted = ChalantMark.fitted(item, in: rect)
+                return NSRect(
+                    x: fitted.minX, y: rect.height - fitted.maxY,
+                    width: fitted.width, height: fitted.height
+                )
             }
-            let path = NSBezierPath()
-            path.windingRule = .evenOdd
-            let bar0 = P(148, 188), bar1 = P(364, 120)  // flipped: bottom-left, top-right
-            path.appendRoundedRect(
-                NSRect(x: bar0.x, y: bar0.y, width: bar1.x - bar0.x, height: bar1.y - bar0.y),
-                xRadius: 34 * s, yRadius: 34 * s
-            )
-            let corners = [P(172, 202), P(340, 202), P(387.95, 392), P(124.05, 392)]
-            let radii = [0.0, 0.0, 20 * s, 20 * s]
-            for i in 0..<4 {
-                let cur = corners[i], prev = corners[(i + 3) % 4], next = corners[(i + 1) % 4]
-                let r = radii[i]
-                if r <= 0 {
-                    if i == 0 { path.move(to: cur) } else { path.line(to: cur) }
-                    continue
-                }
-                func unit(_ f: NSPoint, _ t: NSPoint) -> (Double, Double) {
-                    let dx = t.x - f.x, dy = t.y - f.y, L = max((dx * dx + dy * dy).squareRoot(), 0.0001)
-                    return (dx / L, dy / L)
-                }
-                let up = unit(cur, prev), un = unit(cur, next)
-                let p1 = NSPoint(x: cur.x + up.0 * r, y: cur.y + up.1 * r)
-                let p2 = NSPoint(x: cur.x + un.0 * r, y: cur.y + un.1 * r)
-                path.line(to: p1)
-                path.curve(to: p2, controlPoint1: cur, controlPoint2: cur)
-            }
-            path.close()
-            let eye = P(256, 330), er = 28 * s
-            path.appendOval(in: NSRect(x: eye.x - er, y: eye.y - er, width: er * 2, height: er * 2))
+            _ = bounds
+
+            let ring = placed(ChalantMark.ring)
+            let echo = NSBezierPath(roundedRect: ring, xRadius: ring.height / 2,
+                                    yRadius: ring.height / 2)
+            echo.lineWidth = ChalantMark.scaled(ChalantMark.ringStroke, in: rect)
+            NSColor.black.withAlphaComponent(ChalantMark.ringOpacity).setStroke()
+            echo.stroke()
+
+            let pillRect = placed(ChalantMark.pill)
             NSColor.black.setFill()
-            path.fill()
+            NSBezierPath(roundedRect: pillRect, xRadius: pillRect.height / 2,
+                         yRadius: pillRect.height / 2).fill()
             return true
         }
         icon.isTemplate = true
