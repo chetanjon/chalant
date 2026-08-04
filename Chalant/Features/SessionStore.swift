@@ -58,6 +58,35 @@ final class SessionStore: ObservableObject {
     enum Kind: String, Codable, Equatable {
         case interactive
         case background
+
+        /// What the registry file on disk actually says, which is not
+        /// what `claude agents --json` prints.
+        ///
+        /// A background session's file says `"kind":"bg"`
+        /// (~/.claude/sessions/65463.json, 2026-08-03, for a session that
+        /// was running while this app reported it dead). The raw
+        /// initialiser matched neither, `SessionRegistry.parse` treated
+        /// that as grounds to discard the entire entry, and the pid went
+        /// with it — so every background agent on the machine was
+        /// disowned and filed in the record as gone.
+        ///
+        /// Both spellings are taken so this cannot break again from
+        /// either side, and an unrecognised one answers nil for the
+        /// caller to shrug at rather than for the parser to die on.
+        init?(registryValue raw: String) {
+            switch raw {
+            case "interactive": self = .interactive
+            case "bg", "background": self = .background
+            default: return nil
+            }
+        }
+    }
+
+    /// An application a session is running inside, and what to call it on
+    /// screen. The bundle id decides; the name is only ever shown.
+    struct TerminalApp: Equatable {
+        var bundleID: String
+        var name: String
     }
 
     /// A message the user left for a session, waiting for that session
@@ -171,9 +200,37 @@ final class SessionStore: ObservableObject {
         /// Nil means nobody has looked, which is the ordinary state of
         /// a row the scraper found and the registry has never seen.
         var hasTerminal: Bool?
+        /// The application this session's process lives inside, when one
+        /// could be named.
+        ///
+        /// A second question from `hasTerminal`, and the founder's own
+        /// session is why both are needed. It runs in VS Code's built-in
+        /// terminal: the kernel says it holds a tty, so `hasTerminal` is
+        /// true and the composer opened, but typing works by asking
+        /// Terminal or iTerm which of their tabs owns that tty and VS Code
+        /// answers no such question. Every message became a silent note
+        /// for later.
+        ///
+        /// Read in one direction only. A named owner that cannot be
+        /// addressed is knowledge: nothing typed here would arrive. Nil is
+        /// not: a session started detached has no application ancestor and
+        /// Terminal may still own its tty, so nothing is taken away.
+        var terminalApp: TerminalApp?
         /// A message queued here, waiting to be collected. Nil means
         /// nothing is waiting.
         var outbox: Outbox?
+        /// When this session's transcript was last written, as the
+        /// filesystem reports it. Written only by `upsert`, which is the
+        /// only writer that has read a file.
+        ///
+        /// It exists so a claim can be corroborated. The registry's
+        /// `status` is another program's word for what a process is
+        /// doing, and that word can go stale without any sign: the
+        /// founder's own session said `busy` for twenty-one hours because
+        /// Claude Code stops rewriting the file once a session parks a
+        /// background job. A transcript that has not moved in a quarter of
+        /// an hour is the evidence that says otherwise.
+        var transcriptTouchedAt: Date?
         /// Where this session's transcript lives on disk.
         ///
         /// Discovery has always known it (`jsonlFiles(in:)` returns one
@@ -197,8 +254,19 @@ final class SessionStore: ObservableObject {
         /// thing that takes it away is the kernel saying, positively,
         /// that this process has no terminal — because a message to
         /// such a session would be collected and answered into a void.
+        ///
+        /// `isAddressable` is the same shape of rule about the same kind
+        /// of evidence: only a *named* owner that cannot be typed into
+        /// closes the composer.
         var canReceiveMessages: Bool {
-            agent == .claude && state != .stale && hasTerminal != false
+            agent == .claude && state != .stale && hasTerminal != false && isAddressable
+        }
+
+        /// Whether anything is positively known to stand between a typed
+        /// message and this session. Nil `terminalApp` is not, see there.
+        var isAddressable: Bool {
+            guard let terminalApp else { return true }
+            return SessionRemote.canAddress(bundleID: terminalApp.bundleID)
         }
     }
 
@@ -358,6 +426,33 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    /// Whether `~/.claude/sessions` is there to be read, latched by
+    /// `SessionRegistry.start()`.
+    ///
+    /// The one switch between "a pid makes a session real" and the older
+    /// "a warm file makes a session real". While this is true the registry
+    /// is the list and discovery only describes what is on it; while it is
+    /// false nothing has changed since before the registry existed.
+    ///
+    /// That fallback is the standing law for this overlay, not politeness:
+    /// the directory is undocumented, and a Claude Code release that moves
+    /// it has to cost a busy/idle badge rather than empty the rail.
+    private(set) var registryIsAuthoritative = false
+
+    func noteRegistryIsAuthoritative() { registryIsAuthoritative = true }
+
+    /// How long a transcript may sit still before the registry's "busy"
+    /// stops being taken at face value.
+    ///
+    /// Generous on purpose. A single agent turn commonly runs several
+    /// minutes without the transcript being touched at all
+    /// (`SessionDiscovery.staleWindow` is five, for the same reason), and
+    /// demoting somebody mid-thought would be a worse bug than the one
+    /// this fixes. Twenty-one hours is what this was actually built
+    /// against; fifteen minutes is comfortably past any real turn and
+    /// nowhere near that.
+    static let workCorroborationWindow: TimeInterval = 15 * 60
+
     private let maxSessions: Int
     /// Terminal rows linger just long enough to be seen before they
     /// clear themselves — same idea, same window ActivityStore uses
@@ -450,6 +545,21 @@ final class SessionStore: ObservableObject {
         lastMessage: String? = nil, transcriptPath: String? = nil
     ) {
         let alreadyKnown = sessions.first { $0.id == id }
+        // A warm file is not a session.
+        //
+        // While the registry is answering, it holds the list and this
+        // only ever describes what is already on it. Discovery reads the
+        // freshest transcripts on the machine and has no idea whose they
+        // are: on the founder's Mac, eight of the twelve freshest belonged
+        // to claude-mem's observer bot (2026-08-03), and each one became a
+        // row, then a "lost" entry in the record seconds later when no
+        // process turned up to claim it. Both problems are the same
+        // problem, and this line is where it stops.
+        //
+        // Claude Code only, the same carve-out `reconcileLive` makes and
+        // for the same reason: Cursor keeps no registry, so this registry
+        // has no standing to say a Cursor chat does not exist.
+        guard alreadyKnown != nil || agent != .claude || !registryIsAuthoritative else { return }
         var session = alreadyKnown
             ?? Session(
                 id: id, title: title, cwd: cwd, branch: branch,
@@ -489,6 +599,30 @@ final class SessionStore: ObservableObject {
         // nothing looked broken.
         let questionOutstanding = session.ask.map { !$0.isFullyAnswered } ?? false
         var resolved = questionOutstanding ? .needsInput : state
+        // A pid outranks an mtime, which is the half of that rule this
+        // file was missing.
+        //
+        // Discovery infers "gone" from a transcript that stopped moving,
+        // and a session sitting at its prompt stops moving all the time.
+        // The registry holds the process itself. Without this the two
+        // writers simply took turns: the sweep said working every five
+        // seconds, the rescan said stale every twenty, and a stale row is
+        // filtered out of `groups()` — so the founder's own session
+        // vanished from the rail and came back, over and over, and
+        // `stateSince` reset on each flip so its age read as nonsense.
+        //
+        // Only while the registry still vouches for it. Once `reconcile`
+        // has disowned the id its pid is cleared and discovery is trusted
+        // again, which is the rule immediately below.
+        //
+        // What it keeps is the state the registry gave it, held against
+        // this very read: a transcript that has gone quiet for a quarter
+        // of an hour is exactly the evidence that a "busy" is out of date,
+        // and this is the moment that evidence arrives.
+        if !questionOutstanding, state == .stale, session.pid != nil,
+           !disownedByRegistry.contains(id) {
+            resolved = Self.corroborated(session.state, transcriptTouchedAt: updatedAt)
+        }
         // And a registry that went looking and did not find this
         // session outranks both. Discovery reads an mtime; the registry
         // holds a pid. A warm transcript is not a running process, and
@@ -503,6 +637,10 @@ final class SessionStore: ObservableObject {
         }
         session.state = resolved
         session.updatedAt = updatedAt
+        // The one writer that has actually looked at a file, so the one
+        // that may say when it last moved. `markLive` reads this to decide
+        // whether a "busy" is still worth believing.
+        session.transcriptTouchedAt = updatedAt
         // The record's second entrance. `remember` decides whether this
         // qualifies; all this has to do is be honest about what state
         // was being left. A session that arrives already `.done` because
@@ -516,9 +654,14 @@ final class SessionStore: ObservableObject {
         sessions.removeAll { $0.id == id }
         sessions.append(session)
         sort()
-        if previousState != state {
+        // What the row actually became, not what the caller proposed.
+        // Those are two different things now that a vouched-for session
+        // can refuse a transcript's "gone", and a log that reports the
+        // proposal would show a flip on every single rescan of a quiet
+        // file while the row sat perfectly still.
+        if previousState != resolved {
             Self.log.debug(
-                "\(id, privacy: .public): \(previousState.rawValue, privacy: .public) -> \(state.rawValue, privacy: .public)"
+                "\(id, privacy: .public): \(previousState.rawValue, privacy: .public) -> \(resolved.rawValue, privacy: .public)"
             )
         }
         if sessions.count > maxSessions {
@@ -922,9 +1065,20 @@ final class SessionStore: ObservableObject {
     /// `hasTerminal` defaults to true so a caller that has not looked
     /// cannot accidentally demote a row: the registry, which is the one
     /// caller that does look, always passes what it found.
+    /// `status` is optional because "this process is here" and "this is
+    /// what it is doing" are two different claims, and the registry can
+    /// make the first without the second. A file whose `status` this app
+    /// does not recognise (background's "blocked", or whatever a later
+    /// Claude Code writes) still proves the session exists, and that
+    /// proof is now the only way onto the list at all — so it arrives
+    /// here as nil rather than as a reason not to call.
+    ///
+    /// Nil leaves an existing row's state exactly as the transcript left
+    /// it, and starts a new row at `.idle`: alive, with nothing known to
+    /// be happening in it.
     func markLive(
-        id: String, name: String, cwd: String, pid: pid_t, kind: Kind,
-        hasTerminal: Bool = true, status: State
+        id: String, name: String, cwd: String, pid: pid_t, kind: Kind?,
+        hasTerminal: Bool = true, status: State?, startedAt: Date? = nil
     ) {
         // Vouched for, so whatever the registry concluded last time it
         // could not find this session no longer holds. Including the row
@@ -932,17 +1086,31 @@ final class SessionStore: ObservableObject {
         // registry saying the same process is there after all, and a
         // session cannot be both running and finished.
         disownedByRegistry.remove(id)
-        if status.isLive { revive(id) }
+        if status?.isLive ?? true { revive(id) }
         if let index = sessions.firstIndex(where: { $0.id == id }) {
             sessions[index].pid = pid
-            sessions[index].kind = kind
+            // Same rule every other field here follows: only ever
+            // replaced by something real. A registry file wearing a kind
+            // this app has not learned yet must not blank one it already
+            // read correctly.
+            if let kind { sessions[index].kind = kind }
             sessions[index].hasTerminal = hasTerminal
+            // A fact about the session, replacing a fact about when this
+            // app happened to open. `upsert`'s "first seen here" is an
+            // honest substitute for a transcript, which carries no start
+            // time; the registry does carry one, and at launch the
+            // substitute is the same instant for every row on screen, so
+            // it could not tell two identically-named sessions apart. It
+            // is also what `sort()` orders by within a rank.
+            if let startedAt { sessions[index].startedAt = startedAt }
             let questionOutstanding = sessions[index].ask.map { !$0.isFullyAnswered } ?? false
-            if !questionOutstanding {
+            if let status, !questionOutstanding {
                 let previous = sessions[index].state
-                sessions[index].state = status
+                let believed = Self.corroborated(
+                    status, transcriptTouchedAt: sessions[index].transcriptTouchedAt)
+                sessions[index].state = believed
                 noteTransition(
-                    from: previous, to: status,
+                    from: previous, to: believed,
                     id: sessions[index].id, title: sessions[index].title
                 )
             }
@@ -950,9 +1118,9 @@ final class SessionStore: ObservableObject {
         } else {
             var fresh = Session(
                 id: id, title: name, cwd: cwd, branch: nil, lastPrompt: nil,
-                activity: nil, agent: .claude, state: status, ask: nil,
+                activity: nil, agent: .claude, state: status ?? .idle, ask: nil,
                 pid: pid, kind: kind, hasTerminal: hasTerminal,
-                startedAt: Date(), updatedAt: Date()
+                startedAt: startedAt ?? Date(), updatedAt: Date()
             )
             // Same rediscovery rule `upsert` follows: a row born here is
             // the registry vouching for a real, running process at this
@@ -961,6 +1129,37 @@ final class SessionStore: ObservableObject {
             sessions.append(fresh)
         }
         sort()
+    }
+
+    /// The registry's status, held against what the transcript shows.
+    ///
+    /// Alive is knowledge: this app holds the pid and asked the kernel.
+    /// Working is a claim, made by another program in a file it does not
+    /// always remember to rewrite. The founder's own session claimed to be
+    /// working for twenty-one hours, from the moment it parked a
+    /// background job until the next morning, and the room said so the
+    /// whole time.
+    ///
+    /// So a `busy` no moving transcript agrees with settles at `.idle`,
+    /// which is the honest reading of what is actually known: the process
+    /// is there, and nothing observable is happening in it. Never
+    /// `.stale`, which would claim it had gone.
+    ///
+    /// Only ever demotes. Nothing here can promote a session to working
+    /// that the registry did not already say was working, and a row with
+    /// no transcript read yet is believed: having nothing to corroborate
+    /// against is not the same as being contradicted.
+    /// Takes the touch time rather than the row so both writers can ask
+    /// the same question at the moment each of them learns the answer.
+    /// `upsert` has a fresher `mtime` in hand than the row is carrying,
+    /// and waiting for the next five-second sweep to apply it would leave
+    /// the row claiming to work on evidence that had just been
+    /// contradicted.
+    private static func corroborated(_ status: State, transcriptTouchedAt touched: Date?) -> State {
+        guard status == .working, let touched,
+              -touched.timeIntervalSinceNow > workCorroborationWindow
+        else { return status }
+        return .idle
     }
 
     /// Ids the registry reported alive last time and does not report
@@ -1129,23 +1328,15 @@ final class SessionStore: ObservableObject {
         sessions[index].updatedAt = Date()
     }
 
-    /// What the registry can see about a process without having any
-    /// opinion on what it is doing.
+    /// Which application this session turned out to be running inside.
     ///
-    /// Separate from `markLive` because that one is gated on a status
-    /// this app recognises, and whether a session has a terminal is not
-    /// a fact about its status. claude-mem's indexer writes a registry
-    /// file with no `status` key at all, so it took `markLive`'s else
-    /// branch every sweep and kept a composer it could never answer,
-    /// while sitting in the registry the whole time.
-    ///
-    /// Never creates a row. `markLive` is the only thing allowed to do
-    /// that, and only for a session it can describe.
-    func noteProcess(id: String, pid: pid_t, hasTerminal: Bool) {
+    /// Resolved once per session rather than per sweep: it means walking
+    /// the whole process table, and a session does not change windows.
+    /// The registry is the caller because it is the only thing that holds
+    /// a pid.
+    func noteOwningApp(id: String, bundleID: String, name: String) {
         guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
-        sessions[index].pid = pid
-        sessions[index].hasTerminal = hasTerminal
-        disownedByRegistry.remove(id)
+        sessions[index].terminalApp = TerminalApp(bundleID: bundleID, name: name)
     }
 
     /// Every Claude Code session this store thinks is running, held
@@ -1254,6 +1445,17 @@ final class SessionStore: ObservableObject {
     /// because the value stops changing.
     private func noteTransition(from previous: State, to next: State, id: String, title: String) {
         guard previous == .working, next == .idle || next == .stale else { return }
+        // A turn that ended a quarter of an hour ago is not news, and
+        // announcing it is worse than saying nothing: the point of this
+        // notification is "your agent just stopped, go and look".
+        //
+        // The case that made this necessary is launch. A session wearing a
+        // day-old `busy` is believed for exactly as long as it takes
+        // discovery to read its transcript, and the correction that
+        // follows is a state change like any other. Without this, opening
+        // the app announced a turn that had ended the previous morning.
+        if let touched = sessions.first(where: { $0.id == id })?.transcriptTouchedAt,
+           -touched.timeIntervalSinceNow > Self.workCorroborationWindow { return }
         let words = sessions.first { $0.id == id }?.lastMessage ?? "came to rest in \(next.rawValue)"
         guard announcedRest[id] != words else { return }
         announcedRest[id] = words

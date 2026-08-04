@@ -731,6 +731,12 @@ final class NotchViewModel: ObservableObject {
         // take a second to load all the sessions"). Its own first scan
         // is deferred so it decorates rows the registry already showed,
         // rather than making everyone wait for it to go first.
+        // And discovery now only reads the transcripts of sessions the
+        // registry vouches for, so it has to be told the moment that list
+        // grows rather than waiting out its own twenty-second clock.
+        sessionRegistry.onLiveSetChanged = { [weak self] in
+            self?.sessionDiscovery.refresh()
+        }
         sessionRegistry.start()
         sessionDiscovery.start()
         cursorDiscovery.start()

@@ -480,13 +480,25 @@ final class SessionStoreTests: XCTestCase {
 
     // MARK: Registry liveness (T1-T3, T8)
 
+    /// `kind` and `entrypoint` are both optional here, and both for the
+    /// same reason: they are fields of another program's undocumented
+    /// file, and a test that can only build the shape this app happens to
+    /// expect today cannot catch the day that shape changes. Which is
+    /// exactly what happened: every fixture in this file said
+    /// `kind: "interactive"`, so nothing noticed that a real background
+    /// session says `"bg"` and was being thrown away whole.
     private func registryEntryJSON(
         sessionId: String = "s1", pid: Int = 4242, status: String = "idle",
-        kind: String = "interactive", cwd: String = "/a", name: String = "chalant-f1"
+        kind: String? = "interactive", cwd: String = "/a", name: String = "chalant-f1",
+        entrypoint: String? = "cli"
     ) -> Data {
-        Data("""
+        let optional = [kind.map { "\"kind\":\"\($0)\"" }, entrypoint.map { "\"entrypoint\":\"\($0)\"" }]
+            .compactMap { $0 }
+            .map { "," + $0 }
+            .joined()
+        return Data("""
         {"sessionId":"\(sessionId)","pid":\(pid),"cwd":"\(cwd)","name":"\(name)",
-         "kind":"\(kind)","status":"\(status)"}
+         "status":"\(status)"\(optional)}
         """.utf8)
     }
 
@@ -556,6 +568,244 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(gone, ["s1"])
     }
 
+    // MARK: What the registry actually writes
+
+    /// The bug that made this app report a running agent as dead.
+    ///
+    /// `SessionStore.Kind` was written with the two words
+    /// `claude agents --json` reports, and the file on disk uses neither
+    /// for a background job: it says `"kind":"bg"`
+    /// (~/.claude/sessions/65463.json, observed 2026-08-03, for a session
+    /// that was running at the time). The old parser answered nil to the
+    /// whole entry, so the pid went with it, `reconcileLive` concluded
+    /// the registry had never heard of the session, and it was filed in
+    /// the record as "this session's process went away" — permanently,
+    /// because `disownedByRegistry` is sticky.
+    func testABackgroundSessionIsReadRatherThanThrownAway() {
+        let entry = SessionRegistry.parse(registryEntryJSON(kind: "bg"), filename: "4242.json")
+        XCTAssertNotNil(entry, "a background session is still a session")
+        XCTAssertEqual(entry?.kind, .background)
+        XCTAssertEqual(entry?.pid, 4242)
+    }
+
+    /// Both spellings, so this cannot break again in either direction.
+    func testTheOlderSpellingOfBackgroundIsStillRead() {
+        let entry = SessionRegistry.parse(registryEntryJSON(kind: "background"), filename: "4242.json")
+        XCTAssertEqual(entry?.kind, .background)
+    }
+
+    /// The rule that generalises the fix: **kind is decoration, the pid
+    /// is the payload.** This file's own doc promises that a change on
+    /// Claude Code's side costs a badge and nothing more; discarding the
+    /// entry cost the whole session. A word this app has never seen now
+    /// costs exactly that word.
+    func testAKindThisAppHasNeverSeenCostsTheKindAndNothingElse() {
+        let entry = SessionRegistry.parse(
+            registryEntryJSON(kind: "some-kind-from-2027"), filename: "4242.json")
+        XCTAssertNotNil(entry, "an unknown kind is not a reason to lose a live pid")
+        XCTAssertNil(entry?.kind)
+        XCTAssertEqual(entry?.pid, 4242)
+        XCTAssertEqual(entry?.sessionId, "s1")
+    }
+
+    func testAnEntryWithNoKindAtAllIsStillAnEntry() {
+        let entry = SessionRegistry.parse(registryEntryJSON(kind: nil), filename: "4242.json")
+        XCTAssertNotNil(entry)
+        XCTAssertNil(entry?.kind)
+    }
+
+    /// Everything the parser genuinely cannot do without is still fatal.
+    /// Loosening `kind` must not loosen these.
+    func testTheFieldsThatActuallyIdentifyASessionAreStillRequired() {
+        XCTAssertNil(
+            SessionRegistry.parse(Data(#"{"pid":4242,"cwd":"/a"}"#.utf8), filename: "4242.json"),
+            "no sessionId, no session")
+        XCTAssertNil(
+            SessionRegistry.parse(Data(#"{"sessionId":"s1","cwd":"/a"}"#.utf8), filename: "4242.json"),
+            "no pid, nothing to check for life")
+        XCTAssertNil(
+            SessionRegistry.parse(registryEntryJSON(cwd: "not/absolute"), filename: "4242.json"),
+            "a cwd that is not a path is not a cwd")
+    }
+
+    // MARK: Whose session is it
+
+    /// claude-mem's observer registers itself exactly like a person's
+    /// shell does, and it is not a person's shell. `kind` cannot tell
+    /// them apart (both say `interactive`) and neither can the absence of
+    /// a terminal, because the founder's own background jobs have no
+    /// terminal either. `entrypoint` can: Claude Code writes `sdk-cli`
+    /// for a session the SDK launched
+    /// (~/.claude/sessions/27558.json, the claude-mem observer, observed
+    /// 2026-08-03 beside two `cli` sessions of the founder's own).
+    func testAnSDKLaunchedSessionIsNobodysAgent() {
+        XCTAssertTrue(SessionRegistry.isHeadlessBot(entrypoint: "sdk-cli"))
+    }
+
+    /// A deny-list of the known-headless, never an allow-list of the
+    /// known-human: a new entrypoint that real people use must not
+    /// silently vanish from the rail.
+    func testEverythingElseIsSomebodysAgentUntilProvenOtherwise() {
+        XCTAssertFalse(SessionRegistry.isHeadlessBot(entrypoint: "cli"))
+        XCTAssertFalse(SessionRegistry.isHeadlessBot(entrypoint: nil))
+        XCTAssertFalse(SessionRegistry.isHeadlessBot(entrypoint: "some-entrypoint-from-2027"))
+    }
+
+    /// The founder's own background jobs are `cli` with `kind: "bg"`, and
+    /// hiding bots must never hide those. They belong on the list; they
+    /// simply have no terminal to be typed into.
+    func testABackgroundJobIsTheFoundersEvenThoughItHasNoTerminal() {
+        let entry = SessionRegistry.parse(
+            registryEntryJSON(kind: "bg", entrypoint: "cli"), filename: "4242.json")
+        XCTAssertEqual(entry?.kind, .background)
+        XCTAssertFalse(SessionRegistry.isHeadlessBot(entrypoint: entry?.entrypoint))
+    }
+
+    // MARK: When a session actually started
+
+    /// Two agents in one repo, and nothing on either row to tell them
+    /// apart.
+    ///
+    /// Claude Code names a session after its work, so two sessions doing
+    /// the same job in the same folder get the same name: the founder's
+    /// own machine had two live rows both reading "Push changes to PR and
+    /// pull", in the same repo, on the same branch (2026-08-03). The rail
+    /// already knows to fall back to the start time when titles collide,
+    /// and the start time it had was the moment *this app* first noticed
+    /// the session, which at launch is the same instant for every row on
+    /// screen. So the tiebreaker read "from 18:13" on both.
+    ///
+    /// The registry has the real answer and always did: `startedAt`, in
+    /// epoch milliseconds, per session.
+    func testTheRegistryKnowsWhenASessionActuallyStarted() {
+        let json = #"""
+        {"sessionId":"s1","pid":4242,"cwd":"/a","name":"n","kind":"interactive",
+         "entrypoint":"cli","status":"idle","startedAt":1785666427179}
+        """#
+        let entry = SessionRegistry.parse(Data(json.utf8), filename: "4242.json")
+        XCTAssertEqual(entry?.startedAt, Date(timeIntervalSince1970: 1_785_666_427.179))
+    }
+
+    func testAnAbsentOrNonsenseStartTimeIsSimplyNotOne() {
+        XCTAssertNil(SessionRegistry.parse(registryEntryJSON(), filename: "4242.json")?.startedAt)
+        let zero = #"{"sessionId":"s","pid":1,"cwd":"/a","kind":"interactive","startedAt":0}"#
+        XCTAssertNil(SessionRegistry.parse(Data(zero.utf8), filename: "1.json")?.startedAt)
+    }
+
+    /// And the row takes it, over the "first seen here" stand-in, because
+    /// one of the two is a fact about the session and the other is a fact
+    /// about when the app happened to open.
+    func testTwoSessionsInOneRepoAreToldApartByWhenTheyReallyStarted() {
+        let store = SessionStore()
+        let morning = Date(timeIntervalSince1970: 1_785_666_427)
+        let evening = Date(timeIntervalSince1970: 1_785_727_118)
+        store.markLive(id: "older", name: "Push changes to PR and pull", cwd: "/moai", pid: 1,
+                       kind: .interactive, status: .idle, startedAt: morning)
+        store.markLive(id: "newer", name: "Push changes to PR and pull", cwd: "/moai", pid: 2,
+                       kind: .interactive, status: .idle, startedAt: evening)
+
+        XCTAssertEqual(store.sessions.first { $0.id == "older" }?.startedAt, morning)
+        XCTAssertEqual(store.sessions.first { $0.id == "newer" }?.startedAt, evening)
+        XCTAssertEqual(store.sessions.map(\.id), ["newer", "older"],
+                       "and the sort finally means something: newest first")
+    }
+
+    /// A session the registry has no start time for keeps the stand-in
+    /// rather than losing the one it had.
+    func testASessionWithNoRealStartTimeKeepsTheStandIn() {
+        let store = SessionStore()
+        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .idle)
+        let standIn = try? XCTUnwrap(store.sessions.first?.startedAt)
+        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .working)
+        XCTAssertEqual(store.sessions.first?.startedAt, standIn)
+    }
+
+    // MARK: The whole directory, end to end
+
+    /// The test that would have caught all of this.
+    ///
+    /// Every registry test above this one checks `parse` in isolation and
+    /// every store test drives the store by hand, so both halves were
+    /// green while the thing they add up to was broken on the founder's
+    /// own machine. This drives the real `SessionRegistry` over a real
+    /// directory holding the exact three files that were on that machine
+    /// (2026-08-03) and asks what a person would actually see.
+    ///
+    /// The three: their own session in a VS Code terminal wearing a
+    /// twenty-one hour old `busy`; claude-mem's observer, registered as
+    /// `sdk-cli`; and a `claude bg` job whose kind is spelled `bg`.
+    private func writeRegistry(_ files: [(pid: Int, json: String)]) throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("chalant.tests.registry.\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        for file in files {
+            try Data(file.json.utf8).write(to: root.appendingPathComponent("\(file.pid).json"))
+        }
+        return root
+    }
+
+    func testTheFoundersOwnMachineReadCorrectly() throws {
+        let root = try writeRegistry([
+            (14727, #"{"sessionId":"mine","pid":14727,"cwd":"/Users/x/moai","name":"roll-out-echo-mark","kind":"interactive","entrypoint":"cli","status":"busy"}"#),
+            (33079, #"{"sessionId":"observer","pid":33079,"cwd":"/Users/x/.claude-mem/observer-sessions","name":"observer-sessions-ad","kind":"interactive","entrypoint":"sdk-cli"}"#),
+            (65463, #"{"sessionId":"bgjob","pid":65463,"cwd":"/Users/x/moai","name":"Push changes to PR and pull","kind":"bg","entrypoint":"cli","status":"busy"}"#),
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = SessionStore()
+        let registry = SessionRegistry(
+            store: store, root: root,
+            isAlive: { _ in true },
+            // Only the VS Code session holds one. A background job does
+            // not, and neither does the observer.
+            hasTerminal: { $0 == 14727 }
+        )
+        registry.start()
+        defer { registry.stop() }
+
+        XCTAssertEqual(Set(store.sessions.map(\.id)), ["mine", "bgjob"],
+                       "the observer is another program's worker and does not belong on the list")
+        XCTAssertEqual(store.sessions.first { $0.id == "bgjob" }?.kind, .background,
+                       "\"bg\" is a kind, not a parse failure")
+        XCTAssertEqual(store.sessions.first { $0.id == "bgjob" }?.pid, 65463)
+        XCTAssertTrue(store.finished.isEmpty, "nothing here ended, so the record is empty")
+    }
+
+    /// And then the transcripts arrive, which is the moment the rail used
+    /// to start blinking: the registry says busy every five seconds, the
+    /// scraper says the file went cold every twenty, and a cold row is
+    /// filtered out of the rail entirely.
+    func testASweepAfterAColdTranscriptLeavesTheRailStandingStill() throws {
+        let root = try writeRegistry([
+            (14727, #"{"sessionId":"mine","pid":14727,"cwd":"/Users/x/moai","name":"roll-out-echo-mark","kind":"interactive","entrypoint":"cli","status":"busy"}"#),
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = SessionStore()
+        let registry = SessionRegistry(
+            store: store, root: root, isAlive: { _ in true }, hasTerminal: { _ in true })
+        registry.start()
+        defer { registry.stop() }
+
+        // The scraper reads a transcript last written an hour ago, over
+        // and over, exactly as it does every twenty seconds forever.
+        for _ in 0..<5 {
+            store.upsert(id: "mine", title: "Chalant 1.6.0", cwd: "/Users/x/moai", branch: "main",
+                         lastPrompt: nil, state: .stale,
+                         updatedAt: Date().addingTimeInterval(-3600))
+        }
+
+        XCTAssertEqual(store.sessions.count, 1)
+        XCTAssertEqual(store.sessions.first?.state, .idle,
+                       "alive, and a day-old \"busy\" is not evidence it is working")
+        XCTAssertEqual(store.groups().first?.group, .atPrompt)
+        XCTAssertEqual(store.groups().first?.live.map(\.id), ["mine"],
+                       "and it is on the rail, every single time somebody looks")
+        XCTAssertTrue(store.finished.isEmpty)
+        XCTAssertEqual(store.sessions.first?.title, "Chalant 1.6.0",
+                       "the registry says who exists; the transcript still says who they are")
+    }
+
     func testAnOutstandingQuestionStillOutranksTheRegistry() {
         let store = storeWithSession()
         store.attach(askID: "q", to: "s1", header: "h", question: "q?",
@@ -616,6 +866,80 @@ final class SessionStoreTests: XCTestCase {
 
         XCTAssertEqual(store.sessions.first?.hasTerminal, false)
         XCTAssertFalse(store.sessions.first?.canReceiveMessages ?? true)
+    }
+
+    // MARK: A terminal nobody can address
+
+    /// Having a terminal and being reachable are two different questions,
+    /// and this app was only asking the first one.
+    ///
+    /// The founder's own session runs in VS Code's integrated terminal.
+    /// The kernel says it holds ttys002, so `hasTerminal` is true and the
+    /// composer opened. But typing is done by asking Terminal or iTerm
+    /// which of their tabs owns that tty, and VS Code answers no such
+    /// question, so every message silently became a note for later.
+    func testASessionInsideAnEditorSaysSoInsteadOfTakingAMessage() {
+        let store = SessionStore()
+        store.markLive(id: "s", name: "moai", cwd: "/a", pid: 1, kind: .interactive,
+                       hasTerminal: true, status: .working)
+        store.noteOwningApp(id: "s", bundleID: "com.microsoft.VSCode", name: "Visual Studio Code")
+
+        XCTAssertFalse(store.sessions.first?.canReceiveMessages ?? true)
+        XCTAssertEqual(AgentSessionsStrip.unreachableReason(store.sessions[0]),
+                       "runs in Visual Studio Code, which Chalant can't type into")
+    }
+
+    func testASessionInARealTerminalKeepsItsComposer() {
+        let store = SessionStore()
+        store.markLive(id: "s", name: "moai", cwd: "/a", pid: 1, kind: .interactive,
+                       hasTerminal: true, status: .working)
+        store.noteOwningApp(id: "s", bundleID: "com.apple.Terminal", name: "Terminal")
+
+        XCTAssertTrue(store.sessions.first?.canReceiveMessages ?? false)
+        XCTAssertNil(AgentSessionsStrip.unreachableReason(store.sessions[0]))
+    }
+
+    /// The rule is one-sided on purpose, and this is the case that makes
+    /// it so. A session started detached has no application ancestor at
+    /// all, and Terminal may still own its tty
+    /// (`SessionRemote.target(for:)`, which is what actually decides).
+    /// Nobody being able to name an owning app is not evidence of
+    /// anything, so nothing is taken away.
+    func testASessionWithNoOwningAppAtAllIsLeftAlone() {
+        let store = SessionStore()
+        store.markLive(id: "s", name: "moai", cwd: "/a", pid: 1, kind: .interactive,
+                       hasTerminal: true, status: .working)
+
+        XCTAssertNil(store.sessions.first?.terminalApp)
+        XCTAssertTrue(store.sessions.first?.canReceiveMessages ?? false)
+        XCTAssertNil(AgentSessionsStrip.unreachableReason(store.sessions[0]))
+    }
+
+    /// A background job has no terminal at all, and that is the more
+    /// fundamental thing to say about it. It is also the case most likely
+    /// to be mislabelled: a `claude bg` job started from a VS Code
+    /// terminal still has VS Code somewhere up its parent chain.
+    func testNoTerminalOutranksWhicheverAppHappensToBeUpTheChain() {
+        let store = SessionStore()
+        store.markLive(id: "bg", name: "a background job", cwd: "/a", pid: 1,
+                       kind: .background, hasTerminal: false, status: .working)
+        store.noteOwningApp(id: "bg", bundleID: "com.microsoft.VSCode", name: "Visual Studio Code")
+
+        XCTAssertEqual(AgentSessionsStrip.unreachableReason(store.sessions[0]), "no terminal")
+    }
+
+    /// Terminal and iTerm, and the same set `SessionRemote` types into:
+    /// two copies of this list is exactly how a row would promise
+    /// something the sender cannot deliver.
+    func testTheAddressableTerminalsAreTheOnesThatCanActuallyBeTypedInto() {
+        XCTAssertTrue(SessionRemote.canAddress(bundleID: "com.apple.Terminal"))
+        XCTAssertTrue(SessionRemote.canAddress(bundleID: "com.googlecode.iterm2"))
+        XCTAssertFalse(SessionRemote.canAddress(bundleID: "com.microsoft.VSCode"))
+        XCTAssertTrue(
+            SessionRemote.canType(
+                into: SessionRemote.Target(
+                    tty: "/dev/ttys002", bundleID: "com.apple.Terminal", appName: "Terminal")),
+            "the sender and the row read the same list")
     }
 
     /// launchd is pid 1 on every Mac and has never had a controlling
@@ -915,36 +1239,47 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.sessions.first?.state, .working)
     }
 
-    /// Whether a process has a terminal is a fact about the process, and
-    /// it was being written only on the path that also decides what the
-    /// process is *doing*. claude-mem's indexer registers a file with no
-    /// `status` key at all, so `state(for:)` returned nil, `markLive` was
-    /// never called, and the row kept its composer while sitting right
-    /// there in the registry.
+    /// Whether a process has a terminal is a fact about the process, not
+    /// a fact about its status, and it used to be written only on the
+    /// path that also decided what the process was *doing*. A registry
+    /// file with no `status` key took the other branch every sweep and
+    /// the row kept a composer it could never answer.
     ///
-    /// Found by opening the app after the unit tests were green. Both
-    /// halves were right and nothing connected them.
+    /// The gap is closed at the source now: the registry calls `markLive`
+    /// for everything it can see, and passes nil for a status this app
+    /// has no opinion on. Nil is an opinion about the work, never about
+    /// the process.
     func testAProcessIsMeasuredEvenWhenItsStatusMeansNothingToUs() {
         let store = SessionStore()
         store.upsert(id: "indexer", title: "observer", cwd: "/b", branch: nil,
                      lastPrompt: nil, state: .working)
         XCTAssertTrue(store.sessions.first?.canReceiveMessages ?? false)
 
-        store.noteProcess(id: "indexer", pid: 2, hasTerminal: false)
+        store.markLive(id: "indexer", name: "observer", cwd: "/b", pid: 2,
+                       kind: .interactive, hasTerminal: false, status: nil)
 
         XCTAssertEqual(store.sessions.first?.hasTerminal, false)
         XCTAssertFalse(store.sessions.first?.canReceiveMessages ?? true,
                        "registered, running, and still nowhere to put a reply")
         XCTAssertTrue(store.glanceable.isEmpty)
+        XCTAssertEqual(store.sessions.first?.state, .working,
+                       "no opinion is not an opinion that it stopped")
     }
 
-    /// A registry entry for a session no row exists for yet is not a
-    /// reason to invent one: `markLive` is the only thing allowed to
-    /// create a row, and only for a status it understands.
-    func testMeasuringAProcessNeverInventsARow() {
+    /// And it must put the session on the list, which is the half that
+    /// changed. `markLive` is the only thing that can create a row now, so
+    /// declining to call it for an unfamiliar status would not cost a
+    /// badge, it would lose the session outright: a `claude bg` job
+    /// reporting "blocked" would simply never appear.
+    func testAProcessWithAnUnfamiliarStatusIsStillASession() {
         let store = SessionStore()
-        store.noteProcess(id: "nobody", pid: 3, hasTerminal: false)
-        XCTAssertTrue(store.sessions.isEmpty)
+        store.markLive(id: "blocked-bg", name: "a background job", cwd: "/b", pid: 3,
+                       kind: .background, hasTerminal: false, status: nil)
+
+        XCTAssertEqual(store.sessions.map(\.id), ["blocked-bg"])
+        XCTAssertEqual(store.sessions.first?.state, .idle,
+                       "alive, with nothing known to be happening in it")
+        XCTAssertEqual(store.sessions.first?.pid, 3)
     }
 
     // MARK: What earns a mark on the resting island

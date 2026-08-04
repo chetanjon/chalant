@@ -76,7 +76,25 @@ enum SessionRemote {
     /// type blind, and a blind keystroke in an editor lands in whatever
     /// buffer is open. Those fall back to the queue, which is slower and
     /// cannot corrupt anything.
-    private static let terminals: Set<String> = ["com.apple.Terminal", "com.googlecode.iterm2"]
+    ///
+    /// Read by the row as well as by the sender, through `canAddress`
+    /// below. Two copies of this list is exactly how a row ends up
+    /// promising something the sender cannot deliver, which is the bug
+    /// that let a message be typed into the island and quietly go
+    /// nowhere.
+    nonisolated static let addressableTerminals: Set<String> = [
+        "com.apple.Terminal", "com.googlecode.iterm2",
+    ]
+
+    /// Whether this app is one whose tabs can be named from outside.
+    ///
+    /// A negative answer about a *known* owner is real knowledge: VS Code
+    /// owns the window, VS Code cannot be addressed, so nothing typed here
+    /// would arrive. A missing owner is not knowledge at all, and callers
+    /// must not treat it as one — see `SessionStore.Session.terminalApp`.
+    nonisolated static func canAddress(bundleID: String) -> Bool {
+        addressableTerminals.contains(bundleID)
+    }
 
     /// Where a session's keystrokes would have to go, if anywhere.
     ///
@@ -145,7 +163,7 @@ enum SessionRemote {
     }
 
     /// Whether this target is one this app can address exactly.
-    static func canType(into target: Target) -> Bool { terminals.contains(target.bundleID) }
+    static func canType(into target: Target) -> Bool { canAddress(bundleID: target.bundleID) }
 
     /// Is there actually a process behind this row, right now.
     ///

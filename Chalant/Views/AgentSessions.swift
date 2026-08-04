@@ -230,10 +230,18 @@ struct AgentSessionsStrip: View {
 
     /// Bring up whatever is running this session.
     ///
+    /// By pid first, because a working directory is not an identity:
+    /// three sessions in one repo share a cwd, and the cwd path picks
+    /// whichever of them started last. That was already known to be the
+    /// wrong way to decide where a message goes
+    /// (SessionRemote.swift:86); it is the same wrong when deciding
+    /// which window to raise, and it is the same fix.
+    ///
     /// The folder is the fallback rather than the answer: a session
     /// whose process has since exited still has somewhere to go, and a
     /// row that did nothing when clicked would read as broken.
     static func go(to session: SessionStore.Session) {
+        if let pid = session.pid, SessionLocator.reveal(pid: pid) { return }
         guard !SessionLocator.reveal(cwd: session.cwd) else { return }
         NSWorkspace.shared.open(URL(fileURLWithPath: session.cwd))
     }
@@ -253,7 +261,20 @@ struct AgentSessionsStrip: View {
     /// Why a message left on this row would never be read, or nil when
     /// it would. Both answers are things the row itself now says.
     static func unreachableReason(_ session: SessionStore.Session) -> String? {
+        // First, because it is the more fundamental thing to say and the
+        // one most easily mislabelled by the check below it: a `claude bg`
+        // job started from an editor's terminal still has that editor
+        // somewhere up its parent chain, and "no terminal" is the truth
+        // about it rather than "runs in VS Code".
         if session.hasTerminal == false { return "no terminal" }
+        // A terminal the kernel can see is not a terminal this app can
+        // write to. The founder's own session held ttys002 inside VS
+        // Code's built-in terminal, so it kept a composer that could only
+        // ever queue, and typing into the island went nowhere anybody
+        // could see (2026-08-03).
+        if let app = session.terminalApp, !SessionRemote.canAddress(bundleID: app.bundleID) {
+            return "runs in \(app.name), which Chalant can't type into"
+        }
         // Cursor keeps no hook contract with this app, so nothing
         // queued here would ever be collected (EC-17).
         if session.agent == .cursor { return "no hook yet" }

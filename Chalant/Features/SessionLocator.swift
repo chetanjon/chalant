@@ -63,7 +63,56 @@ enum SessionLocator {
     /// its arguments is not mistaken for the thing itself.
     static let agentNames: Set<String> = ["claude", "codex", "cursor-agent"]
 
+    /// The app each of these processes lives inside, named, in one walk
+    /// of the process table.
+    ///
+    /// A pid is simply absent from the result when its parent chain
+    /// reaches launchd without passing through a running application,
+    /// which is the ordinary shape of a session started detached. That
+    /// absence means "nobody could tell", never "nothing owns it":
+    /// Terminal can perfectly well own the tty of a process it is not an
+    /// ancestor of, which is why callers may only read a *present* answer
+    /// here as evidence.
+    ///
+    /// Batched because the walk is the expensive half and the lookups are
+    /// free, and the caller asks about everything that arrived in one
+    /// sweep.
+    static func owningApps(of pids: [pid_t]) -> [pid_t: (bundleID: String, name: String)] {
+        guard !pids.isEmpty else { return [:] }
+        var byPid: [pid_t: NSRunningApplication] = [:]
+        for app in NSWorkspace.shared.runningApplications {
+            byPid[app.processIdentifier] = app
+        }
+        let table = processTable()
+        let applications = Set(byPid.keys)
+        var found: [pid_t: (bundleID: String, name: String)] = [:]
+        for pid in pids {
+            guard let owner = owningApplication(of: pid, in: table, applications: applications),
+                  let app = byPid[owner], let bundleID = app.bundleIdentifier
+            else { continue }
+            found[pid] = (bundleID, app.localizedName ?? bundleID)
+        }
+        return found
+    }
+
     // MARK: Doing it for real
+
+    /// Brings the application running this exact process to the front.
+    ///
+    /// By pid, because a working directory is not an identity: three
+    /// sessions in one repo share a cwd, and `reveal(cwd:)` below picks
+    /// whichever of them started last. That was already known to be wrong
+    /// for deciding where a message goes (SessionRemote.swift:86) and it
+    /// is the same wrong for deciding which window to raise.
+    @discardableResult
+    static func reveal(pid: pid_t) -> Bool {
+        let apps = NSWorkspace.shared.runningApplications
+        guard let owner = owningApplication(
+            of: pid, in: processTable(), applications: Set(apps.map(\.processIdentifier))
+        ), let app = NSRunningApplication(processIdentifier: owner) else { return false }
+        app.activate(options: [.activateAllWindows])
+        return true
+    }
 
     /// Brings whatever is running the session in `cwd` to the front.
     ///

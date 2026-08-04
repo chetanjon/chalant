@@ -34,6 +34,169 @@ final class SessionRoomDataTests: XCTestCase {
                      lastPrompt: nil, state: state)
     }
 
+    // MARK: A pid makes a session real, a file does not
+
+    /// The rail used to be a list of recently-touched files, and a
+    /// developer's machine is full of files nobody asked about. On the
+    /// founder's Mac, eight of the twelve freshest transcripts belonged to
+    /// claude-mem's observer bot (2026-08-03), so eight of twelve rows
+    /// were another program's leftovers.
+    ///
+    /// While the registry is answering, it is the list. Discovery still
+    /// says everything it knows about a session; it may no longer invent
+    /// one.
+    func testWhileTheRegistryIsAnsweringAWarmFileCannotInventASession() {
+        let store = store()
+        store.noteRegistryIsAuthoritative()
+        store.upsert(id: "observer", title: "observer-sessions", cwd: "/a/observer-sessions",
+                     branch: nil, lastPrompt: nil, state: .working)
+        XCTAssertTrue(store.sessions.isEmpty, "no process vouched for this, so there is no session")
+    }
+
+    /// And having refused it, it must not have quietly filed it as a
+    /// session that ended either. That was the same bug wearing the
+    /// record's clothes: a bot transcript went cold and turned into a
+    /// "lost" row, so the eight-row record filled with them.
+    func testAFileTheRegistryNeverVouchedForNeverReachesTheRecord() {
+        let store = store()
+        store.noteRegistryIsAuthoritative()
+        store.upsert(id: "observer", title: "observer-sessions", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .working)
+        store.reconcileLive(against: ["someone-real"])
+        XCTAssertTrue(store.finished.isEmpty)
+        XCTAssertTrue(store.history.isEmpty)
+    }
+
+    /// The other half: a vouched session still takes everything the
+    /// transcript knows. The registry says who exists; discovery says what
+    /// they are called and what they are doing, and that division is the
+    /// whole point of keeping both.
+    func testAVouchedSessionStillTakesEverythingTheTranscriptKnows() {
+        let store = store()
+        store.noteRegistryIsAuthoritative()
+        store.markLive(id: "real", name: "roll-out-echo-mark", cwd: "/a", pid: 1,
+                       kind: .interactive, status: .idle)
+        store.upsert(id: "real", title: "Fix the sessions tab", cwd: "/a", branch: "main",
+                     lastPrompt: "go", state: .working, activity: "Editing",
+                     transcriptPath: "/t/real.jsonl")
+
+        XCTAssertEqual(store.sessions.first?.title, "Fix the sessions tab")
+        XCTAssertEqual(store.sessions.first?.branch, "main")
+        XCTAssertEqual(store.sessions.first?.activity, "Editing")
+        XCTAssertEqual(store.sessions.first?.transcriptPath, "/t/real.jsonl")
+    }
+
+    /// The standing law this overlay was written under: the registry
+    /// directory is undocumented, and a Claude Code release that moves it
+    /// must cost a badge rather than the whole list. So when nothing has
+    /// vouched for the directory existing, transcripts are the list again,
+    /// exactly as they were before any of this.
+    func testWithNoRegistryAtAllTheTranscriptsAreStillTheList() {
+        let store = store()
+        store.upsert(id: "s", title: "t", cwd: "/a", branch: nil, lastPrompt: nil, state: .working)
+        XCTAssertEqual(store.sessions.map(\.id), ["s"])
+    }
+
+    /// Cursor keeps no registry of its own, so `~/.claude/sessions` has no
+    /// standing to say a Cursor chat does not exist. The same carve-out
+    /// `reconcileLive` already makes, in the one other place that now
+    /// decides whether a session is real.
+    func testAClaudeRegistryHasNoSayOverCursorChats() {
+        let store = store()
+        store.noteRegistryIsAuthoritative()
+        store.upsert(id: "cursor-chat", title: "t", cwd: "/a", branch: nil,
+                     lastPrompt: nil, state: .working, agent: .cursor)
+        XCTAssertEqual(store.sessions.map(\.id), ["cursor-chat"])
+    }
+
+    // MARK: One authority, so the row stops blinking
+
+    /// The blink, in three lines.
+    ///
+    /// The founder's own session sat in a VS Code terminal with a registry
+    /// file that had said `busy` for twenty-one hours and a transcript
+    /// last written an hour ago. The registry sweep set `.working` every
+    /// five seconds; the discovery rescan set `.stale` every twenty. A
+    /// `.stale` row is filtered out of `groups()`, so the row vanished
+    /// from the rail and came back, forever, and `stateSince` reset on
+    /// every flip so the age column read nonsense.
+    ///
+    /// A pid outranks an mtime. Discovery may add what it knows; it may
+    /// not declare a vouched-for process gone.
+    func testAQuietFileCannotDeclareAVouchedProcessGone() {
+        let store = store()
+        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .working)
+        store.upsert(id: "s", title: "t", cwd: "/a", branch: nil, lastPrompt: nil, state: .stale)
+
+        XCTAssertEqual(store.sessions.first?.state, .working)
+        XCTAssertEqual(store.groups().first?.group, .working,
+                       "and so it never leaves the rail")
+    }
+
+    /// The clock the age column reads must survive the rescan that used
+    /// to reset it.
+    func testTheAgeSurvivesARescanOfAQuietTranscript() {
+        let store = store()
+        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .working)
+        let before = store.sessions[0].stateSince
+        store.upsert(id: "s", title: "t", cwd: "/a", branch: nil, lastPrompt: nil, state: .stale)
+        store.upsert(id: "s", title: "t", cwd: "/a", branch: nil, lastPrompt: nil, state: .stale)
+        XCTAssertEqual(store.sessions[0].stateSince, before)
+    }
+
+    /// The rule is about a process the registry vouches for, not about
+    /// `.stale` being unsayable. Once the registry has disowned a session,
+    /// its pid is gone and discovery is trusted again.
+    func testADisownedSessionCanStillGoQuiet() {
+        let store = store()
+        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .working)
+        store.reconcileLive(against: ["somebody-else"])
+        XCTAssertEqual(store.sessions.first?.state, .stale)
+        XCTAssertNil(store.sessions.first?.pid)
+    }
+
+    /// A twenty-one hour old `busy` is not evidence of work.
+    ///
+    /// Claude Code stops rewriting the status file when a session parks a
+    /// background job, so the founder's own session claimed to be working
+    /// from 03:18 until the next morning. Alive is known, because this app
+    /// holds the pid and asked the kernel. Working is a claim, and a claim
+    /// no moving transcript agrees with settles at rest instead.
+    func testABusyClaimNothingCorroboratesSettlesAtRest() {
+        let store = store()
+        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .idle)
+        store.upsert(id: "s", title: "t", cwd: "/a", branch: nil, lastPrompt: nil,
+                     state: .stale, updatedAt: Date().addingTimeInterval(-3600))
+
+        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .working)
+
+        XCTAssertEqual(store.sessions.first?.state, .idle,
+                       "alive, and nothing says it is doing anything")
+    }
+
+    /// A real turn goes minutes at a time without touching its
+    /// transcript, so the window has to be generous enough that ordinary
+    /// work is never demoted mid-thought.
+    func testABusyClaimAMovingTranscriptAgreesWithIsBelieved() {
+        let store = store()
+        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .idle)
+        store.upsert(id: "s", title: "t", cwd: "/a", branch: nil, lastPrompt: nil,
+                     state: .working, updatedAt: Date().addingTimeInterval(-120))
+
+        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .working)
+
+        XCTAssertEqual(store.sessions.first?.state, .working)
+    }
+
+    /// Nothing to corroborate against is not the same as being
+    /// contradicted. A session the registry has just found, whose
+    /// transcript this app has not read yet, is believed.
+    func testABusyClaimWithNoTranscriptYetIsBelieved() {
+        let store = store()
+        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .working)
+        XCTAssertEqual(store.sessions.first?.state, .working)
+    }
+
     // MARK: stateSince, the number that used to mean nothing
 
     /// The row's trailing column read `RelativeAge.short(updatedAt)`,

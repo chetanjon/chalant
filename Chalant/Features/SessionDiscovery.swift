@@ -173,6 +173,14 @@ final class SessionDiscovery {
         }
     }
 
+    /// Go and look now, because the registry just found somebody.
+    ///
+    /// Debounced rather than immediate: a sweep that vouches for three
+    /// sessions at once should cost one scan, not three.
+    func refresh() {
+        scheduleDebouncedRescan()
+    }
+
     func stop() {
         staleTimer?.invalidate()
         staleTimer = nil
@@ -213,7 +221,22 @@ final class SessionDiscovery {
         let byFreshness = files.sorted { $0.mtime > $1.mtime }
         let liveFiles = byFreshness.filter { live.contains($0.id) }
         let rest = byFreshness.filter { !live.contains($0.id) }
-        let freshest = liveFiles + rest.prefix(max(0, Self.maxFilesToTrack - liveFiles.count))
+        // While the registry holds the list, the running sessions are the
+        // whole of it, and reading anything else is work nobody asked for.
+        //
+        // The freshest-dozen fill was how a session got found at all
+        // before there was a registry, and it is what filled the rail with
+        // other people's robots: eight of the twelve freshest transcripts
+        // on the founder's Mac belonged to claude-mem's observer
+        // (2026-08-03). The store now refuses to make rows out of them, so
+        // reading them buys nothing and costs a quarter of a megabyte a
+        // time, on a file that a busy bot rewrites every few seconds.
+        //
+        // The fill stays for the case it was written for: no registry
+        // directory, so no list, so transcripts are the list again.
+        let freshest = store.registryIsAuthoritative
+            ? liveFiles
+            : liveFiles + rest.prefix(max(0, Self.maxFilesToTrack - liveFiles.count))
         var seenIds = Set<String>()
         for file in freshest {
             seenIds.insert(file.id)
