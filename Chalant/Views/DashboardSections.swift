@@ -162,6 +162,18 @@ struct SessionsSection: View {
     @AppStorage(SessionStore.approvalRulesKey) private var approvalRulesRaw = ""
     @State private var draftRule = ""
 
+    // The room's dials. Defaults repeated from where the readers live,
+    // never invented here: `SessionRoomSettings` and
+    // `SessionStore.historyWindow` are the ones that decide.
+    @AppStorage(SessionStore.historyWindowKey) private var historyWindow = "default"
+    @AppStorage(SessionRoomSettings.toolActivityKey) private var showsToolActivity = true
+    @AppStorage(SessionRoomSettings.densityKey) private var rowDensity = SessionRoomSettings.defaultDensity
+    @AppStorage(SessionRemote.straightToTerminalKey) private var straightToTerminal = false
+    @AppStorage(SessionRemote.startsInKey) private var startsIn = "terminal"
+    /// What the last Arm/Disarm actually did, held so the card can say
+    /// so instead of the button going quiet and the user wondering.
+    @State private var armOutcome: HookInstall.ArmOutcome?
+
     /// Read from the stored string rather than through
     /// `SessionStore.approvalRules()`, so editing a rule redraws this
     /// list. The parsing is the same; only the reactivity differs.
@@ -242,16 +254,175 @@ struct SessionsSection: View {
                     .foregroundStyle(Theme.textTertiary)
                 WrappingRules(rules: unused) { add($0) }
             }
+            SettingDivider()
+            armRow(armed: armed)
             if !rules.isEmpty, !armed {
-                SettingDivider()
                 SettingNote(
-                    "These are not armed yet. Holding a call needs one more hook than posting a "
+                    "Or do it by hand. Holding a call needs one more hook than posting a "
                     + "pill does, because PreToolUse is the only event whose answer can stop a "
                     + "command from running. Merge this into ~/.claude/settings.json."
                 )
                 holdSnippet
             }
         }
+    }
+
+    /// The one button that turns rules into a feature.
+    ///
+    /// Until this existed, arming meant pasting JSON into
+    /// ~/.claude/settings.json by hand, and the founder had rules
+    /// configured for a day without one of them ever firing. A feature
+    /// whose setup step nobody completes is not a shipped feature.
+    ///
+    /// The whole safety story is said out loud rather than promised:
+    /// what it adds, that the old file is copied aside first, and that
+    /// it can be taken back out.
+    @ViewBuilder
+    private func armRow(armed: Bool) -> some View {
+        HStack(spacing: Theme.Space.m) {
+            Image(systemName: armed ? "checkmark.circle.fill" : "exclamationmark.circle")
+                .font(Theme.Fonts.icon(.m))
+                .foregroundStyle(armed ? Theme.positive : Theme.textTertiary)
+            Text(armed
+                 ? "Armed. Anything matching a rule above stops and asks you."
+                 : "Not armed. These rules hold nothing until Chalant's PreToolUse hook is in place.")
+                .font(Theme.Fonts.body)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: Theme.Space.m)
+            if armed {
+                Button("Disarm") { armOutcome = HookInstall.disarm() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            } else {
+                Button("Arm it") { armOutcome = HookInstall.arm() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(accent)
+            }
+        }
+        if let armOutcome {
+            switch armOutcome {
+            case .armed(let backup):
+                SettingNote(
+                    (armed ? "Written. " : "Taken back out. ")
+                    + (backup.map { "Your old settings file is at \($0)." }
+                       ?? "There was no settings file to back up.")
+                    + " Claude Code picks this up on its next session; ones already running keep "
+                    + "the hooks they started with.")
+            case .alreadyArmed:
+                SettingNote("It was already there. Nothing was written.")
+            case .refused(let why):
+                Text(why)
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else if !armed {
+            SettingNote(
+                "Arm it adds one PreToolUse hook to ~/.claude/settings.json, merging with the "
+                + "hooks already there rather than replacing them, and copies the old file aside "
+                + "first. Disarm takes only that one line back out.")
+        }
+    }
+
+    /// The room's own dials.
+    ///
+    /// All of them live here rather than in the island, which carries no
+    /// settings of its own and is not about to start: the room is a
+    /// glance surface's grown-up sibling, not a window, and a gear in it
+    /// would be the first step toward one. Every default below is chosen
+    /// so that nobody has to open this card at all.
+    private var roomCard: some View {
+        SettingCard(title: "The sessions room") {
+            SettingNote(
+                "Press the Sessions shortcut, or click the arrow in the island's tool row, to "
+                + "open every agent on this Mac beside the one you have picked."
+            )
+            if SessionRemote.isInstalled("com.googlecode.iterm2") {
+                SettingPicker(
+                    label: "Start new sessions in",
+                    selection: $startsIn,
+                    options: [("Terminal", "terminal"), ("iTerm", "iterm")],
+                    width: 200
+                )
+            }
+            SettingNote(
+                "The + in the room's header opens a terminal in a folder you pick and runs "
+                + "Claude Code in it. A session started that way can be driven from the island "
+                + "straight away, which one started inside an editor's built-in terminal cannot."
+            )
+            SettingDivider()
+            SettingToggle(label: "Send straight to the terminal", isOn: $straightToTerminal)
+            SettingNote(
+                "On, what you type goes into the running session now, the way typing into its "
+                + "window does, and you do not wait for its next turn. Chalant finds the exact "
+                + "tab by the terminal device that session is attached to, so it can only ever "
+                + "land in that one window. Terminal and iTerm only: an editor's built-in "
+                + "terminal cannot be named from outside, and typing blind into an editor would "
+                + "land in whatever file is open, so those keep the queue."
+            )
+            SettingDivider()
+            SettingPicker(
+                label: "Keep finished sessions for",
+                selection: $historyWindow,
+                options: [("Off", "off"), ("1 hour", "hour"), ("2 hours", "default"), ("Today", "today")],
+                width: 260
+            )
+            SettingNote(
+                "Only sessions Chalant actually watched end, never old transcripts it found "
+                + "lying on disk, and eight at most. Off keeps none of them rather than "
+                + "hiding them."
+            )
+            SettingDivider()
+            SettingToggle(label: "Show what agents are doing", isOn: $showsToolActivity)
+            SettingNote(
+                "Threads each tool call into the conversation as it happens. Off leaves only "
+                + "the words, which is quieter and tells you nothing while a turn is running."
+            )
+            SettingDivider()
+            SettingPicker(
+                label: "Row height",
+                selection: $rowDensity,
+                options: [("Compact", "compact"), ("Comfortable", "comfortable")],
+                width: 260
+            )
+            SettingNote("Compact drops the folder and branch line, so more sessions fit without scrolling.")
+            SettingDivider()
+            Text("Groups")
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textTertiary)
+            ForEach(SessionStore.Group.allCases) { group in
+                groupToggle(group)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func groupToggle(_ group: SessionStore.Group) -> some View {
+        if group.canBeHidden {
+            SettingToggle(label: group.title, isOn: groupBinding(group))
+        } else {
+            // Drawn, disabled, with the reason on it. A band whose whole
+            // purpose is "something is blocked on you" being switchable
+            // off is a way to make this app quietly fail at its one job,
+            // and a row that is simply absent reads as an oversight
+            // rather than as a decision.
+            SettingRow(label: group.title) {
+                Text("Always on")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textGhost)
+            }
+        }
+    }
+
+    /// Absent means on. Nobody has opened this card, and every band
+    /// ships visible.
+    private func groupBinding(_ group: SessionStore.Group) -> Binding<Bool> {
+        Binding(
+            get: { UserDefaults.standard.object(forKey: group.settingKey) as? Bool ?? true },
+            set: { UserDefaults.standard.set($0, forKey: group.settingKey) }
+        )
     }
 
     private var holdSnippet: some View {
@@ -313,6 +484,8 @@ struct SessionsSection: View {
             }
 
             approvalCard
+
+            roomCard
 
             // Real path, not a faked pill (H4, founder 2026-08-02: "I
             // want to test the notification and everything"): posts an

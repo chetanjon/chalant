@@ -176,9 +176,19 @@ final class NotchViewModel: ObservableObject {
     /// let the pointer fall outside it mid-drag and collapse the
     /// island out from under it (EC-11).
     static func expandedWidth(
-        configWidth: CGFloat, tab: Tab, pane: Pane, chatFull: Bool
+        configWidth: CGFloat, tab: Tab, pane: Pane, chatFull: Bool, focused: Bool = false
     ) -> CGFloat {
-        tab == .chat && pane == .none && chatFull ? max(configWidth, 680) : configWidth
+        // A floor, never an override, and the wider of the two floors
+        // wins: a user who has already dialled past 820 keeps their
+        // width and the room simply gets a longer reading column.
+        //
+        // 820 is what two panes need. The rail is a fixed 280 and does
+        // not grow with the island (sidebars do not), so everything past
+        // it lands in the conversation: at the widest padding this still
+        // leaves 456 there, about 68 characters, which is a real measure
+        // rather than a column of broken lines.
+        if focused { return max(configWidth, 820) }
+        return tab == .chat && pane == .none && chatFull ? max(configWidth, 680) : configWidth
     }
 
     /// The expanded island's height: whatever the content measured,
@@ -1338,6 +1348,22 @@ final class NotchViewModel: ObservableObject {
     /// the persistent mic. View-local state does not survive that round
     /// trip; `tab` and `draftPrompt` live here for the same reason.
     @Published var composingSessionID: String?
+
+    /// Which session the room has open on its right-hand side.
+    ///
+    /// An id, never an index. The store re-sorts the instant any
+    /// session's state changes, and it changes constantly: a session
+    /// moving from Working to Needs you would pull a different row under
+    /// the pointer of somebody who was about to click, and an
+    /// index-keyed selection would silently start showing them a
+    /// different conversation than the one they were reading.
+    ///
+    /// Lives here rather than in the room for the same reason
+    /// `composingSessionID` does: the composer's mic sends the island
+    /// through `.listening`, which unmounts `ExpandedView` and every
+    /// piece of view-local state under it.
+    @Published var selectedSessionID: String?
+
 
     func beginListening(to destination: VoiceDestination = .chalant) {
         guard state == .collapsed else { return }

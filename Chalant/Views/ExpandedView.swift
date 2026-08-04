@@ -56,7 +56,8 @@ struct ExpandedView: View {
     /// floor under the dial there, never a ceiling on it.
     private var islandWidth: CGFloat {
         NotchViewModel.expandedWidth(
-            configWidth: face.expandedWidth, tab: model.tab, pane: model.pane, chatFull: chatFull)
+            configWidth: face.expandedWidth, tab: model.tab, pane: model.pane,
+            chatFull: chatFull, focused: model.focusedTab != nil)
     }
 
     private var enabledTools: [NotchViewModel.Tab] {
@@ -129,6 +130,12 @@ struct ExpandedView: View {
                     .font(Theme.Fonts.bodyEmphasis)
                     .foregroundStyle(Theme.textPrimary)
                 Spacer(minLength: 0)
+                // Beside the gear rather than buried in the rail: this
+                // is the answer to "why can't I type into my agent", and
+                // the answer should be one reach away from the question.
+                if destination == .sessions {
+                    NewSessionButton()
+                }
                 HoverGlyphButton(
                     symbol: "gearshape", label: "Settings", scale: .m, tint: Theme.textTertiary
                 ) {
@@ -136,8 +143,13 @@ struct ExpandedView: View {
                     model.openDashboard?(nil)
                 }
             }
+            // No frame here. Each destination is handed the room its
+            // display leaves (`Theme.Panel.room`, computed from this
+            // face's own chrome rather than from a constant) and decides
+            // whether to fill it. A frame at this level would force the
+            // full height onto an empty room, which is the exact void
+            // this surface was rebuilt to stop drawing.
             focusedPanel(destination)
-                .frame(height: Theme.Panel.focused)
         }
     }
 
@@ -145,7 +157,10 @@ struct ExpandedView: View {
     private func focusedPanel(_ destination: NotchViewModel.Tab) -> some View {
         switch destination {
         case .sessions:
-            AgentSessionsStrip(sessions: model.sessions, model: model, focused: true)
+            SessionRoom(
+                sessions: model.sessions, model: model,
+                height: Theme.Panel.room(
+                    topReserve: face.contentTopReserve, padding: face.contentPadding))
         default:
             // Nothing else claims `canFocus` yet, so nothing else can
             // reach here. An empty panel beats a crash if one ever does.

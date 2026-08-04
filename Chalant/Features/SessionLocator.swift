@@ -124,6 +124,30 @@ enum SessionLocator {
         return table
     }
 
+    /// The controlling terminal a process is attached to, as a device
+    /// path (`/dev/ttys004`), or nil for a process with no terminal.
+    ///
+    /// This is the one identifier that ties a session to a *window*
+    /// rather than to an application. Terminal.app and iTerm both
+    /// publish it on their own tabs, so a message can be put into
+    /// exactly the session it was written for instead of into whatever
+    /// happened to be frontmost. Without it, "type this into my agent"
+    /// would be a guess, and a wrong guess types somebody's message into
+    /// somebody else's shell.
+    static func tty(of pid: pid_t) -> String? {
+        var info = proc_bsdinfo()
+        let size = proc_pidinfo(
+            pid, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.size)
+        )
+        guard size == Int32(MemoryLayout<proc_bsdinfo>.size) else { return nil }
+        // NODEV, the kernel's "this process has no controlling
+        // terminal". Background agents land here, which is the same
+        // answer `hasTerminal` already gives the composer.
+        guard info.e_tdev != UInt32.max, info.e_tdev != 0 else { return nil }
+        guard let name = devname(dev_t(info.e_tdev), S_IFCHR) else { return nil }
+        return "/dev/" + String(cString: name)
+    }
+
     private static func workingDirectory(of pid: pid_t) -> String? {
         var info = proc_vnodepathinfo()
         let size = proc_pidinfo(
