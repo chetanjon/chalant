@@ -771,6 +771,40 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(store.finished.isEmpty, "nothing here ended, so the record is empty")
     }
 
+    // MARK: The session that can be picked up on a phone
+
+    /// A bridged session carries the id claude.ai/code knows it by, and
+    /// that is the whole "control it from your phone" story: the Claude
+    /// app drives the session, this app hands you the door. Read off the
+    /// registry file rather than inferred from a setting, so a row only
+    /// offers it when it is actually true of that session.
+    func testABridgedSessionKnowsWhereItCanBePickedUp() throws {
+        let entry = try XCTUnwrap(SessionRegistry.parse(Data(#"""
+        {"sessionId":"mine","pid":16155,"cwd":"/Users/x/moai","kind":"interactive",
+         "bridgeSessionId":"session_01Vmte6hoS5L6Lww4F4a3Mh4"}
+        """#.utf8), filename: "16155.json"))
+
+        XCTAssertEqual(entry.bridgeID, "session_01Vmte6hoS5L6Lww4F4a3Mh4")
+        XCTAssertEqual(SessionStore.Session.phoneURL(bridgeID: entry.bridgeID)?.absoluteString,
+                       "https://claude.ai/code/session_01Vmte6hoS5L6Lww4F4a3Mh4")
+    }
+
+    func testASessionWithNoBridgeOffersNoLink() throws {
+        let entry = try XCTUnwrap(SessionRegistry.parse(Data(#"""
+        {"sessionId":"mine","pid":16155,"cwd":"/Users/x/moai","kind":"interactive"}
+        """#.utf8), filename: "16155.json"))
+
+        XCTAssertNil(entry.bridgeID)
+        XCTAssertNil(SessionStore.Session.phoneURL(bridgeID: nil))
+    }
+
+    /// An id with a slash in it would build a URL pointing somewhere
+    /// else entirely, and this link is offered as "your session".
+    func testAnIDThatIsNotAnIDBuildsNoLink() {
+        XCTAssertNil(SessionStore.Session.phoneURL(bridgeID: "../../somewhere/else"))
+        XCTAssertNil(SessionStore.Session.phoneURL(bridgeID: ""))
+    }
+
     // MARK: Background agents, which have no registry file at all
 
     /// A `claude bg` job run through the daemon registers no

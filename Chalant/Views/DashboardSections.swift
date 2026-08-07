@@ -173,6 +173,9 @@ struct SessionsSection: View {
     /// What the last Arm/Disarm actually did, held so the card can say
     /// so instead of the button going quiet and the user wondering.
     @State private var armOutcome: HookInstall.ArmOutcome?
+    /// The same, for the phone switch. Its own state so one card's
+    /// result never appears under the other.
+    @State private var phoneOutcome: HookInstall.ArmOutcome?
 
     /// Read from the stored string rather than through
     /// `SessionStore.approvalRules()`, so editing a rule redraws this
@@ -192,6 +195,77 @@ struct SessionsSection: View {
 
     private func remove(_ rule: String) {
         approvalRulesRaw = rules.filter { $0 != rule }.joined(separator: "\n")
+    }
+
+    /// Your agents, on your phone.
+    ///
+    /// The founder asked what the best way is to control agents from the
+    /// Claude iPhone app. It is this: Claude Code 2.1.223 ships Remote
+    /// Control, and one setting at user scope puts every session on this
+    /// machine in the Claude app, permission prompts included. Their own
+    /// settings already had the push half switched on
+    /// (`agentPushNotifEnabled`, `inputNeededNotifEnabled`) with nothing
+    /// to reach.
+    ///
+    /// So this card is a switch, not a phone app, a push relay or a chat
+    /// bridge. Each of those would be Chalant rebuilding, worse,
+    /// something already inside the tool it watches.
+    private var phoneCard: some View {
+        let on = HookInstall.reachesYourPhone()
+        return SettingCard(title: "Pick a session up on your phone") {
+            SettingNote(
+                "Claude Code can put a session on your phone: the Claude app sees what it is "
+                + "doing, answers its questions, and approves what it asks for. This switch is "
+                + "Claude Code's own setting, not something Chalant invented, and it applies to "
+                + "every session you start from now on, wherever you start it."
+            )
+            HStack(spacing: Theme.Space.m) {
+                Image(systemName: on ? "checkmark.circle.fill" : "iphone")
+                    .font(Theme.Fonts.icon(.m))
+                    .foregroundStyle(on ? Theme.positive : Theme.textTertiary)
+                Text(on
+                     ? "On. New sessions can be picked up in the Claude app."
+                     : "Off. Sessions on this Mac stay on this Mac.")
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: Theme.Space.m)
+                if on {
+                    Button("Turn it off") { phoneOutcome = HookInstall.disarmRemoteControl() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                } else {
+                    Button("Turn it on") { phoneOutcome = HookInstall.armRemoteControl() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(accent)
+                }
+            }
+            if let phoneOutcome {
+                switch phoneOutcome {
+                case .armed(let backup):
+                    SettingNote(
+                        (on ? "Written. " : "Turned back off. ")
+                        + (backup.map { "Your old settings file is at \($0)." }
+                           ?? "There was no settings file to back up.")
+                        + " Sessions already running keep the settings they started with.")
+                case .alreadyArmed:
+                    SettingNote("It was already set that way. Nothing was written.")
+                case .refused(let why):
+                    Text(why)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                SettingNote(
+                    "This writes remoteControlAtStartup into ~/.claude/settings.json, keeping "
+                    + "everything else in the file and copying the old one aside first. A "
+                    + "session already on your phone shows an Open on your phone button in the "
+                    + "room."
+                )
+            }
+        }
     }
 
     /// Rules, and the honest state of whether they are armed.
@@ -482,6 +556,8 @@ struct SessionsSection: View {
                     }
                 }
             }
+
+            phoneCard
 
             approvalCard
 

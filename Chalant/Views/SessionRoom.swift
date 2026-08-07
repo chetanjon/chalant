@@ -797,6 +797,17 @@ private struct SessionActions: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            // Only where it is true. A bridged session is one the Claude
+            // app can drive, so this hands over the door rather than
+            // this app building a second one. A session with no bridge
+            // gets no button, because there would be nothing behind it.
+            if let phone = SessionStore.Session.phoneURL(bridgeID: session.bridgeID) {
+                Button("Open on your phone") { NSWorkspace.shared.open(phone) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("This session is bridged to claude.ai/code, so the Claude app "
+                          + "on your phone can see it and type into it.")
+            }
             Button(copied ? "Copied" : "Copy id") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(session.id, forType: .string)

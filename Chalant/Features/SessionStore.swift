@@ -268,6 +268,28 @@ final class SessionStore: ObservableObject {
             agent == .claude && state != .stale && hasTerminal != false && isAddressable
         }
 
+        /// What claude.ai/code knows this session by, when it is bridged.
+        /// See `SessionRegistry.Entry.bridgeID`.
+        var bridgeID: String?
+
+        /// Where this session can be picked up from another device.
+        ///
+        /// The answer to "how do I control my agents from my phone":
+        /// Claude Code bridges a session, the Claude app drives it, and
+        /// this app hands over the door rather than building a second
+        /// one. Turned on for every future session by
+        /// `HookInstall.armRemoteControl`.
+        ///
+        /// Refuses anything that is not a plain identifier. This link is
+        /// offered as "your session", and an id carrying a slash would
+        /// build a URL pointing somewhere else entirely.
+        static func phoneURL(bridgeID: String?) -> URL? {
+            guard let bridgeID, !bridgeID.isEmpty,
+                  bridgeID.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" })
+            else { return nil }
+            return URL(string: "https://claude.ai/code/\(bridgeID)")
+        }
+
         /// Whether anything is positively known to stand between a typed
         /// message and this session. Nil `terminalApp` is not, see there.
         var isAddressable: Bool {
@@ -1094,7 +1116,8 @@ final class SessionStore: ObservableObject {
     /// be happening in it.
     func markLive(
         id: String, name: String, cwd: String, pid: pid_t, kind: Kind?,
-        hasTerminal: Bool = true, status: State?, startedAt: Date? = nil
+        hasTerminal: Bool = true, status: State?, startedAt: Date? = nil,
+        bridgeID: String? = nil
     ) {
         // Vouched for, so whatever the registry concluded last time it
         // could not find this session no longer holds. Including the row
@@ -1110,6 +1133,10 @@ final class SessionStore: ObservableObject {
             // this app has not learned yet must not blank one it already
             // read correctly.
             if let kind { sessions[index].kind = kind }
+            // Same rule: only ever replaced by something real. A sweep
+            // that read the file before Claude Code finished bridging
+            // must not take the door away again.
+            if let bridgeID { sessions[index].bridgeID = bridgeID }
             sessions[index].hasTerminal = hasTerminal
             // A fact about the session, replacing a fact about when this
             // app happened to open. `upsert`'s "first seen here" is an
@@ -1141,6 +1168,7 @@ final class SessionStore: ObservableObject {
             // Same rediscovery rule `upsert` follows: a row born here is
             // the registry vouching for a real, running process at this
             // id, which is what a restored outbox was waiting for.
+            fresh.bridgeID = bridgeID
             fresh.outbox = restoredOutbox.removeValue(forKey: id)
             sessions.append(fresh)
         }

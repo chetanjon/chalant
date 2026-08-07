@@ -258,6 +258,100 @@ enum HookInstall {
         return .armed(backup: backup)
     }
 
+    // MARK: Reaching a session from your phone
+
+    /// Claude Code's own setting for it. User scope only: repo-local
+    /// settings may turn Remote Control off but never on.
+    static let remoteControlKey = "remoteControlAtStartup"
+
+    /// Whether sessions started on this machine can be reached from the
+    /// Claude app on a phone.
+    ///
+    /// Absent means Claude Code's own default, which is off, and is kept
+    /// distinct from an explicit `false` nowhere except here: both read
+    /// as "no", and only `disarmRemoteControl` cares about the
+    /// difference, because writing `false` over an unset key is a
+    /// decision nobody made.
+    static func reachesYourPhone(at url: URL? = nil) -> Bool {
+        guard case .parsed(let settings) = fileState(at: url ?? Self.settingsURL)
+        else { return false }
+        return settings[remoteControlKey] as? Bool ?? false
+    }
+
+    /// Let the Claude app on your phone see and drive the sessions on
+    /// this machine.
+    ///
+    /// The founder asked what the best way is to control agents from
+    /// their phone. This is it, and it is not this app's invention:
+    /// Claude Code 2.1.223 ships Remote Control, and with this one
+    /// setting on, a local session becomes viewable and drivable from
+    /// the Claude app, permission prompts included. Their machine
+    /// already had `agentPushNotifEnabled` and `inputNeededNotifEnabled`
+    /// set to true, so the phone half was armed the whole time and had
+    /// nothing to reach.
+    ///
+    /// So Chalant ships a switch rather than a phone app, a push relay
+    /// or a chat bridge. Every one of those would be this app rebuilding,
+    /// worse, something already in the tool it watches.
+    ///
+    /// Same safety as `arm`, through the same writer: refuses a file it
+    /// cannot parse, keeps everything else in it, backs up first, writes
+    /// atomically, follows a symlink rather than replacing it.
+    @discardableResult
+    static func armRemoteControl(at url: URL? = nil) -> ArmOutcome {
+        write(remoteControlKey, as: true, at: url)
+    }
+
+    /// Turn it back off by removing the key, not by writing `false`.
+    ///
+    /// The difference matters if Claude Code ever changes its own
+    /// default: somebody who switched this off in Chalant asked for
+    /// Chalant's opinion to go away, not to be pinned against a future
+    /// version's.
+    @discardableResult
+    static func disarmRemoteControl(at url: URL? = nil) -> ArmOutcome {
+        write(remoteControlKey, as: nil, at: url)
+    }
+
+    /// One top-level setting, changed in place. `nil` removes the key.
+    private static func write(_ key: String, as value: Bool?, at url: URL?) -> ArmOutcome {
+        let settingsURL = url ?? Self.settingsURL
+        var settings: [String: Any]
+        switch fileState(at: settingsURL) {
+        case .parsed(let object): settings = object
+        case .missing: settings = [:]
+        case .unreadable:
+            return .refused(
+                "Your ~/.claude/settings.json has something in it that isn't valid JSON. "
+                + "Chalant won't rewrite a file it can't read. Fix the file and try again.")
+        }
+        let current = settings[key] as? Bool
+        guard current != value else { return .alreadyArmed }
+        if let value { settings[key] = value } else { settings.removeValue(forKey: key) }
+        return commit(settings, to: settingsURL)
+    }
+
+    /// The write half `arm`, `disarm` and the settings switches share:
+    /// serialise, copy the old file aside, and write through any
+    /// symlink rather than over it.
+    private static func commit(_ settings: [String: Any], to settingsURL: URL) -> ArmOutcome {
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
+        else { return .refused("Chalant could not build the new settings file.") }
+        let backup = backUpSettings(settingsURL)
+        let destination = settingsURL.resolvingSymlinksInPath()
+        do {
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            try data.write(to: destination, options: .atomic)
+        } catch {
+            return .refused(
+                "Chalant could not write \(destination.path): \(error.localizedDescription)")
+        }
+        return .armed(backup: backup)
+    }
+
     /// Take the hook back out, leaving every other hook alone.
     ///
     /// Matches on the command containing `chalant-hook`, the same test

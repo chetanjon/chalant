@@ -161,6 +161,87 @@ final class ArmingTests: XCTestCase {
             JSONSerialization.jsonObject(with: Data(contentsOf: real)) as? [String: Any])
         XCTAssertTrue(HookInstall.holdsToolCalls(settings: written))
     }
+
+    // MARK: Reaching a session from your phone
+
+    /// Claude Code 2.1.223 has this built in: with
+    /// `remoteControlAtStartup` on at user scope, every session becomes
+    /// viewable and drivable from the Claude app on a phone, permission
+    /// prompts included. The founder already has `agentPushNotifEnabled`
+    /// and `inputNeededNotifEnabled` on, so the push half was armed and
+    /// had nothing to push. This is the missing setting, and one button
+    /// is the whole feature: no phone app, no bridge, no relay.
+    func testArmingThePhoneWritesTheSettingClaudeCodeReads() throws {
+        try write("{}")
+
+        // A file that existed is copied aside first, same as arming the
+        // hook does. Nobody's settings change here without a way back.
+        guard case .armed(let backup) = HookInstall.armRemoteControl(at: settings) else {
+            return XCTFail("should arm")
+        }
+        XCTAssertNotNil(backup)
+        XCTAssertEqual(try read()["remoteControlAtStartup"] as? Bool, true)
+    }
+
+    func testArmingThePhoneKeepsEveryOtherSettingAndHook() throws {
+        try write("""
+        {"permissions":{"allow":["Bash(ls:*)"]},
+         "hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"node other.js"}]}]},
+         "agentPushNotifEnabled":true}
+        """)
+
+        _ = HookInstall.armRemoteControl(at: settings)
+
+        let after = try read()
+        XCTAssertEqual(hooks(after, "Stop").count, 1, "somebody else's hooks are not ours to lose")
+        XCTAssertNotNil(after["permissions"])
+        XCTAssertEqual(after["agentPushNotifEnabled"] as? Bool, true)
+    }
+
+    func testArmingThePhoneTwiceWritesNothingTheSecondTime() throws {
+        try write("{}")
+        _ = HookInstall.armRemoteControl(at: settings)
+        let first = try Data(contentsOf: settings)
+
+        XCTAssertEqual(HookInstall.armRemoteControl(at: settings), .alreadyArmed)
+        XCTAssertEqual(try Data(contentsOf: settings), first)
+    }
+
+    /// The same refusal the hook install makes, for the same reason: a
+    /// settings file this app cannot read is a settings file it does not
+    /// touch.
+    func testUnparseableSettingsAreRefusedByThePhoneSwitchToo() throws {
+        try write("{ not json")
+
+        guard case .refused = HookInstall.armRemoteControl(at: settings) else {
+            return XCTFail("a file it cannot read must not be rewritten")
+        }
+        XCTAssertEqual(try String(contentsOf: settings, encoding: .utf8), "{ not json")
+    }
+
+    func testTurningThePhoneBackOffRemovesTheSettingRatherThanFalsifyingIt() throws {
+        try write(#"{"remoteControlAtStartup":true,"agentPushNotifEnabled":true}"#)
+
+        _ = HookInstall.disarmRemoteControl(at: settings)
+
+        let after = try read()
+        XCTAssertNil(after["remoteControlAtStartup"],
+                     "absent is Claude Code's own default; false is a decision nobody made")
+        XCTAssertEqual(after["agentPushNotifEnabled"] as? Bool, true)
+    }
+
+    func testWhetherThePhoneCanReachSessionsIsReadFromTheFile() throws {
+        try write("{}")
+        XCTAssertFalse(HookInstall.reachesYourPhone(at: settings))
+
+        try write(#"{"remoteControlAtStartup":true}"#)
+        XCTAssertTrue(HookInstall.reachesYourPhone(at: settings))
+
+        // Explicitly off is off, and reads as off rather than as unset.
+        try write(#"{"remoteControlAtStartup":false}"#)
+        XCTAssertFalse(HookInstall.reachesYourPhone(at: settings))
+    }
+
 }
 
 /// Typing into a running session.

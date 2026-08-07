@@ -44,6 +44,14 @@ final class SessionRegistry {
         /// `state(for:alive:)` is the one place this becomes a
         /// `SessionStore.State`.
         var status: String
+        /// What claude.ai/code knows this session by, when it is bridged.
+        ///
+        /// The whole "pick it up on your phone" story in one field: a
+        /// bridged session is drivable from the Claude app, and this app
+        /// only has to hand over the door. Nil means this session is not
+        /// bridged, which is a fact about that session rather than about
+        /// the machine, so the offer appears exactly where it is true.
+        var bridgeID: String?
     }
 
     /// Sessions that belong to another program rather than to a person.
@@ -227,7 +235,8 @@ final class SessionRegistry {
                 pid: entry.pid, kind: entry.kind,
                 hasTerminal: hasTerminal(entry.pid),
                 status: Self.state(for: entry, alive: isAlive),
-                startedAt: entry.startedAt
+                startedAt: entry.startedAt,
+                bridgeID: entry.bridgeID
             )
         }
         let gone = lastAliveIds.subtracting(aliveIds)
@@ -362,7 +371,8 @@ final class SessionRegistry {
             .flatMap { $0 > 0 ? Date(timeIntervalSince1970: $0 / 1000) : nil }
         return Entry(
             sessionId: sessionId, pid: pid_t(bodyPid), cwd: cwd, name: name, kind: kind,
-            entrypoint: object["entrypoint"] as? String, startedAt: startedAt, status: status
+            entrypoint: object["entrypoint"] as? String, startedAt: startedAt, status: status,
+            bridgeID: (object["bridgeSessionId"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         )
     }
 
