@@ -771,6 +771,109 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(store.finished.isEmpty, "nothing here ended, so the record is empty")
     }
 
+    // MARK: Background agents, which have no registry file at all
+
+    /// A `claude bg` job run through the daemon registers no
+    /// `~/.claude/sessions/<pid>.json` at all: it lives in
+    /// `~/.claude/jobs/<short>/state.json`, with its process listed in
+    /// the daemon's roster. So the whole class was invisible here, and
+    /// the founder's own agent sat blocked for three days behind a line
+    /// this app could have shown on day one.
+    private func writeJobs(
+        _ jobs: [(short: String, json: String)], roster: String
+    ) throws -> (jobs: URL, roster: URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("chalant.tests.jobs.\(UUID().uuidString)")
+        for job in jobs {
+            let dir = root.appendingPathComponent(job.short)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try Data(job.json.utf8).write(to: dir.appendingPathComponent("state.json"))
+        }
+        let rosterURL = root.appendingPathComponent("roster.json")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data(roster.utf8).write(to: rosterURL)
+        return (root, rosterURL)
+    }
+
+    func testALiveBackgroundAgentIsOnTheRailWithWhatItNeeds() throws {
+        let registryRoot = try writeRegistry([])
+        let written = try writeJobs([
+            (short: "b8827367", json: #"""
+            {"state":"blocked","sessionId":"bgjob","name":"Push changes to PR and pull",
+             "cwd":"/Users/x/moai","tokens":384376,
+             "needs":"say the word and I'll bump to 1.6.1 and do the proper release",
+             "suggestedReply":"bump to 1.6.1 and do the proper release"}
+            """#),
+        ], roster: #"{"proto":1,"supervisorPid":27476,"workers":{"b8827367":{"pid":65450,"sessionId":"bgjob"}}}"#)
+        defer {
+            try? FileManager.default.removeItem(at: registryRoot)
+            try? FileManager.default.removeItem(at: written.jobs)
+        }
+
+        let store = SessionStore()
+        let registry = SessionRegistry(
+            store: store, root: registryRoot,
+            jobsRoot: written.jobs, rosterURL: written.roster,
+            isAlive: { $0 == 65450 }, hasTerminal: { _ in false })
+        registry.start()
+        defer { registry.stop() }
+
+        let session = store.sessions.first { $0.id == "bgjob" }
+        XCTAssertNotNil(session, "a background agent with a live worker is a session")
+        XCTAssertEqual(session?.kind, .background)
+        XCTAssertEqual(session?.job?.state, .blocked)
+        XCTAssertEqual(SessionActivity.line(for: session!).text,
+                       "say the word and I'll bump to 1.6.1 and do the proper release")
+    }
+
+    /// The same file, three days later, with the daemon long gone. This
+    /// is the branch's own law applied to a second directory: a pid
+    /// makes a session real, a warm file does not.
+    func testABackgroundAgentWhoseWorkerIsGoneIsNotOnTheRail() throws {
+        let registryRoot = try writeRegistry([])
+        let written = try writeJobs([
+            (short: "b8827367", json: #"{"state":"blocked","sessionId":"bgjob","needs":"say the word"}"#),
+        ], roster: #"{"proto":1,"supervisorPid":27476,"workers":{"b8827367":{"pid":65450,"sessionId":"bgjob"}}}"#)
+        defer {
+            try? FileManager.default.removeItem(at: registryRoot)
+            try? FileManager.default.removeItem(at: written.jobs)
+        }
+
+        let store = SessionStore()
+        let registry = SessionRegistry(
+            store: store, root: registryRoot,
+            jobsRoot: written.jobs, rosterURL: written.roster,
+            isAlive: { _ in false }, hasTerminal: { _ in false })
+        registry.start()
+        defer { registry.stop() }
+
+        XCTAssertTrue(store.sessions.isEmpty,
+                      "a three day old question from a dead process is not something to ask about")
+    }
+
+    /// A job the roster has never heard of has no process behind it
+    /// either, whatever its file says.
+    func testAJobMissingFromTheRosterIsNotOnTheRail() throws {
+        let registryRoot = try writeRegistry([])
+        let written = try writeJobs([
+            (short: "orphan", json: #"{"state":"working","sessionId":"ghost"}"#),
+        ], roster: #"{"proto":1,"supervisorPid":1,"workers":{}}"#)
+        defer {
+            try? FileManager.default.removeItem(at: registryRoot)
+            try? FileManager.default.removeItem(at: written.jobs)
+        }
+
+        let store = SessionStore()
+        let registry = SessionRegistry(
+            store: store, root: registryRoot,
+            jobsRoot: written.jobs, rosterURL: written.roster,
+            isAlive: { _ in true }, hasTerminal: { _ in false })
+        registry.start()
+        defer { registry.stop() }
+
+        XCTAssertTrue(store.sessions.isEmpty)
+    }
+
     /// And then the transcripts arrive, which is the moment the rail used
     /// to start blinking: the registry says busy every five seconds, the
     /// scraper says the file went cold every twenty, and a cold row is
@@ -1721,6 +1824,78 @@ final class SessionStoreTests: XCTestCase {
         // An unmapped tool keeps its name: still more use than a shrug,
         // and new tools appear faster than this table is updated.
         XCTAssertEqual(SessionDiscovery.activityPhrase(forTool: "SomeNewTool"), "SomeNewTool")
+    }
+
+    // MARK: Naming what it is doing it to
+
+    /// "Editing" answers half a question. The half a person actually
+    /// wants is which file, and the transcript has it: the tool_use
+    /// block carries its own input beside its name.
+    func testTheThingATooIsPointedAtIsReadAlongsideTheToolName() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/a/b/SessionStore.swift"}}]}}
+        """
+        let parsed = SessionDiscovery.parseMetadata(text, path: "t.jsonl")
+        XCTAssertEqual(parsed.lastTool, "Edit")
+        XCTAssertEqual(parsed.lastToolDetail, "SessionStore.swift")
+    }
+
+    /// A Bash call carries both a command and the agent's own one-line
+    /// description of it. The description is what a glance wants; the
+    /// verbatim command belongs to the approval card, where somebody is
+    /// being asked to authorise it.
+    func testABashCallIsNamedByItsDescriptionRatherThanItsCommand() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"xcodebuild test -scheme Chalant | tail -5","description":"Run the test suite"}}]}}
+        """
+        XCTAssertEqual(SessionDiscovery.parseMetadata(text, path: "t.jsonl").lastToolDetail,
+                       "Run the test suite")
+    }
+
+    func testABashCallWithNoDescriptionFallsBackToTheCommand() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"git status"}}]}}
+        """
+        XCTAssertEqual(SessionDiscovery.parseMetadata(text, path: "t.jsonl").lastToolDetail,
+                       "git status")
+    }
+
+    /// The detail belongs to the tool it arrived with. A later call
+    /// without one must not leave the previous call's file behind, or a
+    /// row reads "Searching for SessionStore.swift".
+    func testANewToolCallClearsThePreviousOnesDetail() {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/a/b/SessionStore.swift"}}]}}
+        {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Glob"}]}}
+        """
+        let parsed = SessionDiscovery.parseMetadata(text, path: "t.jsonl")
+        XCTAssertEqual(parsed.lastTool, "Glob")
+        XCTAssertNil(parsed.lastToolDetail)
+    }
+
+    func testAPhraseNamesWhatTheToolIsPointedAt() {
+        XCTAssertEqual(
+            SessionDiscovery.activityPhrase(forTool: "Edit", detail: "SessionStore.swift"),
+            "Editing SessionStore.swift")
+        XCTAssertEqual(
+            SessionDiscovery.activityPhrase(forTool: "Read", detail: "RELEASING.md"),
+            "Reading RELEASING.md")
+        XCTAssertEqual(
+            SessionDiscovery.activityPhrase(forTool: "Grep", detail: "remoteControl"),
+            "Searching for remoteControl")
+        // A described command is already a sentence. Wrapping it in
+        // "Running a command:" spends the row's width on nothing.
+        XCTAssertEqual(
+            SessionDiscovery.activityPhrase(forTool: "Bash", detail: "Run the test suite"),
+            "Run the test suite")
+    }
+
+    /// The old behaviour is the floor, not a regression: a tool call
+    /// whose input said nothing usable still reads as the plain phrase.
+    func testAPhraseWithNothingToNameIsTheOldOne() {
+        XCTAssertEqual(SessionDiscovery.activityPhrase(forTool: "Edit", detail: nil), "Editing")
+        XCTAssertEqual(SessionDiscovery.activityPhrase(forTool: "Bash", detail: nil),
+                       "Running a command")
     }
 
     // MARK: Claude Code's own AskUserQuestion, read from the transcript

@@ -183,6 +183,12 @@ final class SessionStore: ObservableObject {
         /// Stop hook is installed (founder, 2026-08-02: "is there a way
         /// to see the message that the AI sent").
         var lastMessage: String?
+        /// What a background agent published about itself, when it is one
+        /// and Claude Code wrote the file. See `JobState`.
+        var job: JobState?
+        /// The agent's own to-do list, when it has reached for one. See
+        /// `PlanProgress`.
+        var plan: PlanProgress?
         /// The live process, when the registry knows of one. Nil means
         /// "discovered from a transcript only", which is not proof of
         /// life.
@@ -957,7 +963,17 @@ final class SessionStore: ObservableObject {
 
         var title: String {
             switch self {
-            case .needsYou: return "Needs you"
+            // Was "Needs you" until the founder called it vague
+            // (2026-08-06) and they were right: it names a feeling the
+            // app has about a row rather than the thing on the row. The
+            // band is now an instruction, and every row under it carries
+            // the actual question or the actual command, from
+            // `SessionActivity`.
+            //
+            // The case keeps its name. `settingKey` is built from the
+            // raw value and somebody's stored band visibility should not
+            // reset because a label was reworded.
+            case .needsYou: return "Answer this"
             case .working: return "Working"
             // The app's own existing phrasing, already in the row's
             // accessibility label. "Idle" is accurate and reads like a
@@ -1129,6 +1145,29 @@ final class SessionStore: ObservableObject {
             sessions.append(fresh)
         }
         sort()
+    }
+
+    /// Hands a row what a background agent published about itself.
+    ///
+    /// Decoration, never creation: `markLive` is the only thing that can
+    /// put a session on the list, and that rule is what stopped a warm
+    /// file from inventing rows in the first place. A job for a session
+    /// nobody vouches for is dropped on the floor here.
+    func attach(job: JobState, to id: String) {
+        guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
+        sessions[index].job = job
+    }
+
+    /// Hands a row the to-do list the agent is working through.
+    ///
+    /// Takes an optional and writes it either way, because a plan that
+    /// has just been finished has to be able to go away: leaving the
+    /// last known step on the row is how a finished session ends up
+    /// claiming to still be on step three.
+    func attach(plan: PlanProgress?, to id: String) {
+        guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
+        guard sessions[index].plan != plan else { return }  // no needless publish
+        sessions[index].plan = plan
     }
 
     /// The registry's status, held against what the transcript shows.

@@ -108,14 +108,38 @@ final class SessionRegistry {
     /// move between windows, so it is asked once and never again.
     private var ownerResolved: Set<String> = []
 
+    /// Where background agents live. They register no file under
+    /// `root` at all, so without this half the whole class is invisible.
+    private let jobsRoot: URL
+    /// The daemon's roll, which is where a background agent's pid is.
+    private let rosterURL: URL
+    /// Where live task lists are, so a row can say which step it is on.
+    private let tasksRoot: URL
+
     init(
         store: SessionStore, root: URL? = nil, fileManager: FileManager = .default,
+        jobsRoot: URL? = nil, rosterURL: URL? = nil, tasksRoot: URL? = nil,
         isAlive: @escaping (pid_t) -> Bool = SessionRegistry.processIsAlive,
         hasTerminal: @escaping (pid_t) -> Bool = SessionRegistry.processHasTerminal
     ) {
         self.store = store
         self.fileManager = fileManager
         self.root = root ?? Self.defaultRoot
+        // A registry pointed at a directory of its own does not go and
+        // read the real machine's background agents. Caught the moment
+        // this half was written: every existing registry test passes a
+        // scratch `root`, and without this they all started picking up
+        // the founder's own three-day-old blocked job from
+        // `~/.claude/jobs` and failing on a row they never wrote.
+        //
+        // The nil defaults are for the app, which passes no roots at
+        // all. Anything that names one is either a test or a second
+        // machine's worth of files, and in both cases reaching into
+        // `~/.claude` behind its back is wrong.
+        let elsewhere = root?.appendingPathComponent("no-such-directory")
+        self.jobsRoot = jobsRoot ?? elsewhere ?? JobsReader.defaultJobsDirectory()
+        self.rosterURL = rosterURL ?? elsewhere ?? JobsReader.defaultRosterURL()
+        self.tasksRoot = tasksRoot ?? elsewhere ?? JobsReader.defaultTasksDirectory()
         self.isAlive = isAlive
         self.hasTerminal = hasTerminal
     }
@@ -169,10 +193,14 @@ final class SessionRegistry {
     /// saying "empty", and reconciliation only ever runs on a read that
     /// actually succeeded (EC-4).
     private func rescan() {
+        // Background agents first, and outside the guard below: they
+        // keep no file under `root`, so a machine with no
+        // `~/.claude/sessions` at all still has agents to show.
+        let backgroundIds = scanBackgroundAgents()
         guard let files = try? fileManager.contentsOfDirectory(
             at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
         ) else { return }
-        var aliveIds: Set<String> = []
+        var aliveIds: Set<String> = backgroundIds
         var entries: [Entry] = []
         for file in files where file.pathExtension == "json" {
             guard let data = try? Data(contentsOf: file),
@@ -208,6 +236,13 @@ final class SessionRegistry {
         // catch a session this directory once knew about; discovery can
         // invent one out of a transcript that was never here.
         store.reconcileLive(against: aliveIds)
+        // What each live session is working through, if it has reached
+        // for the task tool. Live ones only: the folder outlives the
+        // session by months, and a finished row's old to-do list is not
+        // news.
+        for id in aliveIds {
+            store.attach(plan: JobsReader.plan(forSession: id, in: tasksRoot), to: id)
+        }
         // After the store has its rows, because `noteOwningApp` decorates
         // a row rather than making one, and once per session rather than
         // once per sweep: see `ownerResolved`.
@@ -216,6 +251,59 @@ final class SessionRegistry {
         let changed = aliveIds != lastAliveIds
         lastAliveIds = aliveIds
         if changed { onLiveSetChanged?() }
+    }
+
+    /// Puts every background agent with a running worker on the list,
+    /// and hands its published state to the row.
+    ///
+    /// A background agent is a session by every measure this app uses
+    /// (a process, a folder, a transcript, a person waiting on it) and
+    /// it was invisible here for one accidental reason: it writes its
+    /// file somewhere else. The founder ran one that sat blocked for
+    /// three days behind a sentence the island could not show.
+    ///
+    /// The roster decides liveness, never the state file. `state.json`
+    /// is still readable long after the daemon that wrote it has gone,
+    /// and a stale `blocked` rendered as a live question is exactly the
+    /// pretending this release is removing.
+    private func scanBackgroundAgents() -> Set<String> {
+        let live = JobsReader.liveSessionIDs(rosterAt: rosterURL, isAlive: isAlive)
+        guard !live.isEmpty else { return [] }
+        var marked: Set<String> = []
+        for (sessionID, job) in JobsReader.jobs(in: jobsRoot) where live.contains(sessionID) {
+            store.markLive(
+                id: sessionID,
+                name: job.name ?? "Background agent",
+                cwd: job.cwd ?? "",
+                pid: 0,
+                kind: .background,
+                // Never. A background agent holds no controlling
+                // terminal by definition, which is what closes the
+                // composer on a row nothing typed could reach.
+                hasTerminal: false,
+                // Its own vocabulary, translated once, here. `blocked`
+                // is a question waiting on a person, which is the one
+                // state this app has to get right.
+                status: job.state.map(Self.state(forJobPhase:)) ?? .idle,
+                startedAt: job.startedAt
+            )
+            store.attach(job: job, to: sessionID)
+            marked.insert(sessionID)
+        }
+        return marked
+    }
+
+    /// A background agent's own word for what it is doing, in this
+    /// app's vocabulary. Kept as a translation rather than a shared
+    /// enum: the two answer different questions, and collapsing them is
+    /// how this app talked itself into guessing before.
+    static func state(forJobPhase phase: SessionStore.JobState.Phase) -> SessionStore.State {
+        switch phase {
+        case .working: return .working
+        case .blocked: return .needsInput
+        case .done: return .done
+        case .failed: return .failed
+        }
     }
 
     /// Names the app each newly-seen session is running inside.

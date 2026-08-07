@@ -206,7 +206,10 @@ private struct SessionRail: View {
                         ForEach(band.live) { session in
                             SessionRailRow(
                                 title: AgentSessionsStrip.title(session),
-                                subtitle: place(session, started: session.startedAt),
+                                subtitle: SessionActivity.railLine(
+                                    for: session,
+                                    disambiguating: collidingTitles
+                                        .contains(AgentSessionsStrip.title(session))),
                                 agent: session.agent,
                                 state: session.state,
                                 group: band.group,
@@ -218,7 +221,7 @@ private struct SessionRail: View {
                         ForEach(band.ended) { record in
                             SessionRailRow(
                                 title: record.title,
-                                subtitle: place(cwd: record.cwd, branch: record.branch),
+                                subtitle: SessionActivity.line(for: record).text,
                                 agent: record.agent,
                                 state: nil,
                                 group: band.group,
@@ -264,28 +267,11 @@ private struct SessionRail: View {
         return repeated
     }
 
-    private func place(_ session: SessionStore.Session, started: Date) -> String {
-        // Only where it is needed. Every row carrying a start time would
-        // be a column of noise for the common case of one session per
-        // repo, and this line is already the busiest thing on the row.
-        guard collidingTitles.contains(AgentSessionsStrip.title(session)) else {
-            return place(cwd: session.cwd, branch: session.branch)
-        }
-        // The branch goes, rather than the start time being squeezed in
-        // beside it. Two rows collide on their title because they are
-        // the same work in the same place, so the branch is the one
-        // thing on the line guaranteed not to tell them apart, and four
-        // segments do not fit a 280pt rail anyway. It is still on the
-        // detail pane's own header, one click away.
-        let folder = session.cwd.split(separator: "/").last.map(String.init) ?? session.cwd
-        return "\(folder) · from \(SessionRoomFormat.clock(started))"
-    }
-
-    private func place(cwd: String, branch: String?) -> String {
-        let folder = cwd.split(separator: "/").last.map(String.init) ?? cwd
-        guard let branch, !branch.isEmpty else { return folder }
-        return "\(folder) · \(branch)"
-    }
+    // Where a session lives used to be this line. It moved to the
+    // detail pane's own header, which already carried it, because a
+    // folder name is looked up once and read never: it is the same on
+    // every row for anyone working in one repo. The line is spent on
+    // what the agent is doing instead. See `SessionActivity`.
 }
 
 private struct SessionRailRow: View {
