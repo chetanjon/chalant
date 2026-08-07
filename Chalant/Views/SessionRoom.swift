@@ -314,7 +314,17 @@ private struct SessionRailRow: View {
                             .font(Theme.Fonts.caption)
                             .foregroundStyle(Theme.textGhost)
                             .lineLimit(1)
-                            .truncationMode(.middle)
+                            // Tail, not middle. This line used to be
+                            // "folder · branch", where both ends carried
+                            // meaning and the middle was the part to
+                            // spend. It is now a sentence about what the
+                            // agent is doing, and a sentence is read from
+                            // the front: middle truncation turned
+                            // "Decline the prompt and run from a neutral
+                            // path" into "Decline the promp…neutral path"
+                            // on this machine, which reads as two
+                            // half-thoughts glued together.
+                            .truncationMode(.tail)
                     }
                 }
                 Spacer(minLength: 0)
