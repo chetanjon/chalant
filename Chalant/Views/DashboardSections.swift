@@ -461,7 +461,8 @@ struct SessionsSection: View {
                 options: [("Compact", "compact"), ("Comfortable", "comfortable")],
                 width: 260
             )
-            SettingNote("Compact drops the folder and branch line, so more sessions fit without scrolling.")
+            SettingNote("Compact drops the line saying what each agent is doing, so more "
+                        + "sessions fit without scrolling.")
             SettingDivider()
             Text("Groups")
                 .font(Theme.Fonts.caption)
