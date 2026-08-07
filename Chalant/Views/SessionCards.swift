@@ -782,6 +782,20 @@ struct ApprovalCard: View {
     /// rather than hidden: the countdown is the promise that this ends.
     private static let patience: TimeInterval = 25
 
+    /// The rule "always allow" would write, and the words on the button.
+    private var exception: String {
+        SessionStore.suggestedException(tool: approval.tool, detail: approval.detail)
+    }
+
+    /// The rule without its tool wrapper, so the button reads
+    /// "Always allow git *" rather than "Always allow Bash(git *)".
+    private var exceptionLabel: String {
+        guard let open = exception.firstIndex(of: "("), exception.hasSuffix(")") else {
+            return exception
+        }
+        return String(exception[exception.index(after: open)..<exception.index(before: exception.endIndex)])
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Wants to run \(approval.tool)")
@@ -804,6 +818,21 @@ struct ApprovalCard: View {
                 Button("Deny") { decide(.deny) }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                // The second option Claude Code's own prompt has always
+                // had, and this card never did. Without it, holding
+                // every command means answering the same question about
+                // the same `git status` forever, which is how a person
+                // stops reading the ones that matter. Says the exact
+                // rule it will write, because a button that promises
+                // something wider than it says is not consent.
+                Button("Always allow \(exceptionLabel)") {
+                    SessionStore.addException(exception)
+                    decide(.allow)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Adds \(exception) to the calls Chalant never holds. "
+                      + "Undo it in Dashboard, Sessions.")
                 Spacer(minLength: 0)
                 TimelineView(.periodic(from: approval.askedAt, by: 1)) { context in
                     let left = Int(

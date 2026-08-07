@@ -771,6 +771,76 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(store.finished.isEmpty, "nothing here ended, so the record is empty")
     }
 
+    // MARK: Not asking twice about the same thing
+
+    /// Holding every Bash call is what the founder asked for
+    /// (2026-08-06), and the rule engine's own doc says gating by tool
+    /// name alone was "unlivable" the first time. Both are true. What
+    /// makes the broad version survivable is the thing Claude Code's own
+    /// prompt has and this app did not: "yes, and don't ask again for
+    /// git *". An exception outranks every hold rule.
+    func testAnExceptionOutranksAHoldRule() {
+        let store = SessionStore()
+        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .working)
+
+        XCTAssertFalse(store.holdForApproval(
+            sessionID: "s", id: "call-1", tool: "Bash", detail: "git --version",
+            rules: ["Bash"], exceptions: ["Bash(git *)"]))
+        XCTAssertNil(store.sessions.first?.approval)
+    }
+
+    func testAHoldStillHoldsWhatNoExceptionCovers() {
+        let store = SessionStore()
+        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .working)
+
+        XCTAssertTrue(store.holdForApproval(
+            sessionID: "s", id: "call-1", tool: "Bash", detail: "rm -rf build",
+            rules: ["Bash"], exceptions: ["Bash(git *)"]))
+        XCTAssertEqual(store.sessions.first?.approval?.detail, "rm -rf build")
+    }
+
+    /// The button's text has to be the rule it will write, or somebody
+    /// taps "always allow" and gets a different promise than they read.
+    func testTheSuggestedExceptionIsTheCommandsOwnName() {
+        XCTAssertEqual(
+            SessionStore.suggestedException(tool: "Bash", detail: "git --version"),
+            "Bash(git *)")
+        XCTAssertEqual(
+            SessionStore.suggestedException(tool: "Bash", detail: "npm run build -- --watch"),
+            "Bash(npm *)")
+    }
+
+    /// A command with a path or a pipe in it must not become a rule
+    /// covering half the machine. When the first word is not a plain
+    /// command name, the offer is the exact command and nothing wider.
+    func testAnUnusualCommandOffersOnlyItself() {
+        XCTAssertEqual(
+            SessionStore.suggestedException(tool: "Bash", detail: "./scripts/deploy.sh prod"),
+            "Bash(./scripts/deploy.sh prod)")
+        XCTAssertEqual(
+            SessionStore.suggestedException(tool: "Bash", detail: "rm -rf / && echo done"),
+            "Bash(rm -rf / && echo done)")
+    }
+
+    /// For everything that is not a shell command there is no first
+    /// word to generalise from, so the offer is the whole tool.
+    func testANonShellToolOffersTheToolItself() {
+        XCTAssertEqual(
+            SessionStore.suggestedException(tool: "Write", detail: "/a/b/notes.md"), "Write")
+        XCTAssertEqual(SessionStore.suggestedException(tool: "Edit", detail: ""), "Edit")
+    }
+
+    /// Exceptions this app writes must not silently widen: adding the
+    /// same one twice is one rule, and an empty one is not a rule.
+    func testAddingAnExceptionIsIdempotentAndRefusesNothing() {
+        let defaults = UserDefaults(suiteName: "chalant.tests.exceptions.\(UUID().uuidString)")!
+        SessionStore.addException("Bash(git *)", in: defaults)
+        SessionStore.addException("Bash(git *)", in: defaults)
+        SessionStore.addException("   ", in: defaults)
+
+        XCTAssertEqual(SessionStore.approvalExceptions(in: defaults), ["Bash(git *)"])
+    }
+
     // MARK: The session that can be picked up on a phone
 
     /// A bridged session carries the id claude.ai/code knows it by, and

@@ -1312,6 +1312,66 @@ final class SessionStore: ObservableObject {
         return pi == p.count
     }
 
+    // MARK: Not asking twice
+
+    /// Calls that are never held, whatever the hold rules say.
+    ///
+    /// The hold list alone could only be made broad by making it
+    /// unlivable: an agent runs dozens of harmless commands for every
+    /// one worth a second look, and "hold every Bash call" without a way
+    /// out means approving so much that you stop reading, which is worse
+    /// than not asking at all.
+    ///
+    /// Claude Code's own prompt has always had the way out, as its
+    /// second option: "Yes, and don't ask again for: git *". This is
+    /// that option. It is what makes the founder's choice (2026-08-06,
+    /// hold anything that touches the machine) something a person can
+    /// live with past the first hour.
+    static let approvalExceptionsKey = "approvalExceptions"
+
+    nonisolated static func approvalExceptions(in defaults: UserDefaults = .standard) -> [String] {
+        (defaults.string(forKey: approvalExceptionsKey) ?? "")
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    nonisolated static func addException(_ rule: String, in defaults: UserDefaults = .standard) {
+        let trimmed = rule.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        var rules = approvalExceptions(in: defaults)
+        guard !rules.contains(trimmed) else { return }
+        rules.append(trimmed)
+        defaults.set(rules.joined(separator: "\n"), forKey: approvalExceptionsKey)
+    }
+
+    /// The rule an "always allow this" button would write, in the same
+    /// words the button says.
+    ///
+    /// Generalises a shell command to its first word, which is what
+    /// Claude Code's own suggestion does ("git --version" offers
+    /// "git *"). It refuses to generalise anything that is not a plain
+    /// command name: a path, a pipe, an && chain, a variable. Widening
+    /// `./scripts/deploy.sh prod` to `./*` would quietly hand over far
+    /// more than the person reading the button agreed to, and a rule
+    /// somebody did not understand is a rule that is not consent.
+    nonisolated static func suggestedException(tool: String, detail: String) -> String {
+        let command = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard tool == "Bash" || tool == "BashOutput", !command.isEmpty else { return tool }
+        // A chained or redirected command is not named by its first
+        // word. "rm -rf / && echo done" starts with `rm`, and offering
+        // "always allow rm *" for it would be reading somebody the first
+        // clause of a sentence and asking them to sign the paragraph.
+        guard !command.contains(where: { "&|;><`$()\n".contains($0) }) else {
+            return "\(tool)(\(command))"
+        }
+        guard let first = command.split(separator: " ").first.map(String.init),
+              first.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }),
+              first.count < command.count
+        else { return "\(tool)(\(command))" }
+        return "\(tool)(\(first) *)"
+    }
+
     /// The rules a fresh install is offered, not the rules it gets.
     /// Every one of these is a thing that is hard to take back: it
     /// leaves the machine, rewrites history, or deletes something.
@@ -1337,8 +1397,14 @@ final class SessionStore: ObservableObject {
     /// existed.
     func holdForApproval(
         sessionID: String, id: String, tool: String, detail: String,
-        rules: [String] = SessionStore.approvalRules()
+        rules: [String] = SessionStore.approvalRules(),
+        exceptions: [String] = SessionStore.approvalExceptions()
     ) -> Bool {
+        // Checked first and cheapest. An exception is somebody having
+        // already answered this exact question, and asking it again is
+        // how a supervision feature turns into a thing people switch
+        // off. See `approvalExceptionsKey`.
+        guard !exceptions.contains(where: { Self.rule($0, holds: tool, detail) }) else { return false }
         guard rules.contains(where: { Self.rule($0, holds: tool, detail) }) else { return false }
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return false }
         guard sessions[index].approval == nil else { return false }

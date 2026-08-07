@@ -160,6 +160,7 @@ struct SessionsSection: View {
     @Environment(\.chalantAccent) private var accent
 
     @AppStorage(SessionStore.approvalRulesKey) private var approvalRulesRaw = ""
+    @AppStorage(SessionStore.approvalExceptionsKey) private var approvalExceptionsRaw = ""
     @State private var draftRule = ""
 
     // The room's dials. Defaults repeated from where the readers live,
@@ -195,6 +196,19 @@ struct SessionsSection: View {
 
     private func remove(_ rule: String) {
         approvalRulesRaw = rules.filter { $0 != rule }.joined(separator: "\n")
+    }
+
+    /// Read the same way `rules` is, so tapping Always allow on the
+    /// island redraws this list without a relaunch.
+    private var exceptions: [String] {
+        approvalExceptionsRaw
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func removeException(_ rule: String) {
+        approvalExceptionsRaw = exceptions.filter { $0 != rule }.joined(separator: "\n")
     }
 
     /// Your agents, on your phone.
@@ -327,6 +341,28 @@ struct SessionsSection: View {
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
                 WrappingRules(rules: unused) { add($0) }
+            }
+            if !exceptions.isEmpty {
+                SettingDivider()
+                Text("Never held")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                SettingNote(
+                    "You tapped Always allow on these. They skip the rules above, so a rule as "
+                    + "broad as Bash stays livable."
+                )
+                ForEach(exceptions, id: \.self) { rule in
+                    HStack(spacing: Theme.Space.m) {
+                        Text(rule)
+                            .font(Theme.Fonts.captionMono)
+                            .foregroundStyle(Theme.textPrimary)
+                        Spacer(minLength: 0)
+                        HoverGlyphButton(
+                            symbol: "xmark", label: "Start holding \(rule) again",
+                            scale: .s, tint: Theme.textTertiary
+                        ) { removeException(rule) }
+                    }
+                }
             }
             SettingDivider()
             armRow(armed: armed)
