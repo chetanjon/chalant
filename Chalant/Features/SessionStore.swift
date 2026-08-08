@@ -183,6 +183,9 @@ final class SessionStore: ObservableObject {
         /// Stop hook is installed (founder, 2026-08-02: "is there a way
         /// to see the message that the AI sent").
         var lastMessage: String?
+        /// A permission prompt Claude Code is showing in its own
+        /// terminal. See `PendingPrompt`.
+        var pendingPrompt: PendingPrompt?
         /// What a background agent published about itself, when it is one
         /// and Claude Code wrote the file. See `JobState`.
         var job: JobState?
@@ -1029,6 +1032,11 @@ final class SessionStore: ObservableObject {
     static func wantsAHuman(_ session: Session) -> Bool {
         if let approval = session.approval, approval.decision == nil { return true }
         if let ask = session.ask, !ask.isFullyAnswered { return true }
+        // Claude Code frozen at its own permission prompt. The island
+        // cannot answer it, and that is not a reason to be quiet about
+        // it: this band's promise is that nothing waiting on a person is
+        // invisible, not that everything in it is answerable from here.
+        if let prompt = session.pendingPrompt, !prompt.isStale { return true }
         return false
     }
 
@@ -1172,6 +1180,50 @@ final class SessionStore: ObservableObject {
             fresh.outbox = restoredOutbox.removeValue(forKey: id)
             sessions.append(fresh)
         }
+        sort()
+    }
+
+    /// How long a reported terminal prompt is still believed. Generous,
+    /// because a person who walked away from one really is still stuck
+    /// on it; the ordinary end is `clearPendingPrompt`, not this.
+    static let pendingPromptExpiry: TimeInterval = 15 * 60
+
+    /// Claude Code has put a permission prompt on screen in this
+    /// session's own terminal.
+    ///
+    /// Reported by the `Notification` hook, which is already installed
+    /// on machines that have ever set this app up and which fires for
+    /// every agent including the ones inside editors this app cannot
+    /// type into. That makes it the only verb here with no setup step,
+    /// which matters more than it sounds: the approval gate has shipped
+    /// twice now and its one button has never been pressed.
+    ///
+    /// Decoration, never creation, the same law `attach` follows.
+    func notePendingPrompt(sessionID: String, tool: String, detail: String) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        sessions[index].pendingPrompt = PendingPrompt(
+            tool: tool, detail: detail, since: Date())
+        sessions[index].updatedAt = Date()
+        // Same reasoning as a held call: an agent standing at a prompt
+        // has not finished, whatever a quiet transcript suggests.
+        disownedByRegistry.remove(sessionID)
+        revive(sessionID)
+        if !sessions[index].state.isLive { sessions[index].state = .needsInput }
+        sort()
+    }
+
+    /// The prompt is over.
+    ///
+    /// Two things prove it and both call this: the turn ending, since
+    /// Claude Code cannot finish a turn while standing at a prompt, and
+    /// the next tool call, since it does not reach for one while the
+    /// last is unanswered.
+    func clearPendingPrompt(sessionID: String) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }),
+              sessions[index].pendingPrompt != nil
+        else { return }
+        sessions[index].pendingPrompt = nil
+        sessions[index].updatedAt = Date()
         sort()
     }
 
@@ -1408,6 +1460,9 @@ final class SessionStore: ObservableObject {
         guard rules.contains(where: { Self.rule($0, holds: tool, detail) }) else { return false }
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return false }
         guard sessions[index].approval == nil else { return false }
+        // A new call means the last prompt was answered: Claude Code
+        // does not reach for another tool while standing at one.
+        sessions[index].pendingPrompt = nil
         sessions[index].approval = Approval(
             id: id, tool: tool, detail: detail, askedAt: Date(), decision: nil)
         sessions[index].updatedAt = Date()

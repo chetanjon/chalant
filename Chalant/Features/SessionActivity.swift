@@ -26,6 +26,7 @@ enum SessionActivity {
     /// which from the text.
     enum Source: Equatable {
         case heldCall
+        case terminalPrompt
         case question
         case needs
         case doing
@@ -52,7 +53,23 @@ enum SessionActivity {
             return Line(text: flattened(approval.detail), source: .heldCall)
         }
 
-        // 2. A question nobody has answered. A bundle asks two to four
+        // 2. Claude Code standing at its own permission prompt. The
+        //    agent is frozen mid tool call and the terminal is unusable
+        //    until somebody answers, which makes it the most stuck a
+        //    session gets. Below a held call only because that one can
+        //    be resolved from here and this one cannot.
+        //
+        //    Worth more than it looks: it needs nothing switched on. The
+        //    `Notification` hook that reports it is already installed on
+        //    the founder's machine, and it fires for a session inside VS
+        //    Code's terminal exactly as it does anywhere else, which is
+        //    the one place none of this app's other verbs reach.
+        if let prompt = session.pendingPrompt, !prompt.isStale {
+            return Line(text: flattened(prompt.detail.isEmpty ? prompt.tool : prompt.detail),
+                        source: .terminalPrompt)
+        }
+
+        // 3. A question nobody has answered. A bundle asks two to four
         //    things at once and gets answered one at a time, so the line
         //    is the first one still outstanding, not the first one asked.
         if let ask = session.ask, !ask.isFullyAnswered,
@@ -204,6 +221,36 @@ extension SessionStore {
         var name: String?
         var cwd: String?
         var startedAt: Date?
+    }
+
+    /// A permission prompt Claude Code is showing in its own terminal
+    /// right now.
+    ///
+    /// Not the same thing as an `Approval`, and deliberately a separate
+    /// type so the difference cannot be blurred: an approval is held by
+    /// this app and a tap resolves it, while this is Claude Code asking
+    /// somebody in a window, which no button here can answer. Proven
+    /// 2026-08-06: a hook returning a decision on `PermissionRequest` is
+    /// ignored, and typing an answer into the prompt from outside picked
+    /// the wrong option and wrote a permission rule nobody agreed to.
+    ///
+    /// So the island's job here is to say what is stuck and where, and
+    /// to hand over a door: the terminal, or the phone if that session
+    /// is bridged.
+    struct PendingPrompt: Equatable {
+        var tool: String
+        /// The command, path or query, read from the transcript's last
+        /// unfinished tool call by the hook that reports the prompt.
+        var detail: String
+        var since: Date
+
+        /// Past believing. The prompt is normally cleared by the turn
+        /// ending or the next tool call; this is the backstop for a turn
+        /// that never ends, because a row still claiming an hour-old
+        /// prompt is describing the past.
+        var isStale: Bool {
+            -since.timeIntervalSinceNow >= SessionStore.pendingPromptExpiry
+        }
     }
 
     /// The agent's live to-do list, from `~/.claude/tasks/<id>/`.

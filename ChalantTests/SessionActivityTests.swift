@@ -106,6 +106,54 @@ final class SessionActivityTests: XCTestCase {
         XCTAssertEqual(SessionActivity.line(for: subject).text, "Bump the version?")
     }
 
+    // MARK: Rung 2, Claude Code asking in its own terminal
+
+    /// The case that needs nothing switched on. Claude Code fires a
+    /// `Notification` the moment it puts a permission prompt on screen,
+    /// and that hook is already installed on the founder's machine. It
+    /// has only ever produced "wants you", which is the vague thing they
+    /// objected to; the command is one transcript read away.
+    ///
+    /// This works where nothing else does: a session inside VS Code's
+    /// terminal cannot be typed into, but its hooks fire exactly the
+    /// same, so the island can at least say what it is stuck on.
+    func testAPromptInTheTerminalShowsTheCommandItIsStuckOn() {
+        var subject = session()
+        subject.pendingPrompt = SessionStore.PendingPrompt(
+            tool: "Bash", detail: "git push --force origin main", since: Date())
+
+        let line = SessionActivity.line(for: subject)
+
+        XCTAssertEqual(line.text, "git push --force origin main")
+        XCTAssertEqual(line.source, .terminalPrompt)
+    }
+
+    /// Chalant's own gate is answerable from the island; a terminal
+    /// prompt is not. When both are somehow true, the row shows the one
+    /// a tap can resolve.
+    func testAHeldCallOutranksATerminalPrompt() {
+        var subject = session()
+        subject.pendingPrompt = SessionStore.PendingPrompt(
+            tool: "Bash", detail: "git push", since: Date())
+        subject.approval = SessionStore.Approval(
+            id: "call-1", tool: "Bash", detail: "rm -rf build", askedAt: Date())
+
+        XCTAssertEqual(SessionActivity.line(for: subject).text, "rm -rf build")
+    }
+
+    /// A prompt nobody answered for an hour is not news, and a row that
+    /// still claims it is lying about the present. The prompt itself is
+    /// cleared by the turn ending; this is the backstop for a turn that
+    /// never ends.
+    func testAStalePromptStopsBeingTheLine() {
+        var subject = session(activity: "Editing SessionStore.swift")
+        subject.pendingPrompt = SessionStore.PendingPrompt(
+            tool: "Bash", detail: "git push",
+            since: Date().addingTimeInterval(-SessionStore.pendingPromptExpiry - 1))
+
+        XCTAssertEqual(SessionActivity.line(for: subject).text, "Editing SessionStore.swift")
+    }
+
     // MARK: Rung 3, a background agent that stopped for you
 
     /// Read verbatim from `~/.claude/jobs/<id>/state.json`. The founder's

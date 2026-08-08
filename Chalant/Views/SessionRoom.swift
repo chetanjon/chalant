@@ -428,6 +428,15 @@ private struct SessionDetail: View {
                     sessions.decide(approvalID: approval.id, as: decision)
                 }
             }
+            // Under the held call, above everything else, for the same
+            // reason it sits there on the ladder: an agent frozen at a
+            // prompt is the most stuck a session gets, and this is the
+            // only card that appears without anything being armed.
+            if let prompt = session.pendingPrompt, !prompt.isStale {
+                TerminalPromptCard(prompt: prompt, session: session) {
+                    AgentSessionsStrip.go(to: session)
+                }
+            }
             if let ask = session.ask, !ask.isFullyAnswered {
                 AskCard(ask: ask, answer: { choices in
                     sessions.answer(sessionID: session.id, with: choices)

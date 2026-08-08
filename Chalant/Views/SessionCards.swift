@@ -773,6 +773,61 @@ struct AskCard: View {
 /// wrong thing. And it says out loud that not answering is an option
 /// with a known outcome, because a dialog that looks like it might trap
 /// an agent forever is one people learn to avoid rather than use.
+/// Claude Code asking, in its own terminal, with the island watching.
+///
+/// Deliberately not styled as a decision. Nothing here can answer this
+/// prompt: a hook returning a decision on the event is ignored, and
+/// typing the answer in from outside selected the wrong option and
+/// wrote a permission rule nobody agreed to (both measured 2026-08-06).
+/// So this card names what is stuck and hands over a door, and says so
+/// rather than implying a button might work.
+struct TerminalPromptCard: View {
+    let prompt: SessionStore.PendingPrompt
+    let session: SessionStore.Session
+    let openTerminal: () -> Void
+
+    @Environment(\.chalantAccent) private var accent
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            Capsule().fill(accent.opacity(0.5)).frame(width: 2)
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                SectionHeader(title: "Asking you, in its terminal", tint: accent)
+                if !prompt.detail.isEmpty {
+                    Text(prompt.detail)
+                        .font(Theme.Fonts.captionMono)
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Text("Chalant can't answer this one from here. Claude Code owns this prompt "
+                     + "and only the window it is in, or the Claude app, can settle it.")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: Theme.Space.m) {
+                    Button(session.hasTerminal == false ? "Open folder" : "Open terminal",
+                           action: openTerminal)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(accent)
+                    if let phone = SessionStore.Session.phoneURL(bridgeID: session.bridgeID) {
+                        Button("Open on your phone") { NSWorkspace.shared.open(phone) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+            .padding(.leading, Theme.Space.m)
+        }
+        .rowInsets()
+        .chalantCard(radius: Theme.Radius.row)
+    }
+}
+
 struct ApprovalCard: View {
     let approval: SessionStore.Approval
     let decide: (SessionStore.Approval.Decision) -> Void

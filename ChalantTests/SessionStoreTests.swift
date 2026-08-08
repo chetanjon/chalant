@@ -771,6 +771,57 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(store.finished.isEmpty, "nothing here ended, so the record is empty")
     }
 
+    // MARK: A prompt Claude Code is showing in its own terminal
+
+    /// The band exists so nothing waiting on a person is ever quiet. A
+    /// terminal prompt is exactly that, even though the island cannot
+    /// answer it.
+    func testASessionStuckAtATerminalPromptLandsInAnswerThis() {
+        let store = SessionStore()
+        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .working)
+
+        store.notePendingPrompt(sessionID: "s", tool: "Bash", detail: "git push --force")
+
+        XCTAssertEqual(store.groups().first?.group, .needsYou)
+        XCTAssertEqual(store.sessions.first?.pendingPrompt?.detail, "git push --force")
+    }
+
+    /// Decoration, not creation, the same law `attach` follows: a
+    /// notification for a session nobody vouches for cannot invent a row.
+    func testAPromptForAnUnknownSessionIsDropped() {
+        let store = SessionStore()
+
+        store.notePendingPrompt(sessionID: "ghost", tool: "Bash", detail: "rm -rf /")
+
+        XCTAssertTrue(store.sessions.isEmpty)
+    }
+
+    /// The turn ending is proof the prompt was answered: Claude Code
+    /// cannot finish a turn while it is still standing at one.
+    func testTheTurnEndingClearsTheTerminalPrompt() {
+        let store = SessionStore()
+        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .working)
+        store.notePendingPrompt(sessionID: "s", tool: "Bash", detail: "git push")
+
+        store.clearPendingPrompt(sessionID: "s")
+
+        XCTAssertNil(store.sessions.first?.pendingPrompt)
+    }
+
+    /// And so is the next tool call: Claude Code does not reach for one
+    /// while a prompt about the last one is unanswered.
+    func testTheNextHeldCallClearsTheTerminalPrompt() {
+        let store = SessionStore()
+        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .working)
+        store.notePendingPrompt(sessionID: "s", tool: "Bash", detail: "git push")
+
+        _ = store.holdForApproval(
+            sessionID: "s", id: "call-1", tool: "Bash", detail: "ls", rules: ["Bash"])
+
+        XCTAssertNil(store.sessions.first?.pendingPrompt)
+        XCTAssertEqual(store.sessions.first?.approval?.detail, "ls")
+    }
+
     // MARK: Not asking twice about the same thing
 
     /// Holding every Bash call is what the founder asked for
