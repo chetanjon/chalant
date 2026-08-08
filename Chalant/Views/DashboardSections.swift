@@ -761,30 +761,46 @@ struct SessionsSection: View {
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(session.cwd)
+                // Was the full `cwd`, which is the same forty characters
+                // on every row for anyone who works in one place, and was
+                // read once and never again. The room stopped spending
+                // its line on that; this list was the other half of the
+                // same habit, and the founder's own screen showed four
+                // rows here reading nothing but a path and a mood word.
+                Text(SessionActivity.railLine(for: session, disambiguating: false))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)
-                    .truncationMode(.middle)
+                    .truncationMode(.tail)
             }
             Spacer(minLength: Theme.Space.m)
-            if let branch = session.branch, !branch.isEmpty {
-                Text(branch)
-                    .font(Theme.Fonts.microMono)
-                    .foregroundStyle(Theme.textTertiary)
-                    .lineLimit(1)
-            }
-            // The state is the column a reader scans; it is not a mark.
-            Text(Self.label(session.state))
-                .font(Theme.Fonts.micro)
-                .foregroundStyle(session.state == .needsInput ? accent : Theme.textTertiary)
-            Text(RelativeAge.short(session.updatedAt))
+            // Where it lives, in the width the state word used to take.
+            // Still worth a column here, unlike in the rail: this list is
+            // every agent on the machine, so telling two repos apart is
+            // the thing it is actually for.
+            Text(Self.place(session))
+                .font(Theme.Fonts.microMono)
+                .foregroundStyle(Theme.textTertiary)
+                .lineLimit(1)
+            Text(RelativeAge.short(session.stateSince))
                 .font(Theme.Fonts.microMono)
                 .foregroundStyle(Theme.textGhost)
                 .frame(width: 30, alignment: .trailing)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(session.title), \(session.cwd), \(Self.label(session.state))")
+        .accessibilityLabel(
+            "\(session.title), \(SessionActivity.line(for: session).text), \(Self.place(session))")
+    }
+
+    /// The folder, and the branch when there is one. The last component
+    /// only: `/Users/someone/Developer/work/moai` and
+    /// `/Users/someone/Developer/play/moai` are told apart by the branch
+    /// beside them far more often than by a path this column has no room
+    /// for anyway.
+    private static func place(_ session: SessionStore.Session) -> String {
+        let folder = session.cwd.split(separator: "/").last.map(String.init) ?? session.cwd
+        guard let branch = session.branch, !branch.isEmpty else { return folder }
+        return "\(folder) · \(branch)"
     }
 
     /// Filled for done and failed, matching `ActivityStore.State.symbol`:
@@ -802,16 +818,11 @@ struct SessionsSection: View {
         }
     }
 
-    private static func label(_ state: SessionStore.State) -> String {
-        switch state {
-        case .needsInput: return "Waiting for you"
-        case .working: return "Working"
-        case .idle: return "Waiting for input"
-        case .stale: return "Last seen"
-        case .done: return "Done"
-        case .failed: return "Failed"
-        }
-    }
+    // The state word column that used to live here is gone: "Waiting for
+    // you", "Working", "Waiting for input" are the mood words the
+    // founder called vague (2026-08-06), and every one of them has been
+    // replaced by the row's own line saying the actual thing. The glyph
+    // stays, because a mark is a mark and a claim is a claim.
 }
 
 // MARK: - What shows
