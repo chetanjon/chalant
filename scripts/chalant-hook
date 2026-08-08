@@ -261,6 +261,80 @@ curl -s --max-time 2 -H "X-Chalant-Token: $TOKEN" "$BASE/activity" \
   -d "{\"id\":\"$AGENT-$(esc "$SESSION")\",\"title\":\"$(esc "$WHAT")\",\"state\":\"$STATE\"}" \
   >/dev/null 2>&1
 
+# Claude Code putting a permission prompt on screen, and what it is
+# about.
+#
+# This is the only thing in this file that needs nothing switched on:
+# the Notification hook is already installed wherever this app has ever
+# been set up, and it fires for agents inside editors that cannot be
+# typed into, which is the one place the rest of this app goes quiet.
+# What it has always lacked is the subject: the payload says only
+# "Claude needs your permission". The call itself is the last unfinished
+# tool_use in the transcript, one read away, so the island can name the
+# command instead of shrugging at it.
+#
+# Never a decision. A hook cannot answer this event (verified
+# 2026-08-06: a permissionDecision returned here is ignored) and typing
+# an answer into the prompt from outside picked the wrong option, so the
+# island reports and points at the door.
+if [ "$AGENT" = "claude" ] && [ "$EVENT" = "Notification" ]; then
+  KIND="$(printf '%s' "$PAYLOAD" | python3 -c '
+import json, sys
+try: print(json.load(sys.stdin).get("notification_type") or "")
+except Exception: print("")' 2>/dev/null)"
+  if [ "$KIND" = "permission_prompt" ]; then
+    read -r P_TOOL P_DETAIL <<EOF
+$(printf '%s' "$PAYLOAD" | python3 -c '
+import json, sys
+try:
+    payload = json.load(sys.stdin)
+    path = payload.get("transcript_path") or ""
+    # Walk backwards: the newest tool_use with no tool_result after it
+    # is the one being asked about. Reading the tail only, because a
+    # transcript is routinely megabytes and this runs on a prompt.
+    import collections
+    lines = collections.deque(open(path, encoding="utf-8", errors="replace"), 400)
+    done, pending = set(), []
+    for raw in lines:
+        try: record = json.loads(raw)
+        except Exception: continue
+        message = record.get("message") or {}
+        blocks = message.get("content")
+        if not isinstance(blocks, list): continue
+        for block in blocks:
+            if not isinstance(block, dict): continue
+            if block.get("type") == "tool_result" and block.get("tool_use_id"):
+                done.add(block["tool_use_id"])
+            elif block.get("type") == "tool_use" and block.get("id"):
+                pending.append(block)
+    for block in reversed(pending):
+        if block["id"] in done: continue
+        data = block.get("input") or {}
+        detail = ""
+        if isinstance(data, dict):
+            for key in ("command", "file_path", "path", "url", "pattern", "query"):
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    detail = " ".join(value.split())[:400]
+                    break
+        print(block.get("name") or "-", detail)
+        break
+except Exception:
+    pass' 2>/dev/null)
+EOF
+    [ -n "${P_TOOL:-}" ] && curl -s --max-time 2 -H "X-Chalant-Token: $TOKEN" "$BASE/prompt" \
+      -d "{\"session\":\"$(esc "$SESSION")\",\"tool\":\"$(esc "$P_TOOL")\",\"detail\":\"$(esc "$P_DETAIL")\"}" \
+      >/dev/null 2>&1
+  fi
+fi
+
+# A turn cannot end while a prompt is still standing, so this is the
+# moment the last one is known to be over.
+if [ "$AGENT" = "claude" ] && [ "$EVENT" = "Stop" ]; then
+  curl -s -X DELETE --max-time 2 -H "X-Chalant-Token: $TOKEN" \
+    "$BASE/prompt/$SESSION" >/dev/null 2>&1
+fi
+
 # A message the user left on the island, collected at the turn
 # boundary: the only moment a Stop hook gets to say anything back.
 # Notification and PermissionRequest do not reach here. A permission

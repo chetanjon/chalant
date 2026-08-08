@@ -373,6 +373,38 @@ final class ActivityServer: @unchecked Sendable {
                 )
             }
 
+        // Claude Code is standing at its own permission prompt, in its
+        // own terminal, right now.
+        //
+        // Reported rather than held: nothing here can answer it (proven
+        // 2026-08-06, a decision returned on `PermissionRequest` is
+        // ignored). The value is that this arrives with no setup at all,
+        // from the `Notification` hook that is already installed, and it
+        // arrives for agents inside editors this app cannot type into,
+        // which is where the founder actually works.
+        case ("POST", "/prompt"):
+            guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+                  let session = object["session"] as? String, !session.isEmpty
+            else {
+                respond(connection, status: "400 Bad Request",
+                        body: #"{"ok":false,"error":"need session"}"#)
+                return
+            }
+            let tool = object["tool"] as? String ?? ""
+            let detail = object["detail"] as? String ?? ""
+            Task { @MainActor in
+                self.sessions?.notePendingPrompt(sessionID: session, tool: tool, detail: detail)
+                self.respond(connection, status: "200 OK", body: #"{"ok":true}"#)
+            }
+
+        // The prompt is over: the turn ended, or the agent moved on.
+        case ("DELETE", let path) where path.hasPrefix("/prompt/"):
+            let session = String(path.dropFirst("/prompt/".count)).removingPercentEncoding ?? ""
+            Task { @MainActor in
+                self.sessions?.clearPendingPrompt(sessionID: session)
+                self.respond(connection, status: "200 OK", body: #"{"ok":true}"#)
+            }
+
         // A tool call at the door. The one route in this app that can
         // change what a running agent does, so it answers the common
         // case first and fastest: "not interested", which is what every

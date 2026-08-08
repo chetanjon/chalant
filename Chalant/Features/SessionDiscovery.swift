@@ -36,6 +36,12 @@ final class SessionDiscovery {
         /// The last tool the agent reached for, which is the closest
         /// thing the transcript has to "what it is doing right now".
         var lastTool: String?
+        /// What that tool was pointed at: a file's name, a search
+        /// pattern, the agent's own description of a command. Always
+        /// rewritten together with `lastTool`, never carried over from
+        /// an earlier call, or a row reads "Searching for
+        /// SessionStore.swift".
+        var lastToolDetail: String?
         /// Claude Code's own `AskUserQuestion` call, still unanswered as
         /// of the end of this tail, if there is one. Set on the tool_use
         /// block, cleared the instant a later `tool_result` names the
@@ -70,17 +76,68 @@ final class SessionDiscovery {
     /// and "NotebookEdit" say nothing to somebody watching a strip go
     /// by. Anything unrecognised falls through to the raw name rather
     /// than to a shrug — a name is still more use than "working".
-    static func activityPhrase(forTool tool: String) -> String {
+    ///
+    /// `detail` names what the tool is pointed at, and it is the half
+    /// that makes the line worth reading: "Editing" answers a question
+    /// nobody asked, "Editing SessionStore.swift" answers the one they
+    /// did. Nil for a call whose input said nothing usable, which lands
+    /// back on the plain phrase this has always returned.
+    static func activityPhrase(forTool tool: String, detail: String? = nil) -> String {
+        let named = detail.flatMap { $0.isEmpty ? nil : $0 }
         switch tool {
-        case "Edit", "Write", "NotebookEdit": return "Editing"
-        case "Read": return "Reading"
-        case "Bash", "BashOutput": return "Running a command"
-        case "Grep", "Glob": return "Searching"
-        case "Task", "Agent": return "Running an agent"
+        case "Edit", "Write", "NotebookEdit":
+            return named.map { "Editing \($0)" } ?? "Editing"
+        case "Read":
+            return named.map { "Reading \($0)" } ?? "Reading"
+        // A described command is already a sentence the agent wrote
+        // about itself. "Running a command: Run the test suite" spends
+        // the row's width saying the same thing twice.
+        case "Bash", "BashOutput":
+            return named ?? "Running a command"
+        case "Grep", "Glob":
+            return named.map { "Searching for \($0)" } ?? "Searching"
+        case "Task", "Agent":
+            return named.map { "Running an agent: \($0)" } ?? "Running an agent"
         case "WebFetch", "WebSearch": return "Looking something up"
         case "TodoWrite": return "Planning"
         case "AskUserQuestion": return "Waiting on you"
         default: return tool
+        }
+    }
+
+    /// What a tool call is pointed at, read from the tool_use block's
+    /// own input.
+    ///
+    /// Every key here is one Claude Code actually writes. A path is cut
+    /// to its last component: the row has one line, and the directory is
+    /// almost always the session's own folder, which the row already
+    /// names elsewhere.
+    ///
+    /// Bash prefers the agent's `description` over the raw `command`.
+    /// That is the opposite of the approval card's verbatim rule, and
+    /// deliberately: the card is asking somebody to authorise a command,
+    /// where a summary would be a summary of the wrong thing, while this
+    /// is a glance at work already permitted.
+    static func toolDetail(fromInput input: [String: Any], tool: String) -> String? {
+        func text(_ key: String) -> String? {
+            guard let raw = input[key] as? String else { return nil }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        switch tool {
+        case "Bash", "BashOutput":
+            return text("description") ?? text("command")?
+                .split(whereSeparator: \.isNewline).first.map(String.init)
+        case "Task", "Agent":
+            return text("description")
+        case "Grep", "Glob":
+            return text("pattern")
+        case "WebFetch", "WebSearch":
+            return nil
+        default:
+            guard let path = text("file_path") ?? text("path") ?? text("notebook_path")
+            else { return nil }
+            return path.split(separator: "/").last.map(String.init) ?? path
         }
     }
 
@@ -173,6 +230,14 @@ final class SessionDiscovery {
         }
     }
 
+    /// Go and look now, because the registry just found somebody.
+    ///
+    /// Debounced rather than immediate: a sweep that vouches for three
+    /// sessions at once should cost one scan, not three.
+    func refresh() {
+        scheduleDebouncedRescan()
+    }
+
     func stop() {
         staleTimer?.invalidate()
         staleTimer = nil
@@ -213,7 +278,22 @@ final class SessionDiscovery {
         let byFreshness = files.sorted { $0.mtime > $1.mtime }
         let liveFiles = byFreshness.filter { live.contains($0.id) }
         let rest = byFreshness.filter { !live.contains($0.id) }
-        let freshest = liveFiles + rest.prefix(max(0, Self.maxFilesToTrack - liveFiles.count))
+        // While the registry holds the list, the running sessions are the
+        // whole of it, and reading anything else is work nobody asked for.
+        //
+        // The freshest-dozen fill was how a session got found at all
+        // before there was a registry, and it is what filled the rail with
+        // other people's robots: eight of the twelve freshest transcripts
+        // on the founder's Mac belonged to claude-mem's observer
+        // (2026-08-03). The store now refuses to make rows out of them, so
+        // reading them buys nothing and costs a quarter of a megabyte a
+        // time, on a file that a busy bot rewrites every few seconds.
+        //
+        // The fill stays for the case it was written for: no registry
+        // directory, so no list, so transcripts are the list again.
+        let freshest = store.registryIsAuthoritative
+            ? liveFiles
+            : liveFiles + rest.prefix(max(0, Self.maxFilesToTrack - liveFiles.count))
         var seenIds = Set<String>()
         for file in freshest {
             seenIds.insert(file.id)
@@ -243,7 +323,9 @@ final class SessionDiscovery {
             tracked[id] = TrackedFile(
                 mtime: mtime, title: title, cwd: cwd, branch: branch,
                 lastPrompt: metadata.lastPrompt,
-                activity: metadata.lastTool.map(Self.activityPhrase(forTool:)),
+                activity: metadata.lastTool.map {
+                    Self.activityPhrase(forTool: $0, detail: metadata.lastToolDetail)
+                },
                 lastMessage: metadata.lastMessage,
                 pendingNativeAsk: metadata.pendingNativeAsk
             )
@@ -418,6 +500,12 @@ final class SessionDiscovery {
                     case "tool_use":
                         if let name = block["name"] as? String, !name.isEmpty {
                             metadata.lastTool = name
+                            // Written together, always. A detail left
+                            // behind by the previous call would be
+                            // attached to this one, which is worse than
+                            // having none.
+                            metadata.lastToolDetail = (block["input"] as? [String: Any])
+                                .flatMap { Self.toolDetail(fromInput: $0, tool: name) }
                         }
                         // A newer AskUserQuestion always replaces an
                         // older pending one, same last-write-wins rule

@@ -520,7 +520,14 @@ final class ChalantTests: XCTestCase {
         let focus = FocusController(ambience: AmbienceController(engine: RecordingAmbienceSource()))
         focus.start(work: 1)
         XCTAssertEqual(focus.remaining, 60)
-        letTheClockRun(1.2)
+        // Past the second tick, not the first. The reading is
+        // `ceil(timeIntervalSinceNow)`, so a timer that fires a
+        // hair early at the one second mark computes ceil(59.0001)
+        // and reads 60, which is correct behaviour and an unstable
+        // assertion: this test failed on exactly that boundary
+        // (2026-08-06, "60 is not less than 60"). Two ticks of margin
+        // costs a second and can only fail if the clock is wrong.
+        letTheClockRun(2.2)
         let beforePause = focus.remaining
         XCTAssertLessThan(beforePause, 60)
 
@@ -531,7 +538,7 @@ final class ChalantTests: XCTestCase {
 
         focus.togglePause()
         // Resumed, it owes the time since resuming and not the pause.
-        letTheClockRun(1.2)
+        letTheClockRun(2.2)
         XCTAssertLessThan(focus.remaining, beforePause)
         XCTAssertGreaterThan(focus.remaining, beforePause - 5)
         focus.stop()

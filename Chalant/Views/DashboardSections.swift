@@ -160,6 +160,7 @@ struct SessionsSection: View {
     @Environment(\.chalantAccent) private var accent
 
     @AppStorage(SessionStore.approvalRulesKey) private var approvalRulesRaw = ""
+    @AppStorage(SessionStore.approvalExceptionsKey) private var approvalExceptionsRaw = ""
     @State private var draftRule = ""
 
     // The room's dials. Defaults repeated from where the readers live,
@@ -173,6 +174,9 @@ struct SessionsSection: View {
     /// What the last Arm/Disarm actually did, held so the card can say
     /// so instead of the button going quiet and the user wondering.
     @State private var armOutcome: HookInstall.ArmOutcome?
+    /// The same, for the phone switch. Its own state so one card's
+    /// result never appears under the other.
+    @State private var phoneOutcome: HookInstall.ArmOutcome?
 
     /// Read from the stored string rather than through
     /// `SessionStore.approvalRules()`, so editing a rule redraws this
@@ -192,6 +196,90 @@ struct SessionsSection: View {
 
     private func remove(_ rule: String) {
         approvalRulesRaw = rules.filter { $0 != rule }.joined(separator: "\n")
+    }
+
+    /// Read the same way `rules` is, so tapping Always allow on the
+    /// island redraws this list without a relaunch.
+    private var exceptions: [String] {
+        approvalExceptionsRaw
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func removeException(_ rule: String) {
+        approvalExceptionsRaw = exceptions.filter { $0 != rule }.joined(separator: "\n")
+    }
+
+    /// Your agents, on your phone.
+    ///
+    /// The founder asked what the best way is to control agents from the
+    /// Claude iPhone app. It is this: Claude Code 2.1.223 ships Remote
+    /// Control, and one setting at user scope puts every session on this
+    /// machine in the Claude app, permission prompts included. Their own
+    /// settings already had the push half switched on
+    /// (`agentPushNotifEnabled`, `inputNeededNotifEnabled`) with nothing
+    /// to reach.
+    ///
+    /// So this card is a switch, not a phone app, a push relay or a chat
+    /// bridge. Each of those would be Chalant rebuilding, worse,
+    /// something already inside the tool it watches.
+    private var phoneCard: some View {
+        let on = HookInstall.reachesYourPhone()
+        return SettingCard(title: "Pick a session up on your phone") {
+            SettingNote(
+                "Claude Code can put a session on your phone: the Claude app sees what it is "
+                + "doing, answers its questions, and approves what it asks for. This switch is "
+                + "Claude Code's own setting, not something Chalant invented, and it applies to "
+                + "every session you start from now on, wherever you start it."
+            )
+            HStack(spacing: Theme.Space.m) {
+                Image(systemName: on ? "checkmark.circle.fill" : "iphone")
+                    .font(Theme.Fonts.icon(.m))
+                    .foregroundStyle(on ? Theme.positive : Theme.textTertiary)
+                Text(on
+                     ? "On. New sessions can be picked up in the Claude app."
+                     : "Off. Sessions on this Mac stay on this Mac.")
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: Theme.Space.m)
+                if on {
+                    Button("Turn it off") { phoneOutcome = HookInstall.disarmRemoteControl() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                } else {
+                    Button("Turn it on") { phoneOutcome = HookInstall.armRemoteControl() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(accent)
+                }
+            }
+            if let phoneOutcome {
+                switch phoneOutcome {
+                case .armed(let backup):
+                    SettingNote(
+                        (on ? "Written. " : "Turned back off. ")
+                        + (backup.map { "Your old settings file is at \($0)." }
+                           ?? "There was no settings file to back up.")
+                        + " Sessions already running keep the settings they started with.")
+                case .alreadyArmed:
+                    SettingNote("It was already set that way. Nothing was written.")
+                case .refused(let why):
+                    Text(why)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                SettingNote(
+                    "This writes remoteControlAtStartup into ~/.claude/settings.json, keeping "
+                    + "everything else in the file and copying the old one aside first. A "
+                    + "session already on your phone shows an Open on your phone button in the "
+                    + "room."
+                )
+            }
+        }
     }
 
     /// Rules, and the honest state of whether they are armed.
@@ -253,6 +341,28 @@ struct SessionsSection: View {
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
                 WrappingRules(rules: unused) { add($0) }
+            }
+            if !exceptions.isEmpty {
+                SettingDivider()
+                Text("Never held")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                SettingNote(
+                    "You tapped Always allow on these. They skip the rules above, so a rule as "
+                    + "broad as Bash stays livable."
+                )
+                ForEach(exceptions, id: \.self) { rule in
+                    HStack(spacing: Theme.Space.m) {
+                        Text(rule)
+                            .font(Theme.Fonts.captionMono)
+                            .foregroundStyle(Theme.textPrimary)
+                        Spacer(minLength: 0)
+                        HoverGlyphButton(
+                            symbol: "xmark", label: "Start holding \(rule) again",
+                            scale: .s, tint: Theme.textTertiary
+                        ) { removeException(rule) }
+                    }
+                }
             }
             SettingDivider()
             armRow(armed: armed)
@@ -387,7 +497,8 @@ struct SessionsSection: View {
                 options: [("Compact", "compact"), ("Comfortable", "comfortable")],
                 width: 260
             )
-            SettingNote("Compact drops the folder and branch line, so more sessions fit without scrolling.")
+            SettingNote("Compact drops the line saying what each agent is doing, so more "
+                        + "sessions fit without scrolling.")
             SettingDivider()
             Text("Groups")
                 .font(Theme.Fonts.caption)
@@ -482,6 +593,8 @@ struct SessionsSection: View {
                     }
                 }
             }
+
+            phoneCard
 
             approvalCard
 
@@ -648,30 +761,46 @@ struct SessionsSection: View {
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(session.cwd)
+                // Was the full `cwd`, which is the same forty characters
+                // on every row for anyone who works in one place, and was
+                // read once and never again. The room stopped spending
+                // its line on that; this list was the other half of the
+                // same habit, and the founder's own screen showed four
+                // rows here reading nothing but a path and a mood word.
+                Text(SessionActivity.railLine(for: session, disambiguating: false))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)
-                    .truncationMode(.middle)
+                    .truncationMode(.tail)
             }
             Spacer(minLength: Theme.Space.m)
-            if let branch = session.branch, !branch.isEmpty {
-                Text(branch)
-                    .font(Theme.Fonts.microMono)
-                    .foregroundStyle(Theme.textTertiary)
-                    .lineLimit(1)
-            }
-            // The state is the column a reader scans; it is not a mark.
-            Text(Self.label(session.state))
-                .font(Theme.Fonts.micro)
-                .foregroundStyle(session.state == .needsInput ? accent : Theme.textTertiary)
-            Text(RelativeAge.short(session.updatedAt))
+            // Where it lives, in the width the state word used to take.
+            // Still worth a column here, unlike in the rail: this list is
+            // every agent on the machine, so telling two repos apart is
+            // the thing it is actually for.
+            Text(Self.place(session))
+                .font(Theme.Fonts.microMono)
+                .foregroundStyle(Theme.textTertiary)
+                .lineLimit(1)
+            Text(RelativeAge.short(session.stateSince))
                 .font(Theme.Fonts.microMono)
                 .foregroundStyle(Theme.textGhost)
                 .frame(width: 30, alignment: .trailing)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(session.title), \(session.cwd), \(Self.label(session.state))")
+        .accessibilityLabel(
+            "\(session.title), \(SessionActivity.line(for: session).text), \(Self.place(session))")
+    }
+
+    /// The folder, and the branch when there is one. The last component
+    /// only: `/Users/someone/Developer/work/moai` and
+    /// `/Users/someone/Developer/play/moai` are told apart by the branch
+    /// beside them far more often than by a path this column has no room
+    /// for anyway.
+    private static func place(_ session: SessionStore.Session) -> String {
+        let folder = session.cwd.split(separator: "/").last.map(String.init) ?? session.cwd
+        guard let branch = session.branch, !branch.isEmpty else { return folder }
+        return "\(folder) · \(branch)"
     }
 
     /// Filled for done and failed, matching `ActivityStore.State.symbol`:
@@ -689,16 +818,11 @@ struct SessionsSection: View {
         }
     }
 
-    private static func label(_ state: SessionStore.State) -> String {
-        switch state {
-        case .needsInput: return "Waiting for you"
-        case .working: return "Working"
-        case .idle: return "Waiting for input"
-        case .stale: return "Last seen"
-        case .done: return "Done"
-        case .failed: return "Failed"
-        }
-    }
+    // The state word column that used to live here is gone: "Waiting for
+    // you", "Working", "Waiting for input" are the mood words the
+    // founder called vague (2026-08-06), and every one of them has been
+    // replaced by the row's own line saying the actual thing. The glyph
+    // stays, because a mark is a mark and a claim is a claim.
 }
 
 // MARK: - What shows

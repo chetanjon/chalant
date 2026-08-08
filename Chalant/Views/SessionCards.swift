@@ -773,6 +773,61 @@ struct AskCard: View {
 /// wrong thing. And it says out loud that not answering is an option
 /// with a known outcome, because a dialog that looks like it might trap
 /// an agent forever is one people learn to avoid rather than use.
+/// Claude Code asking, in its own terminal, with the island watching.
+///
+/// Deliberately not styled as a decision. Nothing here can answer this
+/// prompt: a hook returning a decision on the event is ignored, and
+/// typing the answer in from outside selected the wrong option and
+/// wrote a permission rule nobody agreed to (both measured 2026-08-06).
+/// So this card names what is stuck and hands over a door, and says so
+/// rather than implying a button might work.
+struct TerminalPromptCard: View {
+    let prompt: SessionStore.PendingPrompt
+    let session: SessionStore.Session
+    let openTerminal: () -> Void
+
+    @Environment(\.chalantAccent) private var accent
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            Capsule().fill(accent.opacity(0.5)).frame(width: 2)
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                SectionHeader(title: "Asking you, in its terminal", tint: accent)
+                if !prompt.detail.isEmpty {
+                    Text(prompt.detail)
+                        .font(Theme.Fonts.captionMono)
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Text("Chalant can't answer this one from here. Claude Code owns this prompt "
+                     + "and only the window it is in, or the Claude app, can settle it.")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: Theme.Space.m) {
+                    Button(session.hasTerminal == false ? "Open folder" : "Open terminal",
+                           action: openTerminal)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(accent)
+                    if let phone = SessionStore.Session.phoneURL(bridgeID: session.bridgeID) {
+                        Button("Open on your phone") { NSWorkspace.shared.open(phone) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+            .padding(.leading, Theme.Space.m)
+        }
+        .rowInsets()
+        .chalantCard(radius: Theme.Radius.row)
+    }
+}
+
 struct ApprovalCard: View {
     let approval: SessionStore.Approval
     let decide: (SessionStore.Approval.Decision) -> Void
@@ -781,6 +836,20 @@ struct ApprovalCard: View {
     /// Matches the hook's own patience (`CHALANT_APPROVAL_WAIT`). Shown
     /// rather than hidden: the countdown is the promise that this ends.
     private static let patience: TimeInterval = 25
+
+    /// The rule "always allow" would write, and the words on the button.
+    private var exception: String {
+        SessionStore.suggestedException(tool: approval.tool, detail: approval.detail)
+    }
+
+    /// The rule without its tool wrapper, so the button reads
+    /// "Always allow git *" rather than "Always allow Bash(git *)".
+    private var exceptionLabel: String {
+        guard let open = exception.firstIndex(of: "("), exception.hasSuffix(")") else {
+            return exception
+        }
+        return String(exception[exception.index(after: open)..<exception.index(before: exception.endIndex)])
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -804,6 +873,21 @@ struct ApprovalCard: View {
                 Button("Deny") { decide(.deny) }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                // The second option Claude Code's own prompt has always
+                // had, and this card never did. Without it, holding
+                // every command means answering the same question about
+                // the same `git status` forever, which is how a person
+                // stops reading the ones that matter. Says the exact
+                // rule it will write, because a button that promises
+                // something wider than it says is not consent.
+                Button("Always allow \(exceptionLabel)") {
+                    SessionStore.addException(exception)
+                    decide(.allow)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Adds \(exception) to the calls Chalant never holds. "
+                      + "Undo it in Dashboard, Sessions.")
                 Spacer(minLength: 0)
                 TimelineView(.periodic(from: approval.askedAt, by: 1)) { context in
                     let left = Int(
