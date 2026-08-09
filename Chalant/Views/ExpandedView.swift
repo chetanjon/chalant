@@ -219,20 +219,38 @@ struct ExpandedView: View {
                                     measured: size.height, floor: face.expandedMinHeight))
                         }
                     }
-                    // A tab switch can slip past the size observer and
-                    // leave the shell wearing the previous tab's
-                    // height (seen live: a void under the notes list);
-                    // re-anchor after the new panel settles.
-                    .onChange(of: model.tab) { _, _ in
-                        DispatchQueue.main.async {
-                            let size = geo.size
-                            guard size.height > 0 else { return }
-                            model.expandedSize = CGSize(
-                                width: size.width,
-                                height: NotchViewModel.expandedHeight(
-                                    measured: size.height, floor: face.expandedMinHeight))
-                        }
-                    }
+                    // There was a second writer here, re-anchoring on a
+                    // tab change, and it was the bug.
+                    //
+                    // A `GeometryProxy` is only valid inside the layout
+                    // pass that made it. Captured into a
+                    // `DispatchQueue.main.async` it is a snapshot of the
+                    // size the panel had BEFORE the new tab laid out, and
+                    // no amount of delay refreshes it: it is frozen, not
+                    // late. So the re-anchor could only ever write the
+                    // previous tab's height, which is precisely the fault
+                    // it was added to prevent.
+                    //
+                    // Caught by logging both writers in order rather than
+                    // reading the result (2026-08-09):
+                    //
+                    //   WRITE 170 -> 326 by observer(tab=today)
+                    //   WRITE 326 -> 686 by observer(tab=sessions)
+                    //   WRITE 686 -> 326 by reanchor(tab)
+                    //
+                    // The observer had it right both times and was
+                    // overwritten a moment later. The island then wore
+                    // 326 while the room laid out against 686, which put
+                    // a held call's Allow and Deny 122pt past the
+                    // island's own edge, where they were photographed not
+                    // being (1.8.0).
+                    //
+                    // Nothing replaces it. The observer above carries
+                    // `initial: true` and fires on every size change, so
+                    // a tab whose height differs is already covered; a
+                    // tab whose height is identical needs no re-anchor by
+                    // definition, because the size it would write is the
+                    // size already there.
             }
         )
         // A drag over the island chalantrs the body with one large,

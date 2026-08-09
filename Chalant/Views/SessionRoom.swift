@@ -428,11 +428,13 @@ private struct SessionDetail: View {
             // The card the release exists for was built, positioned, and
             // invisible.
             //
-            // The sizing bug is real and still open. This does not fix
-            // it; it stops these three depending on it. An agent frozen
-            // at a question is the most stuck a session gets, and its
-            // card should not be the one riding on the app's least
-            // reliable number.
+            // The sizing bug behind that was fixed straight after
+            // (a second writer re-anchoring from a frozen
+            // `GeometryProxy`), so this is no longer load-bearing. It
+            // stays because it is the better order anyway: an agent
+            // frozen at a question is the most stuck a session gets, and
+            // the thing blocking you belongs above the record of what
+            // already happened.
             if let approval = session.approval, approval.decision == nil {
                 ApprovalCard(approval: approval, decide: { decision in
                     sessions.decide(approvalID: approval.id, as: decision)
