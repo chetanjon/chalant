@@ -425,9 +425,14 @@ final class ActivityServer: @unchecked Sendable {
                 return
             }
             let detail = object["detail"] as? String ?? ""
+            // Only used when this session has no row yet, which happens
+            // for anything headless: it is the only name such a row will
+            // ever have. Ignored entirely for a session already on the
+            // rail, whose folder came from a source that checked it.
+            let cwd = (object["cwd"] as? String).flatMap { $0.hasPrefix("/") ? $0 : nil }
             Task { @MainActor in
                 let held = self.sessions?.holdForApproval(
-                    sessionID: session, id: id, tool: tool, detail: detail) ?? false
+                    sessionID: session, id: id, tool: tool, detail: detail, cwd: cwd) ?? false
                 self.respond(
                     connection, status: "200 OK",
                     body: held ? #"{"ok":true,"gate":true}"# : #"{"ok":true,"gate":false}"#)

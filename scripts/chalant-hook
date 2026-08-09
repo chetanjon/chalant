@@ -207,9 +207,20 @@ else:
     print("")
 ' 2>/dev/null)"
 
+  # Sent so a session the app has never heard of can still be drawn.
+  # Anything headless (`claude -p`, an SDK worker) registers nowhere, so
+  # this folder is the only name its row will ever have.
+  CALL_CWD="$(printf '%s' "$PAYLOAD" | python3 -c '
+import json, sys
+try:
+    cwd = json.load(sys.stdin).get("cwd") or ""
+except Exception:
+    cwd = ""
+print(cwd if cwd.startswith("/") else "")' 2>/dev/null)"
+
   GATE="$(curl -s --connect-timeout 1 --max-time 2 -H "X-Chalant-Token: $TOKEN" \
     "$BASE/permission" \
-    -d "{\"session\":\"$(esc "$SESSION")\",\"id\":\"$CALL_ID\",\"tool\":\"$(esc "$TOOL_NAME")\",\"detail\":\"$(esc "$DETAIL")\"}" \
+    -d "{\"session\":\"$(esc "$SESSION")\",\"id\":\"$CALL_ID\",\"tool\":\"$(esc "$TOOL_NAME")\",\"detail\":\"$(esc "$DETAIL")\",\"cwd\":\"$(esc "$CALL_CWD")\"}" \
     2>/dev/null | python3 -c 'import json,sys
 try: print("yes" if json.load(sys.stdin).get("gate") else "no")
 except Exception: print("no")' 2>/dev/null)"

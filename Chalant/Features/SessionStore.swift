@@ -186,6 +186,14 @@ final class SessionStore: ObservableObject {
         /// A permission prompt Claude Code is showing in its own
         /// terminal. See `PendingPrompt`.
         var pendingPrompt: PendingPrompt?
+        /// When a hook last stood in this session waiting on an answer.
+        ///
+        /// The one thing allowed to outvote the registry, and only
+        /// briefly. A hook mid-call is a process talking to this app in
+        /// real time; a registry that has never heard of that session is
+        /// silence. Silence does not get to end a conversation somebody
+        /// is having. See `hookVouchWindow`.
+        var vouchedByHookAt: Date?
         /// What a background agent published about itself, when it is one
         /// and Claude Code wrote the file. See `JobState`.
         var job: JobState?
@@ -1449,6 +1457,7 @@ final class SessionStore: ObservableObject {
     /// existed.
     func holdForApproval(
         sessionID: String, id: String, tool: String, detail: String,
+        cwd: String? = nil,
         rules: [String] = SessionStore.approvalRules(),
         exceptions: [String] = SessionStore.approvalExceptions()
     ) -> Bool {
@@ -1458,7 +1467,45 @@ final class SessionStore: ObservableObject {
         // off. See `approvalExceptionsKey`.
         guard !exceptions.contains(where: { Self.rule($0, holds: tool, detail) }) else { return false }
         guard rules.contains(where: { Self.rule($0, holds: tool, detail) }) else { return false }
+        // A session nobody has heard of, with a process standing in a
+        // hook waiting on an answer.
+        //
+        // This used to be a dead end, and that was the gate's biggest
+        // hole: a `claude -p` run leaves a transcript but never
+        // registers in ~/.claude/sessions, so every headless agent on
+        // the machine walked straight past a gate the user believed was
+        // holding everything (found in the founder's own live test,
+        // 2026-08-08).
+        //
+        // Making a row here is not the warm-file heresy it looks like.
+        // The standing law is that a pid makes a session real and a file
+        // does not; a hook mid-call is better than a pid, because it is
+        // a process talking to this app in real time about something it
+        // is doing this second. This file already says so where the hold
+        // is recorded below.
+        //
+        // Only ever on a call that is actually held. Every tool call in
+        // every session reaches this method, and inventing a row for all
+        // of them would put every headless worker on the machine on the
+        // rail, which is the thing `SessionRegistry.isHeadlessBot`
+        // exists to prevent.
+        if !sessions.contains(where: { $0.id == sessionID }) {
+            sessions.append(Session(
+                id: sessionID,
+                title: cwd.flatMap { $0.split(separator: "/").last.map(String.init) } ?? "An agent",
+                cwd: cwd ?? "", branch: nil, lastPrompt: nil, activity: nil,
+                agent: .claude, state: .needsInput, ask: nil,
+                // No pid and no terminal: nothing here has been checked,
+                // and `hasTerminal` nil is the honest "nobody looked"
+                // that keeps the composer's own rule working.
+                pid: nil, kind: nil, startedAt: Date(), updatedAt: Date()
+            ))
+        }
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return false }
+        // Vouched for, by the strongest witness this store has. The
+        // registry sweep lands every five seconds and would otherwise
+        // file this row as lost while its agent is still at the door.
+        sessions[index].vouchedByHookAt = Date()
         guard sessions[index].approval == nil else { return false }
         // A new call means the last prompt was answered: Claude Code
         // does not reach for another tool while standing at one.
@@ -1547,11 +1594,35 @@ final class SessionStore: ObservableObject {
     /// registry has no standing to call a Cursor chat dead.
     func reconcileLive(against aliveIds: Set<String>) {
         guard !aliveIds.isEmpty else { return }
-        let unvouched = sessions.filter { $0.agent == .claude && !aliveIds.contains($0.id) }
+        let unvouched = sessions.filter {
+            $0.agent == .claude && !aliveIds.contains($0.id) && !Self.isVouchedByHook($0)
+        }
         disownedByRegistry.formUnion(unvouched.map(\.id))
         disownedByRegistry.subtract(aliveIds)
         disownedByRegistry.formIntersection(sessions.map(\.id))
         markGone(Set(unvouched.filter { $0.state.isLive }.map(\.id)))
+    }
+
+    /// How long a hook's word holds against a registry that has never
+    /// heard of the session.
+    ///
+    /// Short on purpose. It covers a call being decided and the next one
+    /// arriving, not an agent's whole afternoon: this is an exemption
+    /// from the one rule that keeps dead rows off the rail, and an
+    /// exemption nobody can outlive is just the rule repealed.
+    static let hookVouchWindow: TimeInterval = 90
+
+    nonisolated static func isVouchedByHook(_ session: Session) -> Bool {
+        guard let at = session.vouchedByHookAt else { return false }
+        return -at.timeIntervalSinceNow < hookVouchWindow
+    }
+
+    /// Age a vouch out immediately. Tests only: the window is wall-clock
+    /// and this store deliberately holds no injectable clock, so the
+    /// alternative is a test that sleeps for ninety seconds.
+    func expireVouch(sessionID: String) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        sessions[index].vouchedByHookAt = Date(timeIntervalSinceNow: -Self.hookVouchWindow - 1)
     }
 
     func markGone(_ ids: Set<String>) {

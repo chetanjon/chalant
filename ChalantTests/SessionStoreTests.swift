@@ -771,6 +771,97 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(store.finished.isEmpty, "nothing here ended, so the record is empty")
     }
 
+    // MARK: A call at the door from a session nobody has heard of
+
+    /// The hole the founder's own live test found (2026-08-08). A
+    /// `claude -p` run leaves a transcript but never registers in
+    /// `~/.claude/sessions`, so the store had no row for it and threw
+    /// its held call away. Anything headless walked straight past the
+    /// gate, which for a supervision feature is the whole feature
+    /// missing.
+    ///
+    /// It also contradicted this file's own doctrine: a held call is the
+    /// strongest proof of life there is, because a process is standing
+    /// in that hook right now waiting on an answer. That outranks a
+    /// registry file, so it is allowed to make its own row.
+    func testACallFromAnUnknownSessionMakesItsOwnRow() {
+        let store = SessionStore()
+
+        let held = store.holdForApproval(
+            sessionID: "headless", id: "call-1", tool: "Bash", detail: "rm -rf build",
+            cwd: "/Users/x/moai", rules: ["Bash"])
+
+        XCTAssertTrue(held)
+        XCTAssertEqual(store.sessions.count, 1)
+        XCTAssertEqual(store.sessions.first?.approval?.detail, "rm -rf build")
+        XCTAssertEqual(store.sessions.first?.cwd, "/Users/x/moai")
+        XCTAssertEqual(store.sessions.first?.title, "moai", "the folder is the only name it has")
+        XCTAssertEqual(store.groups().first?.group, .needsYou)
+    }
+
+    /// Only when the call is actually held. Every tool call in every
+    /// session reaches this route, gated or not, and inventing a row for
+    /// each one would put every headless worker on the machine on the
+    /// rail, which is exactly what `isHeadlessBot` exists to prevent.
+    func testAnUngatedCallFromAnUnknownSessionInventsNothing() {
+        let store = SessionStore()
+
+        let held = store.holdForApproval(
+            sessionID: "headless", id: "call-1", tool: "Read", detail: "/a/b.txt",
+            cwd: "/Users/x/moai", rules: ["Bash"])
+
+        XCTAssertFalse(held)
+        XCTAssertTrue(store.sessions.isEmpty)
+    }
+
+    /// And the row has to survive the sweep that lands five seconds
+    /// later. The registry never reported this session and never will,
+    /// so `reconcileLive` would file it as lost while its agent is still
+    /// standing at the door.
+    func testTheRegistryDoesNotDisownARowAHookIsStandingIn() {
+        let store = SessionStore()
+        _ = store.holdForApproval(
+            sessionID: "headless", id: "call-1", tool: "Bash", detail: "rm -rf build",
+            cwd: "/Users/x/moai", rules: ["Bash"])
+
+        // A sweep that saw somebody else entirely.
+        store.markLive(id: "other", name: "n", cwd: "/a", pid: 1,
+                       kind: .interactive, status: .working)
+        store.reconcileLive(against: ["other"])
+
+        XCTAssertEqual(store.sessions.first(where: { $0.id == "headless" })?.state, .needsInput)
+        XCTAssertTrue(store.finished.isEmpty, "nothing here ended")
+    }
+
+    /// The exemption is a vouch, not a permanent pass. Once the hook has
+    /// been gone longer than the window, the registry's word stands
+    /// again and the row leaves like any other.
+    func testAnOldVouchStopsProtectingTheRow() {
+        let store = SessionStore()
+        _ = store.holdForApproval(
+            sessionID: "headless", id: "call-1", tool: "Bash", detail: "rm -rf build",
+            cwd: "/Users/x/moai", rules: ["Bash"])
+        store.expireVouch(sessionID: "headless")
+
+        store.markLive(id: "other", name: "n", cwd: "/a", pid: 1,
+                       kind: .interactive, status: .working)
+        store.reconcileLive(against: ["other"])
+
+        XCTAssertEqual(store.sessions.first(where: { $0.id == "headless" })?.state, .stale)
+    }
+
+    /// A call with no folder still gets a row: something is waiting on
+    /// an answer, and having nothing to call it is not a reason to drop
+    /// the question.
+    func testACallWithNoFolderStillGetsARow() {
+        let store = SessionStore()
+
+        XCTAssertTrue(store.holdForApproval(
+            sessionID: "headless", id: "call-1", tool: "Bash", detail: "curl example.com",
+            cwd: nil, rules: ["Bash"]))
+        XCTAssertEqual(store.sessions.first?.title, "An agent")
+    }
+
     // MARK: A prompt Claude Code is showing in its own terminal
 
     /// The band exists so nothing waiting on a person is ever quiet. A
@@ -1242,14 +1333,25 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertNil(approval?.decision)
     }
 
-    /// Nowhere to draw a card is a reason to decline, not to invent a
-    /// row: the agent falls through to its own permission layer, which
-    /// is exactly what it did before this existed.
-    func testAToolCallForAnUnknownSessionIsNotHeld() {
+    /// This rule was the other way round until 2026-08-08, and the doc
+    /// here said "nowhere to draw a card is a reason to decline, not to
+    /// invent a row". It sounded careful and it was a hole: a `claude
+    /// -p` run registers nowhere, so its held calls were dropped and
+    /// every headless agent on the machine walked past a gate the user
+    /// believed was holding everything. The founder's own live test
+    /// found it within a minute of arming.
+    ///
+    /// A hook mid-call is a process talking to this app right now about
+    /// something it is doing this second. Declining to draw that is not
+    /// caution, it is losing the one event the whole feature exists for.
+    /// See `testACallFromAnUnknownSessionMakesItsOwnRow` for the shape
+    /// of the row it makes.
+    func testAToolCallForAnUnknownSessionIsHeldOnItsOwnNewRow() {
         let store = SessionStore()
-        XCTAssertFalse(store.holdForApproval(
+        XCTAssertTrue(store.holdForApproval(
             sessionID: "ghost", id: "c", tool: "Bash", detail: "ls", rules: ["Bash"]))
-        XCTAssertTrue(store.sessions.isEmpty)
+        XCTAssertEqual(store.sessions.count, 1)
+        XCTAssertEqual(store.sessions.first?.approval?.detail, "ls")
     }
 
     /// Two cards racing for one row is worse than the second call going
