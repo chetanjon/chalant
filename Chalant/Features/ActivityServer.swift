@@ -135,6 +135,15 @@ final class ActivityServer: @unchecked Sendable {
         self.store = store
         self.sessions = sessions
         token = Self.loadOrCreateToken()
+        // A tap on the island reaching an agent suspended inside a hook.
+        // `resolve` returning false means nobody was waiting on that id
+        // over HTTP, which is the ordinary case for a call held by the
+        // polling shim: that one collects its own answer on its own
+        // schedule, so the card has to stay put for it.
+        sessions?.onDecided = { [weak self] id, decision in
+            guard let self else { return }
+            Task { await self.gate.resolve(id, as: decision == .allow ? .allow : .deny) }
+        }
         queue.async { [self] in
             remainingPorts = Self.portCandidates()
             bindNext()
@@ -231,6 +240,14 @@ final class ActivityServer: @unchecked Sendable {
         // token, so 0600 is the point of it.
         try? FileManager.default.setAttributes(
             [.posixPermissions: 0o600], ofItemAtPath: url.path)
+        // An installed hook carries this app's address inside somebody
+        // else's config file, where it will sit until it is rewritten.
+        // If the port moved because something else had 4242, every
+        // prompt would post into a closed door and the island would go
+        // quiet with nothing anywhere saying why. Only ever a refresh of
+        // an entry that is already there: this never arms anybody.
+        guard HookInstall.answersPrompts() else { return }
+        HookInstall.armPrompts(port: port, token: token)
     }
 
     func stop() {
@@ -829,10 +846,32 @@ final class ActivityServer: @unchecked Sendable {
             respond(connection, status: "200 OK", body: "")
             return
         }
+        // However long the hook says it will wait, so the card counts
+        // down the truth rather than a number this app made up. A hook
+        // that sends no timeout is on Claude Code's default of 600.
+        let patience = (object["timeout"] as? TimeInterval) ?? 600
         watchForHangup(connection, id: call.id)
         Task { [weak self] in
             guard let self else { return }
+            // The card first, then the wait. A card that appeared after
+            // the agent was already suspended would be a race with
+            // nothing to win: the answer cannot arrive before the
+            // question is on screen.
+            let surfaced = await MainActor.run {
+                self.sessions?.holdForPrompt(
+                    sessionID: call.sessionID, id: call.id, tool: call.tool,
+                    detail: call.detail, cwd: call.cwd.isEmpty ? nil : call.cwd,
+                    patience: patience) ?? false
+            }
+            // Nowhere to show it, so nothing can answer it. Falling
+            // straight through hands the question to the terminal, which
+            // is where it already is.
+            guard surfaced else {
+                self.respond(connection, status: "200 OK", body: "")
+                return
+            }
             let decision = await gate.hold(call)
+            await MainActor.run { self.sessions?.clearApproval(id: call.id) }
             // Nil is `.abstain`: an empty 200, and the agent's own
             // permission flow runs untouched.
             self.respond(
@@ -856,7 +895,13 @@ final class ActivityServer: @unchecked Sendable {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 1) {
             [weak self] _, _, complete, error in
             guard complete || error != nil else { return }
-            Task { await self?.gate.abandon(id) }
+            Task { [weak self] in
+                guard let self, await gate.abandon(id) else { return }
+                // Only when the abandon actually found something. After
+                // a normal answer this fires too, on the cancel that
+                // follows the response, and the card is already gone.
+                await MainActor.run { self.sessions?.abandonApproval(id: id) }
+            }
         }
     }
 

@@ -789,7 +789,7 @@ struct TerminalPromptCard: View {
     @Environment(\.chalantAccent) private var accent
     /// Read once when the card appears rather than on every redraw: it
     /// reads a file, and this card can be on screen for minutes.
-    @State private var armed = HookInstall.holdsToolCalls()
+    @State private var armed = HookInstall.answersPrompts()
     @State private var outcome: HookInstall.ArmOutcome?
 
     /// The offer, made at the only moment it means anything.
@@ -812,8 +812,9 @@ struct TerminalPromptCard: View {
         if let outcome {
             switch outcome {
             case .armed, .alreadyArmed:
-                Text("Done. Chalant will hold these itself from now on, for sessions you "
-                     + "start after this one. This prompt still belongs to its terminal.")
+                Text("Done. The next prompt arrives here with Allow and Deny on it, for "
+                     + "sessions you start after this one. This one still belongs to its "
+                     + "terminal.")
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -825,16 +826,17 @@ struct TerminalPromptCard: View {
             }
         } else if !armed {
             HStack(alignment: .top, spacing: Theme.Space.m) {
-                Text("Chalant can hold these instead, so the next one arrives here with Allow "
+                Text("Chalant can take these instead, so the next one arrives here with Allow "
                      + "and Deny on it. One hook added to ~/.claude/settings.json, your old "
-                     + "file copied aside first.")
+                     + "file copied aside first. It holds prompts only, so nothing that "
+                     + "was not already being asked about gets interrupted.")
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 Button("Let me answer these here") {
-                    outcome = HookInstall.arm()
-                    armed = HookInstall.holdsToolCalls()
+                    outcome = HookInstall.armPrompts()
+                    armed = HookInstall.answersPrompts()
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -857,8 +859,18 @@ struct TerminalPromptCard: View {
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Text("Chalant can't answer this one from here. Claude Code owns this prompt "
-                     + "and only the window it is in, or the Claude app, can settle it.")
+                // Not "Chalant can't answer permission prompts", which
+                // is what this said for two releases and is not true: it
+                // can, and does, whenever the prompt reaches it. What is
+                // true is narrower and about this one prompt. A session
+                // reads its hooks when it starts, so anything already
+                // running when the door opened never learned to knock.
+                Text(armed
+                     ? "This one came from a session that started before Chalant was set up to "
+                       + "take prompts, so its terminal still owns it."
+                     : "Chalant can't answer this one: nothing told it the prompt existed until "
+                       + "it was already on screen. Its terminal, or the Claude app, can "
+                       + "settle it.")
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -889,9 +901,34 @@ struct ApprovalCard: View {
     let decide: (SessionStore.Approval.Decision) -> Void
     @Environment(\.chalantAccent) private var accent
 
-    /// Matches the hook's own patience (`CHALANT_APPROVAL_WAIT`). Shown
-    /// rather than hidden: the countdown is the promise that this ends.
-    private static let patience: TimeInterval = 25
+    /// Whatever the hook holding this one will actually wait, which is
+    /// 25 seconds for the polling shim and its own `timeout` for an HTTP
+    /// hook. Shown rather than hidden: the countdown is the promise that
+    /// this ends, and a promise made with the wrong number is worse than
+    /// none.
+    private var patience: TimeInterval { approval.patience }
+
+    /// A minute is a countdown. Ten minutes is a fact about the shape of
+    /// the wait, and ticking it down second by second only makes a card
+    /// look frantic about something that is not urgent yet.
+    private func remaining(at now: Date) -> String {
+        Self.remaining(
+            patience: patience, askedAt: approval.askedAt, now: now,
+            alsoInTerminal: approval.alsoInTerminal)
+    }
+
+    static func remaining(
+        patience: TimeInterval, askedAt: Date, now: Date, alsoInTerminal: Bool
+    ) -> String {
+        let left = patience - now.timeIntervalSince(askedAt)
+        guard left > 0 else {
+            return alsoInTerminal ? "only the terminal can answer now" : "back to the terminal"
+        }
+        let tail = alsoInTerminal ? "then only the terminal can answer"
+                                  : "then it asks the terminal"
+        if left >= 90 { return "\(Int((left / 60).rounded(.up)))m, \(tail)" }
+        return "\(Int(left.rounded(.down)))s, \(tail)"
+    }
 
     /// The rule "always allow" would write, and the words on the button.
     private var exception: String {
@@ -921,6 +958,20 @@ struct ApprovalCard: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            // Said out loud because it is measured and it is surprising:
+            // Claude Code paints its own prompt whatever a hook returns,
+            // and it did so even when the answer came back four
+            // milliseconds later. So this card is a second door onto one
+            // question, not a replacement for the first, and somebody
+            // who answers in the terminal instead has not done anything
+            // wrong.
+            if approval.alsoInTerminal {
+                Text("Also on screen in its own terminal. Answering here settles it in both "
+                     + "places.")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack(spacing: Theme.Space.m) {
                 Button("Allow") { decide(.allow) }
                     .buttonStyle(.borderedProminent)
@@ -946,12 +997,7 @@ struct ApprovalCard: View {
                       + "Undo it in Dashboard, Sessions.")
                 Spacer(minLength: 0)
                 TimelineView(.periodic(from: approval.askedAt, by: 1)) { context in
-                    let left = Int(
-                        (Self.patience - context.date.timeIntervalSince(approval.askedAt))
-                            .rounded(.down))
-                    Text(left > 0
-                         ? "\(left)s, then it asks the terminal"
-                         : "back to the terminal")
+                    Text(remaining(at: context.date))
                         .font(Theme.Fonts.caption)
                         .foregroundStyle(Theme.textTertiary)
                 }

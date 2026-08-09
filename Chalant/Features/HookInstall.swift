@@ -258,6 +258,149 @@ enum HookInstall {
         return .armed(backup: backup)
     }
 
+    // MARK: Answering the prompt itself
+
+    /// The path Claude Code posts a permission prompt to.
+    ///
+    /// It is also the tag. Nothing else on anybody's machine writes this
+    /// URL, so finding our own entry again needs no marker key smuggled
+    /// into a schema that belongs to Claude Code rather than to us.
+    static let promptPath = "/hook/permission-request"
+
+    /// How long the agent waits, and the number the card counts down.
+    /// The same as Claude Code's own default, said out loud here because
+    /// two places depend on it agreeing.
+    static let promptTimeout = 600
+
+    /// The `PermissionRequest` entry this app installs, and the only one
+    /// it will ever remove.
+    static func promptEntry(port: UInt16, token: String) -> [String: Any] {
+        [
+            "matcher": "*",
+            "hooks": [[
+                "type": "http",
+                // Loopback by name. This is written into somebody's
+                // config and outlives the process that wrote it.
+                "url": "http://127.0.0.1:\(port)\(promptPath)",
+                "timeout": promptTimeout,
+                // The literal token, never `$VAR`. Header interpolation
+                // reads the AGENT's environment, not this app's, and a
+                // variable that is not set there resolves to an empty
+                // string: a 401 with nothing anywhere saying why.
+                "headers": ["Authorization": "Bearer \(token)"],
+            ]],
+        ]
+    }
+
+    private static func isOurPromptEntry(_ entry: [String: Any]) -> Bool {
+        (entry["hooks"] as? [[String: Any]])?.contains {
+            ($0["url"] as? String)?.contains(promptPath) ?? false
+        } ?? false
+    }
+
+    /// Whether Claude Code will hand this app its permission prompts.
+    static func answersPrompts(settings: [String: Any]?) -> Bool {
+        guard let settings,
+              let hooks = settings["hooks"] as? [String: Any],
+              let entries = hooks["PermissionRequest"] as? [[String: Any]]
+        else { return false }
+        return entries.contains(where: isOurPromptEntry)
+    }
+
+    static func answersPrompts(at url: URL? = nil) -> Bool {
+        guard case .parsed(let object) = fileState(at: url ?? Self.settingsURL) else {
+            return false
+        }
+        return answersPrompts(settings: object)
+    }
+
+    /// Where the running server published its port and token.
+    static func serverConfig() -> (port: UInt16, token: String)? {
+        guard let data = try? Data(contentsOf: ActivityServer.configURL),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let port = object["port"] as? Int, let token = object["token"] as? String,
+              port > 0, port <= Int(UInt16.max), !token.isEmpty
+        else { return nil }
+        return (UInt16(port), token)
+    }
+
+    /// Let Claude Code hand its permission prompts to the island.
+    ///
+    /// Adding and refreshing are one operation on purpose. The port is
+    /// whichever one the server actually opened, and it can move if
+    /// something else has 4242, so an entry written last week can be
+    /// pointing at nothing. Re-running this fixes it, and re-running it
+    /// when nothing has changed writes no file at all, which is what
+    /// keeps it safe to call on every launch.
+    ///
+    /// Same safety as `arm`, through the same writer: refuses a file it
+    /// cannot parse, keeps every other hook in it, copies the old file
+    /// aside, writes atomically, and follows a symlink rather than
+    /// replacing it.
+    @discardableResult
+    static func armPrompts(
+        port: UInt16? = nil, token: String? = nil, at url: URL? = nil
+    ) -> ArmOutcome {
+        let resolved: (port: UInt16, token: String)
+        if let port, let token {
+            resolved = (port, token)
+        } else if let found = serverConfig() {
+            resolved = found
+        } else {
+            return .refused(
+                "Chalant's own door isn't open yet, so there is no address to point Claude "
+                + "Code at. Try again in a moment.")
+        }
+        let settingsURL = url ?? Self.settingsURL
+        var settings: [String: Any]
+        switch fileState(at: settingsURL) {
+        case .parsed(let object): settings = object
+        case .missing: settings = [:]
+        case .unreadable:
+            return .refused(
+                "Your ~/.claude/settings.json has something in it that isn't valid JSON. "
+                + "Chalant won't rewrite a file it can't read. Fix the file and try again.")
+        }
+        var hooks = settings["hooks"] as? [String: Any] ?? [:]
+        var entries = hooks["PermissionRequest"] as? [[String: Any]] ?? []
+        let wanted = promptEntry(port: resolved.port, token: resolved.token)
+        let ours = entries.filter(isOurPromptEntry)
+        // Already exactly right, down to the port and the token. Writing
+        // an identical file would still cost a backup and a timestamp,
+        // and this runs on every launch.
+        if ours.count == 1, NSDictionary(dictionary: ours[0]).isEqual(to: wanted) {
+            return .alreadyArmed
+        }
+        entries.removeAll(where: isOurPromptEntry)
+        entries.append(wanted)
+        hooks["PermissionRequest"] = entries
+        settings["hooks"] = hooks
+        return commit(settings, to: settingsURL)
+    }
+
+    /// Take it back out, leaving every other `PermissionRequest` hook
+    /// alone.
+    @discardableResult
+    static func disarmPrompts(at url: URL? = nil) -> ArmOutcome {
+        let settingsURL = url ?? Self.settingsURL
+        guard case .parsed(var settings) = fileState(at: settingsURL) else {
+            return .refused("Chalant can't read your ~/.claude/settings.json.")
+        }
+        guard var hooks = settings["hooks"] as? [String: Any],
+              var entries = hooks["PermissionRequest"] as? [[String: Any]]
+        else { return .armed(backup: nil) }
+        let before = entries.count
+        entries.removeAll(where: isOurPromptEntry)
+        guard entries.count != before else { return .armed(backup: nil) }
+        if entries.isEmpty {
+            hooks.removeValue(forKey: "PermissionRequest")
+        } else {
+            hooks["PermissionRequest"] = entries
+        }
+        settings["hooks"] = hooks
+        return commit(settings, to: settingsURL)
+    }
+
     // MARK: Reaching a session from your phone
 
     /// Claude Code's own setting for it. User scope only: repo-local
