@@ -765,6 +765,29 @@ final class ActivityServer: @unchecked Sendable {
         case ("POST", "/hook/permission-request"):
             hold(request, on: connection, event: "PermissionRequest")
 
+        // The turn ended, or the session did.
+        //
+        // Fire and forget, answered before anything else happens: this
+        // arrives at the end of every turn of every session on the
+        // machine, and a lifecycle event that could ever block one is a
+        // lifecycle event that will eventually hang one.
+        //
+        // What it is for: a turn cannot end while a permission prompt is
+        // standing, so this is proof that whatever was held is over. It
+        // is the only signal that arrives when somebody answers the
+        // prompt somewhere else, which with Remote Control on is a
+        // normal thing to do rather than an edge case. Claude Code does
+        // not close the hook connection in that case, so without this
+        // the card sat there offering a choice about a settled question
+        // until its own timeout ran out (measured: still held 30 seconds
+        // after the answer, with the command already run).
+        case ("POST", "/hook/stop"), ("POST", "/hook/session-end"):
+            let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any]
+            let ended = (object?["session_id"] as? String) ?? ""
+            respond(connection, status: "200 OK", body: "")
+            guard !ended.isEmpty else { return }
+            Task { await self.releaseHolds(inSession: ended) }
+
         // An MCP server asking the person something, mid tool call.
         //
         // The one kind of question this app can answer outright. Claude
@@ -1035,6 +1058,21 @@ final class ActivityServer: @unchecked Sendable {
                     body: HookPayload.response(for: .allow, event: event) ?? "")
                 return
             }
+            // A second prompt in a session that is already holding one
+            // means the first is over: Claude Code does not reach for
+            // another permission while standing at the last. Same rule
+            // the store already applies to a pending prompt when a call
+            // is held, arriving from the other side.
+            let stale = await MainActor.run { () -> String? in
+                guard let existing = self.sessions?.sessions
+                    .first(where: { $0.id == call.sessionID })?.approval?.id,
+                    existing != call.id
+                else { return nil }
+                return existing
+            }
+            if let stale, await gate.abandon(stale) {
+                await MainActor.run { self.sessions?.abandonApproval(id: stale) }
+            }
             // The card first, then the wait. A card that appeared after
             // the agent was already suspended would be a race with
             // nothing to win: the answer cannot arrive before the
@@ -1059,6 +1097,27 @@ final class ActivityServer: @unchecked Sendable {
             self.respond(
                 connection, status: "200 OK",
                 body: HookPayload.response(for: decision, event: event) ?? "")
+        }
+    }
+
+    /// Let go of anything this session was being held for.
+    ///
+    /// Only ever releases what this app is itself holding over HTTP. A
+    /// call held by the polling shim is left exactly where it is: that
+    /// one comes back and collects its own answer on its own schedule,
+    /// and withdrawing its card from here would take the question away
+    /// from somebody mid-decision.
+    private func releaseHolds(inSession sessionID: String) async {
+        let (heldCall, heldAsk) = await MainActor.run { () -> (String?, String?) in
+            guard let session = self.sessions?.sessions.first(where: { $0.id == sessionID })
+            else { return (nil, nil) }
+            return (session.approval?.id, session.ask.flatMap { $0.elicitation ? $0.id : nil })
+        }
+        if let heldCall, await gate.abandon(heldCall) {
+            await MainActor.run { self.sessions?.abandonApproval(id: heldCall) }
+        }
+        if let heldAsk, await answers.abandon(heldAsk) {
+            await MainActor.run { self.sessions?.clearAsk(askID: heldAsk) }
         }
     }
 

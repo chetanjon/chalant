@@ -319,6 +319,49 @@ final class PromptGateTests: XCTestCase {
         }
     }
 
+    func testTheSwitchAlsoInstallsTheTwoThatSayAQuestionIsOver() throws {
+        // A prompt answered in its own terminal, or on a phone through
+        // Remote Control, closes nothing this app can see. Stop is the
+        // only proof it gets, because a turn cannot end while a prompt
+        // is standing.
+        HookInstall.armPrompts(port: 4242, token: "t", at: settings)
+        let hooks = try XCTUnwrap(try read()["hooks"] as? [String: Any])
+        for event in ["PermissionRequest", "Elicitation", "Stop", "SessionEnd"] {
+            let entries = try XCTUnwrap(hooks[event] as? [[String: Any]], "\(event) missing")
+            let hook = try XCTUnwrap((entries.first?["hooks"] as? [[String: Any]])?.first)
+            XCTAssertEqual(hook["type"] as? String, "http")
+            XCTAssertTrue((hook["url"] as? String)?.hasPrefix("http://127.0.0.1:4242/hook/") ?? false)
+        }
+        // The two lifecycle ones never wait on a person, so they must
+        // not carry a person's timeout.
+        let stop = try XCTUnwrap(((hooks["Stop"] as? [[String: Any]])?.first?["hooks"]
+            as? [[String: Any]])?.first)
+        XCTAssertEqual(stop["timeout"] as? Int, HookInstall.lifecycleTimeout)
+    }
+
+    func testTurningItOffTakesAllFourBackOut() throws {
+        HookInstall.armPrompts(port: 4242, token: "t", at: settings)
+        HookInstall.disarmPrompts(at: settings)
+        let hooks = try XCTUnwrap(try read()["hooks"] as? [String: Any])
+        for event in ["PermissionRequest", "Elicitation", "Stop", "SessionEnd"] {
+            XCTAssertNil(hooks[event], "\(event) was left behind")
+        }
+    }
+
+    func testDisarmLeavesSomebodyElsesStopHookAlone() throws {
+        try #"""
+        {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "/theirs"}]}]}}
+        """#.write(to: settings, atomically: true, encoding: .utf8)
+        HookInstall.armPrompts(port: 4242, token: "t", at: settings)
+        HookInstall.disarmPrompts(at: settings)
+        let hooks = try XCTUnwrap(try read()["hooks"] as? [String: Any])
+        let stop = try XCTUnwrap(hooks["Stop"] as? [[String: Any]])
+        XCTAssertEqual(stop.count, 1)
+        XCTAssertTrue((stop[0]["hooks"] as? [[String: Any]])?.contains {
+            ($0["command"] as? String) == "/theirs"
+        } ?? false)
+    }
+
     func testTheOldFileIsCopiedAsideBeforeItIsChanged() throws {
         try #"{"hooks": {}, "mine": true}"#.write(to: settings, atomically: true, encoding: .utf8)
         let outcome = HookInstall.armPrompts(port: 4242, token: "t", at: settings)

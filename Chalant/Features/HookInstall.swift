@@ -270,6 +270,20 @@ enum HookInstall {
     /// The other half of the same switch: an MCP server's question.
     static let elicitationPath = "/hook/elicitation"
 
+    /// And the two that say a question is over.
+    ///
+    /// Neither ever holds anything up. They exist because a turn cannot
+    /// end while a permission prompt is standing, which makes them the
+    /// only proof this app gets that a prompt was answered somewhere
+    /// else: in its own terminal, or on a phone through Claude Code's
+    /// Remote Control. Without them a card outlived its question by the
+    /// full hook timeout.
+    static let stopPath = "/hook/stop"
+    static let sessionEndPath = "/hook/session-end"
+
+    /// Long enough to answer, for the two that wait on a person.
+    static let lifecycleTimeout = 10
+
     /// How long the agent waits, and the number the card counts down.
     /// The same as Claude Code's own default, said out loud here because
     /// two places depend on it agreeing.
@@ -285,7 +299,9 @@ enum HookInstall {
         entry(path: elicitationPath, port: port, token: token)
     }
 
-    private static func entry(path: String, port: UInt16, token: String) -> [String: Any] {
+    private static func entry(
+        path: String, port: UInt16, token: String, timeout: Int = promptTimeout
+    ) -> [String: Any] {
         [
             "matcher": "*",
             "hooks": [[
@@ -293,7 +309,7 @@ enum HookInstall {
                 // Loopback by name. This is written into somebody's
                 // config and outlives the process that wrote it.
                 "url": "http://127.0.0.1:\(port)\(path)",
-                "timeout": promptTimeout,
+                "timeout": timeout,
                 // The literal token, never `$VAR`. Header interpolation
                 // reads the AGENT's environment, not this app's, and a
                 // variable that is not set there resolves to an empty
@@ -387,6 +403,12 @@ enum HookInstall {
              promptEntry(port: resolved.port, token: resolved.token)),
             ("Elicitation", elicitationPath,
              elicitationEntry(port: resolved.port, token: resolved.token)),
+            ("Stop", stopPath,
+             entry(path: stopPath, port: resolved.port, token: resolved.token,
+                   timeout: lifecycleTimeout)),
+            ("SessionEnd", sessionEndPath,
+             entry(path: sessionEndPath, port: resolved.port, token: resolved.token,
+                   timeout: lifecycleTimeout)),
         ]
         var changed = false
         for (event, path, entry) in wanted {
@@ -419,7 +441,9 @@ enum HookInstall {
         }
         var changed = false
         for (event, path) in [("PermissionRequest", promptPath),
-                              ("Elicitation", elicitationPath)] {
+                              ("Elicitation", elicitationPath),
+                              ("Stop", stopPath),
+                              ("SessionEnd", sessionEndPath)] {
             guard var entries = hooks[event] as? [[String: Any]] else { continue }
             let before = entries.count
             entries.removeAll { isOurs($0, path: path) }
