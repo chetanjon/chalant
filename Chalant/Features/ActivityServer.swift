@@ -104,6 +104,9 @@ final class ActivityServer: @unchecked Sendable {
     /// waiting on an answer this app has not given yet.
     let gate = PendingDecisionStore()
 
+    /// And the questions, whose agents are suspended the same way.
+    let answers = PendingAnswerStore()
+
     /// The grants, and the account of everything settled without anybody
     /// being asked.
     private var policy: PolicyStore?
@@ -149,6 +152,21 @@ final class ActivityServer: @unchecked Sendable {
         sessions?.onDecided = { [weak self] id, decision in
             guard let self else { return }
             Task { await self.gate.resolve(id, as: decision == .allow ? .allow : .deny) }
+        }
+        // The same push for a question. `answers` keyed by the ask's own
+        // id, and a scripted `chalant ask` simply is not in there, so
+        // its poll-and-collect path is untouched by this.
+        sessions?.onAnswered = { [weak self] askID in
+            guard let self else { return }
+            Task { @MainActor in
+                guard let ask = self.sessions?.ask(withID: askID), ask.elicitation else { return }
+                var given: [String: String] = [:]
+                for question in ask.questions where !question.field.isEmpty {
+                    guard let answer = question.answer?.first else { continue }
+                    given[question.field] = answer
+                }
+                await self.answers.resolve(askID, as: .accept(given))
+            }
         }
         queue.async { [self] in
             remainingPorts = Self.portCandidates()
@@ -747,6 +765,15 @@ final class ActivityServer: @unchecked Sendable {
         case ("POST", "/hook/permission-request"):
             hold(request, on: connection, event: "PermissionRequest")
 
+        // An MCP server asking the person something, mid tool call.
+        //
+        // The one kind of question this app can answer outright. Claude
+        // Code's own `AskUserQuestion` is a dialog in a terminal that
+        // nothing outside that process can resolve; an elicitation is a
+        // hook, and a hook can be answered from anywhere.
+        case ("POST", "/hook/elicitation"):
+            askOnTheIsland(request, on: connection)
+
         // Every tool call, before there is a prompt to answer.
         //
         // This one never holds anything and never waits. It fires for
@@ -807,6 +834,63 @@ final class ActivityServer: @unchecked Sendable {
                     withJSONObject: ["ok": true, "decided": entries]
                 )).flatMap { String(data: $0, encoding: .utf8) } ?? #"{"ok":true,"decided":[]}"#
                 self.respond(connection, status: "200 OK", body: body)
+            }
+
+        // The questions on the island right now, and answering one the
+        // way the card does. Same reason as every other route in this
+        // block: a feature whose only proof is a person tapping a button
+        // is a feature nobody can test.
+        case ("GET", "/debug/asks"):
+            Task { @MainActor in
+                let asking = (self.sessions?.sessions ?? []).compactMap { session -> [String: Any]? in
+                    guard let ask = session.ask, ask.elicitation, !ask.isFullyAnswered
+                    else { return nil }
+                    return [
+                        "ask": ask.id, "session": session.id, "server": ask.server,
+                        "questions": ask.questions.map { question in
+                            [
+                                "field": question.field, "header": question.header,
+                                "question": question.question, "options": question.options,
+                                "answered": question.answer != nil,
+                            ] as [String: Any]
+                        },
+                    ]
+                }
+                let body = (try? JSONSerialization.data(
+                    withJSONObject: ["ok": true, "asking": asking]
+                )).flatMap { String(data: $0, encoding: .utf8) } ?? #"{"ok":true,"asking":[]}"#
+                self.respond(connection, status: "200 OK", body: body)
+            }
+
+        case ("POST", "/debug/answer"):
+            guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+                  let askID = object["ask"] as? String, !askID.isEmpty
+            else {
+                respond(connection, status: "400 Bad Request",
+                        body: #"{"ok":false,"error":"need ask, and either choices or decline"}"#)
+                return
+            }
+            Task { @MainActor in
+                if object["decline"] as? Bool == true {
+                    self.decline(askID: askID)
+                    self.sessions?.clearAsk(askID: askID)
+                    self.respond(connection, status: "200 OK", body: #"{"ok":true}"#)
+                    return
+                }
+                let index = object["index"] as? Int ?? 0
+                let choices = (object["choices"] as? [String]) ?? []
+                guard let session = (self.sessions?.sessions ?? [])
+                    .first(where: { $0.ask?.id == askID })
+                else {
+                    self.respond(connection, status: "404 Not Found",
+                                 body: #"{"ok":false,"error":"nobody is asking that"}"#)
+                    return
+                }
+                let took = self.sessions?.answerQuestion(
+                    sessionID: session.id, questionIndex: index, with: choices) ?? false
+                self.respond(
+                    connection, status: took ? "200 OK" : "400 Bad Request",
+                    body: took ? #"{"ok":true}"# : #"{"ok":false,"error":"no such question"}"#)
             }
 
         case ("POST", "/debug/resolve"):
@@ -978,6 +1062,50 @@ final class ActivityServer: @unchecked Sendable {
         }
     }
 
+    /// Told from the card that the person is not answering this one.
+    /// Harmless for anything that is not a held elicitation: nobody is
+    /// waiting on that id and nothing happens.
+    func decline(askID: String) {
+        Task { await answers.resolve(askID, as: .decline) }
+    }
+
+    /// Put an MCP server's question on the island and wait for it to be
+    /// answered.
+    private func askOnTheIsland(_ request: Request, on connection: NWConnection) {
+        guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+              let ask = HookPayload.elicitation(from: object, id: UUID().uuidString)
+        else {
+            respond(connection, status: "200 OK", body: "")
+            return
+        }
+        watchForHangup(connection, id: ask.id, answers: true)
+        Task { [weak self] in
+            guard let self else { return }
+            let surfaced = await MainActor.run {
+                self.sessions?.holdForElicitation(
+                    sessionID: ask.sessionID, askID: ask.id,
+                    questions: ask.fields.map { field in
+                        SessionStore.Ask.Question(
+                            header: field.title, question: field.prompt,
+                            options: field.options, multiSelect: false, field: field.name)
+                    },
+                    cwd: ask.cwd.isEmpty ? nil : ask.cwd, server: ask.server) ?? false
+            }
+            // Nowhere to put it, or a question already on that row. Say
+            // nothing and Claude Code's own dialog handles it, exactly
+            // as it would if this app were not here.
+            guard surfaced else {
+                self.respond(connection, status: "200 OK", body: "")
+                return
+            }
+            let outcome = await answers.hold(ask)
+            await MainActor.run { self.sessions?.clearAsk(sessionID: ask.sessionID) }
+            self.respond(
+                connection, status: "200 OK",
+                body: HookPayload.response(for: outcome, fields: ask.fields) ?? "")
+        }
+    }
+
     /// The agent's side of the wire going quiet.
     ///
     /// A hook that gave up, or a terminal that was closed, leaves a card
@@ -989,12 +1117,20 @@ final class ActivityServer: @unchecked Sendable {
     /// Harmless when the answer got there first. This also fires on the
     /// cancel that follows a successful response, and by then the id is
     /// gone from the store and abandoning it does nothing.
-    private func watchForHangup(_ connection: NWConnection, id: String) {
+    private func watchForHangup(
+        _ connection: NWConnection, id: String, answers isQuestion: Bool = false
+    ) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 1) {
             [weak self] _, _, complete, error in
             guard complete || error != nil else { return }
             Task { [weak self] in
-                guard let self, await gate.abandon(id) else { return }
+                guard let self else { return }
+                if isQuestion {
+                    guard await answers.abandon(id) else { return }
+                    await MainActor.run { self.sessions?.clearAsk(askID: id) }
+                    return
+                }
+                guard await gate.abandon(id) else { return }
                 // Only when the abandon actually found something. After
                 // a normal answer this fires too, on the cancel that
                 // follows the response, and the card is already gone.

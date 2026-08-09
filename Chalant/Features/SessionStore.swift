@@ -414,6 +414,17 @@ final class SessionStore: ObservableObject {
         /// decide which of the two it is doing, and to say so.
         var native: Bool = false
 
+        /// An MCP server's `elicitation/create`, held inside its hook.
+        /// Unlike a native ask this one really can be answered from
+        /// here: the agent is suspended waiting on the hook's reply, so
+        /// the card's buttons resolve it rather than queueing a message
+        /// for later. It can also be turned down, which is a real
+        /// answer of its own and the only kind of ask that has one.
+        var elicitation: Bool = false
+        /// Which MCP server asked, so the card can say whose question
+        /// this is.
+        var server: String = ""
+
         /// One question inside an ask: what it asks, what it offers,
         /// and what got picked, once it has been. `answer` lives here
         /// rather than once on the whole `Ask` so a bundle can be
@@ -426,6 +437,11 @@ final class SessionStore: ObservableObject {
             var options: [String]
             var multiSelect: Bool
             var answer: [String]? = nil     // set when the user taps; hook polls for this
+            /// The schema property this question came from, for an
+            /// elicitation. The answer has to go back under the name the
+            /// MCP server asked for, and nothing else in the card knows
+            /// that name.
+            var field: String = ""
         }
 
         /// True once every question in the bundle has an answer. For a
@@ -766,7 +782,8 @@ final class SessionStore: ObservableObject {
     /// wants something without saying what is worse than no row at all.
     @discardableResult
     func attach(
-        askID: String, to sessionID: String, questions rawQuestions: [Ask.Question], native: Bool = false
+        askID: String, to sessionID: String, questions rawQuestions: [Ask.Question],
+        native: Bool = false, elicitation: Bool = false, server: String = ""
     ) -> Bool {
         let questions: [Ask.Question] = rawQuestions.prefix(Self.maxQuestions).compactMap { raw in
             let question = String(raw.question.prefix(Self.askFieldLimit))
@@ -778,12 +795,15 @@ final class SessionStore: ObservableObject {
                 options: raw.options.prefix(Self.maxOptions)
                     .map { String($0.prefix(Self.askFieldLimit)) }
                     .filter { !$0.isEmpty },
-                multiSelect: raw.multiSelect
+                multiSelect: raw.multiSelect,
+                field: raw.field
             )
         }
         guard !questions.isEmpty, let index = sessions.firstIndex(where: { $0.id == sessionID })
         else { return false }
-        sessions[index].ask = Ask(id: askID, questions: questions, askedAt: Date(), native: native)
+        sessions[index].ask = Ask(
+            id: askID, questions: questions, askedAt: Date(), native: native,
+            elicitation: elicitation, server: server)
         let wasAlreadyAsking = sessions[index].state == .needsInput
         sessions[index].state = .needsInput
         sessions[index].updatedAt = Date()
@@ -837,6 +857,7 @@ final class SessionStore: ObservableObject {
         }
         sessions[index].updatedAt = Date()
         sort()
+        if ask.isFullyAnswered { onAnswered?(ask.id) }
         return true
     }
 
@@ -848,8 +869,64 @@ final class SessionStore: ObservableObject {
         answerQuestion(sessionID: sessionID, questionIndex: 0, with: choices)
     }
 
+    /// Told the moment an ask is fully answered, so an agent suspended
+    /// inside an `Elicitation` hook can be handed the answer rather than
+    /// coming back to poll for it. Carries the ask's own id, because by
+    /// the time this fires the card may already be on its way out.
+    var onAnswered: ((String) -> Void)?
+
+    /// An MCP server's question, with its own hook waiting on the reply.
+    ///
+    /// Self-registering for the same reason a held prompt is: a `claude
+    /// -p` run registers nowhere, and a question with no row to sit on
+    /// is a question nobody can answer. The folder is the only name such
+    /// a row will ever have.
+    @discardableResult
+    func holdForElicitation(
+        sessionID: String, askID: String, questions: [Ask.Question], cwd: String?,
+        server: String
+    ) -> Bool {
+        if !sessions.contains(where: { $0.id == sessionID }) {
+            sessions.append(Session(
+                id: sessionID,
+                title: cwd.flatMap { $0.split(separator: "/").last.map(String.init) } ?? "An agent",
+                cwd: cwd ?? "", branch: nil, lastPrompt: nil, activity: nil,
+                agent: .claude, state: .needsInput, ask: nil,
+                pid: nil, kind: nil, startedAt: Date(), updatedAt: Date()
+            ))
+        }
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return false }
+        // Same vouching a held call gets, and for the same reason: a
+        // hook mid-question is a process talking to this app in real
+        // time, which outranks a registry sweep that may be behind.
+        sessions[index].vouchedByHookAt = Date()
+        disownedByRegistry.remove(sessionID)
+        revive(sessionID)
+        // Never over the top of a question already being answered.
+        guard sessions[index].ask == nil || sessions[index].ask?.isFullyAnswered == true else {
+            return false
+        }
+        return attach(
+            askID: askID, to: sessionID, questions: questions,
+            native: false, elicitation: true, server: server)
+    }
+
     func pendingAsk(sessionID: String) -> Ask? {
         sessions.first { $0.id == sessionID }?.ask
+    }
+
+    /// By the ask's own id rather than its session's, which is what a
+    /// hook holding one knows: the id it minted is the only handle it
+    /// has, and the session it belongs to may have been renamed, revived
+    /// or re-sorted since.
+    func ask(withID askID: String) -> Ask? {
+        sessions.first { $0.ask?.id == askID }?.ask
+    }
+
+    func clearAsk(askID: String) {
+        guard let index = sessions.firstIndex(where: { $0.ask?.id == askID }) else { return }
+        sessions[index].ask = nil
+        sessions[index].updatedAt = Date()
     }
 
     /// Drops the question once the agent has collected its answer, so

@@ -267,6 +267,9 @@ enum HookInstall {
     /// into a schema that belongs to Claude Code rather than to us.
     static let promptPath = "/hook/permission-request"
 
+    /// The other half of the same switch: an MCP server's question.
+    static let elicitationPath = "/hook/elicitation"
+
     /// How long the agent waits, and the number the card counts down.
     /// The same as Claude Code's own default, said out loud here because
     /// two places depend on it agreeing.
@@ -275,13 +278,21 @@ enum HookInstall {
     /// The `PermissionRequest` entry this app installs, and the only one
     /// it will ever remove.
     static func promptEntry(port: UInt16, token: String) -> [String: Any] {
+        entry(path: promptPath, port: port, token: token)
+    }
+
+    static func elicitationEntry(port: UInt16, token: String) -> [String: Any] {
+        entry(path: elicitationPath, port: port, token: token)
+    }
+
+    private static func entry(path: String, port: UInt16, token: String) -> [String: Any] {
         [
             "matcher": "*",
             "hooks": [[
                 "type": "http",
                 // Loopback by name. This is written into somebody's
                 // config and outlives the process that wrote it.
-                "url": "http://127.0.0.1:\(port)\(promptPath)",
+                "url": "http://127.0.0.1:\(port)\(path)",
                 "timeout": promptTimeout,
                 // The literal token, never `$VAR`. Header interpolation
                 // reads the AGENT's environment, not this app's, and a
@@ -292,10 +303,14 @@ enum HookInstall {
         ]
     }
 
-    private static func isOurPromptEntry(_ entry: [String: Any]) -> Bool {
+    private static func isOurs(_ entry: [String: Any], path: String) -> Bool {
         (entry["hooks"] as? [[String: Any]])?.contains {
-            ($0["url"] as? String)?.contains(promptPath) ?? false
+            ($0["url"] as? String)?.contains(path) ?? false
         } ?? false
+    }
+
+    private static func isOurPromptEntry(_ entry: [String: Any]) -> Bool {
+        isOurs(entry, path: promptPath)
     }
 
     /// Whether Claude Code will hand this app its permission prompts.
@@ -362,18 +377,31 @@ enum HookInstall {
                 + "Chalant won't rewrite a file it can't read. Fix the file and try again.")
         }
         var hooks = settings["hooks"] as? [String: Any] ?? [:]
-        var entries = hooks["PermissionRequest"] as? [[String: Any]] ?? []
-        let wanted = promptEntry(port: resolved.port, token: resolved.token)
-        let ours = entries.filter(isOurPromptEntry)
-        // Already exactly right, down to the port and the token. Writing
-        // an identical file would still cost a backup and a timestamp,
-        // and this runs on every launch.
-        if ours.count == 1, NSDictionary(dictionary: ours[0]).isEqual(to: wanted) {
-            return .alreadyArmed
+        // One switch, two events. A permission prompt and an MCP
+        // server's question are the same thing from where the person is
+        // standing: something that stopped an agent and needs an answer.
+        // Splitting them into two switches would mean explaining a
+        // difference that only matters inside Claude Code.
+        let wanted = [
+            ("PermissionRequest", promptPath,
+             promptEntry(port: resolved.port, token: resolved.token)),
+            ("Elicitation", elicitationPath,
+             elicitationEntry(port: resolved.port, token: resolved.token)),
+        ]
+        var changed = false
+        for (event, path, entry) in wanted {
+            var entries = hooks[event] as? [[String: Any]] ?? []
+            let ours = entries.filter { isOurs($0, path: path) }
+            // Already exactly right, down to the port and the token.
+            // Writing an identical file would still cost a backup and a
+            // timestamp, and this runs on every launch.
+            if ours.count == 1, NSDictionary(dictionary: ours[0]).isEqual(to: entry) { continue }
+            entries.removeAll { isOurs($0, path: path) }
+            entries.append(entry)
+            hooks[event] = entries
+            changed = true
         }
-        entries.removeAll(where: isOurPromptEntry)
-        entries.append(wanted)
-        hooks["PermissionRequest"] = entries
+        guard changed else { return .alreadyArmed }
         settings["hooks"] = hooks
         return commit(settings, to: settingsURL)
     }
@@ -386,17 +414,26 @@ enum HookInstall {
         guard case .parsed(var settings) = fileState(at: settingsURL) else {
             return .refused("Chalant can't read your ~/.claude/settings.json.")
         }
-        guard var hooks = settings["hooks"] as? [String: Any],
-              var entries = hooks["PermissionRequest"] as? [[String: Any]]
-        else { return .armed(backup: nil) }
-        let before = entries.count
-        entries.removeAll(where: isOurPromptEntry)
-        guard entries.count != before else { return .armed(backup: nil) }
-        if entries.isEmpty {
-            hooks.removeValue(forKey: "PermissionRequest")
-        } else {
-            hooks["PermissionRequest"] = entries
+        guard var hooks = settings["hooks"] as? [String: Any] else {
+            return .armed(backup: nil)
         }
+        var changed = false
+        for (event, path) in [("PermissionRequest", promptPath),
+                              ("Elicitation", elicitationPath)] {
+            guard var entries = hooks[event] as? [[String: Any]] else { continue }
+            let before = entries.count
+            entries.removeAll { isOurs($0, path: path) }
+            guard entries.count != before else { continue }
+            changed = true
+            // An empty event list left behind is litter in somebody
+            // else's config.
+            if entries.isEmpty {
+                hooks.removeValue(forKey: event)
+            } else {
+                hooks[event] = entries
+            }
+        }
+        guard changed else { return .armed(backup: nil) }
         settings["hooks"] = hooks
         return commit(settings, to: settingsURL)
     }
@@ -605,6 +642,21 @@ enum HookInstall {
     /// own bundled script (MediaRemoteBridge.swift:62).
     static var bundledScriptPath: String? {
         Bundle.main.url(forResource: "chalant-hook", withExtension: nil)?.path
+    }
+
+    /// The bundled MCP server, and the one line that registers it.
+    ///
+    /// Not written by this app. Registering an MCP server means editing
+    /// `~/.claude.json`, which is a different file from the one the
+    /// prompt switch touches and a bigger thing to do on somebody's
+    /// behalf without being asked. So this is a command to read and
+    /// paste, and the path in it is real.
+    static var askServerPath: String? {
+        Bundle.main.url(forResource: "chalant-ask-mcp", withExtension: nil)?.path
+    }
+
+    static var askServerCommand: String {
+        "claude mcp add chalant -- \(askServerPath ?? "/path/to/scripts/chalant-ask-mcp")"
     }
 
     /// The snippet the dashboard offers for each agent, built around

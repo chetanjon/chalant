@@ -452,7 +452,7 @@ struct SessionsSection: View {
     /// answer them.
     private var promptsCard: some View {
         let on = HookInstall.answersPrompts()
-        return SettingCard(title: "Answer permission prompts here") {
+        return SettingCard(title: "Answer prompts and questions here") {
             SettingNote(
                 "When Claude Code stops to ask permission, the question arrives on the island "
                 + "with Allow and Deny on it, and answering settles it in the terminal too. "
@@ -465,7 +465,7 @@ struct SessionsSection: View {
                     .font(Theme.Fonts.icon(.m))
                     .foregroundStyle(on ? Theme.positive : Theme.textTertiary)
                 Text(on
-                     ? "On. New sessions hand their permission prompts to Chalant."
+                     ? "On. New sessions hand their prompts and questions to Chalant."
                      : "Off. Prompts stay in the terminal they came from.")
                     .font(Theme.Fonts.body)
                     .foregroundStyle(Theme.textSecondary)
@@ -499,6 +499,40 @@ struct SessionsSection: View {
                         .foregroundStyle(Theme.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+        }
+    }
+
+    /// The tool that lets an agent ask you something on purpose.
+    ///
+    /// Not installed by this app, and that is the difference between it
+    /// and the switch above. Registering an MCP server means editing
+    /// `~/.claude.json`, a different file from the one the switch
+    /// touches and a bigger thing to do on somebody's behalf without
+    /// being asked for it. So this is a real path in a real command,
+    /// and the person runs it.
+    private var askToolCard: some View {
+        SettingCard(title: "Let an agent ask you a question") {
+            SettingNote(
+                "Claude Code's own question dialog lives in the terminal it was asked in, and "
+                + "nothing outside that process can answer it. This adds an ask_user tool that "
+                + "goes through MCP elicitation instead, which arrives on the island with its "
+                + "choices on it, or a box to write in. Answer it and the agent carries on. "
+                + "Needs the switch above, which is what catches the question."
+            )
+            HStack(spacing: Theme.Space.m) {
+                Text(HookInstall.askServerCommand)
+                    .font(Theme.Fonts.captionMono)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(HookInstall.askServerCommand, forType: .string)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
         }
     }
@@ -761,6 +795,8 @@ struct SessionsSection: View {
             phoneCard
 
             promptsCard
+
+            askToolCard
 
             approvalCard
 

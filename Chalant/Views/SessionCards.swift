@@ -525,6 +525,8 @@ struct AskCard: View {
     /// queue actually took it, so a session that cannot receive
     /// messages right now can be told rather than left looking answered.
     let queue: (String) -> Bool
+    /// Elicitation only: says "not answering" to the server that asked.
+    var declined: (() -> Void)?
 
     /// Only used when several may be picked. A single-choice question
     /// answers (or advances) on the tap and never reads this.
@@ -580,6 +582,12 @@ struct AskCard: View {
                 .font(Theme.Fonts.body)
                 .foregroundStyle(Theme.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
+            if ask.elicitation, !ask.server.isEmpty, queuedOutcome == nil {
+                Text("\(ask.server) is waiting on this, inside the call it is making now.")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if ask.native, queuedOutcome == nil {
                 Text("Claude Code asked this itself, in its own terminal. Chalant can't answer it "
                      + "there directly: tapping a choice queues it as a message for this "
@@ -599,6 +607,17 @@ struct AskCard: View {
                         optionRow(option)
                     }
                     otherRow
+                }
+                if ask.elicitation {
+                    HStack(spacing: Theme.Space.m) {
+                        Spacer(minLength: 0)
+                        Button("Not answering") { decline() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("Tells "
+                                  + (ask.server.isEmpty ? "the server that asked" : ask.server)
+                                  + " you are not answering, rather than leaving it waiting.")
+                    }
                 }
                 if currentQuestion.multiSelect {
                     // Hoisted rather than inlined into the Button call:
@@ -631,9 +650,10 @@ struct AskCard: View {
     /// only the surface lacked a way to type it.
     @ViewBuilder
     private var otherRow: some View {
-        if writingOther {
+        if writingOther || currentQuestion.options.isEmpty {
             HStack(spacing: Theme.Space.s) {
-                TextField("Something else", text: $otherText)
+                TextField(currentQuestion.options.isEmpty ? "Your answer" : "Something else",
+                          text: $otherText)
                     .textFieldStyle(.plain)
                     .font(Theme.Fonts.body)
                     .onSubmit(sendOther)
@@ -669,6 +689,13 @@ struct AskCard: View {
             .buttonStyle(PressableStyle())
             .accessibilityLabel("Answer with your own words")
         }
+    }
+
+    /// Turned down, which only an elicitation can be. The agent is told
+    /// so and carries on, instead of standing there until its hook runs
+    /// out of patience.
+    private func decline() {
+        declined?()
     }
 
     private func sendOther() {

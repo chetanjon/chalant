@@ -100,6 +100,9 @@ struct AgentSessionsStrip: View {
                     sessions.answerQuestion(sessionID: session.id, questionIndex: index, with: choices)
                 }, queue: { label in
                     sessions.queue(message: label, for: session.id)
+                }, declined: {
+                    model.activityServer.decline(askID: ask.id)
+                    sessions.clearAsk(askID: ask.id)
                 })
             }
             // The composer goes in the slot AskCard occupies, under the

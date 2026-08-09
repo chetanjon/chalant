@@ -108,6 +108,82 @@ actor PendingDecisionStore {
     var count: Int { waiting.count }
 }
 
+/// An MCP server asking the person something, mid tool call.
+///
+/// Every field name here was read off a live payload from the installed
+/// Claude Code (2.1.226) rather than from the spec, which guessed at
+/// several of them. It is `message` and `requested_schema`, in snake
+/// case like everything else on the wire, and there is no `tool_name`
+/// and no `tool_use_id` at all: this event is not about a tool call, it
+/// is about a question.
+struct Elicitation: Sendable, Equatable {
+    struct Field: Sendable, Equatable {
+        let name: String
+        let title: String
+        let prompt: String
+        /// The choices, already turned into the words a person will tap.
+        /// Empty means the answer is whatever they type.
+        let options: [String]
+        let kind: Kind
+
+        enum Kind: String, Sendable { case string, number, integer, boolean }
+    }
+
+    let id: String
+    let sessionID: String
+    let cwd: String
+    let message: String
+    let server: String
+    let fields: [Field]
+}
+
+/// What came back from the island.
+enum ElicitationOutcome: Sendable, Equatable {
+    /// The answers, keyed by the schema's own property names.
+    case accept([String: String])
+    case decline
+    case cancel
+    /// Say nothing, and Claude Code's own dialog handles it exactly as
+    /// it would if this app were not installed.
+    case abstain
+}
+
+/// The questions waiting on somebody, and the agents suspended behind
+/// them. The same shape as `PendingDecisionStore` and separate from it
+/// on purpose: an answer is not a decision, and one store holding both
+/// would need a type that is neither.
+actor PendingAnswerStore {
+    private struct Waiting {
+        let ask: Elicitation
+        let continuation: CheckedContinuation<ElicitationOutcome, Never>
+    }
+
+    private var waiting: [String: Waiting] = [:]
+
+    func hold(_ ask: Elicitation) async -> ElicitationOutcome {
+        await withCheckedContinuation { continuation in
+            guard waiting[ask.id] == nil else {
+                continuation.resume(returning: .abstain)
+                return
+            }
+            waiting[ask.id] = Waiting(ask: ask, continuation: continuation)
+        }
+    }
+
+    @discardableResult
+    func resolve(_ id: String, as outcome: ElicitationOutcome) -> Bool {
+        guard let entry = waiting.removeValue(forKey: id) else { return false }
+        entry.continuation.resume(returning: outcome)
+        return true
+    }
+
+    @discardableResult
+    func abandon(_ id: String) -> Bool { resolve(id, as: .abstain) }
+
+    func isHeld(_ id: String) -> Bool { waiting[id] != nil }
+    var count: Int { waiting.count }
+}
+
 /// Reading an agent's hook payload, and writing back the one shape it
 /// will act on.
 ///
@@ -218,6 +294,103 @@ enum HookPayload {
             return nil
         }
         return String(data: data, encoding: .utf8)
+    }
+
+    /// Turn an elicitation payload into questions a person can answer.
+    ///
+    /// Claude Code's own words: "Elicitation requestedSchema must
+    /// describe an object with flat primitive properties". So this reads
+    /// one level and never recurses, and a property it cannot make sense
+    /// of is dropped rather than drawn as an empty row.
+    static func elicitation(from object: [String: Any], id: String) -> Elicitation? {
+        guard let sessionID = (object["session_id"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !sessionID.isEmpty
+        else { return nil }
+        let message = String(((object["message"] as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix(ActivityServer.maxDetail))
+        let schema = object["requested_schema"] as? [String: Any]
+        let properties = (schema?["properties"] as? [String: Any]) ?? [:]
+        // Dictionaries have no order and a form does. `required` is the
+        // only ordering the payload carries, so it goes first and the
+        // rest follow by name, which at least makes the card stable
+        // between two identical asks.
+        let required = (schema?["required"] as? [String]) ?? []
+        let names = required.filter { properties[$0] != nil }
+            + properties.keys.filter { !required.contains($0) }.sorted()
+        let fields: [Elicitation.Field] = names.prefix(SessionStore.maxQuestions)
+            .compactMap { name in
+                guard let property = properties[name] as? [String: Any] else { return nil }
+                let kind = Elicitation.Field.Kind(
+                    rawValue: (property["type"] as? String) ?? "string") ?? .string
+                let described = ((property["description"] as? String) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                // A boolean has no enum but it does have two answers,
+                // and offering them beats making somebody type "true".
+                let options: [String]
+                if let choices = property["enum"] as? [Any] {
+                    options = choices.compactMap { $0 as? String }
+                } else if kind == .boolean {
+                    options = ["Yes", "No"]
+                } else {
+                    options = []
+                }
+                return Elicitation.Field(
+                    name: name,
+                    title: String((((property["title"] as? String) ?? name)).prefix(60)),
+                    prompt: String((described.isEmpty ? message : described)
+                        .prefix(SessionStore.askFieldLimit)),
+                    options: options,
+                    kind: kind)
+            }
+        // Nothing to ask is not an error, it is a payload this app has
+        // no business answering.
+        guard !fields.isEmpty, !message.isEmpty || fields.contains(where: { !$0.prompt.isEmpty })
+        else { return nil }
+        return Elicitation(
+            id: id,
+            sessionID: String(sessionID.prefix(ActivityServer.maxID)),
+            cwd: (object["cwd"] as? String).flatMap { $0.hasPrefix("/") ? $0 : nil } ?? "",
+            message: message,
+            server: String(((object["mcp_server_name"] as? String) ?? "").prefix(60)),
+            fields: fields)
+    }
+
+    /// The answer, in the shape the event expects.
+    ///
+    /// `content` is checked against the schema at the far end, so an
+    /// answer that is not one of the offered choices is not an answer.
+    /// A boolean goes back as a boolean and a number as a number, which
+    /// is the whole reason the field's type is carried this far.
+    static func response(for outcome: ElicitationOutcome, fields: [Elicitation.Field]) -> String? {
+        var output: [String: Any] = ["hookEventName": "Elicitation"]
+        switch outcome {
+        case .abstain:
+            return nil
+        case .decline:
+            output["action"] = "decline"
+        case .cancel:
+            output["action"] = "cancel"
+        case .accept(let answers):
+            output["action"] = "accept"
+            var content: [String: Any] = [:]
+            for field in fields {
+                guard let given = answers[field.name] else { continue }
+                switch field.kind {
+                case .boolean:
+                    content[field.name] = given.lowercased() == "yes" || given.lowercased() == "true"
+                case .number:
+                    content[field.name] = Double(given) ?? given
+                case .integer:
+                    content[field.name] = Int(given) ?? given
+                case .string:
+                    content[field.name] = given
+                }
+            }
+            output["content"] = content
+        }
+        let data = try? JSONSerialization.data(withJSONObject: ["hookSpecificOutput": output])
+        return data.flatMap { String(data: $0, encoding: .utf8) }
     }
 
     /// The policy engine's answer, which has one more word available to

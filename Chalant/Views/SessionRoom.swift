@@ -446,6 +446,9 @@ private struct SessionDetail: View {
                     sessions.answerQuestion(sessionID: session.id, questionIndex: index, with: choices)
                 }, queue: { label in
                     sessions.queue(message: label, for: session.id)
+                }, declined: {
+                    model.activityServer.decline(askID: ask.id)
+                    sessions.clearAsk(askID: ask.id)
                 })
             }
             if session.canReceiveMessages {
