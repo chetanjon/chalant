@@ -462,6 +462,200 @@ enum HookInstall {
         return commit(settings, to: settingsURL)
     }
 
+    // MARK: The other two agents
+
+    /// The bundled shim that speaks for Cursor and Codex.
+    ///
+    /// Neither runs HTTP hooks, so both need a command in between. It is
+    /// a separate script from `chalant-hook` because it does a different
+    /// job: that one reports, this one decides, and a file that did both
+    /// would be one edit away from a reporting change blocking somebody's
+    /// build.
+    static var gateScriptPath: String? {
+        Bundle.main.url(forResource: "chalant-gate", withExtension: nil)?.path
+    }
+
+    /// Cursor's own shape, which is not Claude Code's: a flat entry with
+    /// the command on it, no inner `hooks` array, camelCase event names.
+    static func cursorGateEntry(path: String, endpoint: String) -> [String: Any] {
+        [
+            "type": "command",
+            "command": "\(path) cursor \(endpoint)",
+            "timeout": promptTimeout,
+        ]
+    }
+
+    static let cursorGateEvents = ["beforeShellExecution", "beforeMCPExecution"]
+
+    private static func isOurGate(_ entry: [String: Any]) -> Bool {
+        ((entry["command"] as? String) ?? "").contains("chalant-gate")
+    }
+
+    static func cursorAnswers(hooks: [String: Any]?) -> Bool {
+        guard let hooks, let events = hooks["hooks"] as? [String: Any] else { return false }
+        return cursorGateEvents.contains { event in
+            ((events[event] as? [[String: Any]]) ?? []).contains(where: isOurGate)
+        }
+    }
+
+    static func cursorAnswers(at url: URL? = nil) -> Bool {
+        guard case .parsed(let object) = fileState(at: url ?? Agent.cursor.fileURL) else {
+            return false
+        }
+        return cursorAnswers(hooks: object)
+    }
+
+    /// Hand Cursor's shell and MCP calls to the island.
+    ///
+    /// Same safety as the Claude Code writer, because it is the same
+    /// hazard: refuse a file this app cannot parse, keep every hook
+    /// already in it, copy the old one aside, write atomically, follow a
+    /// symlink rather than replacing it. This is the first time this app
+    /// has written either of these two files, and the founder's standing
+    /// rule was that it never would. The rule was written when there was
+    /// nothing to write; it is being reversed the same way the Claude
+    /// Code one was, deliberately and behind a button.
+    @discardableResult
+    static func armCursor(at url: URL? = nil) -> ArmOutcome {
+        guard let path = gateScriptPath else {
+            return .refused("Chalant can't find its own gate script inside the app bundle.")
+        }
+        let target = url ?? Agent.cursor.fileURL
+        var config: [String: Any]
+        switch fileState(at: target) {
+        case .parsed(let object): config = object
+        case .missing: config = [:]
+        case .unreadable:
+            return .refused(
+                "Your ~/.cursor/hooks.json has something in it that isn't valid JSON. "
+                + "Chalant won't rewrite a file it can't read. Fix the file and try again.")
+        }
+        // Cursor's file carries a version at the top level. Left alone
+        // when it is already there, and set when the file is new,
+        // because a hooks file without one may not be read at all.
+        if config["version"] == nil { config["version"] = 1 }
+        var events = config["hooks"] as? [String: Any] ?? [:]
+        var changed = false
+        for event in cursorGateEvents {
+            var entries = events[event] as? [[String: Any]] ?? []
+            let wanted = cursorGateEntry(path: path, endpoint: "gate")
+            let ours = entries.filter(isOurGate)
+            if ours.count == 1, NSDictionary(dictionary: ours[0]).isEqual(to: wanted) { continue }
+            entries.removeAll(where: isOurGate)
+            entries.append(wanted)
+            events[event] = entries
+            changed = true
+        }
+        guard changed else { return .alreadyArmed }
+        config["hooks"] = events
+        return commit(config, to: target)
+    }
+
+    @discardableResult
+    static func disarmCursor(at url: URL? = nil) -> ArmOutcome {
+        let target = url ?? Agent.cursor.fileURL
+        guard case .parsed(var config) = fileState(at: target) else {
+            return .refused("Chalant can't read your ~/.cursor/hooks.json.")
+        }
+        guard var events = config["hooks"] as? [String: Any] else { return .armed(backup: nil) }
+        var changed = false
+        for event in cursorGateEvents {
+            guard var entries = events[event] as? [[String: Any]] else { continue }
+            let before = entries.count
+            entries.removeAll(where: isOurGate)
+            guard entries.count != before else { continue }
+            changed = true
+            if entries.isEmpty { events.removeValue(forKey: event) } else { events[event] = entries }
+        }
+        guard changed else { return .armed(backup: nil) }
+        config["hooks"] = events
+        return commit(config, to: target)
+    }
+
+    /// Codex's file uses Claude Code's exact shape, per the evidence
+    /// gathered for the reporting hook, so the entry is nested the way
+    /// Claude Code's is rather than flat like Cursor's.
+    ///
+    /// UNVERIFIED end to end. There is no `codex` binary on the machine
+    /// this was built on, so the config shape is from its documentation
+    /// and the decision shape is a reasoned guess. It is written to fail
+    /// silent rather than closed, so the worst case is that Codex simply
+    /// carries on as it always did.
+    static func codexGateEntry(path: String) -> [String: Any] {
+        ["hooks": [["type": "command", "command": "\(path) codex gate",
+                    "timeout": promptTimeout]]]
+    }
+
+    private static func isOurNestedGate(_ entry: [String: Any]) -> Bool {
+        (entry["hooks"] as? [[String: Any]])?.contains {
+            (($0["command"] as? String) ?? "").contains("chalant-gate")
+        } ?? false
+    }
+
+    static func codexAnswers(hooks: [String: Any]?) -> Bool {
+        guard let hooks, let events = hooks["hooks"] as? [String: Any],
+              let entries = events["PreToolUse"] as? [[String: Any]]
+        else { return false }
+        return entries.contains(where: isOurNestedGate)
+    }
+
+    static func codexAnswers(at url: URL? = nil) -> Bool {
+        guard case .parsed(let object) = fileState(at: url ?? Agent.codex.fileURL) else {
+            return false
+        }
+        return codexAnswers(hooks: object)
+    }
+
+    @discardableResult
+    static func armCodex(at url: URL? = nil) -> ArmOutcome {
+        guard let path = gateScriptPath else {
+            return .refused("Chalant can't find its own gate script inside the app bundle.")
+        }
+        let target = url ?? Agent.codex.fileURL
+        var config: [String: Any]
+        switch fileState(at: target) {
+        case .parsed(let object): config = object
+        case .missing: config = [:]
+        case .unreadable:
+            return .refused(
+                "Your ~/.codex/hooks.json has something in it that isn't valid JSON. "
+                + "Chalant won't rewrite a file it can't read. Fix the file and try again.")
+        }
+        var events = config["hooks"] as? [String: Any] ?? [:]
+        var entries = events["PreToolUse"] as? [[String: Any]] ?? []
+        let wanted = codexGateEntry(path: path)
+        let ours = entries.filter(isOurNestedGate)
+        if ours.count == 1, NSDictionary(dictionary: ours[0]).isEqual(to: wanted) {
+            return .alreadyArmed
+        }
+        entries.removeAll(where: isOurNestedGate)
+        entries.append(wanted)
+        events["PreToolUse"] = entries
+        config["hooks"] = events
+        return commit(config, to: target)
+    }
+
+    @discardableResult
+    static func disarmCodex(at url: URL? = nil) -> ArmOutcome {
+        let target = url ?? Agent.codex.fileURL
+        guard case .parsed(var config) = fileState(at: target) else {
+            return .refused("Chalant can't read your ~/.codex/hooks.json.")
+        }
+        guard var events = config["hooks"] as? [String: Any],
+              var entries = events["PreToolUse"] as? [[String: Any]]
+        else { return .armed(backup: nil) }
+        let before = entries.count
+        entries.removeAll(where: isOurNestedGate)
+        guard entries.count != before else { return .armed(backup: nil) }
+        if entries.isEmpty {
+            events.removeValue(forKey: "PreToolUse")
+        } else {
+            events["PreToolUse"] = entries
+        }
+        config["hooks"] = events
+        return commit(config, to: target)
+    }
+
     // MARK: Reaching a session from your phone
 
     /// Claude Code's own setting for it. User scope only: repo-local

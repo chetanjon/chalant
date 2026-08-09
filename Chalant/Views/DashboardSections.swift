@@ -183,6 +183,8 @@ struct SessionsSection: View {
     /// And again for the prompt switch, for the same reason: one card's
     /// result must never appear under another's.
     @State private var promptOutcome: HookInstall.ArmOutcome?
+    /// And for the other two agents, kept apart for the same reason.
+    @State private var otherAgentOutcome: HookInstall.ArmOutcome?
 
     /// Read from the stored string rather than through
     /// `SessionStore.approvalRules()`, so editing a rule redraws this
@@ -503,6 +505,77 @@ struct SessionsSection: View {
         }
     }
 
+    /// Cursor and Codex, through the shim that speaks for them.
+    ///
+    /// Neither runs HTTP hooks, so both go through a command in the
+    /// bundle. And neither has Claude Code's second event, the one that
+    /// fires only when a person is actually needed: they have "before
+    /// this tool call" and nothing else. So the policy rules above do
+    /// the deciding for these two, and only what those rules send to you
+    /// becomes a card. Holding every shell command an agent runs is the
+    /// unlivable version of this feature.
+    private var otherAgentsCard: some View {
+        let cursorOn = HookInstall.cursorAnswers()
+        let codexOn = HookInstall.codexAnswers()
+        return SettingCard(title: "Cursor and Codex") {
+            SettingNote(
+                "Their held calls land in the same queue as Claude Code's, on their own rows. "
+                + "Chalant writes one entry into each tool's own hooks file, merging with what "
+                + "is already there and copying the old file aside first."
+            )
+            agentRow(label: "Cursor", on: cursorOn,
+                     detail: "Shell commands and MCP calls.",
+                     arm: { HookInstall.armCursor() }, disarm: { HookInstall.disarmCursor() })
+            SettingDivider()
+            agentRow(label: "Codex", on: codexOn,
+                     detail: "Tool calls. Untested end to end: there is no Codex on this Mac, "
+                           + "so this one is built from its documentation rather than proven. "
+                           + "It fails silent, so the worst case is Codex carrying on as before.",
+                     arm: { HookInstall.armCodex() }, disarm: { HookInstall.disarmCodex() })
+            if let outcome = otherAgentOutcome {
+                switch outcome {
+                case .armed(let backup):
+                    SettingNote(backup.map { "Written. Your old file is at \($0)." }
+                                ?? "Written. There was no file to back up.")
+                case .alreadyArmed:
+                    SettingNote("It was already there. Nothing was written.")
+                case .refused(let why):
+                    Text(why)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func agentRow(
+        label: String, on: Bool, detail: String,
+        arm: @escaping () -> HookInstall.ArmOutcome,
+        disarm: @escaping () -> HookInstall.ArmOutcome
+    ) -> some View {
+        HStack(alignment: .top, spacing: Theme.Space.m) {
+            Image(systemName: on ? "checkmark.circle.fill" : "circle.dashed")
+                .font(Theme.Fonts.icon(.m))
+                .foregroundStyle(on ? Theme.positive : Theme.textTertiary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textPrimary)
+                Text(detail)
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: Theme.Space.m)
+            Button(on ? "Turn off" : "Turn on") {
+                otherAgentOutcome = on ? disarm() : arm()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+    }
+
     /// The tool that lets an agent ask you something on purpose.
     ///
     /// Not installed by this app, and that is the difference between it
@@ -797,6 +870,8 @@ struct SessionsSection: View {
             promptsCard
 
             askToolCard
+
+            otherAgentsCard
 
             approvalCard
 

@@ -17,11 +17,16 @@ final class SessionStore: ObservableObject {
     enum Agent: String, Codable {
         case claude
         case cursor
+        /// Only ever reaches a row through the gate shim. Codex publishes
+        /// no session state this app can discover, so a Codex row exists
+        /// exactly as long as it is standing at a question and no longer.
+        case codex
 
         var label: String {
             switch self {
             case .claude: return "Claude Code"
             case .cursor: return "Cursor"
+            case .codex: return "Codex"
             }
         }
     }
@@ -1584,18 +1589,19 @@ final class SessionStore: ObservableObject {
     /// prompts it could not answer.
     func holdForPrompt(
         sessionID: String, id: String, tool: String, detail: String,
-        cwd: String? = nil, patience: TimeInterval
+        cwd: String? = nil, patience: TimeInterval, agent: Agent = .claude
     ) -> Bool {
         register(
             sessionID: sessionID, id: id, tool: tool, detail: detail, cwd: cwd,
-            patience: patience, alsoInTerminal: true)
+            patience: patience, alsoInTerminal: true, agent: agent)
     }
 
     /// The part both doors share: make a row if there is not one, vouch
     /// for it, and put the call on it.
     private func register(
         sessionID: String, id: String, tool: String, detail: String,
-        cwd: String?, patience: TimeInterval = 25, alsoInTerminal: Bool = false
+        cwd: String?, patience: TimeInterval = 25, alsoInTerminal: Bool = false,
+        agent: Agent = .claude
     ) -> Bool {
         // A session nobody has heard of, with a process standing in a
         // hook waiting on an answer.
@@ -1624,7 +1630,7 @@ final class SessionStore: ObservableObject {
                 id: sessionID,
                 title: cwd.flatMap { $0.split(separator: "/").last.map(String.init) } ?? "An agent",
                 cwd: cwd ?? "", branch: nil, lastPrompt: nil, activity: nil,
-                agent: .claude, state: .needsInput, ask: nil,
+                agent: agent, state: .needsInput, ask: nil,
                 // No pid and no terminal: nothing here has been checked,
                 // and `hasTerminal` nil is the honest "nobody looked"
                 // that keeps the composer's own rule working.

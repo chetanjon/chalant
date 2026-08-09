@@ -1,0 +1,188 @@
+#!/bin/bash
+# A tool call from Cursor or Codex, held at Chalant's door.
+#
+#   chalant-gate <agent> <endpoint>
+#   chalant-gate cursor permission-request  < the hook's JSON on stdin
+#
+# Claude Code speaks HTTP hooks natively and needs none of this. The
+# other two only run commands, so this is the piece of wire between
+# them: read their payload, hand it to Chalant, wait, and answer in
+# whatever shape the agent that called us expects.
+#
+# The shape is the whole point, and it is where the obvious version of
+# this script is wrong. Chalant answers in Claude Code's language
+# (`hookSpecificOutput`), and Cursor does not speak it: it wants
+# `{"permission": "allow"|"deny"|"ask"}` and would read anything else as
+# no opinion at all. Passing the decision straight back, as the plan for
+# this script originally said, would mean every Deny on the island
+# silently allowed the command on Cursor. So the answer is translated
+# here, per agent, and the translation is the reason this file exists.
+#
+# Failure is always silence. No Chalant, no token, a refused connection,
+# a timeout, a malformed answer: every one of them exits 0 with nothing
+# on stdout, and the agent's own permission flow runs exactly as it did
+# before this was installed. Cursor fails open by default and Codex is
+# not documented either way, so a shim that died loudly could block work
+# on a machine whose owner is not even at the keyboard.
+set -uo pipefail
+
+AGENT="${1:-}"
+ENDPOINT="${2:-}"
+[ -n "$AGENT" ] || exit 0
+[ -n "$ENDPOINT" ] || exit 0
+
+# Port and token together, from the one file Chalant publishes them in.
+# Never a hardcoded 4242: the port moves if something else has it, and a
+# shim holding a fresh token against a stale port fails in the most
+# confusing way available.
+CONFIG="${CHALANT_SERVER_CONFIG:-$HOME/Library/Application Support/Chalant/server.json}"
+[ -r "$CONFIG" ] || exit 0
+
+PAYLOAD="$(cat)"
+[ -n "$PAYLOAD" ] || exit 0
+
+# One python3 for the whole job: read the config, normalise the
+# agent's payload into the shape Chalant's endpoints expect, make the
+# request, and translate the answer back. Doing it in one process rather
+# than four keeps a hook that fires on every tool call cheap, and keeps
+# the JSON in a parser instead of in a regex.
+printf '%s' "$PAYLOAD" | python3 -c '
+import json, sys, urllib.request, hashlib, os
+
+agent, endpoint, config = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def quit_silently():
+    sys.exit(0)
+
+try:
+    with open(config) as handle:
+        server = json.load(handle)
+    port, token = int(server["port"]), server["token"]
+except Exception:
+    quit_silently()
+
+try:
+    payload = json.load(sys.stdin)
+    if not isinstance(payload, dict):
+        raise ValueError
+except Exception:
+    quit_silently()
+
+def first(*keys):
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+# Normalised at the edge, once, so nothing downstream in Chalant has to
+# know which agent a call came from. Cursor names none of its fields the
+# way Claude Code does and has no tool name at all for a shell command:
+# `beforeShellExecution` IS the tool name, it just says it in the event
+# rather than in a field.
+session = first("session_id", "conversation_id", "conversationId", "chat_id", "chatId")
+cwd = first("cwd", "workspaceRoot", "workspacePath")
+if not cwd:
+    roots = payload.get("workspace_roots") or payload.get("workspaceRoots")
+    if isinstance(roots, list) and roots and isinstance(roots[0], str):
+        cwd = roots[0]
+
+tool = first("tool_name", "toolName")
+tool_input = payload.get("tool_input") or payload.get("toolInput")
+command = first("command")
+if command and not tool:
+    tool = "Bash"
+if not isinstance(tool_input, dict):
+    # Cursor sends MCP arguments as a JSON string rather than an object.
+    if isinstance(tool_input, str):
+        try:
+            tool_input = json.loads(tool_input)
+        except Exception:
+            tool_input = {"command": tool_input}
+    else:
+        tool_input = {}
+if command and "command" not in tool_input:
+    tool_input["command"] = command
+
+if not session or not tool:
+    quit_silently()
+
+# A call needs an id that is the same on the way in and the way back.
+# Neither Cursor nor Codex promises a per-call one, and its generation
+# id repeats across the calls in a single turn, so the command itself
+# goes into the digest. Two identical commands in one generation are
+# genuinely the same question anyway.
+call_id = first("tool_use_id", "toolUseId", "generation_id", "generationId")
+digest = hashlib.sha256(
+    (call_id + "|" + tool + "|" + json.dumps(tool_input, sort_keys=True)).encode()
+).hexdigest()[:24]
+
+body = json.dumps({
+    "session_id": session,
+    "hook_event_name": "PermissionRequest" if endpoint == "permission-request" else "PreToolUse",
+    "cwd": cwd,
+    "tool_name": tool,
+    "tool_input": tool_input,
+    "tool_use_id": digest,
+    "agent": agent,
+    # What the far end will wait, so the card counts down the truth.
+    "timeout": int(os.environ.get("CHALANT_GATE_WAIT", "600")),
+}).encode()
+
+request = urllib.request.Request(
+    "http://127.0.0.1:%d/hook/%s" % (port, endpoint),
+    data=body,
+    headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+)
+try:
+    with urllib.request.urlopen(
+        request, timeout=int(os.environ.get("CHALANT_GATE_WAIT", "600"))
+    ) as response:
+        answer = response.read().decode("utf-8", "replace").strip()
+except Exception:
+    quit_silently()
+
+# An empty body is Chalant saying it has no opinion, which is not the
+# same as approval and must never be printed as one.
+if not answer:
+    quit_silently()
+
+try:
+    decided = json.loads(answer).get("hookSpecificOutput") or {}
+except Exception:
+    quit_silently()
+
+verdict = (decided.get("decision") or {}).get("behavior") or decided.get("permissionDecision")
+if verdict not in ("allow", "deny", "ask"):
+    quit_silently()
+
+reason = decided.get("permissionDecisionReason") or (
+    "Allowed from the Chalant island." if verdict == "allow" else "Denied from the Chalant island."
+)
+
+if agent == "cursor":
+    # Cursor speaks its own language and reads nothing else. Getting
+    # this wrong does not fail loudly: an unrecognised object is simply
+    # no opinion, and every Deny would quietly become an allow.
+    print(json.dumps({
+        "permission": verdict,
+        "userMessage": reason,
+        "agentMessage": reason,
+        "user_message": reason,
+        "agent_message": reason,
+    }))
+elif agent == "codex":
+    # Codex documents Claude Code`s config shape and says nothing about
+    # its decision shape, so this returns the one it might understand
+    # and nothing that could be misread. UNVERIFIED: no Codex on the
+    # machine this was written on, so this path is reasoned, not proven.
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": verdict,
+        "permissionDecisionReason": reason,
+    }}))
+else:
+    print(answer)
+' "$AGENT" "$ENDPOINT" "$CONFIG" 2>/dev/null || exit 0
+
+exit 0

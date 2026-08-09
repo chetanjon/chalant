@@ -26,6 +26,11 @@ struct HeldCall: Sendable, Identifiable, Equatable {
     /// Which hook event carried it, so a `PermissionRequest` and a
     /// `PreToolUse` about the same call can be told apart.
     let event: String
+    /// Which tool is standing there. Claude Code never sends this and
+    /// never needs to; the shim that speaks for Cursor and Codex adds
+    /// it, because a row with the wrong mark on it is a row about
+    /// somebody else's agent.
+    var agent: SessionStore.Agent = .claude
     let askedAt: Date
 }
 
@@ -238,6 +243,7 @@ enum HookPayload {
             permissionMode: (object["permission_mode"] as? String) ?? "",
             transcriptPath: (object["transcript_path"] as? String) ?? "",
             event: (object["hook_event_name"] as? String) ?? "",
+            agent: SessionStore.Agent(rawValue: (object["agent"] as? String) ?? "") ?? .claude,
             askedAt: Date()
         )
     }

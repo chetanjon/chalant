@@ -788,6 +788,87 @@ final class ActivityServer: @unchecked Sendable {
             guard !ended.isEmpty else { return }
             Task { await self.releaseHolds(inSession: ended) }
 
+        // Decide, and hold it if a person is actually needed.
+        //
+        // The door for agents whose only decision point is "before this
+        // tool call". Claude Code has two events, one that fires on
+        // every call and one that fires only when it has decided a
+        // person is required, so Chalant can be cheap on the first and
+        // hold on the second. Cursor and Codex have one, and holding a
+        // card for every shell command an agent runs is exactly the
+        // unlivable version of this feature the arming rules were
+        // invented to avoid.
+        //
+        // So the policy engine goes first. Reads and tests are allowed
+        // without a word, the things that cannot be taken back become a
+        // card, and everything in between is left to the agent's own
+        // permission flow.
+        case ("POST", "/hook/gate"):
+            guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+                  let call = HookPayload.call(from: object, fallbackID: UUID().uuidString)
+            else {
+                respond(connection, status: "200 OK", body: "")
+                return
+            }
+            let patience = (object["timeout"] as? TimeInterval) ?? 600
+            watchForHangup(connection, id: call.id)
+            Task { [weak self] in
+                guard let self else { return }
+                let verdict = await MainActor.run {
+                    PolicyEngine.evaluate(
+                        tool: call.tool, detail: call.detail, cwd: call.cwd,
+                        grants: self.policy?.live() ?? [])
+                }
+                switch verdict {
+                case .silent:
+                    self.respond(connection, status: "200 OK", body: "")
+                case .allow:
+                    self.respond(
+                        connection, status: "200 OK",
+                        body: await MainActor.run { self.settle(verdict, for: call) } ?? "")
+                case .ask(let rule, let reason):
+                    await MainActor.run {
+                        self.policy?.note(
+                            tool: call.tool, detail: call.detail, folder: call.cwd,
+                            allowed: false, rule: rule, reason: reason)
+                    }
+                    let surfaced = await MainActor.run {
+                        self.sessions?.holdForPrompt(
+                            sessionID: call.sessionID, id: call.id, tool: call.tool,
+                            detail: call.detail, cwd: call.cwd.isEmpty ? nil : call.cwd,
+                            patience: patience, agent: call.agent) ?? false
+                    }
+                    // Nowhere to show it, so nowhere to answer it. `ask`
+                    // rather than silence: this call was on the list
+                    // that must always reach a person, and the agent's
+                    // own prompt is the only person left.
+                    guard surfaced else {
+                        self.respond(
+                            connection, status: "200 OK",
+                            body: HookPayload.preToolUse(decision: "ask", reason: reason) ?? "")
+                        return
+                    }
+                    let decision = await gate.hold(call)
+                    await MainActor.run { self.sessions?.clearApproval(id: call.id) }
+                    switch decision {
+                    case .allow, .deny:
+                        self.respond(
+                            connection, status: "200 OK",
+                            body: HookPayload.preToolUse(
+                                decision: decision == .allow ? "allow" : "deny",
+                                reason: decision == .allow
+                                    ? "Allowed from the Chalant island."
+                                    : "Denied from the Chalant island.") ?? "")
+                    case .abstain:
+                        // Nobody answered. Back to the agent's own
+                        // prompt, which is where it would have gone.
+                        self.respond(
+                            connection, status: "200 OK",
+                            body: HookPayload.preToolUse(decision: "ask", reason: reason) ?? "")
+                    }
+                }
+            }
+
         // An MCP server asking the person something, mid tool call.
         //
         // The one kind of question this app can answer outright. Claude
@@ -1081,7 +1162,7 @@ final class ActivityServer: @unchecked Sendable {
                 self.sessions?.holdForPrompt(
                     sessionID: call.sessionID, id: call.id, tool: call.tool,
                     detail: call.detail, cwd: call.cwd.isEmpty ? nil : call.cwd,
-                    patience: patience) ?? false
+                    patience: patience, agent: call.agent) ?? false
             }
             // Nowhere to show it, so nothing can answer it. Falling
             // straight through hands the question to the terminal, which
