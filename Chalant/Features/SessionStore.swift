@@ -17,11 +17,16 @@ final class SessionStore: ObservableObject {
     enum Agent: String, Codable {
         case claude
         case cursor
+        /// Only ever reaches a row through the gate shim. Codex publishes
+        /// no session state this app can discover, so a Codex row exists
+        /// exactly as long as it is standing at a question and no longer.
+        case codex
 
         var label: String {
             switch self {
             case .claude: return "Claude Code"
             case .cursor: return "Cursor"
+            case .codex: return "Codex"
             }
         }
     }
@@ -381,6 +386,23 @@ final class SessionStore: ObservableObject {
         var detail: String
         var askedAt: Date
         var decision: Decision?
+        /// How long the agent will actually wait, which is not one
+        /// number any more. The shell shim polls for 25 seconds and then
+        /// hands the question back; an HTTP hook is suspended inside the
+        /// request and waits out its own `timeout`, 600 seconds by
+        /// default. The card counts this down out loud, so it has to be
+        /// the real one.
+        var patience: TimeInterval = 25
+        /// Whether the same question is also on screen in the session's
+        /// own terminal.
+        ///
+        /// True for a `PermissionRequest`, and this is measured rather
+        /// than assumed: Claude Code paints its own prompt whatever a
+        /// hook is doing, and it still painted it when the answer came
+        /// back four milliseconds later. So that card is a second place
+        /// to answer from, never the only one, and it must not claim
+        /// otherwise.
+        var alsoInTerminal: Bool = false
     }
 
     struct Ask: Identifiable, Equatable {
@@ -397,6 +419,17 @@ final class SessionStore: ObservableObject {
         /// decide which of the two it is doing, and to say so.
         var native: Bool = false
 
+        /// An MCP server's `elicitation/create`, held inside its hook.
+        /// Unlike a native ask this one really can be answered from
+        /// here: the agent is suspended waiting on the hook's reply, so
+        /// the card's buttons resolve it rather than queueing a message
+        /// for later. It can also be turned down, which is a real
+        /// answer of its own and the only kind of ask that has one.
+        var elicitation: Bool = false
+        /// Which MCP server asked, so the card can say whose question
+        /// this is.
+        var server: String = ""
+
         /// One question inside an ask: what it asks, what it offers,
         /// and what got picked, once it has been. `answer` lives here
         /// rather than once on the whole `Ask` so a bundle can be
@@ -409,6 +442,11 @@ final class SessionStore: ObservableObject {
             var options: [String]
             var multiSelect: Bool
             var answer: [String]? = nil     // set when the user taps; hook polls for this
+            /// The schema property this question came from, for an
+            /// elicitation. The answer has to go back under the name the
+            /// MCP server asked for, and nothing else in the card knows
+            /// that name.
+            var field: String = ""
         }
 
         /// True once every question in the bundle has an answer. For a
@@ -749,7 +787,8 @@ final class SessionStore: ObservableObject {
     /// wants something without saying what is worse than no row at all.
     @discardableResult
     func attach(
-        askID: String, to sessionID: String, questions rawQuestions: [Ask.Question], native: Bool = false
+        askID: String, to sessionID: String, questions rawQuestions: [Ask.Question],
+        native: Bool = false, elicitation: Bool = false, server: String = ""
     ) -> Bool {
         let questions: [Ask.Question] = rawQuestions.prefix(Self.maxQuestions).compactMap { raw in
             let question = String(raw.question.prefix(Self.askFieldLimit))
@@ -761,12 +800,15 @@ final class SessionStore: ObservableObject {
                 options: raw.options.prefix(Self.maxOptions)
                     .map { String($0.prefix(Self.askFieldLimit)) }
                     .filter { !$0.isEmpty },
-                multiSelect: raw.multiSelect
+                multiSelect: raw.multiSelect,
+                field: raw.field
             )
         }
         guard !questions.isEmpty, let index = sessions.firstIndex(where: { $0.id == sessionID })
         else { return false }
-        sessions[index].ask = Ask(id: askID, questions: questions, askedAt: Date(), native: native)
+        sessions[index].ask = Ask(
+            id: askID, questions: questions, askedAt: Date(), native: native,
+            elicitation: elicitation, server: server)
         let wasAlreadyAsking = sessions[index].state == .needsInput
         sessions[index].state = .needsInput
         sessions[index].updatedAt = Date()
@@ -820,6 +862,7 @@ final class SessionStore: ObservableObject {
         }
         sessions[index].updatedAt = Date()
         sort()
+        if ask.isFullyAnswered { onAnswered?(ask.id) }
         return true
     }
 
@@ -831,8 +874,64 @@ final class SessionStore: ObservableObject {
         answerQuestion(sessionID: sessionID, questionIndex: 0, with: choices)
     }
 
+    /// Told the moment an ask is fully answered, so an agent suspended
+    /// inside an `Elicitation` hook can be handed the answer rather than
+    /// coming back to poll for it. Carries the ask's own id, because by
+    /// the time this fires the card may already be on its way out.
+    var onAnswered: ((String) -> Void)?
+
+    /// An MCP server's question, with its own hook waiting on the reply.
+    ///
+    /// Self-registering for the same reason a held prompt is: a `claude
+    /// -p` run registers nowhere, and a question with no row to sit on
+    /// is a question nobody can answer. The folder is the only name such
+    /// a row will ever have.
+    @discardableResult
+    func holdForElicitation(
+        sessionID: String, askID: String, questions: [Ask.Question], cwd: String?,
+        server: String
+    ) -> Bool {
+        if !sessions.contains(where: { $0.id == sessionID }) {
+            sessions.append(Session(
+                id: sessionID,
+                title: cwd.flatMap { $0.split(separator: "/").last.map(String.init) } ?? "An agent",
+                cwd: cwd ?? "", branch: nil, lastPrompt: nil, activity: nil,
+                agent: .claude, state: .needsInput, ask: nil,
+                pid: nil, kind: nil, startedAt: Date(), updatedAt: Date()
+            ))
+        }
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return false }
+        // Same vouching a held call gets, and for the same reason: a
+        // hook mid-question is a process talking to this app in real
+        // time, which outranks a registry sweep that may be behind.
+        sessions[index].vouchedByHookAt = Date()
+        disownedByRegistry.remove(sessionID)
+        revive(sessionID)
+        // Never over the top of a question already being answered.
+        guard sessions[index].ask == nil || sessions[index].ask?.isFullyAnswered == true else {
+            return false
+        }
+        return attach(
+            askID: askID, to: sessionID, questions: questions,
+            native: false, elicitation: true, server: server)
+    }
+
     func pendingAsk(sessionID: String) -> Ask? {
         sessions.first { $0.id == sessionID }?.ask
+    }
+
+    /// By the ask's own id rather than its session's, which is what a
+    /// hook holding one knows: the id it minted is the only handle it
+    /// has, and the session it belongs to may have been renamed, revived
+    /// or re-sorted since.
+    func ask(withID askID: String) -> Ask? {
+        sessions.first { $0.ask?.id == askID }?.ask
+    }
+
+    func clearAsk(askID: String) {
+        guard let index = sessions.firstIndex(where: { $0.ask?.id == askID }) else { return }
+        sessions[index].ask = nil
+        sessions[index].updatedAt = Date()
     }
 
     /// Drops the question once the agent has collected its answer, so
@@ -1209,6 +1308,13 @@ final class SessionStore: ObservableObject {
     /// Decoration, never creation, the same law `attach` follows.
     func notePendingPrompt(sessionID: String, tool: String, detail: String) {
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        // Both hooks fire for one permission prompt: `PermissionRequest`
+        // holds it and puts a card with buttons on the row, and
+        // `Notification` reports the same prompt a moment later. Without
+        // this the row grows a second card about the same question, one
+        // of which says it cannot be answered while the other is busy
+        // answering it.
+        guard sessions[index].approval == nil else { return }
         sessions[index].pendingPrompt = PendingPrompt(
             tool: tool, detail: detail, since: Date())
         sessions[index].updatedAt = Date()
@@ -1467,6 +1573,36 @@ final class SessionStore: ObservableObject {
         // off. See `approvalExceptionsKey`.
         guard !exceptions.contains(where: { Self.rule($0, holds: tool, detail) }) else { return false }
         guard rules.contains(where: { Self.rule($0, holds: tool, detail) }) else { return false }
+        return register(sessionID: sessionID, id: id, tool: tool, detail: detail, cwd: cwd)
+    }
+
+    /// A permission prompt Claude Code is putting on screen right now,
+    /// with its own hook suspended inside this app waiting for an
+    /// answer.
+    ///
+    /// No rules are consulted, and that is the point. The arming rules
+    /// decide which calls to INTERRUPT, and this call was already
+    /// interrupted: Claude Code decided it needs a person, and the
+    /// person is being asked either way. Running it past the rules would
+    /// mean the island stays silent about the one question that is
+    /// definitely being asked, which is how 1.7.0 ended up reporting
+    /// prompts it could not answer.
+    func holdForPrompt(
+        sessionID: String, id: String, tool: String, detail: String,
+        cwd: String? = nil, patience: TimeInterval, agent: Agent = .claude
+    ) -> Bool {
+        register(
+            sessionID: sessionID, id: id, tool: tool, detail: detail, cwd: cwd,
+            patience: patience, alsoInTerminal: true, agent: agent)
+    }
+
+    /// The part both doors share: make a row if there is not one, vouch
+    /// for it, and put the call on it.
+    private func register(
+        sessionID: String, id: String, tool: String, detail: String,
+        cwd: String?, patience: TimeInterval = 25, alsoInTerminal: Bool = false,
+        agent: Agent = .claude
+    ) -> Bool {
         // A session nobody has heard of, with a process standing in a
         // hook waiting on an answer.
         //
@@ -1494,7 +1630,7 @@ final class SessionStore: ObservableObject {
                 id: sessionID,
                 title: cwd.flatMap { $0.split(separator: "/").last.map(String.init) } ?? "An agent",
                 cwd: cwd ?? "", branch: nil, lastPrompt: nil, activity: nil,
-                agent: .claude, state: .needsInput, ask: nil,
+                agent: agent, state: .needsInput, ask: nil,
                 // No pid and no terminal: nothing here has been checked,
                 // and `hasTerminal` nil is the honest "nobody looked"
                 // that keeps the composer's own rule working.
@@ -1511,7 +1647,8 @@ final class SessionStore: ObservableObject {
         // does not reach for another tool while standing at one.
         sessions[index].pendingPrompt = nil
         sessions[index].approval = Approval(
-            id: id, tool: tool, detail: detail, askedAt: Date(), decision: nil)
+            id: id, tool: tool, detail: detail, askedAt: Date(), decision: nil,
+            patience: patience, alsoInTerminal: alsoInTerminal)
         sessions[index].updatedAt = Date()
         // A held call is the strongest proof of life this store ever
         // gets: a `PreToolUse` hook is standing at the door right now,
@@ -1532,10 +1669,27 @@ final class SessionStore: ObservableObject {
         return true
     }
 
+    /// Told the instant somebody decides, so an agent suspended inside
+    /// an HTTP hook can be answered rather than left to come back and
+    /// ask again. The polling shim needs none of this: it collects from
+    /// `collectDecision` on its own schedule, which is why this pushes
+    /// rather than replacing that.
+    var onDecided: ((String, Approval.Decision) -> Void)?
+
     func decide(approvalID: String, as decision: Approval.Decision) {
         guard let index = sessions.firstIndex(where: { $0.approval?.id == approvalID })
         else { return }
         sessions[index].approval?.decision = decision
+        sessions[index].updatedAt = Date()
+        onDecided?(approvalID, decision)
+    }
+
+    /// The answer landed somewhere that does not need collecting, so the
+    /// card's work is done. Distinct from `abandonApproval` only in what
+    /// it means; both take the card off the row.
+    func clearApproval(id: String) {
+        guard let index = sessions.firstIndex(where: { $0.approval?.id == id }) else { return }
+        sessions[index].approval = nil
         sessions[index].updatedAt = Date()
     }
 

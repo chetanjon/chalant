@@ -80,6 +80,11 @@ struct AgentMark: View {
                 // bad copy of their mark.
                 Image(systemName: "cursorarrow")
                     .font(Theme.Fonts.icon(size: size, weight: .semibold))
+            case .codex:
+                // Same reasoning again: a letter in a ring, not an
+                // attempt at somebody else's logo.
+                Image(systemName: "chevron.left.forwardslash.chevron.right")
+                    .font(Theme.Fonts.icon(size: size, weight: .semibold))
             }
         }
         .frame(width: size, height: size)

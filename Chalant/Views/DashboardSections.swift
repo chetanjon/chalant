@@ -157,6 +157,9 @@ struct SessionsSection: View {
     /// Not `@ObservedObject`: this view only calls into it (the test
     /// button below) and never renders its published state.
     let activities: ActivityStore
+    /// Rendered here, so it is observed: the grant list and the audit
+    /// both change while this page is open.
+    @ObservedObject var policy: PolicyStore
     @Environment(\.chalantAccent) private var accent
 
     @AppStorage(SessionStore.approvalRulesKey) private var approvalRulesRaw = ""
@@ -177,6 +180,11 @@ struct SessionsSection: View {
     /// The same, for the phone switch. Its own state so one card's
     /// result never appears under the other.
     @State private var phoneOutcome: HookInstall.ArmOutcome?
+    /// And again for the prompt switch, for the same reason: one card's
+    /// result must never appear under another's.
+    @State private var promptOutcome: HookInstall.ArmOutcome?
+    /// And for the other two agents, kept apart for the same reason.
+    @State private var otherAgentOutcome: HookInstall.ArmOutcome?
 
     /// Read from the stored string rather than through
     /// `SessionStore.approvalRules()`, so editing a rule redraws this
@@ -436,6 +444,269 @@ struct SessionsSection: View {
         }
     }
 
+    /// Answering the prompt itself.
+    ///
+    /// A different switch from the rules above and worth keeping apart
+    /// from them. The rules decide which calls to INTERRUPT, and turning
+    /// them on means choosing to be asked about things nobody was asking
+    /// you about. This one interrupts nothing: it takes the questions
+    /// Claude Code was already going to ask and puts them where you can
+    /// answer them.
+    private var promptsCard: some View {
+        let on = HookInstall.answersPrompts()
+        return SettingCard(title: "Answer prompts and questions here") {
+            SettingNote(
+                "When Claude Code stops to ask permission, the question arrives on the island "
+                + "with Allow and Deny on it, and answering settles it in the terminal too. "
+                + "Nothing that was not already being asked about gets held up. The prompt "
+                + "still appears in its own terminal either way, so this adds a second place "
+                + "to answer rather than moving the question."
+            )
+            HStack(spacing: Theme.Space.m) {
+                Image(systemName: on ? "checkmark.circle.fill" : "questionmark.circle")
+                    .font(Theme.Fonts.icon(.m))
+                    .foregroundStyle(on ? Theme.positive : Theme.textTertiary)
+                Text(on
+                     ? "On. New sessions hand their prompts and questions to Chalant."
+                     : "Off. Prompts stay in the terminal they came from.")
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: Theme.Space.m)
+                if on {
+                    Button("Turn off") { promptOutcome = HookInstall.disarmPrompts() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                } else {
+                    Button("Turn on") { promptOutcome = HookInstall.armPrompts() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(accent)
+                }
+            }
+            if let promptOutcome {
+                switch promptOutcome {
+                case .armed(let backup):
+                    SettingNote(
+                        (on ? "Written. " : "Taken back out. ")
+                        + (backup.map { "Your old settings file is at \($0)." }
+                           ?? "There was no settings file to back up.")
+                        + " Claude Code picks this up on its next session; ones already running "
+                        + "keep the hooks they started with.")
+                case .alreadyArmed:
+                    SettingNote("It was already there. Nothing was written.")
+                case .refused(let why):
+                    Text(why)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    /// Cursor and Codex, through the shim that speaks for them.
+    ///
+    /// Neither runs HTTP hooks, so both go through a command in the
+    /// bundle. And neither has Claude Code's second event, the one that
+    /// fires only when a person is actually needed: they have "before
+    /// this tool call" and nothing else. So the policy rules above do
+    /// the deciding for these two, and only what those rules send to you
+    /// becomes a card. Holding every shell command an agent runs is the
+    /// unlivable version of this feature.
+    private var otherAgentsCard: some View {
+        let cursorOn = HookInstall.cursorAnswers()
+        let codexOn = HookInstall.codexAnswers()
+        return SettingCard(title: "Cursor and Codex") {
+            SettingNote(
+                "Their held calls land in the same queue as Claude Code's, on their own rows. "
+                + "Chalant writes one entry into each tool's own hooks file, merging with what "
+                + "is already there and copying the old file aside first."
+            )
+            agentRow(label: "Cursor", on: cursorOn,
+                     detail: "Shell commands and MCP calls.",
+                     arm: { HookInstall.armCursor() }, disarm: { HookInstall.disarmCursor() })
+            SettingDivider()
+            agentRow(label: "Codex", on: codexOn,
+                     detail: "Tool calls. Untested end to end: there is no Codex on this Mac, "
+                           + "so this one is built from its documentation rather than proven. "
+                           + "It fails silent, so the worst case is Codex carrying on as before.",
+                     arm: { HookInstall.armCodex() }, disarm: { HookInstall.disarmCodex() })
+            if let outcome = otherAgentOutcome {
+                switch outcome {
+                case .armed(let backup):
+                    SettingNote(backup.map { "Written. Your old file is at \($0)." }
+                                ?? "Written. There was no file to back up.")
+                case .alreadyArmed:
+                    SettingNote("It was already there. Nothing was written.")
+                case .refused(let why):
+                    Text(why)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func agentRow(
+        label: String, on: Bool, detail: String,
+        arm: @escaping () -> HookInstall.ArmOutcome,
+        disarm: @escaping () -> HookInstall.ArmOutcome
+    ) -> some View {
+        HStack(alignment: .top, spacing: Theme.Space.m) {
+            Image(systemName: on ? "checkmark.circle.fill" : "circle.dashed")
+                .font(Theme.Fonts.icon(.m))
+                .foregroundStyle(on ? Theme.positive : Theme.textTertiary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.textPrimary)
+                Text(detail)
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: Theme.Space.m)
+            Button(on ? "Turn off" : "Turn on") {
+                otherAgentOutcome = on ? disarm() : arm()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+    }
+
+    /// The tool that lets an agent ask you something on purpose.
+    ///
+    /// Not installed by this app, and that is the difference between it
+    /// and the switch above. Registering an MCP server means editing
+    /// `~/.claude.json`, a different file from the one the switch
+    /// touches and a bigger thing to do on somebody's behalf without
+    /// being asked for it. So this is a real path in a real command,
+    /// and the person runs it.
+    private var askToolCard: some View {
+        SettingCard(title: "Let an agent ask you a question") {
+            SettingNote(
+                "Claude Code's own question dialog lives in the terminal it was asked in, and "
+                + "nothing outside that process can answer it. This adds an ask_user tool that "
+                + "goes through MCP elicitation instead, which arrives on the island with its "
+                + "choices on it, or a box to write in. Answer it and the agent carries on. "
+                + "Needs the switch above, which is what catches the question."
+            )
+            HStack(spacing: Theme.Space.m) {
+                Text(HookInstall.askServerCommand)
+                    .font(Theme.Fonts.captionMono)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(HookInstall.askServerCommand, forType: .string)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+    }
+
+    /// What you have handed over, and when it runs out.
+    private var grantsCard: some View {
+        let live = policy.live()
+        return SettingCard(title: "Standing permissions") {
+            SettingNote(
+                "Made from an approval card, with Allow … here for. Each one is a pattern in "
+                + "one folder with an end time, never everywhere and never forever, and none of "
+                + "them can allow the things Chalant always asks about."
+            )
+            if live.isEmpty {
+                SettingNote("Nothing standing. Every call is decided as it comes.")
+            } else {
+                ForEach(live) { grant in
+                    HStack(spacing: Theme.Space.m) {
+                        Text(grant.pattern)
+                            .font(Theme.Fonts.captionMono)
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("in \((grant.repo as NSString).lastPathComponent)")
+                            .font(Theme.Fonts.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                        Spacer(minLength: Theme.Space.m)
+                        Text(Self.until(grant.expires))
+                            .font(Theme.Fonts.caption)
+                            .foregroundStyle(Theme.textTertiary)
+                        Button("Revoke") { policy.revoke(id: grant.id) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                }
+                Button("Revoke all") { policy.revokeAll() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    /// Everything settled without anybody being asked.
+    ///
+    /// The price of a gate that answers for you is an account of what it
+    /// answered. Without this, "auto-allowed by policy" is something the
+    /// app says about itself and nobody can check.
+    private var auditCard: some View {
+        SettingCard(title: "Decided for you") {
+            SettingNote(
+                "Every call Chalant settled on its own, newest first, since it started. Kept in "
+                + "memory only: this is an account of what this run of the app has done."
+            )
+            if policy.audit.isEmpty {
+                SettingNote("Nothing yet.")
+            } else {
+                ForEach(policy.audit.prefix(30)) { entry in
+                    HStack(alignment: .top, spacing: Theme.Space.m) {
+                        Image(systemName: entry.allowed
+                              ? "checkmark.circle.fill" : "hand.raised.fill")
+                            .font(Theme.Fonts.icon(.s))
+                            .foregroundStyle(entry.allowed ? Theme.positive : Theme.textTertiary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.detail.isEmpty ? entry.tool : entry.detail)
+                                .font(Theme.Fonts.captionMono)
+                                .foregroundStyle(Theme.textPrimary)
+                                .lineLimit(2)
+                            Text(entry.allowed
+                                 ? "allowed · \(entry.rule)"
+                                 : "sent to you · \(entry.rule)")
+                                .font(Theme.Fonts.caption)
+                                .foregroundStyle(Theme.textTertiary)
+                        }
+                        Spacer(minLength: Theme.Space.m)
+                        Text(Self.clock.string(from: entry.at))
+                            .font(Theme.Fonts.caption)
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                }
+                if policy.audit.count > 30 {
+                    SettingNote("\(policy.audit.count - 30) older ones not shown.")
+                }
+                Button("Clear") { policy.clearAudit() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    private static let clock: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
+
+    static func until(_ date: Date, now: Date = Date()) -> String {
+        let left = date.timeIntervalSince(now)
+        guard left > 0 else { return "expired" }
+        if left < 90 { return "\(Int(left.rounded(.down)))s left" }
+        if left < 5400 { return "\(Int((left / 60).rounded(.down)))m left" }
+        return "\(Int((left / 3600).rounded(.down)))h left"
+    }
+
     /// The room's own dials.
     ///
     /// All of them live here rather than in the island, which carries no
@@ -596,7 +867,17 @@ struct SessionsSection: View {
 
             phoneCard
 
+            promptsCard
+
+            askToolCard
+
+            otherAgentsCard
+
             approvalCard
+
+            grantsCard
+
+            auditCard
 
             roomCard
 
@@ -691,9 +972,22 @@ struct SessionsSection: View {
             case .installed:
                 SettingNote(installedNote(for: agent))
             case .missing:
+                // This card is about the REPORTING hook, which is still
+                // paste-it-yourself for all three. The card further down
+                // writes Cursor's and Codex's files, and it is about a
+                // different hook: the one that holds a call rather than
+                // announces one. Saying "Chalant never writes this file"
+                // here, six inches above a button that writes it, was
+                // true when it was written and is now a contradiction
+                // somebody would read as a bug in one card or the other.
                 SettingNote(
-                    "Chalant never writes \(agent.configPath) for you. Paste this in, merging "
-                    + "the arrays with whatever is already there:"
+                    "Paste this into \(agent.configPath), merging the arrays with whatever is "
+                    + (agent == .claude
+                       ? "already there. It is the pill and the message path, not the approval "
+                         + "one: the switches below install that themselves."
+                       : "already there. This is the pill, not the approval gate. Chalant can "
+                         + "write the gate into this same file itself, under Cursor and Codex "
+                         + "below.")
                 )
                 hookSnippet(for: agent)
             case .unreadable:

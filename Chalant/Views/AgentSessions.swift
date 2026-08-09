@@ -83,9 +83,11 @@ struct AgentSessionsStrip: View {
             // question can wait, a held tool call is an agent standing
             // still until it is answered.
             if let approval = session.approval, approval.decision == nil {
-                ApprovalCard(approval: approval) { decision in
+                ApprovalCard(approval: approval, decide: { decision in
                     sessions.decide(approvalID: approval.id, as: decision)
-                }
+                }, repo: session.cwd, grant: { pattern, duration in
+                    model.policy.grant(pattern: pattern, repo: session.cwd, for: duration)
+                })
             }
             // `isFullyAnswered`, never just the first question's answer:
             // a bundle two of three questions answered is still a
@@ -98,6 +100,9 @@ struct AgentSessionsStrip: View {
                     sessions.answerQuestion(sessionID: session.id, questionIndex: index, with: choices)
                 }, queue: { label in
                     sessions.queue(message: label, for: session.id)
+                }, declined: {
+                    model.activityServer.decline(askID: ask.id)
+                    sessions.clearAsk(askID: ask.id)
                 })
             }
             // The composer goes in the slot AskCard occupies, under the

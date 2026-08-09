@@ -246,7 +246,8 @@ struct DashboardView: View {
                         onInstallUpdate: { model.installUpdate?() }
                     )
                 case .sessions:
-                    SessionsSection(sessions: model.sessions, activities: model.activities)
+                    SessionsSection(sessions: model.sessions, activities: model.activities,
+                                    policy: model.policy)
                 case .whatShows:
                     WhatShowsSection(events: model.events, stats: model.stats)
                 case .island:

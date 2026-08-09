@@ -375,6 +375,9 @@ final class NotchViewModel: ObservableObject {
     let courier = MessageCourier()
     let activities = ActivityStore()
     let activityServer = ActivityServer()
+
+    /// Grants and the record of what was settled without asking.
+    let policy = PolicyStore()
     /// Claude Code sessions on this Mac. Discovery reads the metadata
     /// files Claude Code already writes, so sessions show up with no
     /// setup and no hook contract — including ones that were already
@@ -723,7 +726,7 @@ final class NotchViewModel: ObservableObject {
         shortcuts.announce = { [weak self] message in
             self?.flashGlance(message)
         }
-        activityServer.start(store: activities, sessions: sessions)
+        activityServer.start(store: activities, sessions: sessions, policy: policy)
         // Registry first: it lists four small JSON files and can paint
         // a session row immediately. Discovery scrapes transcript tails
         // and can walk the filesystem to resolve a cwd, which is slow

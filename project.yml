@@ -28,6 +28,17 @@ targets:
       # Sessions pane could not name a real path to paste).
       - path: scripts/chalant-hook
         buildPhase: resources
+      # The MCP server whose only tool is asking you something. Bundled
+      # for the same reason: the Sessions pane has to name a real path
+      # for `claude mcp add`, and a path it made up is a command that
+      # fails when somebody pastes it.
+      - path: scripts/chalant-ask-mcp
+        buildPhase: resources
+      # The shim Cursor and Codex call. Neither runs HTTP hooks, so
+      # both need a command in between, and it has to be a real path
+      # inside the bundle for their config to point at.
+      - path: scripts/chalant-gate
+        buildPhase: resources
     dependencies:
       - framework: Vendor/MediaRemoteAdapter/MediaRemoteAdapter.framework
         embed: true

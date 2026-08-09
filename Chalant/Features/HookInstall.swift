@@ -258,6 +258,404 @@ enum HookInstall {
         return .armed(backup: backup)
     }
 
+    // MARK: Answering the prompt itself
+
+    /// The path Claude Code posts a permission prompt to.
+    ///
+    /// It is also the tag. Nothing else on anybody's machine writes this
+    /// URL, so finding our own entry again needs no marker key smuggled
+    /// into a schema that belongs to Claude Code rather than to us.
+    static let promptPath = "/hook/permission-request"
+
+    /// The other half of the same switch: an MCP server's question.
+    static let elicitationPath = "/hook/elicitation"
+
+    /// And the two that say a question is over.
+    ///
+    /// Neither ever holds anything up. They exist because a turn cannot
+    /// end while a permission prompt is standing, which makes them the
+    /// only proof this app gets that a prompt was answered somewhere
+    /// else: in its own terminal, or on a phone through Claude Code's
+    /// Remote Control. Without them a card outlived its question by the
+    /// full hook timeout.
+    static let stopPath = "/hook/stop"
+    static let sessionEndPath = "/hook/session-end"
+
+    /// Long enough to answer, for the two that wait on a person.
+    static let lifecycleTimeout = 10
+
+    /// How long the agent waits, and the number the card counts down.
+    /// The same as Claude Code's own default, said out loud here because
+    /// two places depend on it agreeing.
+    static let promptTimeout = 600
+
+    /// The `PermissionRequest` entry this app installs, and the only one
+    /// it will ever remove.
+    static func promptEntry(port: UInt16, token: String) -> [String: Any] {
+        entry(path: promptPath, port: port, token: token)
+    }
+
+    static func elicitationEntry(port: UInt16, token: String) -> [String: Any] {
+        entry(path: elicitationPath, port: port, token: token)
+    }
+
+    private static func entry(
+        path: String, port: UInt16, token: String, timeout: Int = promptTimeout
+    ) -> [String: Any] {
+        [
+            "matcher": "*",
+            "hooks": [[
+                "type": "http",
+                // Loopback by name. This is written into somebody's
+                // config and outlives the process that wrote it.
+                "url": "http://127.0.0.1:\(port)\(path)",
+                "timeout": timeout,
+                // The literal token, never `$VAR`. Header interpolation
+                // reads the AGENT's environment, not this app's, and a
+                // variable that is not set there resolves to an empty
+                // string: a 401 with nothing anywhere saying why.
+                "headers": ["Authorization": "Bearer \(token)"],
+            ]],
+        ]
+    }
+
+    private static func isOurs(_ entry: [String: Any], path: String) -> Bool {
+        (entry["hooks"] as? [[String: Any]])?.contains {
+            ($0["url"] as? String)?.contains(path) ?? false
+        } ?? false
+    }
+
+    private static func isOurPromptEntry(_ entry: [String: Any]) -> Bool {
+        isOurs(entry, path: promptPath)
+    }
+
+    /// Whether Claude Code will hand this app its permission prompts.
+    static func answersPrompts(settings: [String: Any]?) -> Bool {
+        guard let settings,
+              let hooks = settings["hooks"] as? [String: Any],
+              let entries = hooks["PermissionRequest"] as? [[String: Any]]
+        else { return false }
+        return entries.contains(where: isOurPromptEntry)
+    }
+
+    static func answersPrompts(at url: URL? = nil) -> Bool {
+        guard case .parsed(let object) = fileState(at: url ?? Self.settingsURL) else {
+            return false
+        }
+        return answersPrompts(settings: object)
+    }
+
+    /// Where the running server published its port and token.
+    static func serverConfig() -> (port: UInt16, token: String)? {
+        guard let data = try? Data(contentsOf: ActivityServer.configURL),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let port = object["port"] as? Int, let token = object["token"] as? String,
+              port > 0, port <= Int(UInt16.max), !token.isEmpty
+        else { return nil }
+        return (UInt16(port), token)
+    }
+
+    /// Let Claude Code hand its permission prompts to the island.
+    ///
+    /// Adding and refreshing are one operation on purpose. The port is
+    /// whichever one the server actually opened, and it can move if
+    /// something else has 4242, so an entry written last week can be
+    /// pointing at nothing. Re-running this fixes it, and re-running it
+    /// when nothing has changed writes no file at all, which is what
+    /// keeps it safe to call on every launch.
+    ///
+    /// Same safety as `arm`, through the same writer: refuses a file it
+    /// cannot parse, keeps every other hook in it, copies the old file
+    /// aside, writes atomically, and follows a symlink rather than
+    /// replacing it.
+    @discardableResult
+    static func armPrompts(
+        port: UInt16? = nil, token: String? = nil, at url: URL? = nil
+    ) -> ArmOutcome {
+        let resolved: (port: UInt16, token: String)
+        if let port, let token {
+            resolved = (port, token)
+        } else if let found = serverConfig() {
+            resolved = found
+        } else {
+            return .refused(
+                "Chalant's own door isn't open yet, so there is no address to point Claude "
+                + "Code at. Try again in a moment.")
+        }
+        let settingsURL = url ?? Self.settingsURL
+        var settings: [String: Any]
+        switch fileState(at: settingsURL) {
+        case .parsed(let object): settings = object
+        case .missing: settings = [:]
+        case .unreadable:
+            return .refused(
+                "Your ~/.claude/settings.json has something in it that isn't valid JSON. "
+                + "Chalant won't rewrite a file it can't read. Fix the file and try again.")
+        }
+        var hooks = settings["hooks"] as? [String: Any] ?? [:]
+        // One switch, two events. A permission prompt and an MCP
+        // server's question are the same thing from where the person is
+        // standing: something that stopped an agent and needs an answer.
+        // Splitting them into two switches would mean explaining a
+        // difference that only matters inside Claude Code.
+        let wanted = [
+            ("PermissionRequest", promptPath,
+             promptEntry(port: resolved.port, token: resolved.token)),
+            ("Elicitation", elicitationPath,
+             elicitationEntry(port: resolved.port, token: resolved.token)),
+            ("Stop", stopPath,
+             entry(path: stopPath, port: resolved.port, token: resolved.token,
+                   timeout: lifecycleTimeout)),
+            ("SessionEnd", sessionEndPath,
+             entry(path: sessionEndPath, port: resolved.port, token: resolved.token,
+                   timeout: lifecycleTimeout)),
+        ]
+        var changed = false
+        for (event, path, entry) in wanted {
+            var entries = hooks[event] as? [[String: Any]] ?? []
+            let ours = entries.filter { isOurs($0, path: path) }
+            // Already exactly right, down to the port and the token.
+            // Writing an identical file would still cost a backup and a
+            // timestamp, and this runs on every launch.
+            if ours.count == 1, NSDictionary(dictionary: ours[0]).isEqual(to: entry) { continue }
+            entries.removeAll { isOurs($0, path: path) }
+            entries.append(entry)
+            hooks[event] = entries
+            changed = true
+        }
+        guard changed else { return .alreadyArmed }
+        settings["hooks"] = hooks
+        return commit(settings, to: settingsURL)
+    }
+
+    /// Take it back out, leaving every other `PermissionRequest` hook
+    /// alone.
+    @discardableResult
+    static func disarmPrompts(at url: URL? = nil) -> ArmOutcome {
+        let settingsURL = url ?? Self.settingsURL
+        guard case .parsed(var settings) = fileState(at: settingsURL) else {
+            return .refused("Chalant can't read your ~/.claude/settings.json.")
+        }
+        guard var hooks = settings["hooks"] as? [String: Any] else {
+            return .armed(backup: nil)
+        }
+        var changed = false
+        for (event, path) in [("PermissionRequest", promptPath),
+                              ("Elicitation", elicitationPath),
+                              ("Stop", stopPath),
+                              ("SessionEnd", sessionEndPath)] {
+            guard var entries = hooks[event] as? [[String: Any]] else { continue }
+            let before = entries.count
+            entries.removeAll { isOurs($0, path: path) }
+            guard entries.count != before else { continue }
+            changed = true
+            // An empty event list left behind is litter in somebody
+            // else's config.
+            if entries.isEmpty {
+                hooks.removeValue(forKey: event)
+            } else {
+                hooks[event] = entries
+            }
+        }
+        guard changed else { return .armed(backup: nil) }
+        settings["hooks"] = hooks
+        return commit(settings, to: settingsURL)
+    }
+
+    // MARK: The other two agents
+
+    /// The bundled shim that speaks for Cursor and Codex.
+    ///
+    /// Neither runs HTTP hooks, so both need a command in between. It is
+    /// a separate script from `chalant-hook` because it does a different
+    /// job: that one reports, this one decides, and a file that did both
+    /// would be one edit away from a reporting change blocking somebody's
+    /// build.
+    static var gateScriptPath: String? {
+        Bundle.main.url(forResource: "chalant-gate", withExtension: nil)?.path
+    }
+
+    /// Cursor's own shape, which is not Claude Code's: a flat entry with
+    /// the command on it, no inner `hooks` array, camelCase event names.
+    static func cursorGateEntry(path: String, endpoint: String) -> [String: Any] {
+        [
+            "type": "command",
+            "command": "\(path) cursor \(endpoint)",
+            "timeout": promptTimeout,
+        ]
+    }
+
+    static let cursorGateEvents = ["beforeShellExecution", "beforeMCPExecution"]
+
+    private static func isOurGate(_ entry: [String: Any]) -> Bool {
+        ((entry["command"] as? String) ?? "").contains("chalant-gate")
+    }
+
+    static func cursorAnswers(hooks: [String: Any]?) -> Bool {
+        guard let hooks, let events = hooks["hooks"] as? [String: Any] else { return false }
+        return cursorGateEvents.contains { event in
+            ((events[event] as? [[String: Any]]) ?? []).contains(where: isOurGate)
+        }
+    }
+
+    static func cursorAnswers(at url: URL? = nil) -> Bool {
+        guard case .parsed(let object) = fileState(at: url ?? Agent.cursor.fileURL) else {
+            return false
+        }
+        return cursorAnswers(hooks: object)
+    }
+
+    /// Hand Cursor's shell and MCP calls to the island.
+    ///
+    /// Same safety as the Claude Code writer, because it is the same
+    /// hazard: refuse a file this app cannot parse, keep every hook
+    /// already in it, copy the old one aside, write atomically, follow a
+    /// symlink rather than replacing it. This is the first time this app
+    /// has written either of these two files, and the founder's standing
+    /// rule was that it never would. The rule was written when there was
+    /// nothing to write; it is being reversed the same way the Claude
+    /// Code one was, deliberately and behind a button.
+    @discardableResult
+    static func armCursor(at url: URL? = nil) -> ArmOutcome {
+        guard let path = gateScriptPath else {
+            return .refused("Chalant can't find its own gate script inside the app bundle.")
+        }
+        let target = url ?? Agent.cursor.fileURL
+        var config: [String: Any]
+        switch fileState(at: target) {
+        case .parsed(let object): config = object
+        case .missing: config = [:]
+        case .unreadable:
+            return .refused(
+                "Your ~/.cursor/hooks.json has something in it that isn't valid JSON. "
+                + "Chalant won't rewrite a file it can't read. Fix the file and try again.")
+        }
+        // Cursor's file carries a version at the top level. Left alone
+        // when it is already there, and set when the file is new,
+        // because a hooks file without one may not be read at all.
+        if config["version"] == nil { config["version"] = 1 }
+        var events = config["hooks"] as? [String: Any] ?? [:]
+        var changed = false
+        for event in cursorGateEvents {
+            var entries = events[event] as? [[String: Any]] ?? []
+            let wanted = cursorGateEntry(path: path, endpoint: "gate")
+            let ours = entries.filter(isOurGate)
+            if ours.count == 1, NSDictionary(dictionary: ours[0]).isEqual(to: wanted) { continue }
+            entries.removeAll(where: isOurGate)
+            entries.append(wanted)
+            events[event] = entries
+            changed = true
+        }
+        guard changed else { return .alreadyArmed }
+        config["hooks"] = events
+        return commit(config, to: target)
+    }
+
+    @discardableResult
+    static func disarmCursor(at url: URL? = nil) -> ArmOutcome {
+        let target = url ?? Agent.cursor.fileURL
+        guard case .parsed(var config) = fileState(at: target) else {
+            return .refused("Chalant can't read your ~/.cursor/hooks.json.")
+        }
+        guard var events = config["hooks"] as? [String: Any] else { return .armed(backup: nil) }
+        var changed = false
+        for event in cursorGateEvents {
+            guard var entries = events[event] as? [[String: Any]] else { continue }
+            let before = entries.count
+            entries.removeAll(where: isOurGate)
+            guard entries.count != before else { continue }
+            changed = true
+            if entries.isEmpty { events.removeValue(forKey: event) } else { events[event] = entries }
+        }
+        guard changed else { return .armed(backup: nil) }
+        config["hooks"] = events
+        return commit(config, to: target)
+    }
+
+    /// Codex's file uses Claude Code's exact shape, per the evidence
+    /// gathered for the reporting hook, so the entry is nested the way
+    /// Claude Code's is rather than flat like Cursor's.
+    ///
+    /// UNVERIFIED end to end. There is no `codex` binary on the machine
+    /// this was built on, so the config shape is from its documentation
+    /// and the decision shape is a reasoned guess. It is written to fail
+    /// silent rather than closed, so the worst case is that Codex simply
+    /// carries on as it always did.
+    static func codexGateEntry(path: String) -> [String: Any] {
+        ["hooks": [["type": "command", "command": "\(path) codex gate",
+                    "timeout": promptTimeout]]]
+    }
+
+    private static func isOurNestedGate(_ entry: [String: Any]) -> Bool {
+        (entry["hooks"] as? [[String: Any]])?.contains {
+            (($0["command"] as? String) ?? "").contains("chalant-gate")
+        } ?? false
+    }
+
+    static func codexAnswers(hooks: [String: Any]?) -> Bool {
+        guard let hooks, let events = hooks["hooks"] as? [String: Any],
+              let entries = events["PreToolUse"] as? [[String: Any]]
+        else { return false }
+        return entries.contains(where: isOurNestedGate)
+    }
+
+    static func codexAnswers(at url: URL? = nil) -> Bool {
+        guard case .parsed(let object) = fileState(at: url ?? Agent.codex.fileURL) else {
+            return false
+        }
+        return codexAnswers(hooks: object)
+    }
+
+    @discardableResult
+    static func armCodex(at url: URL? = nil) -> ArmOutcome {
+        guard let path = gateScriptPath else {
+            return .refused("Chalant can't find its own gate script inside the app bundle.")
+        }
+        let target = url ?? Agent.codex.fileURL
+        var config: [String: Any]
+        switch fileState(at: target) {
+        case .parsed(let object): config = object
+        case .missing: config = [:]
+        case .unreadable:
+            return .refused(
+                "Your ~/.codex/hooks.json has something in it that isn't valid JSON. "
+                + "Chalant won't rewrite a file it can't read. Fix the file and try again.")
+        }
+        var events = config["hooks"] as? [String: Any] ?? [:]
+        var entries = events["PreToolUse"] as? [[String: Any]] ?? []
+        let wanted = codexGateEntry(path: path)
+        let ours = entries.filter(isOurNestedGate)
+        if ours.count == 1, NSDictionary(dictionary: ours[0]).isEqual(to: wanted) {
+            return .alreadyArmed
+        }
+        entries.removeAll(where: isOurNestedGate)
+        entries.append(wanted)
+        events["PreToolUse"] = entries
+        config["hooks"] = events
+        return commit(config, to: target)
+    }
+
+    @discardableResult
+    static func disarmCodex(at url: URL? = nil) -> ArmOutcome {
+        let target = url ?? Agent.codex.fileURL
+        guard case .parsed(var config) = fileState(at: target) else {
+            return .refused("Chalant can't read your ~/.codex/hooks.json.")
+        }
+        guard var events = config["hooks"] as? [String: Any],
+              var entries = events["PreToolUse"] as? [[String: Any]]
+        else { return .armed(backup: nil) }
+        let before = entries.count
+        entries.removeAll(where: isOurNestedGate)
+        guard entries.count != before else { return .armed(backup: nil) }
+        if entries.isEmpty {
+            events.removeValue(forKey: "PreToolUse")
+        } else {
+            events["PreToolUse"] = entries
+        }
+        config["hooks"] = events
+        return commit(config, to: target)
+    }
+
     // MARK: Reaching a session from your phone
 
     /// Claude Code's own setting for it. User scope only: repo-local
@@ -462,6 +860,21 @@ enum HookInstall {
     /// own bundled script (MediaRemoteBridge.swift:62).
     static var bundledScriptPath: String? {
         Bundle.main.url(forResource: "chalant-hook", withExtension: nil)?.path
+    }
+
+    /// The bundled MCP server, and the one line that registers it.
+    ///
+    /// Not written by this app. Registering an MCP server means editing
+    /// `~/.claude.json`, which is a different file from the one the
+    /// prompt switch touches and a bigger thing to do on somebody's
+    /// behalf without being asked. So this is a command to read and
+    /// paste, and the path in it is real.
+    static var askServerPath: String? {
+        Bundle.main.url(forResource: "chalant-ask-mcp", withExtension: nil)?.path
+    }
+
+    static var askServerCommand: String {
+        "claude mcp add chalant -- \(askServerPath ?? "/path/to/scripts/chalant-ask-mcp")"
     }
 
     /// The snippet the dashboard offers for each agent, built around

@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+"""An MCP server whose only tool is asking you something.
+
+Claude Code has `AskUserQuestion`, and an agent that uses it gets a
+dialog in its own terminal that nothing outside that process can answer.
+This routes the same intent through MCP elicitation instead, which
+Claude Code publishes as an `Elicitation` hook event, which Chalant can
+hold and answer from the island or the phone.
+
+The server itself knows nothing about Chalant. It has no token, no port
+and no HTTP client, and it works exactly as well with Chalant not
+running: the elicitation goes to Claude Code's own dialog, the way it
+would have anyway. The whole of the integration is that an elicitation
+is a thing a hook can answer and a tool call is not.
+
+Register it with:
+
+    claude mcp add chalant -- /path/to/chalant-ask-mcp
+
+Speaks newline-delimited JSON-RPC over stdin and stdout. Nothing is ever
+written to stdout that is not a protocol message; anything worth saying
+goes to stderr, which the client shows in its MCP log.
+"""
+import json
+import sys
+
+PROTOCOL = "2025-06-18"
+NAME = "chalant"
+VERSION = "1.0.0"
+
+TOOL = {
+    "name": "ask_user",
+    "title": "Ask the user",
+    "description": (
+        "Ask the person a question and wait for their answer. Use this when you need a "
+        "decision, a preference, or a piece of information only they have, instead of "
+        "guessing. The question reaches them wherever they are, including away from this "
+        "terminal, so prefer it over stopping and hoping they read the transcript."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                "description": "The question, in full, as you would say it out loud.",
+            },
+            "header": {
+                "type": "string",
+                "description": "Two or three words naming the choice, for the card's title.",
+            },
+            "options": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "The choices to offer. Leave it out for a question answered in "
+                    "the person's own words."
+                ),
+            },
+        },
+        "required": ["question"],
+    },
+}
+
+# Set from the client's own initialize: elicitation is a CLIENT
+# capability, and asking for one from a client that has not got it hangs
+# a turn on a question nobody will ever see.
+client_elicits = False
+
+
+def send(message):
+    sys.stdout.write(json.dumps(message) + "\n")
+    sys.stdout.flush()
+
+
+def note(text):
+    sys.stderr.write("[chalant-ask-mcp] %s\n" % text)
+    sys.stderr.flush()
+
+
+def result(request_id, payload):
+    send({"jsonrpc": "2.0", "id": request_id, "result": payload})
+
+
+def failure(request_id, code, message):
+    send({"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}})
+
+
+def text_result(request_id, text, is_error=False):
+    result(request_id, {"content": [{"type": "text", "text": text}], "isError": is_error})
+
+
+def schema_for(question, header, options):
+    """One flat object with one property, which is all Claude Code takes.
+
+    Its own words: "Elicitation requestedSchema must describe an object
+    with flat primitive properties". So a bundle of questions is not
+    expressible here, and pretending otherwise would fail at the far end
+    where the agent is already waiting.
+    """
+    answer = {"type": "string", "title": header or "Answer", "description": question}
+    if options:
+        answer["enum"] = [str(option) for option in options][:12]
+    return {"type": "object", "properties": {"answer": answer}, "required": ["answer"]}
+
+
+def ask(request_id, arguments):
+    question = (arguments.get("question") or "").strip()
+    if not question:
+        return text_result(request_id, "ask_user needs a question.", is_error=True)
+    if not client_elicits:
+        return text_result(
+            request_id,
+            "This client cannot show a question from an MCP server, so nothing was asked. "
+            "Ask in your reply instead.",
+            is_error=True)
+
+    header = (arguments.get("header") or "").strip()
+    options = arguments.get("options")
+    options = options if isinstance(options, list) else []
+
+    # The one place this server talks first. Its id must not collide with
+    # anything the client is using, so it is namespaced rather than a
+    # bare counter.
+    call_id = "chalant-ask-%s" % request_id
+    send({
+        "jsonrpc": "2.0",
+        "id": call_id,
+        "method": "elicitation/create",
+        "params": {
+            "message": question,
+            "requestedSchema": schema_for(question, header, options),
+        },
+    })
+
+    # Wait for our answer, and keep being a server while we do. The
+    # client is free to send other requests in the meantime and a server
+    # that stopped listening to them would deadlock the session it is
+    # trying to be useful to.
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            return
+        try:
+            message = json.loads(line)
+        except ValueError:
+            continue
+        if message.get("id") == call_id:
+            if "error" in message:
+                return text_result(
+                    request_id,
+                    "The question could not be put to the user: %s"
+                    % message["error"].get("message", "no reason given"),
+                    is_error=True)
+            answer = message.get("result") or {}
+            action = answer.get("action")
+            if action == "accept":
+                content = answer.get("content") or {}
+                given = content.get("answer")
+                if given is None and len(content) == 1:
+                    given = list(content.values())[0]
+                return text_result(request_id, "The user answered: %s" % given)
+            if action == "decline":
+                return text_result(request_id, "The user declined to answer.")
+            return text_result(request_id, "The user dismissed the question without answering.")
+        handle(message)
+
+
+def handle(message):
+    global client_elicits
+    method = message.get("method")
+    request_id = message.get("id")
+
+    if method == "initialize":
+        params = message.get("params") or {}
+        capabilities = params.get("capabilities") or {}
+        client_elicits = "elicitation" in capabilities
+        if not client_elicits:
+            note("this client did not offer elicitation; ask_user will refuse rather than hang")
+        asked = params.get("protocolVersion")
+        return result(request_id, {
+            "protocolVersion": asked if isinstance(asked, str) else PROTOCOL,
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": NAME, "version": VERSION},
+        })
+
+    if method == "tools/list":
+        return result(request_id, {"tools": [TOOL]})
+
+    if method == "tools/call":
+        params = message.get("params") or {}
+        if params.get("name") != TOOL["name"]:
+            return failure(request_id, -32602, "no such tool: %s" % params.get("name"))
+        return ask(request_id, params.get("arguments") or {})
+
+    # Everything else. Notifications carry no id and must never be
+    # answered; an unknown request must be, or the client waits forever.
+    if method in ("ping",):
+        return result(request_id, {})
+    if request_id is not None:
+        failure(request_id, -32601, "method not found: %s" % method)
+
+
+def main():
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            message = json.loads(line)
+        except ValueError:
+            continue
+        try:
+            handle(message)
+        except Exception as error:  # never take the session down with us
+            note("failed handling %s: %s" % (message.get("method"), error))
+            if message.get("id") is not None:
+                failure(message["id"], -32603, str(error))
+
+
+if __name__ == "__main__":
+    main()

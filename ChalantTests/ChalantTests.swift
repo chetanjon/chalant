@@ -801,6 +801,83 @@ final class ChalantTests: XCTestCase {
             rawRequest("GET /activities HTTP/1.1\r\nContent-Length: 0"))?.body, Data())
     }
 
+    // MARK: The second name the door answers to (Claude Code's HTTP hooks)
+
+    func testBearerTokenIsAcceptedAlongsideTheOriginalHeader() {
+        // Claude Code's `type: "http"` hooks can only send
+        // `Authorization: Bearer <token>`, so the door has to answer to
+        // both names or the whole hook path is unreachable.
+        XCTAssertEqual(
+            ActivityServer.parse(rawRequest(
+                "GET /health HTTP/1.1\r\nAuthorization: Bearer abc123"))?.offeredToken,
+            "abc123")
+        XCTAssertEqual(
+            ActivityServer.parse(rawRequest(
+                "GET /health HTTP/1.1\r\nX-Chalant-Token: abc123"))?.offeredToken,
+            "abc123")
+        // Case is Claude Code's to choose, not this app's.
+        XCTAssertEqual(
+            ActivityServer.parse(rawRequest(
+                "GET /health HTTP/1.1\r\nauthorization: bearer abc123"))?.offeredToken,
+            "abc123")
+    }
+
+    func testOnlyBearerCountsAndAMalformedHeaderIsNoToken() {
+        // Anything that is not a Bearer reads as no token at all rather
+        // than as its own tail: `Basic YWJj` must never be offered up as
+        // if it were the secret, and an empty or truncated header must
+        // not trap the way Content-Length once did.
+        for header in [
+            "Authorization: Basic YWJjMTIz",
+            "Authorization: Bearer",
+            "Authorization: Bearer ",
+            "Authorization:",
+            "Authorization",
+        ] {
+            XCTAssertEqual(
+                ActivityServer.parse(rawRequest("GET /health HTTP/1.1\r\n\(header)"))?
+                    .offeredToken,
+                "", "\(header) should offer no token")
+        }
+    }
+
+    func testAnEmptyOfferNeverMatchesTheRealToken() {
+        // The 401 depends on this: a request with no token at all must
+        // fail the comparison, not pass it by being equally empty.
+        let real = ActivityServer.loadOrCreateToken()
+        XCTAssertFalse(ActivityServer.tokenMatches("", real))
+        XCTAssertFalse(ActivityServer.tokenMatches("", ""))
+    }
+
+    func testPortFallbackTriesTheKnownPortFirstThenNeighbours() {
+        // 4242 is the port every hook and script already installed on
+        // this machine knows, so it stays first. The rest exist so a
+        // taken port leaves the island reachable rather than silently
+        // deaf.
+        let candidates = ActivityServer.portCandidates(from: 4242)
+        XCTAssertEqual(candidates.first, 4242)
+        XCTAssertEqual(candidates.count, 11)
+        XCTAssertEqual(Set(candidates).count, candidates.count)
+        XCTAssertEqual(candidates.last, 4252)
+    }
+
+    func testPortFallbackCannotOverflow() {
+        // UInt16(next) traps past 65535, and the preferred port is a
+        // user default anybody can set.
+        let candidates = ActivityServer.portCandidates(from: UInt16.max - 2)
+        XCTAssertEqual(candidates, [UInt16.max - 2, UInt16.max - 1, UInt16.max])
+    }
+
+    func testServerConfigAndTokenSitTogetherUnderTheAppsOwnFolder() {
+        XCTAssertEqual(ActivityServer.configURL.lastPathComponent, "server.json")
+        XCTAssertEqual(ActivityServer.tokenURL.lastPathComponent, "api-token")
+        XCTAssertEqual(
+            ActivityServer.configURL.deletingLastPathComponent(),
+            ActivityServer.tokenURL.deletingLastPathComponent())
+        XCTAssertEqual(
+            ActivityServer.support.lastPathComponent, "Chalant")
+    }
+
     func testActivityStringsAreCapped() {
         // Up to half a megabyte could arrive as one unbroken line for
         // SwiftUI to lay out inside a pill. Rows were bounded at eight
