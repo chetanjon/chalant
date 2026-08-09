@@ -1026,7 +1026,14 @@ struct ApprovalCard: View {
                 // pattern, the folder and how long, and every one of
                 // those is a limit on what is being agreed to.
                 if let grant, !repo.isEmpty {
-                    Menu("Allow \(exceptionLabel) here for…") {
+                    // No `fixedSize`. With it the menu refused to
+                    // compress, the row could not fit the room's ~370pt
+                    // pane, and the whole card laid out 495pt wide with
+                    // its own sentences running off the island's edge
+                    // (seen 2026-08-09: "Answering here settles it i").
+                    // A truncated menu label is a small loss; a card
+                    // wider than the surface it sits on is a broken one.
+                    Menu("Allow \(exceptionLabel) for…") {
                         ForEach(Grant.expiries(), id: \.label) { choice in
                             Button(choice.label) {
                                 grant(exception, choice.seconds)
@@ -1036,7 +1043,7 @@ struct ApprovalCard: View {
                     }
                     .menuStyle(.borderlessButton)
                     .controlSize(.small)
-                    .fixedSize()
+                    .layoutPriority(-1)
                     .help("Allows \(exception) in \((repo as NSString).lastPathComponent) "
                           + "and nowhere else, until it runs out. "
                           + "Undo it in Dashboard, Sessions.")
@@ -1051,11 +1058,18 @@ struct ApprovalCard: View {
                           + "Undo it in Dashboard, Sessions.")
                 }
                 Spacer(minLength: 0)
-                TimelineView(.periodic(from: approval.askedAt, by: 1)) { context in
-                    Text(remaining(at: context.date))
-                        .font(Theme.Fonts.caption)
-                        .foregroundStyle(Theme.textTertiary)
-                }
+            }
+            // Its own line, not the tail of the button row.
+            //
+            // The room's pane is about 370pt wide and the three controls
+            // above already fill it: sharing a row, the countdown was cut
+            // mid-word at the island's edge (seen 2026-08-09, "10m, th…").
+            // A promise that this ends is worth nothing half-drawn.
+            TimelineView(.periodic(from: approval.askedAt, by: 1)) { context in
+                Text(remaining(at: context.date))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .rowInsets()

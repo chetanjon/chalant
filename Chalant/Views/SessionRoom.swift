@@ -412,17 +412,27 @@ private struct SessionDetail: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             headline
             Divider().overlay(Theme.hairlineFaint)
-            Conversation(
-                turns: showsToolActivity ? reader.turns : reader.turns.filter { !$0.isTool },
-                agentLabel: session.agent.label,
-                empty: reader.loaded
-                    ? "Nothing readable in this session's transcript yet."
-                    : "Reading this session\u{2026}"
-            )
-            .frame(maxHeight: .infinity)
-            // Pinned, never scrollable away. A held call has an agent
-            // standing still on the other side of it and a countdown
-            // running; it may not be something you can scroll past.
+            // Directly under the headline, above the transcript, because
+            // the top of this pane is the only part guaranteed to be on
+            // screen.
+            //
+            // These three were below the conversation, which reads
+            // correctly (what it said, then what it is asking) and drew
+            // them where nobody could see them. The conversation claims
+            // `maxHeight: .infinity`, so anything after it lands at the
+            // bottom of whatever height the room was given, and the
+            // island does not always wear that height: measured
+            // 2026-08-09 on the shipped 1.8.0, the room laid out at 686
+            // while the island drew 326, putting a held call's Allow and
+            // Deny at y=448, which is 122pt past the island's own edge.
+            // The card the release exists for was built, positioned, and
+            // invisible.
+            //
+            // The sizing bug is real and still open. This does not fix
+            // it; it stops these three depending on it. An agent frozen
+            // at a question is the most stuck a session gets, and its
+            // card should not be the one riding on the app's least
+            // reliable number.
             if let approval = session.approval, approval.decision == nil {
                 ApprovalCard(approval: approval, decide: { decision in
                     sessions.decide(approvalID: approval.id, as: decision)
@@ -430,10 +440,9 @@ private struct SessionDetail: View {
                     model.policy.grant(pattern: pattern, repo: session.cwd, for: duration)
                 })
             }
-            // Under the held call, above everything else, for the same
-            // reason it sits there on the ladder: an agent frozen at a
-            // prompt is the most stuck a session gets, and this is the
-            // only card that appears without anything being armed.
+            // Under the held call, for the same reason it sits there on
+            // the ladder: this is the only card that appears without
+            // anything being armed.
             if let prompt = session.pendingPrompt, !prompt.isStale {
                 TerminalPromptCard(prompt: prompt, session: session) {
                     AgentSessionsStrip.go(to: session)
@@ -451,6 +460,14 @@ private struct SessionDetail: View {
                     sessions.clearAsk(askID: ask.id)
                 })
             }
+            Conversation(
+                turns: showsToolActivity ? reader.turns : reader.turns.filter { !$0.isTool },
+                agentLabel: session.agent.label,
+                empty: reader.loaded
+                    ? "Nothing readable in this session's transcript yet."
+                    : "Reading this session\u{2026}"
+            )
+            .frame(maxHeight: .infinity)
             if session.canReceiveMessages {
                 // The same card the glance uses, minus the quoted last
                 // message: the conversation above already carries it,
