@@ -972,9 +972,22 @@ struct SessionsSection: View {
             case .installed:
                 SettingNote(installedNote(for: agent))
             case .missing:
+                // This card is about the REPORTING hook, which is still
+                // paste-it-yourself for all three. The card further down
+                // writes Cursor's and Codex's files, and it is about a
+                // different hook: the one that holds a call rather than
+                // announces one. Saying "Chalant never writes this file"
+                // here, six inches above a button that writes it, was
+                // true when it was written and is now a contradiction
+                // somebody would read as a bug in one card or the other.
                 SettingNote(
-                    "Chalant never writes \(agent.configPath) for you. Paste this in, merging "
-                    + "the arrays with whatever is already there:"
+                    "Paste this into \(agent.configPath), merging the arrays with whatever is "
+                    + (agent == .claude
+                       ? "already there. It is the pill and the message path, not the approval "
+                         + "one: the switches below install that themselves."
+                       : "already there. This is the pill, not the approval gate. Chalant can "
+                         + "write the gate into this same file itself, under Cursor and Codex "
+                         + "below.")
                 )
                 hookSnippet(for: agent)
             case .unreadable:
