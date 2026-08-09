@@ -219,4 +219,20 @@ enum HookPayload {
         }
         return String(data: data, encoding: .utf8)
     }
+
+    /// The policy engine's answer, which has one more word available to
+    /// it than a person's does: `ask` sends the call to the permission
+    /// prompt whatever any saved rule would otherwise have said.
+    static func preToolUse(decision: String, reason: String) -> String? {
+        let data = try? JSONSerialization.data(withJSONObject: [
+            "hookSpecificOutput": [
+                "hookEventName": "PreToolUse",
+                "permissionDecision": decision,
+                // Shown to the model. A statement of what happened, not
+                // an instruction about what to do next.
+                "permissionDecisionReason": reason,
+            ],
+        ])
+        return data.flatMap { String(data: $0, encoding: .utf8) }
+    }
 }

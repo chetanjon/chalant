@@ -104,6 +104,10 @@ final class ActivityServer: @unchecked Sendable {
     /// waiting on an answer this app has not given yet.
     let gate = PendingDecisionStore()
 
+    /// The grants, and the account of everything settled without anybody
+    /// being asked.
+    private var policy: PolicyStore?
+
     /// The ports this app will try, in order. 4242 is the one every
     /// hook and script already installed on this machine knows by
     /// heart, so it stays first and stays the answer in every ordinary
@@ -131,9 +135,11 @@ final class ActivityServer: @unchecked Sendable {
     private var remainingPorts: [UInt16] = []
 
     @MainActor
-    func start(store: ActivityStore, sessions: SessionStore? = nil) {
+    func start(store: ActivityStore, sessions: SessionStore? = nil,
+               policy: PolicyStore? = nil) {
         self.store = store
         self.sessions = sessions
+        self.policy = policy
         token = Self.loadOrCreateToken()
         // A tap on the island reaching an agent suspended inside a hook.
         // `resolve` returning false means nobody was waiting on that id
@@ -741,6 +747,28 @@ final class ActivityServer: @unchecked Sendable {
         case ("POST", "/hook/permission-request"):
             hold(request, on: connection, event: "PermissionRequest")
 
+        // Every tool call, before there is a prompt to answer.
+        //
+        // This one never holds anything and never waits. It fires for
+        // calls nobody asked to supervise, dozens per turn, so the only
+        // acceptable shape is to decide in microseconds and get out of
+        // the way. Silence is the answer almost every time, and silence
+        // means the agent's own permission flow runs untouched.
+        case ("POST", "/hook/pre-tool-use"):
+            guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+                  let call = HookPayload.call(from: object, fallbackID: UUID().uuidString)
+            else {
+                respond(connection, status: "200 OK", body: "")
+                return
+            }
+            Task { @MainActor in
+                let verdict = PolicyEngine.evaluate(
+                    tool: call.tool, detail: call.detail, cwd: call.cwd,
+                    grants: self.policy?.live() ?? [])
+                self.respond(
+                    connection, status: "200 OK", body: self.settle(verdict, for: call) ?? "")
+            }
+
         // Deciding a held call from outside the island, and seeing what
         // is held. Here for the same reason `/outbox` and `/permissions`
         // are: a feature whose only proof is a person clicking a button
@@ -759,6 +787,25 @@ final class ActivityServer: @unchecked Sendable {
                 let body = (try? JSONSerialization.data(
                     withJSONObject: ["ok": true, "held": held]
                 )).flatMap { String(data: $0, encoding: .utf8) } ?? #"{"ok":true,"held":[]}"#
+                self.respond(connection, status: "200 OK", body: body)
+            }
+
+        // What was settled without anybody being asked. Readable from a
+        // terminal for the same reason `/permissions` is: an account
+        // whose only surface is a settings page nobody has open is an
+        // account nobody can check.
+        case ("GET", "/debug/audit"):
+            Task { @MainActor in
+                let entries = (self.policy?.audit ?? []).prefix(100).map { entry in
+                    [
+                        "at": ISO8601DateFormatter().string(from: entry.at),
+                        "tool": entry.tool, "detail": entry.detail, "folder": entry.folder,
+                        "allowed": entry.allowed, "rule": entry.rule, "reason": entry.reason,
+                    ] as [String: Any]
+                }
+                let body = (try? JSONSerialization.data(
+                    withJSONObject: ["ok": true, "decided": entries]
+                )).flatMap { String(data: $0, encoding: .utf8) } ?? #"{"ok":true,"decided":[]}"#
                 self.respond(connection, status: "200 OK", body: body)
             }
 
@@ -833,6 +880,34 @@ final class ActivityServer: @unchecked Sendable {
         }
     }
 
+    /// Turn a verdict into the body of a `PreToolUse` answer, and write
+    /// it down.
+    ///
+    /// Everything decided here was decided without asking anybody, which
+    /// is exactly why it is all recorded. A gate that quietly answers on
+    /// your behalf and keeps no account of it is not supervision.
+    @MainActor
+    private func settle(_ verdict: PolicyEngine.Verdict, for call: HeldCall) -> String? {
+        switch verdict {
+        case .silent:
+            return nil
+        case .allow(let rule, let reason):
+            policy?.note(
+                tool: call.tool, detail: call.detail, folder: call.cwd,
+                allowed: true, rule: rule, reason: reason)
+            return HookPayload.preToolUse(decision: "allow", reason: reason)
+        case .ask(let rule, let reason):
+            policy?.note(
+                tool: call.tool, detail: call.detail, folder: call.cwd,
+                allowed: false, rule: rule, reason: reason)
+            // `ask` rather than `deny`, deliberately. This app's job at
+            // this point is to make sure a person sees the question, not
+            // to answer it for them in the other direction: a deny here
+            // would take the choice away just as completely as an allow.
+            return HookPayload.preToolUse(decision: "ask", reason: reason)
+        }
+    }
+
     /// Register a held call and answer whenever somebody decides.
     ///
     /// A payload this app cannot read is answered immediately with an
@@ -853,6 +928,29 @@ final class ActivityServer: @unchecked Sendable {
         watchForHangup(connection, id: call.id)
         Task { [weak self] in
             guard let self else { return }
+            // A grant is a person who already answered this exact
+            // question in this exact folder, and it is the only thing
+            // allowed to settle a prompt without showing it. The general
+            // read-only list is not consulted here on purpose: Claude
+            // Code has decided this call needs somebody, and a list of
+            // commands this app thinks are boring has no business
+            // overruling that.
+            let granted = await MainActor.run { () -> String? in
+                let verdict = PolicyEngine.evaluateGrantsOnly(
+                    tool: call.tool, detail: call.detail, cwd: call.cwd,
+                    grants: self.policy?.live() ?? [])
+                guard case .allow(let rule, let reason) = verdict else { return nil }
+                self.policy?.note(
+                    tool: call.tool, detail: call.detail, folder: call.cwd,
+                    allowed: true, rule: rule, reason: reason)
+                return reason
+            }
+            if granted != nil {
+                self.respond(
+                    connection, status: "200 OK",
+                    body: HookPayload.response(for: .allow, event: event) ?? "")
+                return
+            }
             // The card first, then the wait. A card that appeared after
             // the agent was already suspended would be a race with
             // nothing to win: the answer cannot arrive before the

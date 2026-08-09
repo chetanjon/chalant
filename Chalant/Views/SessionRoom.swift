@@ -424,9 +424,11 @@ private struct SessionDetail: View {
             // standing still on the other side of it and a countdown
             // running; it may not be something you can scroll past.
             if let approval = session.approval, approval.decision == nil {
-                ApprovalCard(approval: approval) { decision in
+                ApprovalCard(approval: approval, decide: { decision in
                     sessions.decide(approvalID: approval.id, as: decision)
-                }
+                }, repo: session.cwd, grant: { pattern, duration in
+                    model.policy.grant(pattern: pattern, repo: session.cwd, for: duration)
+                })
             }
             // Under the held call, above everything else, for the same
             // reason it sits there on the ladder: an agent frozen at a

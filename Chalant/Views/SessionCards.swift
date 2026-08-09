@@ -899,6 +899,11 @@ struct TerminalPromptCard: View {
 struct ApprovalCard: View {
     let approval: SessionStore.Approval
     let decide: (SessionStore.Approval.Decision) -> Void
+    /// The folder this call is being made in, which is the only place a
+    /// grant made here will ever apply. Empty means nowhere to scope
+    /// one to, and the offer is withdrawn rather than widened.
+    var repo: String = ""
+    var grant: ((String, TimeInterval) -> Void)?
     @Environment(\.chalantAccent) private var accent
 
     /// Whatever the hook holding this one will actually wait, which is
@@ -987,14 +992,37 @@ struct ApprovalCard: View {
                 // stops reading the ones that matter. Says the exact
                 // rule it will write, because a button that promises
                 // something wider than it says is not consent.
-                Button("Always allow \(exceptionLabel)") {
-                    SessionStore.addException(exception)
-                    decide(.allow)
+                // Narrowed from what this used to be. It wrote a rule
+                // with no folder and no end date, which is a strange
+                // thing to be handed for pressing a button once while
+                // looking at one command in one repo. Now it says the
+                // pattern, the folder and how long, and every one of
+                // those is a limit on what is being agreed to.
+                if let grant, !repo.isEmpty {
+                    Menu("Allow \(exceptionLabel) here for…") {
+                        ForEach(Grant.expiries(), id: \.label) { choice in
+                            Button(choice.label) {
+                                grant(exception, choice.seconds)
+                                decide(.allow)
+                            }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .help("Allows \(exception) in \((repo as NSString).lastPathComponent) "
+                          + "and nowhere else, until it runs out. "
+                          + "Undo it in Dashboard, Sessions.")
+                } else {
+                    Button("Always allow \(exceptionLabel)") {
+                        SessionStore.addException(exception)
+                        decide(.allow)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Adds \(exception) to the calls Chalant never holds. "
+                          + "Undo it in Dashboard, Sessions.")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Adds \(exception) to the calls Chalant never holds. "
-                      + "Undo it in Dashboard, Sessions.")
                 Spacer(minLength: 0)
                 TimelineView(.periodic(from: approval.askedAt, by: 1)) { context in
                     Text(remaining(at: context.date))
