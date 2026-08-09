@@ -37,11 +37,29 @@ final class ActivityServer: @unchecked Sendable {
 
     static let tokenHeader = "x-chalant-token:"
 
+    /// Claude Code's HTTP hooks send `Authorization: Bearer <token>` and
+    /// have no way to send anything else, so the same door has to answer
+    /// to both names. The scripted callers (`chalant`, `chalant-hook`,
+    /// every curl in this file's header) keep the header they have
+    /// always used.
+    static let bearerHeader = "authorization:"
+
     static var tokenURL: URL {
-        let support = FileManager.default.urls(
+        support.appendingPathComponent("api-token")
+    }
+
+    /// Where the resolved port and token are published, so a hook does
+    /// not have to guess either. The port is only 4242 until something
+    /// else is already on 4242.
+    static var configURL: URL {
+        support.appendingPathComponent("server.json")
+    }
+
+    static var support: URL {
+        let base = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first ?? FileManager.default.temporaryDirectory
-        return support.appendingPathComponent("Chalant/api-token")
+        return base.appendingPathComponent("Chalant")
     }
 
     /// Minted once and kept at 0600. Read fresh rather than cached so
@@ -82,37 +100,107 @@ final class ActivityServer: @unchecked Sendable {
 
     private var token = ""
 
+    /// The ports this app will try, in order. 4242 is the one every
+    /// hook and script already installed on this machine knows by
+    /// heart, so it stays first and stays the answer in every ordinary
+    /// case; the rest only matter when something else got there first.
+    static func portCandidates(from preferred: UInt16 = port) -> [UInt16] {
+        [preferred] + (1...10).compactMap { step in
+            let next = Int(preferred) + step
+            return next <= Int(UInt16.max) ? UInt16(next) : nil
+        }
+    }
+
+    private let lock = NSLock()
+    private var openPort: UInt16?
+
+    /// The port the door actually opened on. Nil until a listener has
+    /// reached `.ready`, which is the only moment either fact is known.
+    var resolvedPort: UInt16? {
+        lock.lock()
+        defer { lock.unlock() }
+        return openPort
+    }
+
+    /// Touched only on `queue`, which is serial and is also where every
+    /// state update lands.
+    private var remainingPorts: [UInt16] = []
+
     @MainActor
     func start(store: ActivityStore, sessions: SessionStore? = nil) {
         self.store = store
         self.sessions = sessions
         token = Self.loadOrCreateToken()
+        queue.async { [self] in
+            remainingPorts = Self.portCandidates()
+            bindNext()
+        }
+    }
+
+    /// Tries candidates until one opens.
+    ///
+    /// It has to be a walk rather than a loop because NWListener reports
+    /// a taken port asynchronously, not from the initializer: the whole
+    /// reason the state handler exists is that a second instance used to
+    /// leave the door dead while the app looked perfectly healthy, and
+    /// every `chalant` command failed with nothing anywhere saying why.
+    private func bindNext() {
+        guard !remainingPorts.isEmpty else {
+            Self.log.error(
+                "activity door could not be opened on any port from \(Self.port); nothing local can reach Chalant")
+            return
+        }
+        let candidate = remainingPorts.removeFirst()
         let parameters = NWParameters.tcp
         parameters.requiredInterfaceType = .loopback
         parameters.allowLocalEndpointReuse = true
-        guard let port = NWEndpoint.Port(rawValue: Self.port) else { return }
+        guard let port = NWEndpoint.Port(rawValue: candidate) else {
+            bindNext()
+            return
+        }
+        // Bound to 127.0.0.1 itself, not to the wildcard with a
+        // loopback interface asked for politely alongside it. Those are
+        // not the same thing and `lsof` says so: the shipped 1.7.1
+        // listens on `*:4242`, which is a socket on every interface the
+        // machine has, kept honest only by the interface requirement
+        // above. Naming the local endpoint makes the kernel the one
+        // enforcing it, so a wrong assumption about `requiredInterfaceType`
+        // cannot quietly put this port on the network.
+        parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: port)
         let listener: NWListener
         do {
-            listener = try NWListener(using: parameters, on: port)
+            // No `on:` here. The port is already named by the required
+            // local endpoint above, and giving it twice leaves a
+            // listener that never reaches `.ready` and never reports a
+            // failure either: no socket, no log line, and an app that
+            // looks perfectly healthy while nothing local can reach it.
+            // That is the exact symptom this file's state handler was
+            // written for, arrived at from the opposite direction.
+            listener = try NWListener(using: parameters)
         } catch {
             Self.log.error(
-                "activity door could not be opened on \(Self.port): \(error.localizedDescription, privacy: .public)")
+                "activity door could not be opened on \(candidate): \(error.localizedDescription, privacy: .public)")
+            bindNext()
             return
         }
         listener.newConnectionHandler = { [weak self] connection in
             self?.handle(connection)
         }
-        // NWListener reports a taken port asynchronously, not from the
-        // initializer: without this a second instance left the door
-        // dead while the app looked perfectly healthy, and every
-        // `chalant` command failed with nothing anywhere saying why.
-        listener.stateUpdateHandler = { state in
+        listener.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
             switch state {
             case .ready:
-                Self.log.notice("activity door open on \(Self.port)")
+                lock.lock()
+                openPort = candidate
+                lock.unlock()
+                publish(port: candidate)
+                Self.log.notice("activity door open on \(candidate)")
             case .failed(let error):
                 Self.log.error(
-                    "activity door failed on \(Self.port): \(error.localizedDescription, privacy: .public). Another Chalant is probably already running.")
+                    "activity door failed on \(candidate): \(error.localizedDescription, privacy: .public). Trying the next port.")
+                listener.cancel()
+                if self.listener === listener { self.listener = nil }
+                bindNext()
             case .cancelled:
                 Self.log.notice("activity door closed")
             default:
@@ -123,9 +211,36 @@ final class ActivityServer: @unchecked Sendable {
         self.listener = listener
     }
 
+    /// Publish the port and the token together, so a hook has to read
+    /// exactly one file to reach this app and can never hold a fresh
+    /// token against a stale port.
+    private func publish(port: UInt16) {
+        let payload: [String: Any] = ["port": Int(port), "token": token]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        try? FileManager.default.createDirectory(
+            at: Self.support, withIntermediateDirectories: true)
+        let url = Self.configURL
+        try? data.write(to: url, options: .atomic)
+        // After the write, never before: an atomic write lands a new
+        // file, and a new file arrives with the umask's permissions
+        // rather than the ones the old one had. This file names the
+        // token, so 0600 is the point of it.
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
     func stop() {
-        listener?.cancel()
-        listener = nil
+        lock.lock()
+        openPort = nil
+        lock.unlock()
+        // On `queue` because that is where every other write to these
+        // two lands, and quit is the one moment this can be called from
+        // somewhere else.
+        queue.async { [self] in
+            remainingPorts = []
+            listener?.cancel()
+            listener = nil
+        }
     }
 
     private func handle(_ connection: NWConnection) {
@@ -237,18 +352,41 @@ final class ActivityServer: @unchecked Sendable {
         guard contentLength >= 0, contentLength <= Self.maxBody else { return nil }
         let body = data[headerEnd.upperBound...]
         guard body.count >= contentLength else { return nil }
-        let offeredToken = lines
-            .first { $0.lowercased().hasPrefix(tokenHeader) }
+        return Request(
+            method: parts[0], path: parts[1],
+            body: Data(body.prefix(contentLength)), fromBrowser: fromBrowser,
+            offeredToken: offeredToken(in: lines)
+        )
+    }
+
+    /// A header carries at most one value, and splitting on the FIRST
+    /// colon is what makes an empty one read as empty rather than trap
+    /// (the crash this file already paid for once, at Content-Length).
+    static func headerValue(_ name: String, in lines: [String]) -> String? {
+        lines
+            .first { $0.lowercased().hasPrefix(name) }
             .flatMap { line -> String? in
                 guard let colon = line.firstIndex(of: ":") else { return nil }
                 return line[line.index(after: colon)...]
                     .trimmingCharacters(in: .whitespaces)
-            } ?? ""
-        return Request(
-            method: parts[0], path: parts[1],
-            body: Data(body.prefix(contentLength)), fromBrowser: fromBrowser,
-            offeredToken: offeredToken
-        )
+            }
+    }
+
+    /// Whichever of the two headers the caller brought. The scheme word
+    /// is matched case-insensitively because it is Claude Code writing
+    /// it, not this app, and an `Authorization` carrying anything other
+    /// than Bearer reads as no token at all rather than as its own tail.
+    static func offeredToken(in lines: [String]) -> String {
+        if let direct = headerValue(tokenHeader, in: lines), !direct.isEmpty {
+            return direct
+        }
+        guard let offered = headerValue(bearerHeader, in: lines) else { return "" }
+        let scheme = "bearer "
+        guard offered.count > scheme.count,
+              offered.prefix(scheme.count).lowercased() == scheme
+        else { return "" }
+        return String(offered.dropFirst(scheme.count))
+            .trimmingCharacters(in: .whitespaces)
     }
 
     private func route(_ request: Request, on connection: NWConnection) {
@@ -277,7 +415,7 @@ final class ActivityServer: @unchecked Sendable {
         // about what a right one would carry.
         guard Self.tokenMatches(request.offeredToken, token) else {
             respond(connection, status: "401 Unauthorized",
-                    body: #"{"ok":false,"error":"send X-Chalant-Token, see ~/Library/Application Support/Chalant/api-token"}"#)
+                    body: #"{"ok":false,"error":"send X-Chalant-Token or Authorization: Bearer, see ~/Library/Application Support/Chalant/server.json"}"#)
             return
         }
         switch (request.method, request.path) {
@@ -549,6 +687,18 @@ final class ActivityServer: @unchecked Sendable {
                 // real failure unreadable.
                 self.respond(connection, status: "200 OK", body: body)
             }
+
+        // Is anybody home, and which Chalant is it. Behind the token
+        // like everything else: an unauthenticated liveness probe is
+        // also an unauthenticated "is this app installed, and which
+        // version" for anything on the machine that fancies knowing.
+        case ("GET", "/health"):
+            let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+                ?? "0"
+            let body = (try? JSONSerialization.data(
+                withJSONObject: ["ok": true, "app": "Chalant", "version": version]
+            )).flatMap { String(data: $0, encoding: .utf8) } ?? #"{"ok":true}"#
+            respond(connection, status: "200 OK", body: body)
 
         case ("GET", "/activities"):
             Task { @MainActor in
