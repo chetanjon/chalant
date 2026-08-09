@@ -130,6 +130,28 @@ final class ArmingTests: XCTestCase {
         XCTAssertFalse(HookInstall.holdsToolCalls(settings: try read()))
     }
 
+    /// An entry somebody hand-built, mixing this app's hook with another
+    /// tool's in one entry. Detection counts it as armed (any inner hook
+    /// is ours), so disarm has to reach inside it the same way — the old
+    /// all-or-nothing removal left it armed forever with no way out.
+    func testDisarmReachesInsideAMixedEntryAndTakesOnlyOurHalf() throws {
+        try write("""
+        {"hooks":{"PreToolUse":[{"hooks":[
+          {"type":"command","command":"/other/guard.js"},
+          {"type":"command","command":"/somewhere/chalant-hook","timeout":40}]}]}}
+        """)
+        XCTAssertTrue(HookInstall.holdsToolCalls(settings: try read()))
+
+        guard case .armed = HookInstall.disarm(at: settings) else { return XCTFail("should disarm") }
+
+        let left = hooks(try read(), "PreToolUse")
+        XCTAssertEqual(left.count, 1)
+        let inner = try XCTUnwrap(left[0]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(inner.map { $0["command"] as? String }, ["/other/guard.js"],
+                       "the other tool's half of the entry is not ours to lose")
+        XCTAssertFalse(HookInstall.holdsToolCalls(settings: try read()))
+    }
+
     /// Arm, disarm, and the only difference to the file should be the
     /// hook itself.
     func testArmThenDisarmLeavesTheRestOfTheFileIntact() throws {

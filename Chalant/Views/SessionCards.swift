@@ -788,26 +788,19 @@ struct AskCard: View {
     }
 }
 
-/// A tool call held at the door.
-///
-/// The only card in this app whose buttons change what a running agent
-/// does. Everything else here reports, or leaves something for an agent
-/// to collect on its own schedule; this one has an agent standing still
-/// on the other side of it.
-///
-/// So it shows the call verbatim and never summarises: a paraphrase of
-/// a command you are being asked to authorise is a paraphrase of the
-/// wrong thing. And it says out loud that not answering is an option
-/// with a known outcome, because a dialog that looks like it might trap
-/// an agent forever is one people learn to avoid rather than use.
 /// Claude Code asking, in its own terminal, with the island watching.
 ///
-/// Deliberately not styled as a decision. Nothing here can answer this
-/// prompt: a hook returning a decision on the event is ignored, and
-/// typing the answer in from outside selected the wrong option and
-/// wrote a permission rule nobody agreed to (both measured 2026-08-06).
-/// So this card names what is stuck and hands over a door, and says so
-/// rather than implying a button might work.
+/// Deliberately not styled as a decision, because nothing is holding
+/// this one: it reached the island as a report from the `Notification`
+/// hook, not as a suspended `PermissionRequest`. A prompt that hook
+/// holds gets an `ApprovalCard` with working buttons — the old claim
+/// here that a decision on the event is ignored came from a 2026-08-06
+/// test that answered with the PreToolUse field name; the event obeys
+/// `decision.behavior` (HookPayload.response(for:event:)). What remains
+/// true is narrower: typing the answer into the terminal from outside
+/// selected the wrong option and wrote a permission rule nobody agreed
+/// to (measured 2026-08-06). So for the prompts this app is not
+/// holding, this card names what is stuck and hands over a door.
 struct TerminalPromptCard: View {
     let prompt: SessionStore.PendingPrompt
     let session: SessionStore.Session
@@ -923,6 +916,18 @@ struct TerminalPromptCard: View {
     }
 }
 
+/// A tool call held at the door.
+///
+/// The only card in this app whose buttons change what a running agent
+/// does. Everything else here reports, or leaves something for an agent
+/// to collect on its own schedule; this one has an agent standing still
+/// on the other side of it.
+///
+/// So it shows the call verbatim and never summarises: a paraphrase of
+/// a command you are being asked to authorise is a paraphrase of the
+/// wrong thing. And it says out loud that not answering is an option
+/// with a known outcome, because a dialog that looks like it might trap
+/// an agent forever is one people learn to avoid rather than use.
 struct ApprovalCard: View {
     let approval: SessionStore.Approval
     let decide: (SessionStore.Approval.Decision) -> Void

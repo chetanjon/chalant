@@ -575,12 +575,17 @@ final class ActivityServer: @unchecked Sendable {
         // Claude Code is standing at its own permission prompt, in its
         // own terminal, right now.
         //
-        // Reported rather than held: nothing here can answer it (proven
-        // 2026-08-06, a decision returned on `PermissionRequest` is
-        // ignored). The value is that this arrives with no setup at all,
-        // from the `Notification` hook that is already installed, and it
-        // arrives for agents inside editors this app cannot type into,
-        // which is where the founder actually works.
+        // Reported rather than held, because nothing is holding it: this
+        // arrives from the `Notification` command hook, for prompts the
+        // `PermissionRequest` HTTP hook never saw — a session that
+        // started before the prompt switch was armed, or a machine where
+        // it never was. A held prompt IS answerable: the old claim here
+        // that a decision on `PermissionRequest` is ignored came from a
+        // 2026-08-06 test that answered with the PreToolUse field name;
+        // the event obeys `decision.behavior` (HookPayload.response(for:
+        // event:), and /hook/permission-request below). The value of
+        // this route is that it needs no setup at all and reaches agents
+        // inside editors this app cannot type into.
         case ("POST", "/prompt"):
             guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
                   let session = object["session"] as? String, !session.isEmpty

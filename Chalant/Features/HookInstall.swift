@@ -765,10 +765,19 @@ enum HookInstall {
         guard var hooks = settings["hooks"] as? [String: Any],
               var preToolUse = hooks["PreToolUse"] as? [[String: Any]]
         else { return .armed(backup: nil) }
-        preToolUse.removeAll { entry in
-            (entry["hooks"] as? [[String: Any]])?.allSatisfy {
-                ($0["command"] as? String)?.contains("chalant-hook") ?? false
-            } ?? false
+        // Reaches inside each entry rather than removing entries whole.
+        // `holdsToolCalls` counts an entry as armed if ANY inner hook is
+        // ours, so removal has to match the same way: an entry somebody
+        // hand-built mixing this app's hook with another tool's used to
+        // read as armed forever, because the old all-or-nothing removal
+        // would never touch it. The other tool's half stays put.
+        preToolUse = preToolUse.compactMap { entry in
+            guard var inner = entry["hooks"] as? [[String: Any]] else { return entry }
+            inner.removeAll { ($0["command"] as? String)?.contains("chalant-hook") ?? false }
+            guard !inner.isEmpty else { return nil }
+            var kept = entry
+            kept["hooks"] = inner
+            return kept
         }
         if preToolUse.isEmpty { hooks.removeValue(forKey: "PreToolUse") } else { hooks["PreToolUse"] = preToolUse }
         settings["hooks"] = hooks
