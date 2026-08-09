@@ -100,6 +100,10 @@ final class ActivityServer: @unchecked Sendable {
 
     private var token = ""
 
+    /// The agents suspended inside a hook request right now, each one
+    /// waiting on an answer this app has not given yet.
+    let gate = PendingDecisionStore()
+
     /// The ports this app will try, in order. 4242 is the one every
     /// hook and script already installed on this machine knows by
     /// heart, so it stays first and stays the answer in every ordinary
@@ -243,22 +247,37 @@ final class ActivityServer: @unchecked Sendable {
         }
     }
 
+    /// Whether a connection got as far as a whole request. Touched only
+    /// on `queue`, which is serial and is where both writers live.
+    private final class Arrival {
+        var routed = false
+    }
+
     private func handle(_ connection: NWConnection) {
         connection.start(queue: queue)
         // A client that opens a socket and never finishes its header
         // block would pin the connection and its buffer forever
         // (review-caught). Five seconds is a lifetime for a loopback
         // request of a few hundred bytes.
+        //
+        // It is a deadline on ARRIVING, not on being answered. A held
+        // tool call is a whole request that arrived in a millisecond and
+        // is then deliberately left unanswered for as long as it takes
+        // somebody to decide, which is minutes. Cancelling those at five
+        // seconds would have made the entire gate a slightly slower way
+        // of doing nothing.
+        let arrival = Arrival()
         queue.asyncAfter(deadline: .now() + 5) { [weak connection] in
+            guard !arrival.routed else { return }
             connection?.cancel()
         }
-        receive(connection, buffer: Data())
+        receive(connection, buffer: Data(), arrival: arrival)
     }
 
     /// Accumulate until the header block and Content-Length body are
     /// whole; requests here are a few hundred bytes, one read usually
     /// does it.
-    private func receive(_ connection: NWConnection, buffer: Data) {
+    private func receive(_ connection: NWConnection, buffer: Data, arrival: Arrival) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) {
             [weak self] chunk, _, complete, error in
             guard let self, error == nil else {
@@ -272,11 +291,12 @@ final class ActivityServer: @unchecked Sendable {
                 return
             }
             if let request = Self.parse(data) {
+                arrival.routed = true
                 self.route(request, on: connection)
             } else if complete {
                 self.respond(connection, status: "400 Bad Request", body: #"{"ok":false}"#)
             } else {
-                self.receive(connection, buffer: data)
+                self.receive(connection, buffer: data, arrival: arrival)
             }
         }
     }
@@ -688,6 +708,65 @@ final class ActivityServer: @unchecked Sendable {
                 self.respond(connection, status: "200 OK", body: body)
             }
 
+        // An agent standing inside its own hook, waiting on this app.
+        //
+        // Nothing polls here and nothing sleeps: the request arrives
+        // whole, this handler returns, and the answer is written onto
+        // the same connection whenever somebody decides, which may be
+        // minutes later. What is suspended is one Swift task and one
+        // agent process, and neither is holding a thread of this app's.
+        //
+        // Not answering at all is a supported outcome and the safest
+        // one. A hook that hears nothing back before its own timeout
+        // treats it as a non-blocking error and falls through to the
+        // agent's own permission flow, which is exactly what happened
+        // before any of this existed.
+        case ("POST", "/hook/permission-request"):
+            hold(request, on: connection, event: "PermissionRequest")
+
+        // Deciding a held call from outside the island, and seeing what
+        // is held. Here for the same reason `/outbox` and `/permissions`
+        // are: a feature whose only proof is a person clicking a button
+        // is a feature nobody can test without spending somebody's real
+        // authorisation on it.
+        case ("GET", "/debug/pending"):
+            Task {
+                let held = await self.gate.held.map { call in
+                    [
+                        "id": call.id, "session": call.sessionID, "tool": call.tool,
+                        "detail": call.detail, "cwd": call.cwd, "event": call.event,
+                        "permissionMode": call.permissionMode,
+                        "askedAt": ISO8601DateFormatter().string(from: call.askedAt),
+                    ]
+                }
+                let body = (try? JSONSerialization.data(
+                    withJSONObject: ["ok": true, "held": held]
+                )).flatMap { String(data: $0, encoding: .utf8) } ?? #"{"ok":true,"held":[]}"#
+                self.respond(connection, status: "200 OK", body: body)
+            }
+
+        case ("POST", "/debug/resolve"):
+            guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+                  let id = object["id"] as? String, !id.isEmpty,
+                  let raw = object["decision"] as? String,
+                  let decision = Self.decision(named: raw)
+            else {
+                respond(connection, status: "400 Bad Request",
+                        body: #"{"ok":false,"error":"need id and decision: allow, deny or abstain"}"#)
+                return
+            }
+            Task {
+                // False means nobody was waiting on that id: it was
+                // answered already, or its agent walked away. Reported
+                // rather than swallowed, because "the button did
+                // nothing" and "the button worked" must not look alike.
+                let answered = await self.gate.resolve(id, as: decision)
+                let body = (try? JSONSerialization.data(
+                    withJSONObject: ["ok": true, "resolved": answered]
+                )).flatMap { String(data: $0, encoding: .utf8) } ?? #"{"ok":true}"#
+                self.respond(connection, status: "200 OK", body: body)
+            }
+
         // Is anybody home, and which Chalant is it. Behind the token
         // like everything else: an unauthenticated liveness probe is
         // also an unauthenticated "is this app installed, and which
@@ -725,6 +804,59 @@ final class ActivityServer: @unchecked Sendable {
 
         default:
             respond(connection, status: "404 Not Found", body: #"{"ok":false}"#)
+        }
+    }
+
+    static func decision(named raw: String) -> GateDecision? {
+        switch raw {
+        case "allow": return .allow
+        case "deny": return .deny
+        case "abstain": return .abstain
+        default: return nil
+        }
+    }
+
+    /// Register a held call and answer whenever somebody decides.
+    ///
+    /// A payload this app cannot read is answered immediately with an
+    /// empty 200, which means "no opinion" rather than approval. That is
+    /// the common case by a wide margin and it costs one loopback round
+    /// trip, because this fires for calls nobody asked to supervise.
+    private func hold(_ request: Request, on connection: NWConnection, event: String) {
+        guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+              let call = HookPayload.call(from: object, fallbackID: UUID().uuidString)
+        else {
+            respond(connection, status: "200 OK", body: "")
+            return
+        }
+        watchForHangup(connection, id: call.id)
+        Task { [weak self] in
+            guard let self else { return }
+            let decision = await gate.hold(call)
+            // Nil is `.abstain`: an empty 200, and the agent's own
+            // permission flow runs untouched.
+            self.respond(
+                connection, status: "200 OK",
+                body: HookPayload.response(for: decision, event: event) ?? "")
+        }
+    }
+
+    /// The agent's side of the wire going quiet.
+    ///
+    /// A hook that gave up, or a terminal that was closed, leaves a card
+    /// offering a choice nobody is listening for, which is worse than no
+    /// choice at all. The request is already whole, so this read can
+    /// never return more of it: anything it reports is the connection
+    /// ending, which is the one thing worth knowing.
+    ///
+    /// Harmless when the answer got there first. This also fires on the
+    /// cancel that follows a successful response, and by then the id is
+    /// gone from the store and abandoning it does nothing.
+    private func watchForHangup(_ connection: NWConnection, id: String) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1) {
+            [weak self] _, _, complete, error in
+            guard complete || error != nil else { return }
+            Task { await self?.gate.abandon(id) }
         }
     }
 
