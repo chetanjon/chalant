@@ -787,6 +787,61 @@ struct TerminalPromptCard: View {
     let openTerminal: () -> Void
 
     @Environment(\.chalantAccent) private var accent
+    /// Read once when the card appears rather than on every redraw: it
+    /// reads a file, and this card can be on screen for minutes.
+    @State private var armed = HookInstall.holdsToolCalls()
+    @State private var outcome: HookInstall.ArmOutcome?
+
+    /// The offer, made at the only moment it means anything.
+    ///
+    /// The button that turns this app's approval gate on has lived at
+    /// the bottom of the Sessions settings page since 1.5.0, under two
+    /// hook status cards, three code snippets, a session list and a rule
+    /// editor. It was never pressed once, by the person who asked for
+    /// the feature, across two releases. That is not forgetfulness, it
+    /// is a button nobody was ever looking at.
+    ///
+    /// Here it is attached to the exact frustration it answers: you are
+    /// staring at a question you cannot answer from here, and this is
+    /// the thing that would have let you. It appears only while the gate
+    /// is off, and it says what it changes and when, because arming
+    /// writes somebody's Claude config and takes effect for sessions
+    /// they have not started yet.
+    @ViewBuilder
+    private var offerToHold: some View {
+        if let outcome {
+            switch outcome {
+            case .armed, .alreadyArmed:
+                Text("Done. Chalant will hold these itself from now on, for sessions you "
+                     + "start after this one. This prompt still belongs to its terminal.")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .refused(let why):
+                Text(why)
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else if !armed {
+            HStack(alignment: .top, spacing: Theme.Space.m) {
+                Text("Chalant can hold these instead, so the next one arrives here with Allow "
+                     + "and Deny on it. One hook added to ~/.claude/settings.json, your old "
+                     + "file copied aside first.")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button("Let me answer these here") {
+                    outcome = HookInstall.arm()
+                    armed = HookInstall.holdsToolCalls()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .fixedSize()
+            }
+        }
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -807,6 +862,7 @@ struct TerminalPromptCard: View {
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
+                offerToHold
                 HStack(spacing: Theme.Space.m) {
                     Button(session.hasTerminal == false ? "Open folder" : "Open terminal",
                            action: openTerminal)
