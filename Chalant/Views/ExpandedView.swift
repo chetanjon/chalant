@@ -263,9 +263,9 @@ struct ExpandedView: View {
             }
         }
         .animation(Theme.Motion.hover, value: face.isDropTargeted)
-        .animation(Theme.Motion.content, value: model.tab)
-        .animation(Theme.Motion.content, value: chatFull)
-        .animation(Theme.Motion.content, value: model.pane)
+        .animation(Theme.Motion.island, value: model.tab)
+        .animation(Theme.Motion.island, value: chatFull)
+        .animation(Theme.Motion.island, value: model.pane)
         .animation(Theme.Motion.content, value: music.nowPlaying != nil)
         .animation(Theme.Motion.content, value: ambience.active)
         .animation(Theme.Motion.content, value: model.pendingContext != nil)

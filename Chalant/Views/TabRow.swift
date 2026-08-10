@@ -150,7 +150,8 @@ private struct SwitcherItem: View {
             let from = order.firstIndex(of: model.tab) ?? 0
             let to = order.firstIndex(of: tab) ?? 0
             model.tabSlideDirection = to >= from ? 1 : -1
-            withAnimation(Theme.Motion.content) { model.tab = tab }
+            // The pour: a tab change moves the shell, so it rides the island's own curve.
+            withAnimation(Theme.Motion.island) { model.tab = tab }
         } label: {
             // Thin, not semibold: the row's finish reads by brightness,
             // never by bulk. `weight: .regular` at this scale is
