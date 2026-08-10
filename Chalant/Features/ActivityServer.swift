@@ -142,6 +142,7 @@ final class ActivityServer: @unchecked Sendable {
                policy: PolicyStore? = nil) {
         wire(store: store, sessions: sessions, policy: policy)
         token = Self.loadOrCreateToken()
+        WireLog.trim()
         queue.async { [self] in
             remainingPorts = Self.portCandidates()
             bindNext()
@@ -674,6 +675,8 @@ final class ActivityServer: @unchecked Sendable {
             Task { @MainActor in
                 self.sessions?.notePendingPrompt(sessionID: session, tool: tool, detail: detail)
                 self.respond(connection, status: "200 OK", body: #"{"ok":true}"#)
+                WireLog.note(event: "Notification", ntype: "permission_prompt", tool: tool,
+                             response: "reported the prompt's subject")
             }
 
         // The prompt is over: the turn ended, or the agent moved on.
@@ -811,6 +814,10 @@ final class ActivityServer: @unchecked Sendable {
             // everything else here: a lifecycle event must never block.
             let lastWords = (object?["last_assistant_message"] as? String) ?? ""
             respond(connection, status: "200 OK", body: "")
+            WireLog.note(
+                event: (object?["hook_event_name"] as? String)
+                    ?? (request.path == "/hook/stop" ? "Stop" : "SessionEnd"),
+                response: "")
             guard !ended.isEmpty else { return }
             if !lastWords.isEmpty {
                 Task { @MainActor in
@@ -934,11 +941,11 @@ final class ActivityServer: @unchecked Sendable {
             watchForHangup(connection, id: call.id, answers: true)
             Task { [weak self] in
                 guard let self else { return }
-                self.respond(
-                    connection, status: "200 OK",
-                    body: await self.settleQuestion(
-                        call: call, questions: questions,
-                        patience: Self.questionPatience) ?? "")
+                let body = await self.settleQuestion(
+                    call: call, questions: questions,
+                    patience: Self.questionPatience) ?? ""
+                self.respond(connection, status: "200 OK", body: body)
+                WireLog.note(event: "PreToolUse", tool: "AskUserQuestion", response: body)
             }
 
         // Every Claude Code tool call, standing at this app's own door.
@@ -966,10 +973,31 @@ final class ActivityServer: @unchecked Sendable {
             watchForHangup(connection, id: call.id)
             Task { [weak self] in
                 guard let self else { return }
-                self.respond(
-                    connection, status: "200 OK",
-                    body: await self.settleGate(call: call, patience: patience) ?? "")
+                let body = await self.settleGate(call: call, patience: patience) ?? ""
+                self.respond(connection, status: "200 OK", body: body)
+                WireLog.note(event: "PreToolUse", tool: call.tool, response: body)
             }
+
+        // A line for the wire log from a process the log cannot see
+        // into. The command hooks (Notification, Stop) consume their
+        // payloads inside `chalant-hook` and post only their effects
+        // here, so the literal `notification_type` never reaches this
+        // server through them; this is the script handing the tail its
+        // line, type string verbatim.
+        case ("POST", "/debug/wire"):
+            guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+                  let event = object["event"] as? String, !event.isEmpty
+            else {
+                respond(connection, status: "400 Bad Request",
+                        body: #"{"ok":false,"error":"need event"}"#)
+                return
+            }
+            WireLog.note(
+                event: String(event.prefix(60)),
+                ntype: (object["notification_type"] as? String).map { String($0.prefix(80)) },
+                tool: (object["tool"] as? String).map { String($0.prefix(60)) },
+                response: String(((object["note"] as? String) ?? "reported").prefix(200)))
+            respond(connection, status: "200 OK", body: #"{"ok":true}"#)
 
         // Deciding a held call from outside the island, and seeing what
         // is held. Here for the same reason `/outbox` and `/permissions`
@@ -1214,9 +1242,9 @@ final class ActivityServer: @unchecked Sendable {
                 return reason
             }
             if granted != nil {
-                self.respond(
-                    connection, status: "200 OK",
-                    body: HookPayload.response(for: .allow, event: event) ?? "")
+                let body = HookPayload.response(for: .allow, event: event) ?? ""
+                self.respond(connection, status: "200 OK", body: body)
+                WireLog.note(event: event, tool: call.tool, response: body)
                 return
             }
             // A second prompt in a session that is already holding one
@@ -1255,9 +1283,9 @@ final class ActivityServer: @unchecked Sendable {
             await MainActor.run { self.sessions?.clearApproval(id: call.id) }
             // Nil is `.abstain`: an empty 200, and the agent's own
             // permission flow runs untouched.
-            self.respond(
-                connection, status: "200 OK",
-                body: HookPayload.response(for: decision, event: event) ?? "")
+            let body = HookPayload.response(for: decision, event: event) ?? ""
+            self.respond(connection, status: "200 OK", body: body)
+            WireLog.note(event: event, tool: call.tool, response: body)
         }
     }
 
@@ -1403,9 +1431,9 @@ final class ActivityServer: @unchecked Sendable {
             }
             let outcome = await answers.hold(ask)
             await MainActor.run { self.sessions?.clearAsk(sessionID: ask.sessionID) }
-            self.respond(
-                connection, status: "200 OK",
-                body: HookPayload.response(for: outcome, fields: ask.fields) ?? "")
+            let body = HookPayload.response(for: outcome, fields: ask.fields) ?? ""
+            self.respond(connection, status: "200 OK", body: body)
+            WireLog.note(event: "Elicitation", response: body)
         }
     }
 

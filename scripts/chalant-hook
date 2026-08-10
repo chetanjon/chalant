@@ -125,10 +125,11 @@ title = where or (session[:8] if session else "") or "a session"
 # below, which does not depend on this at all, and which only Claude
 # Code is even asked for.
 stop_active = "1" if d.get("stop_hook_active") else "0"
-# Which kind of Notification, sanitised down to one shell-safe word:
-# it decides a case branch below, and an unrecognised or hostile
-# value must read as "no type" rather than as its own text.
-ntype = re.sub(r"[^a-z_]", "", first("notification_type"))
+# Which kind of Notification, sanitised down to one shell-safe word
+# but otherwise verbatim: it decides a case branch below, AND it is
+# what the wire tail shows, so squashing its case would mean reading a
+# string off a live session that Claude Code never sent.
+ntype = re.sub(r"[^A-Za-z0-9_-]", "", first("notification_type"))
 print(event or "-", session or "-", stop_active, ntype or "-", title.replace(" ", " "))
 ' 2>/dev/null)
 EOF
@@ -193,6 +194,14 @@ esac
 
 curl -s --max-time 2 -H "X-Chalant-Token: $TOKEN" "$BASE/activity" \
   -d "{\"id\":\"$AGENT-$(esc "$SESSION")\",\"title\":\"$(esc "$WHAT")\",\"state\":\"$STATE\"}" \
+  >/dev/null 2>&1
+
+# The wire tail's line for this event (`chalant tail`). The command
+# hooks consume their payloads here in the script, so the literal
+# notification_type never reaches the server through the pill alone;
+# this hands the tail the string verbatim.
+curl -s --max-time 2 -H "X-Chalant-Token: $TOKEN" "$BASE/debug/wire" \
+  -d "{\"event\":\"$(esc "$EVENT")\",\"notification_type\":\"$(esc "$NTYPE")\",\"note\":\"$(esc "pill $STATE: $WHAT")\"}" \
   >/dev/null 2>&1
 
 # Claude Code putting a permission prompt on screen, and what it is

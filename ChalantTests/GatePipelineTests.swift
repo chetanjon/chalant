@@ -301,6 +301,32 @@ final class GatePipelineTests: XCTestCase {
         XCTAssertNil(sessions.sessions.first?.ask, "the card goes with the asker")
     }
 
+    // MARK: The wire tail's line
+
+    func testAWireLineCarriesOnlyWhatTheEventHad() {
+        let at = Date(timeIntervalSince1970: 1_754_700_000)
+        let full = WireLog.line(
+            at: at, event: "Notification", ntype: "agent_needs_input", tool: "Bash",
+            response: "pill needs-input: moai needs input")
+        XCTAssertTrue(full.contains("Notification"))
+        XCTAssertTrue(full.contains("type=agent_needs_input"))
+        XCTAssertTrue(full.contains("tool=Bash"))
+        XCTAssertTrue(full.hasSuffix("-> pill needs-input: moai needs input"))
+
+        let bare = WireLog.line(at: at, event: "Stop", response: "")
+        XCTAssertFalse(bare.contains("type="))
+        XCTAssertFalse(bare.contains("tool="))
+        XCTAssertTrue(bare.hasSuffix("-> (empty 200, no opinion)"),
+                      "an empty answer must read as no opinion, never as nothing happening")
+
+        // A response is JSON and a tail is lines: flattened and cut.
+        let long = WireLog.line(
+            at: at, event: "PreToolUse", tool: "Bash",
+            response: "{\"a\":\n\"" + String(repeating: "x", count: 500) + "\"}")
+        XCTAssertFalse(long.contains("\n"))
+        XCTAssertLessThanOrEqual(long.count, 400)
+    }
+
     // MARK: Who owns the preferred port
 
     func testOnlyAChalantShapedAnswerReadsAsAnotherChalant() {
