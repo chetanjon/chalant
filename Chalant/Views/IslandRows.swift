@@ -219,12 +219,18 @@ struct MusicRow: View {
 
     /// Hours appear only when needed: videos and live streams run
     /// long, songs stay "3:41".
-    private static func clock(_ seconds: Double) -> String {
+    static func clock(_ seconds: Double) -> String {
         let total = max(0, Int(seconds))
         if total >= 3600 {
             return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
         }
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    /// The right side of the progress line counts down (founder's
+    /// mockup, 2026-08-10): what is left, not what the whole is.
+    static func remainingClock(elapsed: Double, duration: Double) -> String {
+        "-" + clock(max(0, duration - elapsed))
     }
 }
 

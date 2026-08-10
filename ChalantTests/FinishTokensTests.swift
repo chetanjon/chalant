@@ -18,4 +18,20 @@ final class FinishTokensTests: XCTestCase {
         _ = Theme.Fonts.timeMono
         _ = Theme.Fonts.iconThin(.m)
     }
+
+    func testRemainingTimeReadsAsMinusMinutesSeconds() {
+        XCTAssertEqual(MusicRow.remainingClock(elapsed: 1358, duration: 1660), "-5:02")
+        XCTAssertEqual(MusicRow.remainingClock(elapsed: 0, duration: 61), "-1:01")
+    }
+
+    func testRemainingTimeNeverGoesPositiveOrBreaksOnLiveStreams() {
+        // Elapsed past the duration (a seek race) clamps to -0:00.
+        XCTAssertEqual(MusicRow.remainingClock(elapsed: 200, duration: 100), "-0:00")
+        // A live stream reports no duration; the clock stays honest.
+        XCTAssertEqual(MusicRow.remainingClock(elapsed: 100, duration: 0), "-0:00")
+    }
+
+    func testRemainingTimeGrowsHoursOnlyWhenNeeded() {
+        XCTAssertEqual(MusicRow.remainingClock(elapsed: 0, duration: 3723), "-1:02:03")
+    }
 }
