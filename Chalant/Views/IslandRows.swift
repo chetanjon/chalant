@@ -79,7 +79,7 @@ struct MusicRow: View {
                             Image(systemName: "speaker.wave.2.fill")
                                 .font(Theme.Fonts.icon(.xs))
                                 .foregroundStyle(Theme.textTertiary)
-                            Slider(
+                            ThinSlider(
                                 value: Binding(
                                     get: { volumeOverride ?? playing.volume },
                                     set: { value in
@@ -90,16 +90,11 @@ struct MusicRow: View {
                                     }
                                 ),
                                 in: 0...100,
-                                onEditingChanged: { editing in
-                                    if !editing, let target = volumeOverride {
-                                        music.commitVolume(target)
-                                        volumeOverride = nil
-                                    }
+                                onCommit: { target in
+                                    music.commitVolume(target)
+                                    volumeOverride = nil
                                 }
                             )
-                            .controlSize(.mini)
-                            .tint(Color.white.opacity(0.5))
-                            .frame(width: 84)
                         }
                         .help(
                             playing.source.scriptable == nil
@@ -292,10 +287,7 @@ struct AmbienceRow: View {
                     Image(systemName: "speaker.wave.2.fill")
                         .font(Theme.Fonts.icon(.xs))
                         .foregroundStyle(Theme.textTertiary)
-                    Slider(value: $ambience.volume, in: 0...1)
-                        .controlSize(.mini)
-                        .tint(Color.white.opacity(0.5))
-                        .frame(width: 84)
+                    ThinSlider(value: $ambience.volume, in: 0...1, onCommit: nil)
                 }
                 .transition(.opacity)
             }

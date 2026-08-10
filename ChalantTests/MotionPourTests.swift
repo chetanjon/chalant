@@ -57,4 +57,11 @@ final class MotionPourTests: XCTestCase {
             MusicRow.displayPosition(live: 84, pending: (target: 140, at: then), now: Date()),
             84, "a player that never catches up gets the truth back after 3s")
     }
+
+    func testThinSliderMathMapsAndClampsAcrossItsRange() {
+        XCTAssertEqual(ThinSlider.value(atX: 42, width: 84, in: 0...100), 50)
+        XCTAssertEqual(ThinSlider.value(atX: -5, width: 84, in: 0...100), 0)
+        XCTAssertEqual(ThinSlider.value(atX: 200, width: 84, in: 0...1), 1)
+        XCTAssertEqual(ThinSlider.value(atX: 10, width: 0, in: 0...1), 0)
+    }
 }

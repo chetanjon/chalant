@@ -727,6 +727,77 @@ struct ThinkingDots: View {
     }
 }
 
+/// The island's own slider: a 2pt track, a 6pt dot that appears on
+/// hover or drag, drag anywhere on a 16pt target. The AppKit mini
+/// slider's knob read as furniture next to the scrub line; this is the
+/// same voice at volume size. Adjustable to assistive tech like a
+/// slider, because it is one.
+struct ThinSlider: View {
+    @Binding var value: Double
+    var range: ClosedRange<Double> = 0...1
+    var onCommit: ((Double) -> Void)?
+    @State private var dragging = false
+    @State private var hovered = false
+
+    // The memberwise init would label this parameter `range:`; call
+    // sites read as a slider (`in: 0...1`, matching ScrubBar's own
+    // static function below) so the label is spelled out here.
+    init(value: Binding<Double>, in range: ClosedRange<Double> = 0...1, onCommit: ((Double) -> Void)? = nil) {
+        self._value = value
+        self.range = range
+        self.onCommit = onCommit
+    }
+
+    static func value(atX x: CGFloat, width: CGFloat, in range: ClosedRange<Double>) -> Double {
+        guard width > 0 else { return range.lowerBound }
+        let unit = min(1, max(0, Double(x / width)))
+        return range.lowerBound + unit * (range.upperBound - range.lowerBound)
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let span = range.upperBound - range.lowerBound
+            let unit = span > 0 ? (value - range.lowerBound) / span : 0
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.16)).frame(height: 2)
+                Capsule().fill(Color.white.opacity(0.6))
+                    .frame(width: geo.size.width * unit, height: 2)
+                if hovered || dragging {
+                    Circle().fill(Color.white.opacity(0.9))
+                        .frame(width: 6, height: 6)
+                        .offset(x: geo.size.width * unit - 3)
+                        .transition(.opacity)
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .center)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { drag in
+                        dragging = true
+                        value = Self.value(atX: drag.location.x, width: geo.size.width, in: range)
+                    }
+                    .onEnded { _ in
+                        dragging = false
+                        onCommit?(value)
+                    }
+            )
+        }
+        .frame(width: 84, height: 16)
+        .onHover { hovered = $0 }
+        .animation(Theme.Motion.hover, value: hovered || dragging)
+        .accessibilityElement()
+        .accessibilityLabel("Volume")
+        .accessibilityValue(Text("\(Int((value - range.lowerBound) / max(range.upperBound - range.lowerBound, 0.0001) * 100)) percent"))
+        .accessibilityAdjustableAction { direction in
+            let step = (range.upperBound - range.lowerBound) * 0.05
+            let delta = direction == .increment ? step : -step
+            value = min(range.upperBound, max(range.lowerBound, value + delta))
+            onCommit?(value)
+        }
+    }
+}
+
 /// The finish's progress line: a full-width 2pt track, no knob, drag
 /// anywhere to seek. Replaces the mini Slider in the music row (spec
 /// 2026-08-10); a hit target 16pt tall hides behind the 2pt drawing so
