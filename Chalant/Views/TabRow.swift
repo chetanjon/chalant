@@ -1,9 +1,12 @@
 import SwiftUI
 
 /// The lower-panel switcher: Today (when your day is turned on) plus
-/// whichever tools you keep, and the settings gear. The selected tool
-/// wears its name and the hovered one says its own, so the row can be
-/// read by running along it rather than guessed at or clicked through.
+/// whichever tools you keep, and the settings gear. It reads by
+/// brightness now, not by pills: the active tool's icon is white, the
+/// rest sit faint until the cursor lifts one. A name never left the
+/// row, it just moved into the tooltip, where a sweep of the cursor
+/// still turns up every label without a single word sitting on screen
+/// at rest.
 struct Switcher: View {
     @ObservedObject var model: NotchViewModel
     /// Observed in its own right: a nested ObservableObject does not
@@ -16,14 +19,15 @@ struct Switcher: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.xs) {
-            // The tools sit on one quiet track, so the row reads as a
-            // single switcher rather than as a scatter of loose glyphs.
-            // Nothing is hidden by this: with a soundscape row directly
-            // above wearing chips of the same size and colour, twelve
-            // small symbols stacked in two rows had nothing to say
-            // which were navigation and which were controls (user,
+            // No track under these any more: brightness alone tells
+            // the active tool from the rest, so the row reads as a
+            // single switcher without needing a shared background to
+            // say so. Nothing is hidden by this: with a soundscape row
+            // directly above wearing chips of the same size and colour,
+            // twelve small symbols stacked in two rows had nothing to
+            // say which were navigation and which were controls (user,
             // relaying "too much to see").
-            HStack(spacing: Theme.Space.xs) {
+            HStack(spacing: Theme.Space.xxl) {
                 if todayEnabled {
                     SwitcherItem(tab: .today, model: model)
                 }
@@ -31,8 +35,6 @@ struct Switcher: View {
                     SwitcherItem(tab: tab, model: model)
                 }
             }
-            .padding(.horizontal, Theme.Space.xs)
-            .background(Capsule().fill(Theme.surface))
             Spacer(minLength: 0)
             // The door into the full-height island, and only on the
             // destinations that have one. A visible button rather than
@@ -56,7 +58,7 @@ struct Switcher: View {
             // standing without adding a surface or nagging: it is the
             // gear already there, wearing a dot until you have looked.
             HoverGlyphButton(
-                symbol: "gearshape", label: "Settings", scale: .m, tint: Theme.textTertiary
+                symbol: "gearshape", label: "Settings", scale: .m, tint: Theme.textGhost
             ) {
                 // Settings is a window now, so the island gets out of
                 // the way rather than sitting lit over the window that
@@ -122,23 +124,19 @@ struct Switcher: View {
     }
 }
 
-/// One switcher pill. The active tab wears its name, and so does the
-/// one under the cursor, so a sweep across the row reads it out.
+/// One switcher glyph, icon only. No pill, no label at rest: the
+/// active tab is the one drawn white, and the rest sit faint until
+/// hovered a shade brighter. The name never disappeared, it just moved
+/// off the canvas and into `.help`, so a sweep across the row with the
+/// cursor still turns up every one of them.
 ///
-/// Every name at once needs about 780pt and the island is 518, which is
-/// why they were glyphs to begin with. But the answer was living only in
-/// a tooltip, and a tooltip is a place nobody looks before deciding a
-/// feature is not there: the row was unlearnable without clicking all of
-/// it. The name arrives on hover instead, immediately, where the eye
-/// already is.
-///
-/// It grows rightward from a left edge that does not move, so the pill
-/// under the cursor stays under the cursor and the row cannot chase
-/// itself.
+/// Every name at once needs about 780pt and the island is 518, which
+/// is why these were glyphs to begin with. Reading the row by
+/// brightness instead of by a pill or a revealed word means the eye
+/// never has to wait for a hover to know which tool is active.
 private struct SwitcherItem: View {
     let tab: NotchViewModel.Tab
     @ObservedObject var model: NotchViewModel
-    @Environment(\.chalantAccent) private var accent
     @State private var hovered = false
 
     var body: some View {
@@ -154,35 +152,18 @@ private struct SwitcherItem: View {
             model.tabSlideDirection = to >= from ? 1 : -1
             withAnimation(Theme.Motion.content) { model.tab = tab }
         } label: {
-            HStack(spacing: Theme.Space.snug) {
-                // A size up and a tier brighter than they were: the
-                // tools read at a glance now (user call, 2026-07-22,
-                // "looks too small").
-                GlyphImage(symbol: Switcher.symbol(tab), scale: .m)
-                if on || hovered {
-                    Text(Switcher.label(tab))
-                        // Emphasised only where it means "you are here".
-                        // On hover it is a label, not a selection.
-                        .font(on ? Theme.Fonts.bodyEmphasis : Theme.Fonts.body)
-                        .fixedSize()
-                        .transition(.opacity)
-                }
-            }
-            .foregroundStyle(
-                on ? Theme.textPrimary
-                    : hovered ? Theme.textPrimary : Theme.textSecondary
-            )
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.vertical, 7)
-            // The active tool wears a quiet wash of the accent, the
-            // island's one habit of color inside the glass.
-            .background(Capsule().fill(on ? accent.opacity(0.14) : Color.clear))
-            .overlay(
-                Capsule().strokeBorder(
-                    on ? accent.opacity(0.22) : Color.clear, lineWidth: 1
+            // Thin, not semibold: the row's finish reads by brightness,
+            // never by bulk. `weight: .regular` at this scale is
+            // `Theme.Fonts.iconThin(.m)`, reached through GlyphImage's
+            // own scale/weight pair since it takes no raw `Font`.
+            GlyphImage(symbol: Switcher.symbol(tab), scale: .m, weight: .regular)
+                .foregroundStyle(
+                    on ? Theme.textPrimary
+                        : hovered ? Theme.textSecondary : Theme.textGhost
                 )
-            )
-            .contentShape(Capsule())
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, 7)
+                .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle())
         .onHover { hovered = $0 }
