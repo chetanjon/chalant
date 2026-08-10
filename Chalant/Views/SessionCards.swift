@@ -931,11 +931,14 @@ struct TerminalPromptCard: View {
 struct ApprovalCard: View {
     let approval: SessionStore.Approval
     let decide: (SessionStore.Approval.Decision) -> Void
-    /// The folder this call is being made in, which is the only place a
-    /// grant made here will ever apply. Empty means nowhere to scope
-    /// one to, and the offer is withdrawn rather than widened.
+    /// The folder this call is being made in, which is where a timed
+    /// grant made here applies. Empty means nowhere to scope one to,
+    /// and only the everywhere-forever shape is offered.
     var repo: String = ""
-    var grant: ((String, TimeInterval) -> Void)?
+    /// Writes one grant: the pattern, the folder ("" for everywhere),
+    /// and how long (nil for forever). The card owns which combination
+    /// each control means; the caller just hands this to PolicyStore.
+    var grant: ((String, String, TimeInterval?) -> Void)?
     @Environment(\.chalantAccent) private var accent
 
     /// Whatever the hook holding this one will actually wait, which is
@@ -1023,13 +1026,12 @@ struct ApprovalCard: View {
                 // the same `git status` forever, which is how a person
                 // stops reading the ones that matter. Says the exact
                 // rule it will write, because a button that promises
-                // something wider than it says is not consent.
-                // Narrowed from what this used to be. It wrote a rule
-                // with no folder and no end date, which is a strange
-                // thing to be handed for pressing a button once while
-                // looking at one command in one repo. Now it says the
-                // pattern, the folder and how long, and every one of
-                // those is a limit on what is being agreed to.
+                // something wider than it says is not consent. Every
+                // choice here is one grant in PolicyStore: the timed
+                // ones scoped to this folder, and "always" the
+                // everywhere-forever shape that button has always
+                // meant, all of them revocable in Dashboard, Sessions,
+                // and none of them able to cover the always-ask list.
                 if let grant, !repo.isEmpty {
                     // No `fixedSize`. With it the menu refused to
                     // compress, the row could not fit the room's ~370pt
@@ -1041,26 +1043,31 @@ struct ApprovalCard: View {
                     Menu("Allow \(exceptionLabel) for…") {
                         ForEach(Grant.expiries(), id: \.label) { choice in
                             Button(choice.label) {
-                                grant(exception, choice.seconds)
+                                grant(exception, repo, choice.seconds)
                                 decide(.allow)
                             }
+                        }
+                        Divider()
+                        Button("Always, everywhere") {
+                            grant(exception, "", nil)
+                            decide(.allow)
                         }
                     }
                     .menuStyle(.borderlessButton)
                     .controlSize(.small)
                     .layoutPriority(-1)
                     .help("Allows \(exception) in \((repo as NSString).lastPathComponent) "
-                          + "and nowhere else, until it runs out. "
+                          + "until it runs out, or always and everywhere. "
                           + "Undo it in Dashboard, Sessions.")
-                } else {
+                } else if let grant {
                     Button("Always allow \(exceptionLabel)") {
-                        SessionStore.addException(exception)
+                        grant(exception, "", nil)
                         decide(.allow)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .help("Adds \(exception) to the calls Chalant never holds. "
-                          + "Undo it in Dashboard, Sessions.")
+                    .help("Allows \(exception) everywhere, until you revoke it "
+                          + "in Dashboard, Sessions.")
                 }
                 Spacer(minLength: 0)
             }

@@ -70,7 +70,7 @@ final class PromptGateTests: XCTestCase {
         let store = SessionStore()
         _ = store.holdForApproval(
             sessionID: "s1", id: "toolu_1", tool: "Bash", detail: "ls", cwd: "/tmp",
-            patience: 480, rules: ["Bash"], exceptions: [])
+            patience: 480, rules: ["Bash"])
         let approval = store.sessions.first { $0.id == "s1" }?.approval
         XCTAssertEqual(approval?.patience, 480)
         XCTAssertEqual(approval?.alsoInTerminal, false)

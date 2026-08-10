@@ -9,12 +9,31 @@ import XCTest
 /// prove the pipeline without a socket, a token file, or a listener.
 @MainActor
 final class GatePipelineTests: XCTestCase {
+    private var dir: URL!
 
-    private func makeGate() -> (server: ActivityServer, sessions: SessionStore) {
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("chalant-gatepipeline-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: dir)
+        try super.tearDownWithError()
+    }
+
+    private func makeGate(
+        policy: PolicyStore? = nil
+    ) -> (server: ActivityServer, sessions: SessionStore) {
         let sessions = SessionStore()
         let server = ActivityServer()
-        server.wire(sessions: sessions)
+        server.wire(sessions: sessions, policy: policy)
         return (server, sessions)
+    }
+
+    private func makePolicy() -> PolicyStore {
+        PolicyStore(url: dir.appendingPathComponent("policy.json"))
     }
 
     private func call(
@@ -50,8 +69,7 @@ final class GatePipelineTests: XCTestCase {
     func testAllowTravelsBackInPreToolUseShape() async throws {
         let (server, sessions) = makeGate()
         let held = call()
-        async let body = server.settleGate(
-            call: held, patience: 600, rules: ["Bash"], exceptions: [])
+        async let body = server.settleGate(call: held, patience: 600, rules: ["Bash"])
         await waitForCard(held.id, in: sessions)
 
         sessions.decide(approvalID: held.id, as: .allow)
@@ -65,8 +83,7 @@ final class GatePipelineTests: XCTestCase {
     func testDenyTravelsBackAsDeny() async throws {
         let (server, sessions) = makeGate()
         let held = call(id: "toolu_gate_2", detail: "rm -rf build")
-        async let body = server.settleGate(
-            call: held, patience: 600, rules: ["Bash"], exceptions: [])
+        async let body = server.settleGate(call: held, patience: 600, rules: ["Bash"])
         await waitForCard(held.id, in: sessions)
 
         sessions.decide(approvalID: held.id, as: .deny)
@@ -81,26 +98,75 @@ final class GatePipelineTests: XCTestCase {
         // anything: silence means the agent's own permission flow runs
         // exactly as it would if this app were not installed.
         let (server, sessions) = makeGate()
-        let body = await server.settleGate(
-            call: call(), patience: 600, rules: ["Write"], exceptions: [])
+        let body = await server.settleGate(call: call(), patience: 600, rules: ["Write"])
         XCTAssertNil(body)
         XCTAssertTrue(sessions.sessions.isEmpty, "an ungated call draws no card")
     }
 
-    func testAnExceptionMakesTheGateStandAside() async {
-        let (server, sessions) = makeGate()
+    func testAGrantAnswersAllowWithoutACard() async throws {
+        // A grant is somebody who already answered this exact question,
+        // so the gate answers allow outright rather than holding — and
+        // writes it in the audit, because a gate that answers for you
+        // silently is not supervision.
+        let policy = makePolicy()
+        let (server, sessions) = makeGate(policy: policy)
+        policy.grant(pattern: "Bash(git *)", repo: "", for: nil)
+
         let body = await server.settleGate(
-            call: call(detail: "git status"), patience: 600,
-            rules: ["Bash"], exceptions: ["Bash(git *)"])
-        XCTAssertNil(body)
-        XCTAssertTrue(sessions.sessions.isEmpty)
+            call: call(detail: "git status"), patience: 600, rules: ["Bash"])
+
+        let output = try decoded(body)
+        XCTAssertEqual(output["permissionDecision"] as? String, "allow")
+        XCTAssertTrue(sessions.sessions.isEmpty, "no card for a question already answered")
+        XCTAssertEqual(policy.audit.count, 1)
+        XCTAssertEqual(policy.audit.first?.allowed, true)
+    }
+
+    func testAlwaysAllowIsHonoredOnTheVeryNextMatchingCall() async throws {
+        // The whole point of folding the two stores together: the tap
+        // that writes the grant and the gate that reads it are finally
+        // the same pipeline.
+        let policy = makePolicy()
+        let (server, sessions) = makeGate(policy: policy)
+        let first = call(id: "toolu_first", detail: "git status")
+        async let firstBody = server.settleGate(call: first, patience: 600, rules: ["Bash"])
+        await waitForCard(first.id, in: sessions)
+
+        // What tapping "Always allow git *" on the card does.
+        policy.grant(
+            pattern: SessionStore.suggestedException(tool: first.tool, detail: first.detail),
+            repo: "", for: nil)
+        sessions.decide(approvalID: first.id, as: .allow)
+        _ = await firstBody
+
+        let second = await server.settleGate(
+            call: call(id: "toolu_second", detail: "git log"), patience: 600, rules: ["Bash"])
+        let output = try decoded(second)
+        XCTAssertEqual(output["permissionDecision"] as? String, "allow")
+        XCTAssertNil(sessions.sessions.first?.approval, "no second card")
+    }
+
+    func testAGrantCannotWidenIntoTheAlwaysAskList() async {
+        // Somebody who allowed "git *" did not agree to a force push:
+        // the call falls through to the rules and is held like any
+        // other.
+        let policy = makePolicy()
+        let (server, sessions) = makeGate(policy: policy)
+        policy.grant(pattern: "Bash(git *)", repo: "", for: nil)
+        let held = call(id: "toolu_force", detail: "git push --force origin main")
+
+        async let body = server.settleGate(call: held, patience: 600, rules: ["Bash"])
+        await waitForCard(held.id, in: sessions)
+
+        sessions.decide(approvalID: held.id, as: .deny)
+        let answer = await body
+        XCTAssertNotNil(answer, "the force push was held, not granted through")
     }
 
     func testAHangupWithdrawsTheCardAndAnswersNothing() async {
         let (server, sessions) = makeGate()
         let held = call(id: "toolu_gate_3")
-        async let body = server.settleGate(
-            call: held, patience: 600, rules: ["Bash"], exceptions: [])
+        async let body = server.settleGate(call: held, patience: 600, rules: ["Bash"])
         await waitForCard(held.id, in: sessions)
 
         // What `watchForHangup` does when the agent's side of the wire
@@ -119,8 +185,7 @@ final class GatePipelineTests: XCTestCase {
         // Control. Without it the card outlived its question.
         let (server, sessions) = makeGate()
         let held = call(id: "toolu_gate_4")
-        async let body = server.settleGate(
-            call: held, patience: 600, rules: ["Bash"], exceptions: [])
+        async let body = server.settleGate(call: held, patience: 600, rules: ["Bash"])
         await waitForCard(held.id, in: sessions)
 
         await server.releaseHolds(inSession: held.sessionID)
@@ -134,15 +199,13 @@ final class GatePipelineTests: XCTestCase {
     func testASecondCallInOneSessionFallsThroughWhileTheFirstIsHeld() async {
         let (server, sessions) = makeGate()
         let first = call(id: "toolu_gate_5")
-        async let firstBody = server.settleGate(
-            call: first, patience: 600, rules: ["Bash"], exceptions: [])
+        async let firstBody = server.settleGate(call: first, patience: 600, rules: ["Bash"])
         await waitForCard(first.id, in: sessions)
 
         // Two cards racing for one row is worse than the second call
         // falling through to the terminal.
         let second = await server.settleGate(
-            call: call(id: "toolu_gate_6"), patience: 600,
-            rules: ["Bash"], exceptions: [])
+            call: call(id: "toolu_gate_6"), patience: 600, rules: ["Bash"])
         XCTAssertNil(second)
 
         sessions.decide(approvalID: first.id, as: .allow)

@@ -163,7 +163,6 @@ struct SessionsSection: View {
     @Environment(\.chalantAccent) private var accent
 
     @AppStorage(SessionStore.approvalRulesKey) private var approvalRulesRaw = ""
-    @AppStorage(SessionStore.approvalExceptionsKey) private var approvalExceptionsRaw = ""
     @State private var draftRule = ""
 
     // The room's dials. Defaults repeated from where the readers live,
@@ -204,19 +203,6 @@ struct SessionsSection: View {
 
     private func remove(_ rule: String) {
         approvalRulesRaw = rules.filter { $0 != rule }.joined(separator: "\n")
-    }
-
-    /// Read the same way `rules` is, so tapping Always allow on the
-    /// island redraws this list without a relaunch.
-    private var exceptions: [String] {
-        approvalExceptionsRaw
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-    }
-
-    private func removeException(_ rule: String) {
-        approvalExceptionsRaw = exceptions.filter { $0 != rule }.joined(separator: "\n")
     }
 
     /// Your agents, on your phone.
@@ -350,28 +336,11 @@ struct SessionsSection: View {
                     .foregroundStyle(Theme.textTertiary)
                 WrappingRules(rules: unused) { add($0) }
             }
-            if !exceptions.isEmpty {
-                SettingDivider()
-                Text("Never held")
-                    .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.textTertiary)
-                SettingNote(
-                    "You tapped Always allow on these. They skip the rules above, so a rule as "
-                    + "broad as Bash stays livable."
-                )
-                ForEach(exceptions, id: \.self) { rule in
-                    HStack(spacing: Theme.Space.m) {
-                        Text(rule)
-                            .font(Theme.Fonts.captionMono)
-                            .foregroundStyle(Theme.textPrimary)
-                        Spacer(minLength: 0)
-                        HoverGlyphButton(
-                            symbol: "xmark", label: "Start holding \(rule) again",
-                            scale: .s, tint: Theme.textTertiary
-                        ) { removeException(rule) }
-                    }
-                }
-            }
+            SettingNote(
+                "The way out of a broad rule is Always allow on the card itself, which "
+                + "makes a standing permission below, so a rule as broad as Bash stays "
+                + "livable."
+            )
             SettingDivider()
             armRow(armed: armed)
             if !rules.isEmpty, !armed {
@@ -615,9 +584,10 @@ struct SessionsSection: View {
         let live = policy.live()
         return SettingCard(title: "Standing permissions") {
             SettingNote(
-                "Made from an approval card, with Allow … here for. Each one is a pattern in "
-                + "one folder with an end time, never everywhere and never forever, and none of "
-                + "them can allow the things Chalant always asks about."
+                "Made from an approval card. Allow … for makes one in that folder with an "
+                + "end time; Always allow makes one everywhere with none. None of them can "
+                + "allow the things Chalant always asks about, and every one is revocable "
+                + "here."
             )
             if live.isEmpty {
                 SettingNote("Nothing standing. Every call is decided as it comes.")
@@ -627,11 +597,13 @@ struct SessionsSection: View {
                         Text(grant.pattern)
                             .font(Theme.Fonts.captionMono)
                             .foregroundStyle(Theme.textPrimary)
-                        Text("in \((grant.repo as NSString).lastPathComponent)")
+                        Text(grant.repo.isEmpty
+                             ? "everywhere"
+                             : "in \((grant.repo as NSString).lastPathComponent)")
                             .font(Theme.Fonts.caption)
                             .foregroundStyle(Theme.textSecondary)
                         Spacer(minLength: Theme.Space.m)
-                        Text(Self.until(grant.expires))
+                        Text(grant.expires.map { Self.until($0) } ?? "until revoked")
                             .font(Theme.Fonts.caption)
                             .foregroundStyle(Theme.textTertiary)
                         Button("Revoke") { policy.revoke(id: grant.id) }

@@ -85,8 +85,8 @@ struct AgentSessionsStrip: View {
             if let approval = session.approval, approval.decision == nil {
                 ApprovalCard(approval: approval, decide: { decision in
                     sessions.decide(approvalID: approval.id, as: decision)
-                }, repo: session.cwd, grant: { pattern, duration in
-                    model.policy.grant(pattern: pattern, repo: session.cwd, for: duration)
+                }, repo: session.cwd, grant: { pattern, repo, duration in
+                    model.policy.grant(pattern: pattern, repo: repo, for: duration)
                 })
             }
             // `isFullyAnswered`, never just the first question's answer:

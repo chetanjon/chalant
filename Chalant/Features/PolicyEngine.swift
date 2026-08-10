@@ -1,38 +1,48 @@
 import Foundation
 import os
 
-/// A rule somebody made from a card: this pattern, in this repo, until
-/// this time.
+/// A rule somebody made from a card: this pattern, in this repo (or
+/// everywhere), until this time (or until revoked).
 ///
-/// Never global and never forever, and both halves are the point. An
+/// The timed, folder-scoped shape is the default and the point: an
 /// approval given while looking at one command in one repo is not
-/// consent for the same command everywhere, and a permission that
-/// outlives the reason it was given is how a supervision feature
-/// quietly turns into no supervision at all.
+/// consent for the same command everywhere. The everywhere-forever
+/// shape exists because "Always allow" has always meant exactly that,
+/// and pretending otherwise just kept it in a second store
+/// (UserDefaults exceptions, folded in here 2026-08-09). Neither shape
+/// can cover the always-ask list: `mustAsk` is checked in front of
+/// grants everywhere they are read.
 struct Grant: Codable, Identifiable, Equatable, Sendable {
     let id: String
     /// Claude Code's own permission-rule shape, which the arming rules
     /// and the "always allow" button already speak. A second syntax for
     /// the same idea would be a second thing to be wrong about.
     let pattern: String
-    /// The absolute folder it applies to. Never empty: a grant with
-    /// nowhere to apply would apply everywhere.
+    /// The absolute folder it applies to, or empty for everywhere —
+    /// the shape an "Always allow" makes, and the shape a migrated
+    /// exception has, because global is what both always meant.
     let repo: String
     let grantedAt: Date
-    let expires: Date
+    /// Nil never runs out. That is a decision the person made by
+    /// pressing a button that says "always", not a default.
+    let expires: Date?
 
-    func isLive(at now: Date) -> Bool { now < expires }
+    func isLive(at now: Date) -> Bool { expires.map { now < $0 } ?? true }
 
     /// A call this grant speaks for.
     ///
     /// The session's folder, or anywhere under it. A session opened in a
     /// subfolder of the repo somebody granted is still that repo; a
     /// sibling repo whose path merely starts with the same letters is
-    /// not, which is what the trailing separator is for.
+    /// not, which is what the trailing separator is for. An empty repo
+    /// skips the folder test entirely: it applies everywhere, including
+    /// to a call that carried no cwd at all.
     func covers(tool: String, detail: String, cwd: String, at now: Date) -> Bool {
-        guard isLive(at: now), !repo.isEmpty, !cwd.isEmpty else { return false }
-        guard cwd == repo || cwd.hasPrefix(repo.hasSuffix("/") ? repo : repo + "/") else {
-            return false
+        guard isLive(at: now) else { return false }
+        if !repo.isEmpty {
+            guard !cwd.isEmpty,
+                  cwd == repo || cwd.hasPrefix(repo.hasSuffix("/") ? repo : repo + "/")
+            else { return false }
         }
         return SessionStore.rule(pattern, holds: tool, detail)
     }
@@ -264,21 +274,52 @@ final class PolicyStore: ObservableObject {
         return kept
     }
 
+    /// A nil duration never runs out, and an empty repo applies
+    /// everywhere: the "Always allow" shape. Anything scoped must name
+    /// an absolute folder, or it would silently scope to nothing.
     @discardableResult
-    func grant(pattern: String, repo: String, for duration: TimeInterval,
+    func grant(pattern: String, repo: String, for duration: TimeInterval?,
                now: Date = Date()) -> Grant? {
         let cleanPattern = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
-        // A grant with no folder would be a global one, which is the one
-        // shape this is not allowed to have.
-        guard !cleanPattern.isEmpty, repo.hasPrefix("/") else { return nil }
+        guard !cleanPattern.isEmpty, repo.isEmpty || repo.hasPrefix("/") else { return nil }
         let grant = Grant(
             id: UUID().uuidString, pattern: cleanPattern, repo: repo,
-            grantedAt: now, expires: now.addingTimeInterval(duration))
+            grantedAt: now, expires: duration.map { now.addingTimeInterval($0) })
         grants.removeAll { $0.pattern == cleanPattern && $0.repo == repo }
         grants.append(grant)
         save()
         return grant
     }
+
+    /// The one-time move of the old "Always allow" store.
+    ///
+    /// Exceptions lived in UserDefaults as newline-separated rules,
+    /// global and forever, while the grants lived here: two stores for
+    /// one idea, and the island's button wrote to only one of them.
+    /// Each exception becomes the grant it always meant — that pattern,
+    /// everywhere, never running out — and the key is removed so this
+    /// runs once and the old store stays gone. Takes the defaults as a
+    /// parameter so no test can drain the real machine's key.
+    func migrateLegacyExceptions(from defaults: UserDefaults, now: Date = Date()) {
+        let rules = (defaults.string(forKey: Self.legacyExceptionsKey) ?? "")
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        defer { defaults.removeObject(forKey: Self.legacyExceptionsKey) }
+        guard !rules.isEmpty else { return }
+        for rule in rules where !grants.contains(where: {
+            $0.pattern == rule && $0.repo.isEmpty && $0.expires == nil
+        }) {
+            grants.append(Grant(
+                id: UUID().uuidString, pattern: rule, repo: "",
+                grantedAt: now, expires: nil))
+        }
+        save()
+    }
+
+    /// Where the old store lived. Kept only so the migration can empty
+    /// it; nothing reads or writes it any more.
+    static let legacyExceptionsKey = "approvalExceptions"
 
     func revoke(id: String) {
         guard grants.contains(where: { $0.id == id }) else { return }

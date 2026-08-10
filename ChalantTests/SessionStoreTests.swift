@@ -914,32 +914,11 @@ final class SessionStoreTests: XCTestCase {
     }
 
     // MARK: Not asking twice about the same thing
-
-    /// Holding every Bash call is what the founder asked for
-    /// (2026-08-06), and the rule engine's own doc says gating by tool
-    /// name alone was "unlivable" the first time. Both are true. What
-    /// makes the broad version survivable is the thing Claude Code's own
-    /// prompt has and this app did not: "yes, and don't ask again for
-    /// git *". An exception outranks every hold rule.
-    func testAnExceptionOutranksAHoldRule() {
-        let store = SessionStore()
-        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .working)
-
-        XCTAssertFalse(store.holdForApproval(
-            sessionID: "s", id: "call-1", tool: "Bash", detail: "git --version",
-            rules: ["Bash"], exceptions: ["Bash(git *)"]))
-        XCTAssertNil(store.sessions.first?.approval)
-    }
-
-    func testAHoldStillHoldsWhatNoExceptionCovers() {
-        let store = SessionStore()
-        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .working)
-
-        XCTAssertTrue(store.holdForApproval(
-            sessionID: "s", id: "call-1", tool: "Bash", detail: "rm -rf build",
-            rules: ["Bash"], exceptions: ["Bash(git *)"]))
-        XCTAssertEqual(store.sessions.first?.approval?.detail, "rm -rf build")
-    }
+    //
+    // "Yes, and don't ask again for git *" is a Grant now, checked by
+    // `settleGate` where the policy store lives — GatePipelineTests
+    // proves a grant makes the gate stand aside, and PolicyTests proves
+    // the grant itself. This store only answers to the hold rules.
 
     /// The button's text has to be the rule it will write, or somebody
     /// taps "always allow" and gets a different promise than they read.
@@ -970,17 +949,6 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(
             SessionStore.suggestedException(tool: "Write", detail: "/a/b/notes.md"), "Write")
         XCTAssertEqual(SessionStore.suggestedException(tool: "Edit", detail: ""), "Edit")
-    }
-
-    /// Exceptions this app writes must not silently widen: adding the
-    /// same one twice is one rule, and an empty one is not a rule.
-    func testAddingAnExceptionIsIdempotentAndRefusesNothing() {
-        let defaults = UserDefaults(suiteName: "chalant.tests.exceptions.\(UUID().uuidString)")!
-        SessionStore.addException("Bash(git *)", in: defaults)
-        SessionStore.addException("Bash(git *)", in: defaults)
-        SessionStore.addException("   ", in: defaults)
-
-        XCTAssertEqual(SessionStore.approvalExceptions(in: defaults), ["Bash(git *)"])
     }
 
     // MARK: The session that can be picked up on a phone

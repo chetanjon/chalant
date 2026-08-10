@@ -1477,37 +1477,14 @@ final class SessionStore: ObservableObject {
     }
 
     // MARK: Not asking twice
-
-    /// Calls that are never held, whatever the hold rules say.
-    ///
-    /// The hold list alone could only be made broad by making it
-    /// unlivable: an agent runs dozens of harmless commands for every
-    /// one worth a second look, and "hold every Bash call" without a way
-    /// out means approving so much that you stop reading, which is worse
-    /// than not asking at all.
-    ///
-    /// Claude Code's own prompt has always had the way out, as its
-    /// second option: "Yes, and don't ask again for: git *". This is
-    /// that option. It is what makes the founder's choice (2026-08-06,
-    /// hold anything that touches the machine) something a person can
-    /// live with past the first hour.
-    static let approvalExceptionsKey = "approvalExceptions"
-
-    nonisolated static func approvalExceptions(in defaults: UserDefaults = .standard) -> [String] {
-        (defaults.string(forKey: approvalExceptionsKey) ?? "")
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-    }
-
-    nonisolated static func addException(_ rule: String, in defaults: UserDefaults = .standard) {
-        let trimmed = rule.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        var rules = approvalExceptions(in: defaults)
-        guard !rules.contains(trimmed) else { return }
-        rules.append(trimmed)
-        defaults.set(rules.joined(separator: "\n"), forKey: approvalExceptionsKey)
-    }
+    //
+    // The way out of a broad hold rule — "Yes, and don't ask again for:
+    // git *" — is a Grant now, in PolicyStore. It used to be a second
+    // store here (UserDefaults "exceptions", global and forever), which
+    // meant the island's Always allow button and the approval card's
+    // timed grants wrote to different places and only one of them was
+    // ever consulted per pipeline. `PolicyStore.migrateLegacyExceptions`
+    // moved the old key's contents into grants on first launch.
 
     /// The rule an "always allow this" button would write, in the same
     /// words the button says.
@@ -1562,14 +1539,12 @@ final class SessionStore: ObservableObject {
     func holdForApproval(
         sessionID: String, id: String, tool: String, detail: String,
         cwd: String? = nil, patience: TimeInterval = 600,
-        rules: [String] = SessionStore.approvalRules(),
-        exceptions: [String] = SessionStore.approvalExceptions()
+        rules: [String] = SessionStore.approvalRules()
     ) -> Bool {
-        // Checked first and cheapest. An exception is somebody having
-        // already answered this exact question, and asking it again is
-        // how a supervision feature turns into a thing people switch
-        // off. See `approvalExceptionsKey`.
-        guard !exceptions.contains(where: { Self.rule($0, holds: tool, detail) }) else { return false }
+        // Only the rules decide here. The way out of a broad rule — a
+        // grant somebody made from an earlier card — is checked by the
+        // caller (`settleGate`), where the policy store lives, before
+        // this is ever reached.
         guard rules.contains(where: { Self.rule($0, holds: tool, detail) }) else { return false }
         return register(
             sessionID: sessionID, id: id, tool: tool, detail: detail, cwd: cwd,

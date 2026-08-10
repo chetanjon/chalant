@@ -726,6 +726,10 @@ final class NotchViewModel: ObservableObject {
         shortcuts.announce = { [weak self] message in
             self?.flashGlance(message)
         }
+        // Before the server opens its door, so the first gated call of
+        // the session already sees what the old key held. Runs once:
+        // the migration empties the key it reads.
+        policy.migrateLegacyExceptions(from: .standard)
         activityServer.start(store: activities, sessions: sessions, policy: policy)
         // Registry first: it lists four small JSON files and can paint
         // a session row immediately. Discovery scrapes transcript tails

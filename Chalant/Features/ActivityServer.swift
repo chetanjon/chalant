@@ -1149,25 +1149,42 @@ final class ActivityServer: @unchecked Sendable {
     }
 
     /// Everything about holding one gated call except the connection:
-    /// the rules, the card, the wait, and the answer's shape. Its own
-    /// method so the whole pipeline can be proven in a test without a
-    /// socket.
+    /// the grants, the rules, the card, the wait, and the answer's
+    /// shape. Its own method so the whole pipeline can be proven in a
+    /// test without a socket.
     ///
     /// Unlike `hold(_:on:event:)` above, which holds unconditionally
     /// because Claude Code already decided that call needs a person,
     /// this one holds only what the arming rules name. Nil is silence:
     /// an empty 200, and the agent's own permission flow untouched.
     func settleGate(
-        call: HeldCall, patience: TimeInterval,
-        rules: [String]? = nil, exceptions: [String]? = nil
+        call: HeldCall, patience: TimeInterval, rules: [String]? = nil
     ) async -> String? {
+        // A live grant is somebody who already answered this exact
+        // question, so it answers allow outright — and writes it down,
+        // because a gate that answers for you and keeps no account of
+        // it is not supervision. `mustAsk` is checked in front of the
+        // grants (inside `evaluateGrantsOnly`), so a grant can never
+        // widen into the always-ask list.
+        let granted = await MainActor.run { () -> Bool in
+            let verdict = PolicyEngine.evaluateGrantsOnly(
+                tool: call.tool, detail: call.detail, cwd: call.cwd,
+                grants: self.policy?.live() ?? [])
+            guard case .allow(let rule, let reason) = verdict else { return false }
+            self.policy?.note(
+                tool: call.tool, detail: call.detail, folder: call.cwd,
+                allowed: true, rule: rule, reason: reason)
+            return true
+        }
+        if granted {
+            return HookPayload.response(for: .allow, event: call.event)
+        }
         let surfaced = await MainActor.run {
             self.sessions?.holdForApproval(
                 sessionID: call.sessionID, id: call.id, tool: call.tool,
                 detail: call.detail, cwd: call.cwd.isEmpty ? nil : call.cwd,
                 patience: patience,
-                rules: rules ?? SessionStore.approvalRules(),
-                exceptions: exceptions ?? SessionStore.approvalExceptions()) ?? false
+                rules: rules ?? SessionStore.approvalRules()) ?? false
         }
         // Not on the list, or nowhere to show it. Either way the call
         // runs exactly as it would have before this app existed.
