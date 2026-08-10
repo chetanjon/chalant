@@ -3,11 +3,14 @@ import SwiftUI
 
 /// The music row: flat 56pt artwork, stacked title/artist, bare thin
 /// transport glyphs, and a full-width scrub line with elapsed and
-/// remaining time beneath. The glow, sheen and now-playing equalizer
-/// are gone (premium finish, spec 2026-08-10): the row reads by
-/// typography and brightness, never decoration.
+/// remaining time beneath. The sheen and now-playing equalizer are
+/// gone (premium finish, spec 2026-08-10): the row reads by
+/// typography and brightness, never decoration. One quiet exception
+/// (round 3, task 6): a soft accent-colored pool breathes behind the
+/// zone while music plays, matching the album's own color.
 struct MusicRow: View {
     @ObservedObject var music: MusicController
+    @Environment(\.chalantAccent) private var accent
     /// Local slider value while the user is dragging, so the 1s
     /// player poll can't yank the knob back mid-gesture.
     @State private var volumeOverride: Double?
@@ -15,6 +18,11 @@ struct MusicRow: View {
     /// converges on it (or 3s pass), so the bar never snaps back to
     /// the stale position after a release.
     @State private var pendingSeek: (target: Double, at: Date)?
+    /// Drives the background pool's slow opacity breath. Only ever
+    /// animated through withAnimation in updateBreathing, never by an
+    /// .animation modifier, so the repeatForever loop can't leak onto
+    /// sibling views.
+    @State private var breathing = false
 
     var body: some View {
         if let playing = music.nowPlaying {
@@ -132,7 +140,44 @@ struct MusicRow: View {
                     }
                 }
             }
+            .background {
+                if playing.isPlaying {
+                    // The one drop of color the founder asked back: the album's own
+                    // light, pooled soft behind the zone, breathing slowly while the
+                    // music plays. Feel-gated: Still means a quiet, motionless pool.
+                    RadialGradient(
+                        colors: [accent.opacity(0.14), .clear],
+                        center: .init(x: 0.22, y: 0.35),
+                        startRadius: 8, endRadius: 220
+                    )
+                    .blur(radius: 18)
+                    .opacity(breathing ? 1.0 : 0.7)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+                }
+            }
             .animation(Theme.Motion.content, value: playing.isPlaying)
+            .onAppear { updateBreathing(isPlaying: playing.isPlaying) }
+            .onChange(of: playing.isPlaying) { _, isPlaying in
+                updateBreathing(isPlaying: isPlaying)
+            }
+        }
+    }
+
+    /// Starts (or stops) the pool's breathing loop. The repeatForever
+    /// animation is attached to this state change alone, never to an
+    /// .animation modifier on the view, so it can't leak onto siblings
+    /// and dies with the view's @State when MusicRow unmounts.
+    private func updateBreathing(isPlaying: Bool) {
+        if isPlaying, Theme.Feel.current.ambient {
+            withAnimation(
+                .easeInOut(duration: 3.2 * Theme.Motion.ambientSlow)
+                    .repeatForever(autoreverses: true)
+            ) {
+                breathing = true
+            }
+        } else {
+            breathing = false
         }
     }
 
