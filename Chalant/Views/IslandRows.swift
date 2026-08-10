@@ -238,69 +238,43 @@ struct NowPlayingBars: View {
 /// the active one tints and reveals a volume slider.
 struct AmbienceRow: View {
     @ObservedObject var ambience: AmbienceController
-    @Environment(\.chalantAccent) private var accent
 
     var body: some View {
-        HStack(spacing: Theme.Space.s) {
-            Group {
-                if let active = ambience.active {
-                    // While a sound plays its name becomes a quiet accent
-                    // pill; tapping it stops. Reads as "on, tap to stop"
-                    // the way the sound chips already do.
-                    Button {
-                        ambience.stop()
-                    } label: {
-                        Text(active.displayName)
-                            .font(Theme.Fonts.caption)
-                            .foregroundStyle(accent)
-                            .lineLimit(1)
-                            .padding(.horizontal, Theme.Space.s)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(accent.opacity(0.14)))
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(PressableStyle())
-                    .help("Stop \(active.displayName)")
-                } else if let failure = ambience.failure {
-                    // The chip has already gone dark; this says why,
-                    // rather than leaving the tap looking ignored.
-                    Text("No sound")
-                        .font(Theme.Fonts.caption)
-                        .foregroundStyle(Theme.textHint)
-                        .lineLimit(1)
-                        .help("Tried to play, but \(failure).")
-                } else {
-                    Text("Ambience")
-                        .font(Theme.Fonts.caption)
-                        .foregroundStyle(Theme.textTertiary)
+        HStack(spacing: Theme.Space.xxl) {
+            ForEach(NoiseEngine.NoiseColor.chipChoices, id: \.self) { color in
+                Button {
+                    ambience.toggle(color)
+                } label: {
+                    Text(color.displayName)
+                        .font(ambience.active == color
+                              ? Theme.Fonts.bodyEmphasis : Theme.Fonts.body)
+                        .foregroundStyle(ambience.active == color
+                                         ? Theme.textPrimary : Theme.textSecondary)
                 }
+                .buttonStyle(PressableStyle())
+                .help(ambience.active == color
+                      ? "Stop \(color.displayName)" : "Play \(color.displayName)")
             }
-            .frame(width: 92, alignment: .leading)
-
-            // White is gone from the row: piercing, nobody's friend.
-            // On one track, for the same reason the switcher below is:
-            // five loose glyphs above seven more read as one scatter of
-            // twelve, with nothing to say where one row ends.
-            HStack(spacing: Theme.Space.s) {
-                ForEach(NoiseEngine.NoiseColor.chipChoices, id: \.self) { color in
-                    NoiseButton(
-                        color: color,
-                        selected: ambience.active == color,
-                        compact: true
-                    ) {
-                        ambience.toggle(color)
-                    }
-                }
+            if let failure = ambience.failure {
+                Text("No sound")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textHint)
+                    .help("Tried to play, but \(failure).")
             }
-            .padding(.horizontal, Theme.Space.xs)
-            .background(Capsule().fill(Theme.surface))
             Spacer(minLength: 0)
+            // The founder's rule, already true here and staying true:
+            // the volume control exists only while a sound is on.
             if ambience.active != nil {
-                Slider(value: $ambience.volume, in: 0...1)
-                    .controlSize(.mini)
-                    .tint(Color.white.opacity(0.5))
-                    .frame(width: 44)
-                    .transition(.opacity)
+                HStack(spacing: Theme.Space.m) {
+                    Image(systemName: "speaker.wave.2.fill")
+                        .font(Theme.Fonts.icon(.xs))
+                        .foregroundStyle(Theme.textTertiary)
+                    Slider(value: $ambience.volume, in: 0...1)
+                        .controlSize(.mini)
+                        .tint(Color.white.opacity(0.5))
+                        .frame(width: 84)
+                }
+                .transition(.opacity)
             }
         }
         .animation(Theme.Motion.content, value: ambience.active)
