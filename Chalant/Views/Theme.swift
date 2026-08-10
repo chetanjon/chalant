@@ -103,6 +103,12 @@ enum Theme {
         static let bodyMedium = Font.system(size: 14, weight: .medium)
         static let bodyEmphasis = Font.system(size: 14, weight: .semibold)
         static let title = Font.system(size: 15, weight: .semibold)
+        /// The island's loudest voice (the song title, the date).
+        /// Part of the premium finish (spec 2026-08-10): typography
+        /// carries hierarchy now that the pills are gone.
+        static let headline = Font.system(size: 18, weight: .semibold)
+        /// The quiet line under a headline (the artist, a detail).
+        static let subhead = Font.system(size: 15)
         /// A window's own page title. The island has no room for this
         /// tier; the dashboard is the first surface with the space to
         /// say where you are before it says anything else.
@@ -117,6 +123,8 @@ enum Theme {
         static let microMono = Font.system(size: 11, weight: .medium, design: .monospaced)
         static let captionMono = Font.system(size: 12, weight: .medium, design: .monospaced)
         static let labelMono = Font.system(size: 13, weight: .semibold, design: .monospaced)
+        /// Time on the island: elapsed, remaining, temperatures.
+        static let timeMono = Font.system(size: 13, weight: .medium, design: .monospaced)
         static let bodyMono = Font.system(size: 14, design: .monospaced)
         static let bodyEmphasisMono = Font.system(size: 14, weight: .semibold, design: .monospaced)
         static let counterMono = Font.system(size: 17, weight: .semibold, design: .monospaced)
@@ -142,6 +150,12 @@ enum Theme {
         static func icon(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
             .system(size: size, weight: weight)
         }
+
+        /// Thin outline glyphs, the finish's icon voice. Regular, not
+        /// semibold: the row reads by brightness, never by bulk.
+        static func iconThin(_ scale: IconScale) -> Font {
+            .system(size: scale.rawValue, weight: .regular)
+        }
     }
 
     /// Spacing rhythm. Named exceptions live here too, so a raw
@@ -153,6 +167,10 @@ enum Theme {
         static let l: CGFloat = 12
         static let xl: CGFloat = 16
         static let xxl: CGFloat = 22
+        /// Between the island's zones (music, ambience, switcher,
+        /// panel). Air is the only divider; the hairlines are gone
+        /// (founder, 2026-08-10).
+        static let zone: CGFloat = 26
         /// Tight icon-to-label and dot gaps.
         static let snug: CGFloat = 5
         /// Collapsed wings sit flush against the physical notch.
@@ -178,7 +196,7 @@ enum Theme {
         static let card: CGFloat = 12
         static let row: CGFloat = 10
         static let field: CGFloat = 12
-        static let artwork: CGFloat = 10
+        static let artwork: CGFloat = 14
         /// Small inline thumbnails (clipboard shots).
         static let thumb: CGFloat = 6
     }
@@ -190,7 +208,7 @@ enum Theme {
         static let radiusCollapsed: CGFloat = 16
         // 44/10 read as a long empty chin under the last row; the
         // droplet keeps a hint of belly without the sag.
-        static let radiusExpanded: CGFloat = 34
+        static let radiusExpanded: CGFloat = 40
         /// Flat, both of them. The bottom edge used to bow below
         /// straight, a point and a half at rest and five when open, as
         /// a droplet flourish. The founder read it as a fault twice,
