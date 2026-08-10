@@ -726,3 +726,49 @@ struct ThinkingDots: View {
         .onAppear { bouncing = true }
     }
 }
+
+/// The finish's progress line: a full-width 2pt track, no knob, drag
+/// anywhere to seek. Replaces the mini Slider in the music row (spec
+/// 2026-08-10); a hit target 16pt tall hides behind the 2pt drawing so
+/// fingers on trackpads do not have to land on a hairline.
+struct ScrubBar: View {
+    let position: Double
+    let duration: Double
+    let tint: Color
+    let onSeek: (Double) -> Void
+    @State private var dragPosition: Double?
+
+    static func position(atX x: CGFloat, width: CGFloat, duration: Double) -> Double {
+        guard width > 0, duration > 0 else { return 0 }
+        return min(duration, max(0, Double(x / width) * duration))
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let shown = dragPosition ?? position
+            let fraction = duration > 0 ? min(1, max(0, shown / duration)) : 0
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.16))
+                    .frame(height: 2)
+                Capsule().fill(tint)
+                    .frame(width: geo.size.width * fraction, height: 2)
+            }
+            .frame(maxHeight: .infinity, alignment: .center)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        dragPosition = Self.position(
+                            atX: value.location.x, width: geo.size.width,
+                            duration: duration)
+                    }
+                    .onEnded { _ in
+                        if let target = dragPosition { onSeek(target) }
+                        dragPosition = nil
+                    }
+            )
+        }
+        .frame(height: 16)
+        .accessibilityLabel("Playback position")
+    }
+}

@@ -34,4 +34,11 @@ final class FinishTokensTests: XCTestCase {
     func testRemainingTimeGrowsHoursOnlyWhenNeeded() {
         XCTAssertEqual(MusicRow.remainingClock(elapsed: 0, duration: 3723), "-1:02:03")
     }
+
+    func testScrubMathMapsTheBarToTheTrackAndClampsTheEnds() {
+        XCTAssertEqual(ScrubBar.position(atX: 150, width: 300, duration: 200), 100)
+        XCTAssertEqual(ScrubBar.position(atX: -20, width: 300, duration: 200), 0)
+        XCTAssertEqual(ScrubBar.position(atX: 900, width: 300, duration: 200), 200)
+        XCTAssertEqual(ScrubBar.position(atX: 10, width: 0, duration: 200), 0)
+    }
 }
