@@ -247,7 +247,7 @@ final class ActivityServer: @unchecked Sendable {
                 lock.lock()
                 openPort = candidate
                 lock.unlock()
-                publish(port: candidate)
+                claimOrDefer(port: candidate)
                 Self.log.notice("activity door open on \(candidate)")
             case .failed(let error):
                 Self.log.error(
@@ -263,6 +263,59 @@ final class ActivityServer: @unchecked Sendable {
         }
         listener.start(queue: queue)
         self.listener = listener
+    }
+
+    /// Publish on the preferred port; on a fallback port, first make
+    /// sure the preferred one is not another live Chalant.
+    ///
+    /// Binding a fallback port means somebody else holds the preferred
+    /// one, and on this machine that somebody is almost always another
+    /// Chalant: the installed app beside a dev build, or (before the
+    /// test-host guard) the unit-test host beside either. That other
+    /// instance owns `server.json` and the installed hooks. A guest
+    /// rewriting them to its own port strands every armed hook the
+    /// moment it quits, which is exactly the measured 2026-08-09
+    /// failure: a second instance moved everything to 4243, exited,
+    /// and the founder's next Stop hook died with ECONNREFUSED
+    /// against a port nothing was listening on. So a fallback-port
+    /// instance publishes only after the preferred port fails to
+    /// answer as a Chalant, and stays a quiet guest otherwise.
+    private func claimOrDefer(port: UInt16) {
+        guard port != Self.port else {
+            publish(port: port)
+            return
+        }
+        guard let health = URL(string: "http://127.0.0.1:\(Self.port)/health") else {
+            publish(port: port)
+            return
+        }
+        var request = URLRequest(url: health)
+        request.timeoutInterval = 2
+        // The shared api-token file means both instances usually hold
+        // the same token; a 401 from a token that differs still names
+        // this app in its body, which is all the probe needs.
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
+            guard let self else { return }
+            if Self.portOwnerIsChalant(data) {
+                Self.log.notice(
+                    "port \(Self.port) is another live Chalant; staying a guest on \(port) and leaving its config alone")
+                return
+            }
+            // Whatever holds the preferred port, it is not a working
+            // Chalant, so the hooks must follow this instance or reach
+            // nothing at all.
+            self.queue.async { self.publish(port: port) }
+        }.resume()
+    }
+
+    /// Whether an HTTP body came from a Chalant. `/health` answers with
+    /// the app's own name, and even its 401 names this app in the
+    /// error; anything else on the port (another tool, or nothing that
+    /// speaks HTTP) produces no body with the word in it.
+    static func portOwnerIsChalant(_ body: Data?) -> Bool {
+        guard let body, let text = String(data: body, encoding: .utf8) else { return false }
+        return text.contains("Chalant")
     }
 
     /// Publish the port and the token together, so a hook has to read

@@ -34,6 +34,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The unit-test bundle runs inside this app as its host, and a
+        // host that starts the real thing is a second Chalant: it binds
+        // a real port, and until 2026-08-09 it then "refreshed" the
+        // real ~/.claude/settings.json to whatever fallback port it
+        // got. A suite run beside the installed app rewrote every
+        // armed hook to 4243, and the next Stop hook on the machine
+        // died with ECONNREFUSED against a port nothing was listening
+        // on. Tests build their own stores through the `at:` seams;
+        // the host app stays inert.
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else {
+            return
+        }
         // One-time inheritance from the Moai era: the rename changed
         // the bundle id, which changed the defaults domain, which
         // would have orphaned every setting, note, and focus streak.
