@@ -67,8 +67,8 @@ struct ExpandedView: View {
         if toolShelf { tools.append(.shelf) }
         if toolNotes { tools.append(.notes) }
         if toolFocus { tools.append(.focus) }
-        if toolChat { tools.append(.chat) }
-        if toolSessions { tools.append(.sessions) }
+        if toolChat, FeatureFlags.chatVisible { tools.append(.chat) }
+        if toolSessions, FeatureFlags.sessionsVisible { tools.append(.sessions) }
         // Hidden outright on a Mac with no battery (a Mac mini, a
         // desktop docked in clamshell) rather than switched off by
         // default: there is nothing this tool toggle should even be

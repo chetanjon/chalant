@@ -3246,10 +3246,15 @@ final class SessionStoreTests: XCTestCase {
 
     /// A tool switched off is not somewhere to open onto, exactly as
     /// `restoreLastTabIfWanted` already refuses to reopen into one.
+    /// Sessions sits second in the preference order, but only while it
+    /// is in the build at all (the dark-ship, FeatureFlags): hidden,
+    /// the fallback walks straight past it to focus.
     func testTheFallbackSkipsToolsTheUserSwitchedOff() {
         let defaults = Self.emptyDefaults()
         defaults.set(false, forKey: NotchViewModel.Tab.clipboard.toolKey!)
-        XCTAssertEqual(NotchViewModel.landingTab(todayCanSee: false, in: defaults), .sessions)
+        XCTAssertEqual(
+            NotchViewModel.landingTab(todayCanSee: false, in: defaults),
+            FeatureFlags.sessionsVisible ? .sessions : .focus)
     }
 
     /// And if every tool is off, Today is still the only place left. A
@@ -3338,7 +3343,12 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(DashboardSection.named("island"), .island)
         XCTAssertEqual(DashboardSection.named("Island"), .island)
         XCTAssertEqual(DashboardSection.named("what shows"), .whatShows)
-        XCTAssertEqual(DashboardSection.named("sessions"), .sessions)
+        // A dark-shipped section answers to no name at all, so the
+        // harness cannot steer to a page that is not listed
+        // (FeatureFlags).
+        XCTAssertEqual(
+            DashboardSection.named("sessions"),
+            FeatureFlags.sessionsVisible ? .sessions : nil)
         XCTAssertNil(DashboardSection.named("nonexistent"))
     }
 

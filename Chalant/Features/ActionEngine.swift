@@ -210,7 +210,11 @@ final class ActionEngine {
             // model; capturing without it wasted seconds and then
             // promised "ask away" into a dead end (review-caught).
             guard AIService.localModelAvailable else {
-                return "Reading the screen needs Apple Intelligence, System Settings, Apple Intelligence and Siri. The Chat tab carries your own Claude, ChatGPT, or Gemini meanwhile."
+                // Point at the Chat tab only while it exists (the
+                // dark-ship, FeatureFlags).
+                return FeatureFlags.chatVisible
+                    ? "Reading the screen needs Apple Intelligence, System Settings, Apple Intelligence and Siri. The Chat tab carries your own Claude, ChatGPT, or Gemini meanwhile."
+                    : "Reading the screen needs Apple Intelligence, System Settings, Apple Intelligence and Siri."
             }
             guard ScreenReader.preflight() else {
                 ScreenReader.requestGrant()

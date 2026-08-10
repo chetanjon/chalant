@@ -66,13 +66,17 @@ struct GeneralSection: View {
             }
 
             SettingCard(title: "Opening the island") {
-                SettingToggle(label: "Open when an agent finishes", isOn: $openOnFinish)
-                SettingNote(
-                    "The island opens on the session that just finished, showing what it said "
-                    + "with the reply box under it. It stays out of the way while you are "
-                    + "dictating or already typing in it."
-                )
-                SettingDivider()
+                // The finish announcement is a sessions behaviour, so
+                // its switch dark-ships with the surface (FeatureFlags).
+                if FeatureFlags.sessionsVisible {
+                    SettingToggle(label: "Open when an agent finishes", isOn: $openOnFinish)
+                    SettingNote(
+                        "The island opens on the session that just finished, showing what it said "
+                        + "with the reply box under it. It stays out of the way while you are "
+                        + "dictating or already typing in it."
+                    )
+                    SettingDivider()
+                }
                 SettingToggle(label: "Remember last tab", isOn: $rememberLastTab)
                 SettingNote(
                     "On, the island reopens on whatever you were last looking at. Off, it always "
@@ -1160,24 +1164,32 @@ struct WhatShowsSection: View {
                 SettingToggle(label: "Notes", isOn: $toolNotes)
                 SettingDivider()
                 SettingToggle(label: "Focus & timers", isOn: $toolFocus)
-                SettingDivider()
-                SettingToggle(label: "Sessions", isOn: $toolSessions)
+                // Dark-shipped tools keep no switch: a row for a tab
+                // that cannot appear is a promise the switcher breaks
+                // (FeatureFlags).
+                if FeatureFlags.sessionsVisible {
+                    SettingDivider()
+                    SettingToggle(label: "Sessions", isOn: $toolSessions)
+                }
                 if stats.battery != nil {
                     SettingDivider()
                     SettingToggle(label: "Battery", isOn: $toolBattery)
                 }
-                SettingDivider()
-                SettingToggle(label: "Chat", isOn: $toolChat)
-                if toolChat {
-                    SettingPicker(
-                        label: "Service",
-                        selection: $chatService,
-                        options: [("Claude", "claude"), ("ChatGPT", "chatgpt"), ("Gemini", "gemini")]
-                    )
-                    SettingNote(
-                        "Your own account, in a small built-in browser. Chalant is not affiliated "
-                        + "with Anthropic, OpenAI, or Google."
-                    )
+                if FeatureFlags.chatVisible {
+                    SettingDivider()
+                    SettingToggle(label: "Chat", isOn: $toolChat)
+                    if toolChat {
+                        SettingPicker(
+                            label: "Service",
+                            selection: $chatService,
+                            options: [("Claude", "claude"), ("ChatGPT", "chatgpt"),
+                                      ("Gemini", "gemini")]
+                        )
+                        SettingNote(
+                            "Your own account, in a small built-in browser. Chalant is not affiliated "
+                            + "with Anthropic, OpenAI, or Google."
+                        )
+                    }
                 }
             }
         }
@@ -1321,13 +1333,15 @@ struct GlanceSection: View {
                     + "MacBook keeps the bare pill so it still matches the hardware."
                 )
                 SettingDivider()
-                SettingToggle(label: "Agents running", isOn: $glanceAgents)
-                SettingNote(
-                    "A mark beside the notch while Claude Code or Cursor sessions are going. It "
-                    + "breathes while they work and holds still, in the accent, the moment one is "
-                    + "waiting on you."
-                )
-                SettingDivider()
+                if FeatureFlags.sessionsVisible {
+                    SettingToggle(label: "Agents running", isOn: $glanceAgents)
+                    SettingNote(
+                        "A mark beside the notch while Claude Code or Cursor sessions are going. It "
+                        + "breathes while they work and holds still, in the accent, the moment one is "
+                        + "waiting on you."
+                    )
+                    SettingDivider()
+                }
                 SettingToggle(label: "Battery", isOn: $glanceBattery)
                 SettingNote(
                     "The charge, last in line: it only takes the space when nothing else beside the "
@@ -1366,19 +1380,22 @@ struct AboutSection: View {
 
             SettingCard(title: "Privacy") {
                 SettingNote(
-                    "Everything Chalant reads stays on this Mac: what is playing, your day, your "
-                    + "sessions. Nothing is sent anywhere."
+                    "Everything Chalant reads stays on this Mac: what is playing, your day"
+                    + (FeatureFlags.sessionsVisible ? ", your sessions" : "")
+                    + ". Nothing is sent anywhere."
                 )
                 SettingDivider()
                 SettingNote(
                     "Speech is transcribed by macOS itself, and the recording is deleted the moment "
                     + "the phrase is understood."
                 )
-                SettingDivider()
-                SettingNote(
-                    "Chat opens your own accounts in a small built-in browser. Chalant is not "
-                    + "affiliated with the services it opens."
-                )
+                if FeatureFlags.chatVisible {
+                    SettingDivider()
+                    SettingNote(
+                        "Chat opens your own accounts in a small built-in browser. Chalant is not "
+                        + "affiliated with the services it opens."
+                    )
+                }
             }
         }
     }

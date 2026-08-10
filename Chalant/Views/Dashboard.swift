@@ -54,12 +54,23 @@ enum DashboardSection: String, CaseIterable, Identifiable {
         }
     }
 
+    /// The sections the sidebar actually lists. A dark-shipped
+    /// feature's section goes with it (FeatureFlags): a settings page
+    /// full of arm buttons for a surface that does not exist would be
+    /// the one door the hide forgot.
+    static var visibleCases: [DashboardSection] {
+        allCases.filter { $0 != .sessions || FeatureFlags.sessionsVisible }
+    }
+
     /// Matches the tail of "debug settings <name>" and the old in-island
     /// scroll anchors, so the screenshot harness keeps working after the
-    /// pane it used to drive stopped existing.
+    /// pane it used to drive stopped existing. Searches only the
+    /// visible sections, so nothing can steer to a hidden one by name.
     static func named(_ name: String) -> DashboardSection? {
         let wanted = name.lowercased()
-        return allCases.first { $0.rawValue.lowercased() == wanted || $0.title.lowercased() == wanted }
+        return visibleCases.first {
+            $0.rawValue.lowercased() == wanted || $0.title.lowercased() == wanted
+        }
     }
 }
 
@@ -173,7 +184,7 @@ struct DashboardView: View {
             // element's `id`, which would silently bind a String where
             // this binds a section, and both spellings compile.
             List(selection: $selection.section) {
-                ForEach(DashboardSection.allCases) { section in
+                ForEach(DashboardSection.visibleCases) { section in
                     Label(section.title, systemImage: section.symbol)
                         .font(Theme.Fonts.body)
                         .tag(section)
@@ -246,8 +257,19 @@ struct DashboardView: View {
                         onInstallUpdate: { model.installUpdate?() }
                     )
                 case .sessions:
-                    SessionsSection(sessions: model.sessions, activities: model.activities,
-                                    policy: model.policy)
+                    // Unreachable while dark-shipped (the sidebar never
+                    // lists it, named() never returns it), and harmless
+                    // if somehow reached: hidden means General.
+                    if FeatureFlags.sessionsVisible {
+                        SessionsSection(sessions: model.sessions, activities: model.activities,
+                                        policy: model.policy)
+                    } else {
+                        GeneralSection(
+                            updates: model.updates,
+                            onReplayTour: model.replayWelcome,
+                            onInstallUpdate: { model.installUpdate?() }
+                        )
+                    }
                 case .whatShows:
                     WhatShowsSection(events: model.events, stats: model.stats)
                 case .island:

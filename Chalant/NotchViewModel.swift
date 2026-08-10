@@ -476,6 +476,9 @@ final class NotchViewModel: ObservableObject {
     /// how the closed pill came to read 2 beside a list with one session
     /// worth opening.
     var agentGlance: (count: Int, waiting: Bool)? {
+        // No badge for a dark-shipped surface: a count you cannot open
+        // is an itch with nothing to scratch it.
+        guard FeatureFlags.sessionsVisible else { return nil }
         guard UserDefaults.standard.object(forKey: "glanceAgents") as? Bool ?? true else {
             return nil
         }
@@ -638,10 +641,14 @@ final class NotchViewModel: ObservableObject {
     /// A pill that has already been shut away comes back on its own for
     /// this, and goes away again when the asking is over.
     var somethingWantsYou: Bool {
-        sessions.sessions.contains { session in
+        // The sessions clause holds only while the surface exists: an
+        // island that un-hides itself for a question nobody can see or
+        // answer would be the worst of both worlds (the dark-ship,
+        // FeatureFlags).
+        (FeatureFlags.sessionsVisible && sessions.sessions.contains { session in
             session.state == .needsInput
                 || (session.ask.map { !$0.isFullyAnswered } ?? false)
-        } || activities.activities.contains { $0.state == .needsInput }
+        }) || activities.activities.contains { $0.state == .needsInput }
     }
 
     /// Whether an already-expanded island is in the middle of something:
@@ -730,6 +737,11 @@ final class NotchViewModel: ObservableObject {
         // the session already sees what the old key held. Runs once:
         // the migration empties the key it reads.
         policy.migrateLegacyExceptions(from: .standard)
+        // The dark-ship reaches the wire too: a store that surfaces no
+        // cards makes every /hook hold answer with silence at once, so
+        // an upgrader whose hooks are still armed loses only the card,
+        // never ten minutes (FeatureFlags).
+        sessions.surfacesCards = FeatureFlags.sessionsVisible
         activityServer.start(store: activities, sessions: sessions, policy: policy)
         // Registry first: it lists four small JSON files and can paint
         // a session row immediately. Discovery scrapes transcript tails
@@ -741,12 +753,17 @@ final class NotchViewModel: ObservableObject {
         // And discovery now only reads the transcripts of sessions the
         // registry vouches for, so it has to be told the moment that list
         // grows rather than waiting out its own twenty-second clock.
-        sessionRegistry.onLiveSetChanged = { [weak self] in
-            self?.sessionDiscovery.refresh()
+        // Dark-shipped sessions start no watchers at all: no registry
+        // sweep, no transcript scraping, no rows to announce. The
+        // hidden feature has to cost what a deleted one would.
+        if FeatureFlags.sessionsVisible {
+            sessionRegistry.onLiveSetChanged = { [weak self] in
+                self?.sessionDiscovery.refresh()
+            }
+            sessionRegistry.start()
+            sessionDiscovery.start()
+            cursorDiscovery.start()
         }
-        sessionRegistry.start()
-        sessionDiscovery.start()
-        cursorDiscovery.start()
         // EC-11: a session can exit with a message still queued while
         // nobody has the composer open to see the row flip. The store
         // has no glance to flash, so it hands the moment back here.
@@ -758,65 +775,74 @@ final class NotchViewModel: ObservableObject {
         // turn's last words in front of them the moment it ends, with
         // the reply box under them, so answering is one place rather
         // than a hunt (2026-08-03).
-        sessions.onSessionCameToRest = { [weak self] id, title in
-            guard let self, self.opensWhenAnAgentFinishes else { return }
-            self.flashGlance("\(title) finished", seconds: 6)
-            // Same restraint as a question: never over a live mic, and
-            // never over an island already busy with something. A turn
-            // ending is worth showing, and it is not worth taking the
-            // screen away from whatever is already being typed into.
-            guard self.state != .listening else { return }
-            guard self.state != .expanded || !self.isMidInteraction else { return }
-            // takeKey: false, and this is the whole difference between a
-            // notification and an interruption. The default takes
-            // keyboard focus, which is right when a person just clicked
-            // the island and wrong when the island appeared on its own:
-            // the founder was typing in a terminal and their keystrokes
-            // stopped going there (2026-08-03). Nothing that opens
-            // without being asked may take the keyboard. Clicking into
-            // the composer still focuses it, because that is a click.
-            self.expand(takeKey: false)
-            self.tab = .sessions
-            // Straight to that session's own card, open, so its last
-            // words and the box to answer them are the same surface.
-            self.composingSessionID = id
-        }
-        sessions.onSessionWantsYou = { [weak self] title in
-            guard let self else { return }
-            self.flashGlance("\(title) wants you", seconds: 8)
-            // Founder's explicit call: a question opens the island by
-            // itself rather than waiting to be found (2026-08-03,
-            // "Auto-open" -> "Yes, always open"). Two things still
-            // outrank it: a live voice capture, which this would yank
-            // the microphone out from under, and an island already open
-            // on something the user is actively doing, which the flash
-            // above is enough to point at without taking over their
-            // screen mid-task. Everything else, including an island
-            // that is merely open and idle, gets opened straight to it.
-            guard self.state != .listening else { return }
-            if self.state == .expanded, self.isMidInteraction { return }
-            // takeKey: false for the same reason the finished-turn path
-            // uses it: an island nobody asked to open must not take the
-            // keyboard away from whatever they were typing into.
-            self.expand(takeKey: false)
-            // After expand(), never before: expand() runs
-            // restoreLastTabIfWanted(), which would otherwise stomp this
-            // the instant it ran (same bug and same fix as the shortcut
-            // handler in ChalantApp.swift).
-            self.tab = .sessions
-        }
-        sessions.onMessageUndelivered = { [weak self] title in
-            self?.flashGlance("\(title) ended before reading your message")
-        }
-        // scripts/chalant-hook posts a Claude Code session's pill as
-        // "claude-<session>" (only the pill is prefixed; the outbox and
-        // ask routes take the bare id), the same mapping
-        // ActivitiesStrip reverses to find a session for a tapped pill.
-        // Resolves a needs-input pill once its session actually ends
-        // (H5), rather than leaving it sitting there answerable to
-        // nobody.
-        sessions.onSessionGone = { [weak self] id in
-            self?.activities.resolveIfPending(id: "claude-\(id)")
+        // The same law for the announcements: none of these may fire
+        // while sessions are dark-shipped, because every one of them
+        // ends by steering the island to a tab that no longer exists.
+        // With the watchers above off the store stays empty and they
+        // could not fire anyway; the gate makes that a promise rather
+        // than a coincidence (a held hook can still write to the store
+        // through the server).
+        if FeatureFlags.sessionsVisible {
+            sessions.onSessionCameToRest = { [weak self] id, title in
+                guard let self, self.opensWhenAnAgentFinishes else { return }
+                self.flashGlance("\(title) finished", seconds: 6)
+                // Same restraint as a question: never over a live mic, and
+                // never over an island already busy with something. A turn
+                // ending is worth showing, and it is not worth taking the
+                // screen away from whatever is already being typed into.
+                guard self.state != .listening else { return }
+                guard self.state != .expanded || !self.isMidInteraction else { return }
+                // takeKey: false, and this is the whole difference between a
+                // notification and an interruption. The default takes
+                // keyboard focus, which is right when a person just clicked
+                // the island and wrong when the island appeared on its own:
+                // the founder was typing in a terminal and their keystrokes
+                // stopped going there (2026-08-03). Nothing that opens
+                // without being asked may take the keyboard. Clicking into
+                // the composer still focuses it, because that is a click.
+                self.expand(takeKey: false)
+                self.tab = .sessions
+                // Straight to that session's own card, open, so its last
+                // words and the box to answer them are the same surface.
+                self.composingSessionID = id
+            }
+            sessions.onSessionWantsYou = { [weak self] title in
+                guard let self else { return }
+                self.flashGlance("\(title) wants you", seconds: 8)
+                // Founder's explicit call: a question opens the island by
+                // itself rather than waiting to be found (2026-08-03,
+                // "Auto-open" -> "Yes, always open"). Two things still
+                // outrank it: a live voice capture, which this would yank
+                // the microphone out from under, and an island already open
+                // on something the user is actively doing, which the flash
+                // above is enough to point at without taking over their
+                // screen mid-task. Everything else, including an island
+                // that is merely open and idle, gets opened straight to it.
+                guard self.state != .listening else { return }
+                if self.state == .expanded, self.isMidInteraction { return }
+                // takeKey: false for the same reason the finished-turn path
+                // uses it: an island nobody asked to open must not take the
+                // keyboard away from whatever they were typing into.
+                self.expand(takeKey: false)
+                // After expand(), never before: expand() runs
+                // restoreLastTabIfWanted(), which would otherwise stomp this
+                // the instant it ran (same bug and same fix as the shortcut
+                // handler in ChalantApp.swift).
+                self.tab = .sessions
+            }
+            sessions.onMessageUndelivered = { [weak self] title in
+                self?.flashGlance("\(title) ended before reading your message")
+            }
+            // scripts/chalant-hook posts a Claude Code session's pill as
+            // "claude-<session>" (only the pill is prefixed; the outbox and
+            // ask routes take the bare id), the same mapping
+            // ActivitiesStrip reverses to find a session for a tapped pill.
+            // Resolves a needs-input pill once its session actually ends
+            // (H5), rather than leaving it sitting there answerable to
+            // nobody.
+            sessions.onSessionGone = { [weak self] id in
+                self?.activities.resolveIfPending(id: "claude-\(id)")
+            }
         }
         events.startGlanceTicker()
         updates.onNewVersion = { [weak self] version in
@@ -1203,6 +1229,10 @@ final class NotchViewModel: ObservableObject {
     static func isAvailable(
         _ tab: Tab, in defaults: UserDefaults = .standard, batteryPresent: Bool = true
     ) -> Bool {
+        // A dark-shipped tab is nowhere, whatever its settings switch
+        // says: the switch itself is hidden with it (FeatureFlags).
+        if tab == .sessions, !FeatureFlags.sessionsVisible { return false }
+        if tab == .chat, !FeatureFlags.chatVisible { return false }
         if tab == .battery, !batteryPresent { return false }
         guard let key = tab.toolKey else { return true }
         // An unset flag means the tool ships on, matching the
@@ -1703,7 +1733,12 @@ final class NotchViewModel: ObservableObject {
             // own model, keyless. Long conversations belong to the
             // Chat tab, where the user's real subscription lives.
             guard AIService.localModelAvailable else {
-                answer = "That one needs Apple Intelligence, System Settings, Apple Intelligence and Siri. Reminders, notes, timers, focus, calendar, and music all work without it, and the Chat tab carries your own Claude, ChatGPT, or Gemini."
+                // The Chat tab is only worth pointing at while it
+                // exists (the dark-ship, FeatureFlags): a promise about
+                // a hidden tab is a broken one.
+                answer = FeatureFlags.chatVisible
+                    ? "That one needs Apple Intelligence, System Settings, Apple Intelligence and Siri. Reminders, notes, timers, focus, calendar, and music all work without it, and the Chat tab carries your own Claude, ChatGPT, or Gemini."
+                    : "That one needs Apple Intelligence, System Settings, Apple Intelligence and Siri. Reminders, notes, timers, focus, calendar, and music all work without it."
                 return
             }
 

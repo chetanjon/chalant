@@ -903,6 +903,7 @@ final class SessionStore: ObservableObject {
         sessionID: String, askID: String, questions: [Ask.Question], cwd: String?,
         server: String, intercepted: Bool = false
     ) -> Bool {
+        guard surfacesCards else { return false }
         if !sessions.contains(where: { $0.id == sessionID }) {
             sessions.append(Session(
                 id: sessionID,
@@ -1555,6 +1556,7 @@ final class SessionStore: ObservableObject {
         cwd: String? = nil, patience: TimeInterval = 600,
         rules: [String] = SessionStore.approvalRules()
     ) -> Bool {
+        guard surfacesCards else { return false }
         // Only the rules decide here. The way out of a broad rule — a
         // grant somebody made from an earlier card — is checked by the
         // caller (`settleGate`), where the policy store lives, before
@@ -1564,6 +1566,16 @@ final class SessionStore: ObservableObject {
             sessionID: sessionID, id: id, tool: tool, detail: detail, cwd: cwd,
             patience: patience)
     }
+
+    /// Whether this store may surface cards at all. True by default so
+    /// the gate engine keeps its full test coverage; the app wires in
+    /// `FeatureFlags.sessionsVisible` at startup. False, every hold
+    /// below is refused on arrival, which is the server's existing
+    /// "nowhere to show it" path: an instant empty 200, and the
+    /// agent's own terminal flow untouched. This is what keeps an
+    /// upgrader with armed hooks from waiting out a patience window on
+    /// a card that cannot be drawn.
+    var surfacesCards = true
 
     /// A permission prompt Claude Code is putting on screen right now,
     /// with its own hook suspended inside this app waiting for an
@@ -1580,7 +1592,8 @@ final class SessionStore: ObservableObject {
         sessionID: String, id: String, tool: String, detail: String,
         cwd: String? = nil, patience: TimeInterval, agent: Agent = .claude
     ) -> Bool {
-        register(
+        guard surfacesCards else { return false }
+        return register(
             sessionID: sessionID, id: id, tool: tool, detail: detail, cwd: cwd,
             patience: patience, alsoInTerminal: true, agent: agent)
     }

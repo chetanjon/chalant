@@ -51,6 +51,21 @@ final class HotKeyCenter {
 
         var defaultsKey: String { "hotkey.\(rawValue)" }
 
+        /// Whether this action's surface exists in the build at all.
+        /// A dark-shipped feature keeps no doors (FeatureFlags): its
+        /// shortcut row is not drawn and its combination is never
+        /// registered, so a binding a user made before the hide simply
+        /// goes quiet rather than flashing about a switch that is
+        /// gone. The stored combo survives for the day the surface
+        /// returns.
+        var isVisible: Bool {
+            switch self {
+            case .chat: return FeatureFlags.chatVisible
+            case .sessions: return FeatureFlags.sessionsVisible
+            default: return true
+            }
+        }
+
         /// The panel this shortcut opens, for the ones that open one.
         /// Kept here rather than as a closure each in the app delegate:
         /// they are one behaviour with a different destination, and
@@ -213,7 +228,7 @@ final class HotKeyCenter {
         registered.removeAll()
         actionsByID.removeAll()
 
-        for action in Action.allCases {
+        for action in Action.allCases where action.isVisible {
             guard let combo = Self.combo(for: action), combo.isSafe else { continue }
             let id = nextID
             nextID += 1
