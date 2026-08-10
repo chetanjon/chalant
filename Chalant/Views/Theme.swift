@@ -173,6 +173,9 @@ enum Theme {
         static let zone: CGFloat = 26
         /// Tight icon-to-label and dot gaps.
         static let snug: CGFloat = 5
+        /// A headline directly over its subhead: the tightest stack
+        /// there is, the two lines read as one object.
+        static let stacked: CGFloat = 2
         /// Collapsed wings sit flush against the physical notch.
         // 7, not 11: the pill's 8pt width tuck (worn by the glass, not
         // the report) took 4 from each wing; the inset gives it back

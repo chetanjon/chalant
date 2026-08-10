@@ -9,6 +9,7 @@ import XCTest
 final class FinishTokensTests: XCTestCase {
     func testTheFinishTokensExistAtTheirApprovedValues() {
         XCTAssertEqual(Theme.Space.zone, 26)
+        XCTAssertEqual(Theme.Space.stacked, 2)
         XCTAssertEqual(Theme.Radius.artwork, 14)
         XCTAssertEqual(Theme.Island.radiusExpanded, 40)
         // Fonts are opaque; existence is the assertion. A wrong size

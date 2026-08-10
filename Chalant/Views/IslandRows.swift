@@ -24,7 +24,7 @@ struct MusicRow: View {
                     .buttonStyle(PressableStyle())
                     .help("Open \(playing.source.displayName)")
 
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: Theme.Space.stacked) {
                         Text(playing.track)
                             .font(Theme.Fonts.headline)
                             .foregroundStyle(Theme.textPrimary)
