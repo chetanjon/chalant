@@ -910,15 +910,21 @@ final class NotchWindowController {
             // time expandedSize actually changes, then let the
             // subscription go; a second expand before that fires just
             // replaces it (see `expandedSizeResync`).
+            // @Published emits on willSet, so without the hop below
+            // the sink would still read the property's old value; the
+            // receive(on:) defers delivery to the next run loop turn,
+            // after the new size has actually landed.
             expandedSizeResync = viewModel.$expandedSize
                 .dropFirst()
                 .prefix(1)
+                .receive(on: DispatchQueue.main)
                 .sink { [weak self] _ in
                     self?.recheckExpandedContainment()
                     self?.expandedSizeResync = nil
                 }
         case .listening:
-            break
+            // A voice session is not an open to re-check.
+            expandedSizeResync = nil
         }
     }
 
