@@ -1,114 +1,49 @@
 import AppKit
 import SwiftUI
 
-/// The music row: dimensional artwork that glows while it plays, a
-/// now-playing equalizer, title/artist, and a scrubber with elapsed and
-/// total time. Rich but still one tight block, volume lives on the
-/// system keys, not here.
+/// The music row: flat 56pt artwork, stacked title/artist, bare thin
+/// transport glyphs, and a full-width scrub line with elapsed and
+/// remaining time beneath. The glow, sheen and now-playing equalizer
+/// are gone (premium finish, spec 2026-08-10): the row reads by
+/// typography and brightness, never decoration.
 struct MusicRow: View {
     @ObservedObject var music: MusicController
-    @Environment(\.chalantAccent) private var accent
-    @State private var scrubPosition: Double?
     /// Local slider value while the user is dragging, so the 1s
     /// player poll can't yank the knob back mid-gesture.
     @State private var volumeOverride: Double?
 
     var body: some View {
         if let playing = music.nowPlaying {
-            HStack(spacing: Theme.Space.l) {
-                Button {
-                    music.openMusicApp()
-                } label: {
-                    artworkView(isPlaying: playing.isPlaying)
-                }
-                .buttonStyle(PressableStyle())
-                .help("Open \(playing.source.displayName)")
-                .background(
-                    // The album's own light spilling out from under
-                    // the artwork: the row warms to whatever plays,
-                    // without ever drawing a box around itself.
-                    //
-                    // endRadius must not outrun the frame's shorter
-                    // half. At 190 inside a box 150 tall the gradient
-                    // was still around 60% opaque where the frame
-                    // stopped, so it ended on a hard horizontal line
-                    // under the artwork instead of fading out. Matching
-                    // the radius to the half-height lands it exactly on
-                    // clear at the edge, in every direction.
-                    RadialGradient(
-                        colors: [accent.opacity(playing.isPlaying ? 0.22 : 0.10), .clear],
-                        center: .center,
-                        startRadius: 4,
-                        endRadius: 80
-                    )
-                    .frame(width: 360, height: 160)
-                    .allowsHitTesting(false)
-                )
+            VStack(spacing: Theme.Space.m) {
+                HStack(spacing: Theme.Space.xl) {
+                    Button {
+                        music.openMusicApp()
+                    } label: {
+                        artworkView()
+                    }
+                    .buttonStyle(PressableStyle())
+                    .help("Open \(playing.source.displayName)")
 
-                VStack(alignment: .leading, spacing: Theme.Space.snug) {
-                    HStack(spacing: Theme.Space.s) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(playing.track)
-                            .font(Theme.Fonts.bodyEmphasis)
+                            .font(Theme.Fonts.headline)
                             .foregroundStyle(Theme.textPrimary)
                             .lineLimit(1)
                         Text(playing.artist)
-                            .font(Theme.Fonts.caption)
+                            .font(Theme.Fonts.subhead)
                             .foregroundStyle(Theme.textSecondary)
                             .lineLimit(1)
-                        Spacer(minLength: 0)
-                        if playing.isPlaying {
-                            NowPlayingBars(accent: accent)
-                                .transition(.opacity)
-                        }
                     }
-                    // Position is projected between the player's 1s
-                    // polls, so the knob and clock glide instead of
-                    // stepping once a second. Times flank a bounded
-                    // bar: one tight line instead of a wire across
-                    // the whole island.
-                    TimelineView(.periodic(from: .now, by: 0.5)) { context in
-                        let livePosition = music.position(at: context.date)
-                        HStack(spacing: Theme.Space.s) {
-                            Text(Self.clock(scrubPosition ?? livePosition))
-                                .font(Theme.Fonts.microMono)
-                                .foregroundStyle(Theme.textSecondary)
-                            Slider(
-                                value: Binding(
-                                    get: { scrubPosition ?? livePosition },
-                                    set: { scrubPosition = $0 }
-                                ),
-                                in: 0...max(playing.duration, 1),
-                                onEditingChanged: { editing in
-                                    if !editing, let target = scrubPosition {
-                                        music.seek(to: target)
-                                        scrubPosition = nil
-                                    }
-                                }
-                            )
-                            .controlSize(.mini)
-                            .tint(accent)
-                            .frame(maxWidth: 190)
-                            Text(Self.clock(playing.duration))
-                                .font(Theme.Fonts.microMono)
-                                .foregroundStyle(Theme.textGhost)
-                            Spacer(minLength: 0)
-                        }
-                    }
-                }
 
-                // Trailing, not centred: the transport row changes width
-                // when a player that supports shuffle takes over, and
-                // centred rows made the volume slider slide sideways
-                // underneath the pointer as it did. Both rows hang off
-                // the same right edge instead.
-                VStack(alignment: .trailing, spacing: Theme.Space.xs) {
-                    HStack(spacing: Theme.Space.s) {
+                    Spacer()
+
+                    HStack(spacing: Theme.Space.xxl) {
                         if playing.supportsShuffle {
                             HoverGlyphButton(
                                 symbol: "shuffle",
                                 label: "Shuffle",
                                 scale: .xs,
-                                tint: playing.shuffling ? accent : Theme.textTertiary
+                                tint: playing.shuffling ? Theme.textPrimary : Theme.textTertiary
                             ) {
                                 music.toggleShuffle()
                             }
@@ -116,7 +51,7 @@ struct MusicRow: View {
                         }
                         HoverGlyphButton(
                             symbol: "backward.fill", label: "Previous track",
-                            scale: .s, tint: Theme.textPrimary
+                            scale: .m, tint: Theme.textPrimary, weight: .regular
                         ) {
                             music.previous()
                         }
@@ -124,62 +59,82 @@ struct MusicRow: View {
                             playing.isPlaying ? music.pause() : music.play()
                         } label: {
                             Image(systemName: playing.isPlaying ? "pause.fill" : "play.fill")
-                                .font(Theme.Fonts.icon(.m, weight: .bold))
-                                .foregroundStyle(Color.black)
-                                .frame(width: 32, height: 32)
-                                .background(
-                                    Circle()
-                                        .fill(Color.white.opacity(0.96))
-                                        .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
-                                )
-                                .contentShape(Circle())
+                                .font(Theme.Fonts.icon(.l))
+                                .foregroundStyle(Theme.textPrimary)
+                                .frame(minWidth: 22, minHeight: 22)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(PressableStyle())
                         HoverGlyphButton(
                             symbol: "forward.fill", label: "Next track",
-                            scale: .s, tint: Theme.textPrimary
+                            scale: .m, tint: Theme.textPrimary, weight: .regular
                         ) {
                             music.next()
                         }
-                    }
-                    HStack(spacing: Theme.Space.xs) {
-                        Image(systemName: "speaker.wave.2.fill")
-                            .font(Theme.Fonts.icon(.xs))
-                            .foregroundStyle(Theme.textTertiary)
-                        Slider(
-                            value: Binding(
-                                get: { volumeOverride ?? playing.volume },
-                                set: { value in
-                                    volumeOverride = value
-                                    // Applied live but debounced, so the
-                                    // drag feels attached to the sound.
-                                    music.previewVolume(value)
+                        HStack(spacing: Theme.Space.xs) {
+                            Image(systemName: "speaker.wave.2.fill")
+                                .font(Theme.Fonts.icon(.xs))
+                                .foregroundStyle(Theme.textTertiary)
+                            Slider(
+                                value: Binding(
+                                    get: { volumeOverride ?? playing.volume },
+                                    set: { value in
+                                        volumeOverride = value
+                                        // Applied live but debounced, so the
+                                        // drag feels attached to the sound.
+                                        music.previewVolume(value)
+                                    }
+                                ),
+                                in: 0...100,
+                                onEditingChanged: { editing in
+                                    if !editing, let target = volumeOverride {
+                                        music.commitVolume(target)
+                                        volumeOverride = nil
+                                    }
                                 }
-                            ),
-                            in: 0...100,
-                            onEditingChanged: { editing in
-                                if !editing, let target = volumeOverride {
-                                    music.commitVolume(target)
-                                    volumeOverride = nil
-                                }
-                            }
+                            )
+                            .controlSize(.mini)
+                            .tint(Color.white.opacity(0.5))
+                            .frame(width: 84)
+                        }
+                        .help(
+                            playing.source.scriptable == nil
+                                ? "System volume"
+                                : "\(playing.source.displayName) volume"
                         )
-                        .controlSize(.mini)
-                        .tint(Color.white.opacity(0.5))
-                        .frame(width: 68)
                     }
-                    .help(
-                        playing.source.scriptable == nil
-                            ? "System volume"
-                            : "\(playing.source.displayName) volume"
-                    )
+                }
+
+                // Position is projected between the player's 1s polls,
+                // so the line and clocks glide instead of stepping once
+                // a second. ScrubBar draws at a fixed 16pt height, so
+                // this periodic tick never touches layout.
+                TimelineView(.periodic(from: .now, by: 0.5)) { context in
+                    let livePosition = music.position(at: context.date)
+                    VStack(spacing: Theme.Space.m) {
+                        ScrubBar(
+                            position: livePosition,
+                            duration: max(playing.duration, 1),
+                            tint: Color.white.opacity(0.9),
+                            onSeek: { music.seek(to: $0) }
+                        )
+                        HStack {
+                            Text(Self.clock(livePosition))
+                                .font(Theme.Fonts.timeMono)
+                                .foregroundStyle(Theme.textSecondary)
+                            Spacer()
+                            Text(Self.remainingClock(elapsed: livePosition, duration: playing.duration))
+                                .font(Theme.Fonts.timeMono)
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                    }
                 }
             }
             .animation(Theme.Motion.content, value: playing.isPlaying)
         }
     }
 
-    private func artworkView(isPlaying: Bool) -> some View {
+    private func artworkView() -> some View {
         Group {
             if let artwork = music.artwork {
                 Image(nsImage: artwork)
@@ -194,27 +149,8 @@ struct MusicRow: View {
                 }
             }
         }
-        .frame(width: 54, height: 54)
+        .frame(width: 56, height: 56)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.artwork, style: .continuous))
-        // Top-lit sheen: the art reads as a physical, lit surface.
-        .overlay(
-            LinearGradient(
-                colors: [Color.white.opacity(0.22), .clear],
-                startPoint: .top, endPoint: .center
-            )
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.artwork, style: .continuous))
-            .allowsHitTesting(false)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.artwork, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
-        )
-        // Album-colored glow while playing; a plain drop shadow when paused.
-        .shadow(
-            color: isPlaying ? accent.opacity(0.38) : Color.black.opacity(0.4),
-            radius: isPlaying ? 9 : 5,
-            y: 3
-        )
     }
 
     /// Hours appear only when needed: videos and live streams run
