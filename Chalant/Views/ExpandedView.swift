@@ -748,16 +748,6 @@ struct TodayView: View {
             } else {
                 dayRows(hasEvents: hasEvents, hasReminders: hasReminders)
             }
-            // Speaks for the sources that can actually see. It used to
-            // fall silent the moment anything was denied, so a granted
-            // reminders list with nothing due said nothing at all and
-            // the whole panel was one denial line. With every source
-            // denied there is still nothing to report: "the day is
-            // yours" over a permission wall is a guess dressed as a
-            // fact, and the denial above is the whole story.
-            if !hasEvents, !hasReminders, canSeeAnything {
-                clearDay
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .task { await events.refresh() }
@@ -814,34 +804,6 @@ struct TodayView: View {
 
     private var seesCalendar: Bool { showCalendar && !events.calendarDenied }
     private var seesReminders: Bool { showReminders && !events.remindersDenied }
-    private var canSeeAnything: Bool { seesCalendar || seesReminders }
-
-    /// The empty moment, in the island's own voice.
-    ///
-    /// Claims only what it looked at. Half a view of the day cannot say
-    /// the day is yours, and saying it anyway beside a line admitting
-    /// the calendar is hidden is the app contradicting itself in two
-    /// consecutive sentences.
-    private var clearDay: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Text("Clear water.")
-                .font(Theme.Fonts.subhead)
-                .foregroundStyle(Theme.textSecondary)
-            Text(Self.clearDayDetail(seesCalendar: seesCalendar, seesReminders: seesReminders))
-                .font(Theme.Fonts.subhead)
-                .foregroundStyle(Theme.textTertiary)
-        }
-        .padding(.vertical, Theme.Space.s)
-    }
-
-    static func clearDayDetail(seesCalendar: Bool, seesReminders: Bool) -> String {
-        switch (seesCalendar, seesReminders) {
-        case (true, true): return "Nothing scheduled, nothing due. The day is yours."
-        case (true, false): return "Nothing scheduled."
-        case (false, true): return "Nothing due."
-        case (false, false): return ""
-        }
-    }
 
     private var eventRows: some View {
         let now = Date()
