@@ -769,6 +769,17 @@ struct ScrubBar: View {
             )
         }
         .frame(height: 16)
+        // A drag gesture alone reads as nothing to VoiceOver, so the
+        // value and adjustable action below keep the bar a slider to
+        // assistive tech even though it no longer is one on screen.
         .accessibilityLabel("Playback position")
+        .accessibilityValue(Text(MusicRow.clock(position)))
+        .accessibilityAdjustableAction { direction in
+            guard duration > 0 else { return }
+            let step = duration * 0.05
+            let delta = direction == .increment ? step : -step
+            let target = min(duration, max(0, position + delta))
+            onSeek(target)
+        }
     }
 }

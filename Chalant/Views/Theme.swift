@@ -153,6 +153,9 @@ enum Theme {
 
         /// Thin outline glyphs, the finish's icon voice. Regular, not
         /// semibold: the row reads by brightness, never by bulk.
+        /// Reserved for the finish's later rounds (the weather glyph
+        /// is its first consumer), so having no view callers yet is
+        /// intent, not leftovers.
         static func iconThin(_ scale: IconScale) -> Font {
             .system(size: scale.rawValue, weight: .regular)
         }
@@ -210,7 +213,9 @@ enum Theme {
         static let eaveExpanded: CGFloat = 22
         static let radiusCollapsed: CGFloat = 16
         // 44/10 read as a long empty chin under the last row; the
-        // droplet keeps a hint of belly without the sag.
+        // droplet keeps a hint of belly without the sag. The premium
+        // finish (spec 2026-08-10) raised the settled 34 to 40, with
+        // the founder's mockup as the reference.
         static let radiusExpanded: CGFloat = 40
         /// Flat, both of them. The bottom edge used to bow below
         /// straight, a point and a half at rest and five when open, as

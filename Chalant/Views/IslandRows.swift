@@ -107,8 +107,9 @@ struct MusicRow: View {
 
                 // Position is projected between the player's 1s polls,
                 // so the line and clocks glide instead of stepping once
-                // a second. ScrubBar draws at a fixed 16pt height, so
-                // this periodic tick never touches layout.
+                // a second. The fill width still relayouts every tick,
+                // but inside ScrubBar's own fixed 16pt frame, so it is
+                // what keeps the island's measured height out of it.
                 TimelineView(.periodic(from: .now, by: 0.5)) { context in
                     let livePosition = music.position(at: context.date)
                     VStack(spacing: Theme.Space.m) {
@@ -233,9 +234,10 @@ struct NowPlayingBars: View {
     }
 }
 
-/// The ambience row: a label that names the feature (and the sound
-/// that's playing), then the sound icons. Hover an icon for its name;
-/// the active one tints and reveals a volume slider.
+/// The ambience row: text chips, one per sound, no label zone and no
+/// icons. The active chip is white (`Theme.textPrimary`); tapping it
+/// is how you stop it, same button as the one that started it. The
+/// volume control appears only while a sound is actually playing.
 struct AmbienceRow: View {
     @ObservedObject var ambience: AmbienceController
 
