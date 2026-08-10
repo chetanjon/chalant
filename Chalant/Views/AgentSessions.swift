@@ -94,12 +94,8 @@ struct AgentSessionsStrip: View {
             // session that wants you, and the old single-question check
             // would have hidden the card the moment question one landed.
             if let ask = session.ask, !ask.isFullyAnswered {
-                AskCard(ask: ask, answer: { choices in
-                    sessions.answer(sessionID: session.id, with: choices)
-                }, answerQuestion: { index, choices in
+                AskCard(ask: ask, answerQuestion: { index, choices in
                     sessions.answerQuestion(sessionID: session.id, questionIndex: index, with: choices)
-                }, queue: { label in
-                    sessions.queue(message: label, for: session.id)
                 }, declined: {
                     model.activityServer.decline(askID: ask.id)
                     sessions.clearAsk(askID: ask.id)

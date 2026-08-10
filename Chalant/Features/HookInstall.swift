@@ -321,6 +321,20 @@ enum HookInstall {
     /// The other half of the same switch: an MCP server's question.
     static let elicitationPath = "/hook/elicitation"
 
+    /// And Claude Code's own `AskUserQuestion`, intercepted at
+    /// `PreToolUse` with a matcher naming exactly that one tool. Its
+    /// entry rides the same switch as the prompts: from where the
+    /// person stands, a question and a permission prompt are the same
+    /// thing — something that stopped an agent and needs an answer.
+    static let askPath = "/hook/ask-user"
+
+    /// The question hook's own timeout: a backstop above the island's
+    /// `ActivityServer.questionPatience`, which answers with an empty
+    /// 200 at 20 seconds so the picker falls back to the terminal. The
+    /// hook timing out first would kill the request the server was
+    /// about to answer.
+    static let questionTimeout = 30
+
     /// And the two that say a question is over.
     ///
     /// Neither ever holds anything up. They exist because a turn cannot
@@ -351,10 +365,11 @@ enum HookInstall {
     }
 
     private static func entry(
-        path: String, port: UInt16, token: String, timeout: Int = promptTimeout
+        path: String, port: UInt16, token: String, timeout: Int = promptTimeout,
+        matcher: String = "*"
     ) -> [String: Any] {
         [
-            "matcher": "*",
+            "matcher": matcher,
             "hooks": [[
                 "type": "http",
                 // Loopback by name. This is written into somebody's
@@ -454,6 +469,12 @@ enum HookInstall {
              promptEntry(port: resolved.port, token: resolved.token)),
             ("Elicitation", elicitationPath,
              elicitationEntry(port: resolved.port, token: resolved.token)),
+            // The matcher is the whole of the filter: only the one tool
+            // whose call IS a question posts here, so every other
+            // PreToolUse costs nothing.
+            ("PreToolUse", askPath,
+             entry(path: askPath, port: resolved.port, token: resolved.token,
+                   timeout: questionTimeout, matcher: "AskUserQuestion")),
             ("Stop", stopPath,
              entry(path: stopPath, port: resolved.port, token: resolved.token,
                    timeout: lifecycleTimeout)),
@@ -493,6 +514,7 @@ enum HookInstall {
         var changed = false
         for (event, path) in [("PermissionRequest", promptPath),
                               ("Elicitation", elicitationPath),
+                              ("PreToolUse", askPath),
                               ("Stop", stopPath),
                               ("SessionEnd", sessionEndPath)] {
             guard var entries = hooks[event] as? [[String: Any]] else { continue }

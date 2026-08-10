@@ -327,7 +327,7 @@ final class PromptGateTests: XCTestCase {
         // is standing.
         HookInstall.armPrompts(port: 4242, token: "t", at: settings)
         let hooks = try XCTUnwrap(try read()["hooks"] as? [String: Any])
-        for event in ["PermissionRequest", "Elicitation", "Stop", "SessionEnd"] {
+        for event in ["PermissionRequest", "Elicitation", "PreToolUse", "Stop", "SessionEnd"] {
             let entries = try XCTUnwrap(hooks[event] as? [[String: Any]], "\(event) missing")
             let hook = try XCTUnwrap((entries.first?["hooks"] as? [[String: Any]])?.first)
             XCTAssertEqual(hook["type"] as? String, "http")
@@ -340,11 +340,40 @@ final class PromptGateTests: XCTestCase {
         XCTAssertEqual(stop["timeout"] as? Int, HookInstall.lifecycleTimeout)
     }
 
-    func testTurningItOffTakesAllFourBackOut() throws {
+    /// The question entry is the one with a matcher: only the tool
+    /// whose call IS a question posts to the ask route, so every other
+    /// PreToolUse costs nothing here.
+    func testTheSwitchInstallsTheQuestionEntryMatchedToItsOneTool() throws {
+        HookInstall.armPrompts(port: 4242, token: "t", at: settings)
+        let hooks = try XCTUnwrap(try read()["hooks"] as? [String: Any])
+        let entries = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries[0]["matcher"] as? String, "AskUserQuestion")
+        let hook = try XCTUnwrap((entries[0]["hooks"] as? [[String: Any]])?.first)
+        XCTAssertEqual(hook["url"] as? String, "http://127.0.0.1:4242/hook/ask-user")
+        XCTAssertEqual(hook["timeout"] as? Int, HookInstall.questionTimeout)
+    }
+
+    /// And it lives beside the gate's own PreToolUse entry, not instead
+    /// of it: two entries, two doors, each removed only by its own
+    /// switch.
+    func testTheQuestionEntryAndTheGateEntryCoexist() throws {
+        HookInstall.arm(port: 4242, token: "t", at: settings)
+        HookInstall.armPrompts(port: 4242, token: "t", at: settings)
+        var entries = ((try read()["hooks"] as? [String: Any])?["PreToolUse"] as? [[String: Any]]) ?? []
+        XCTAssertEqual(entries.count, 2)
+
+        HookInstall.disarmPrompts(at: settings)
+        entries = ((try read()["hooks"] as? [String: Any])?["PreToolUse"] as? [[String: Any]]) ?? []
+        XCTAssertEqual(entries.count, 1, "the prompt switch must not take the gate with it")
+        XCTAssertTrue(HookInstall.holdsToolCalls(settings: try read()))
+    }
+
+    func testTurningItOffTakesAllFiveBackOut() throws {
         HookInstall.armPrompts(port: 4242, token: "t", at: settings)
         HookInstall.disarmPrompts(at: settings)
         let hooks = try XCTUnwrap(try read()["hooks"] as? [String: Any])
-        for event in ["PermissionRequest", "Elicitation", "Stop", "SessionEnd"] {
+        for event in ["PermissionRequest", "Elicitation", "PreToolUse", "Stop", "SessionEnd"] {
             XCTAssertNil(hooks[event], "\(event) was left behind")
         }
     }

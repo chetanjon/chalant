@@ -358,12 +358,6 @@ final class SessionStore: ObservableObject {
         var finishedAt: Date
     }
 
-    /// One or several questions asked together and answered one at a
-    /// time. `AskUserQuestion` routinely bundles two to four questions
-    /// into a single call; the scripted `chalant ask` only ever sends
-    /// one. Both are this same array — the single-question shape is it
-    /// holding one element, not a second type running alongside this
-    /// one that everything would have to be kept in step with.
     /// A tool call an agent is holding at the door, waiting to be told
     /// yes or no.
     ///
@@ -403,27 +397,32 @@ final class SessionStore: ObservableObject {
         var alsoInTerminal: Bool = false
     }
 
+    /// One or several questions asked together and answered one at a
+    /// time. `AskUserQuestion` routinely bundles two to four questions
+    /// into a single call; the scripted `chalant ask` only ever sends
+    /// one. Both are this same array — the single-question shape is it
+    /// holding one element, not a second type running alongside this
+    /// one that everything would have to be kept in step with.
     struct Ask: Identifiable, Equatable {
         let id: String
         var questions: [Question]
         var askedAt: Date
-        /// True for a question Claude Code asked itself (its own
-        /// `AskUserQuestion` tool call, read from the transcript), false
-        /// for the scripted `chalant ask`. There is no supported way to
-        /// resolve a native one from outside the process, so the island
-        /// never calls `answer()` for these: it can only queue a pick
-        /// through the outbox, arriving at a later turn boundary rather
-        /// than answering the prompt itself. `AskCard` reads this to
-        /// decide which of the two it is doing, and to say so.
-        var native: Bool = false
 
-        /// An MCP server's `elicitation/create`, held inside its hook.
-        /// Unlike a native ask this one really can be answered from
-        /// here: the agent is suspended waiting on the hook's reply, so
-        /// the card's buttons resolve it rather than queueing a message
-        /// for later. It can also be turned down, which is a real
-        /// answer of its own and the only kind of ask that has one.
+        /// A question held inside a hook, answerable in place: an MCP
+        /// server's `elicitation/create`, or an intercepted
+        /// `AskUserQuestion`. The agent is suspended waiting on the
+        /// hook's reply, so the card's buttons resolve it rather than
+        /// queueing a message for later. It can also be turned down,
+        /// which is a real answer of its own.
         var elicitation: Bool = false
+        /// True for an `AskUserQuestion` held at the `PreToolUse` door
+        /// (its answer travels back as a deny whose reason is the
+        /// answer), false for an MCP elicitation. Only the card reads
+        /// it, to say which kind of wait this is and what not answering
+        /// does. The transcript-scraped, queue-only "native" ask this
+        /// flag replaced is gone: interception answers the prompt
+        /// itself instead of leaving a note for the next turn.
+        var intercepted: Bool = false
         /// Which MCP server asked, so the card can say whose question
         /// this is.
         var server: String = ""
@@ -445,6 +444,12 @@ final class SessionStore: ObservableObject {
             /// MCP server asked for, and nothing else in the card knows
             /// that name.
             var field: String = ""
+            /// One description per option, aligned by index with
+            /// `options`, empty where an option has none. Carried for an
+            /// intercepted `AskUserQuestion`, whose options arrive as
+            /// label-and-description pairs; everything else leaves it
+            /// empty.
+            var optionDescriptions: [String] = []
         }
 
         /// True once every question in the bundle has an answer. For a
@@ -786,27 +791,39 @@ final class SessionStore: ObservableObject {
     @discardableResult
     func attach(
         askID: String, to sessionID: String, questions rawQuestions: [Ask.Question],
-        native: Bool = false, elicitation: Bool = false, server: String = ""
+        elicitation: Bool = false, intercepted: Bool = false, server: String = ""
     ) -> Bool {
         let questions: [Ask.Question] = rawQuestions.prefix(Self.maxQuestions).compactMap { raw in
             let question = String(raw.question.prefix(Self.askFieldLimit))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !question.isEmpty else { return nil }
+            // Options and their descriptions stay aligned by walking
+            // them together: dropping a blank label drops its
+            // description with it, never sliding one under a
+            // neighbour.
+            let kept: [(label: String, described: String)] = raw.options
+                .prefix(Self.maxOptions).enumerated().compactMap { offset, label in
+                    let trimmedLabel = String(label.prefix(Self.askFieldLimit))
+                    guard !trimmedLabel.isEmpty else { return nil }
+                    let described = offset < raw.optionDescriptions.count
+                        ? String(raw.optionDescriptions[offset].prefix(Self.askFieldLimit))
+                        : ""
+                    return (trimmedLabel, described)
+                }
             return Ask.Question(
                 header: String(raw.header.prefix(Self.askFieldLimit)),
                 question: question,
-                options: raw.options.prefix(Self.maxOptions)
-                    .map { String($0.prefix(Self.askFieldLimit)) }
-                    .filter { !$0.isEmpty },
+                options: kept.map(\.label),
                 multiSelect: raw.multiSelect,
-                field: raw.field
+                field: raw.field,
+                optionDescriptions: kept.map(\.described)
             )
         }
         guard !questions.isEmpty, let index = sessions.firstIndex(where: { $0.id == sessionID })
         else { return false }
         sessions[index].ask = Ask(
-            id: askID, questions: questions, askedAt: Date(), native: native,
-            elicitation: elicitation, server: server)
+            id: askID, questions: questions, askedAt: Date(),
+            elicitation: elicitation, intercepted: intercepted, server: server)
         let wasAlreadyAsking = sessions[index].state == .needsInput
         sessions[index].state = .needsInput
         sessions[index].updatedAt = Date()
@@ -829,12 +846,11 @@ final class SessionStore: ObservableObject {
     @discardableResult
     func attach(
         askID: String, to sessionID: String, header: String, question: String,
-        options: [String], multiSelect: Bool, native: Bool = false
+        options: [String], multiSelect: Bool
     ) -> Bool {
         attach(
             askID: askID, to: sessionID,
-            questions: [Ask.Question(header: header, question: question, options: options, multiSelect: multiSelect)],
-            native: native
+            questions: [Ask.Question(header: header, question: question, options: options, multiSelect: multiSelect)]
         )
     }
 
@@ -843,10 +859,9 @@ final class SessionStore: ObservableObject {
     /// answered stays right there — needs-input — until the last one
     /// lands: `isFullyAnswered` below is what decides that, not this
     /// single question's own answer. Only once every question has one
-    /// does the session go back to working, and even then only for a
-    /// non-native ask — a native one waits for the transcript to say the
-    /// real prompt was resolved, exactly as a single native question
-    /// always did (see `Ask.native`; `AskCard` never calls this for one).
+    /// does the session go back to working and `onAnswered` fire, which
+    /// is what hands a held ask's answers to the hook suspended on
+    /// them.
     @discardableResult
     func answerQuestion(sessionID: String, questionIndex: Int, with choices: [String]) -> Bool {
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }),
@@ -855,7 +870,7 @@ final class SessionStore: ObservableObject {
         else { return false }
         ask.questions[questionIndex].answer = choices
         sessions[index].ask = ask
-        if ask.isFullyAnswered, !ask.native {
+        if ask.isFullyAnswered {
             sessions[index].state = .working
         }
         sessions[index].updatedAt = Date()
@@ -887,7 +902,7 @@ final class SessionStore: ObservableObject {
     @discardableResult
     func holdForElicitation(
         sessionID: String, askID: String, questions: [Ask.Question], cwd: String?,
-        server: String
+        server: String, intercepted: Bool = false
     ) -> Bool {
         if !sessions.contains(where: { $0.id == sessionID }) {
             sessions.append(Session(
@@ -911,7 +926,7 @@ final class SessionStore: ObservableObject {
         }
         return attach(
             askID: askID, to: sessionID, questions: questions,
-            native: false, elicitation: true, server: server)
+            elicitation: true, intercepted: intercepted, server: server)
     }
 
     func pendingAsk(sessionID: String) -> Ask? {

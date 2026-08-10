@@ -399,6 +399,71 @@ enum HookPayload {
         return data.flatMap { String(data: $0, encoding: .utf8) }
     }
 
+    /// The questions inside an `AskUserQuestion` call, read off its own
+    /// `tool_input`: the text, the header, the options with their
+    /// descriptions, and whether several may be picked. Each question's
+    /// `field` is its index, which is the name its answer travels back
+    /// under. Empty when the payload is not a question worth showing,
+    /// which reads as "stand aside" rather than as an error.
+    static func questions(from object: [String: Any]) -> [SessionStore.Ask.Question] {
+        guard let input = object["tool_input"] as? [String: Any],
+              let raw = input["questions"] as? [[String: Any]]
+        else { return [] }
+        return raw.prefix(SessionStore.maxQuestions).enumerated().compactMap { index, entry in
+            guard let question = (entry["question"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !question.isEmpty
+            else { return nil }
+            // Labels and descriptions stay aligned by building them as
+            // pairs: an option with a blank label is dropped whole, so
+            // a description can never slide under its neighbour.
+            let options: [(label: String, described: String)] =
+                ((entry["options"] as? [[String: Any]]) ?? [])
+                .prefix(SessionStore.maxOptions)
+                .compactMap { option in
+                    guard let label = (option["label"] as? String)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty
+                    else { return nil }
+                    let described = ((option["description"] as? String) ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    return (String(label.prefix(SessionStore.askFieldLimit)),
+                            String(described.prefix(SessionStore.askFieldLimit)))
+                }
+            return SessionStore.Ask.Question(
+                header: String(((entry["header"] as? String) ?? "").prefix(60)),
+                question: String(question.prefix(SessionStore.askFieldLimit)),
+                options: options.map(\.label),
+                multiSelect: (entry["multiSelect"] as? Bool) ?? false,
+                field: "q\(index)",
+                optionDescriptions: options.map(\.described))
+        }
+    }
+
+    /// The answer to a held `AskUserQuestion`, in the one shape that
+    /// makes Claude Code act on it: a deny whose reason IS the answer.
+    ///
+    /// There is no supported way to resolve the question's own picker
+    /// from outside the process, so the call is denied with the answer
+    /// in the reason, worded so the model reads it as the answer rather
+    /// than as a refusal: continue, and do not re-ask. Anything short
+    /// of a full set of answers is nil — an empty 200, and the question
+    /// falls through to the terminal picker untouched.
+    static func questionResponse(
+        for outcome: ElicitationOutcome, questions: [SessionStore.Ask.Question]
+    ) -> String? {
+        guard case .accept(let answers) = outcome else { return nil }
+        let parts = questions.compactMap { question -> String? in
+            guard let answer = answers[question.field], !answer.isEmpty else { return nil }
+            guard questions.count > 1 else { return answer }
+            let name = question.header.isEmpty ? question.question : question.header
+            return "\(name): \(answer)"
+        }
+        guard parts.count == questions.count else { return nil }
+        return preToolUse(
+            decision: "deny",
+            reason: "User answered via Chalant: \(parts.joined(separator: "; ")). "
+                + "Treat this as the final answer and continue. Do not re-ask.")
+    }
+
     /// The policy engine's answer, which has one more word available to
     /// it than a person's does: `ask` sends the call to the permission
     /// prompt whatever any saved rule would otherwise have said.

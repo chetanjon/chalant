@@ -196,6 +196,89 @@ final class GatePipelineTests: XCTestCase {
             sessions.sessions.first(where: { $0.id == held.sessionID })?.approval)
     }
 
+    // MARK: The question pipeline
+
+    private func questionCall(id: String = "toolu_ask_1") -> HeldCall {
+        HeldCall(
+            id: id, sessionID: "s1", tool: "AskUserQuestion", detail: "",
+            cwd: "/tmp/repo", permissionMode: "default", transcriptPath: "",
+            event: "PreToolUse", askedAt: Date())
+    }
+
+    private func oneQuestion() -> [SessionStore.Ask.Question] {
+        [SessionStore.Ask.Question(
+            header: "Pick", question: "Which one?", options: ["A", "B"],
+            multiSelect: false, field: "q0", optionDescriptions: ["first", "second"])]
+    }
+
+    private func waitForAsk(
+        _ id: String, in sessions: SessionStore, file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<200 {
+            if sessions.sessions.contains(where: { $0.ask?.id == id }) { return }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTFail("\(id) never made it onto a card", file: file, line: line)
+    }
+
+    func testAnAnsweredQuestionTravelsBackAsADenyCarryingTheAnswer() async throws {
+        let (server, sessions) = makeGate()
+        let held = questionCall()
+        async let body = server.settleQuestion(
+            call: held, questions: oneQuestion(), patience: 600)
+        await waitForAsk(held.id, in: sessions)
+
+        // What tapping option B on the card does.
+        let session = sessions.sessions.first { $0.ask?.id == held.id }
+        XCTAssertEqual(session?.ask?.intercepted, true)
+        sessions.answerQuestion(sessionID: "s1", questionIndex: 0, with: ["B"])
+
+        let output = try decoded(await body)
+        XCTAssertEqual(output["permissionDecision"] as? String, "deny")
+        XCTAssertTrue((output["permissionDecisionReason"] as? String ?? "")
+            .contains("User answered via Chalant: B."))
+        XCTAssertNil(sessions.sessions.first?.ask, "an answered card must go")
+    }
+
+    func testAnUnansweredQuestionFallsThroughAtItsDeadline() async {
+        // The 20-second promise, at test speed: nobody answers, the
+        // response is an empty 200, and the picker runs in the terminal
+        // exactly as it always did.
+        let (server, sessions) = makeGate()
+        let held = questionCall(id: "toolu_ask_2")
+        let body = await server.settleQuestion(
+            call: held, questions: oneQuestion(), patience: 0.1)
+        XCTAssertNil(body)
+        XCTAssertNil(sessions.sessions.first?.ask, "the card goes when the question does")
+    }
+
+    func testDecliningAQuestionHandsItBackToTheTerminal() async {
+        let (server, sessions) = makeGate()
+        let held = questionCall(id: "toolu_ask_3")
+        async let body = server.settleQuestion(
+            call: held, questions: oneQuestion(), patience: 600)
+        await waitForAsk(held.id, in: sessions)
+
+        // What "Answer in terminal" does.
+        server.decline(askID: held.id)
+
+        let answer = await body
+        XCTAssertNil(answer, "declining must fall through, never deny the question itself")
+    }
+
+    func testTheGateStandsAsideForAQuestionEvenWhenARuleMatchesIt() async {
+        // A rule broad enough to name AskUserQuestion must not draw an
+        // approval card with no options on it: the ask pipeline owns
+        // the tool.
+        let (server, sessions) = makeGate()
+        let body = await server.settleGate(
+            call: questionCall(id: "toolu_ask_4"), patience: 600,
+            rules: ["AskUserQuestion"])
+        XCTAssertNil(body)
+        XCTAssertTrue(sessions.sessions.isEmpty)
+    }
+
     func testASecondCallInOneSessionFallsThroughWhileTheFirstIsHeld() async {
         let (server, sessions) = makeGate()
         let first = call(id: "toolu_gate_5")

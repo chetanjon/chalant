@@ -173,13 +173,23 @@ final class ActivityServer: @unchecked Sendable {
                 guard let ask = self.sessions?.ask(withID: askID), ask.elicitation else { return }
                 var given: [String: String] = [:]
                 for question in ask.questions where !question.field.isEmpty {
-                    guard let answer = question.answer?.first else { continue }
-                    given[question.field] = answer
+                    // Joined, not first: a multi-select question's
+                    // answer is every picked option, and handing over
+                    // one of three picks would be a different answer.
+                    guard let answer = question.answer, !answer.isEmpty else { continue }
+                    given[question.field] = answer.joined(separator: ", ")
                 }
                 await self.answers.resolve(askID, as: .accept(given))
             }
         }
     }
+
+    /// How long a held `AskUserQuestion` waits on the island before the
+    /// question goes back to the terminal picker. Short on purpose: the
+    /// picker is already on screen in the terminal, wearing the same
+    /// options, and an agent mid-plan should not stand still for ten
+    /// minutes because a card was drawn on a screen nobody is at.
+    static let questionPatience: TimeInterval = 20
 
     /// Tries candidates until one opens.
     ///
@@ -830,12 +840,44 @@ final class ActivityServer: @unchecked Sendable {
 
         // An MCP server asking the person something, mid tool call.
         //
-        // The one kind of question this app can answer outright. Claude
-        // Code's own `AskUserQuestion` is a dialog in a terminal that
-        // nothing outside that process can resolve; an elicitation is a
-        // hook, and a hook can be answered from anywhere.
+        // An elicitation is a hook, and a hook can be answered from
+        // anywhere.
         case ("POST", "/hook/elicitation"):
             askOnTheIsland(request, on: connection)
+
+        // Claude Code's own `AskUserQuestion`, held before its picker
+        // decides anything.
+        //
+        // The picker itself cannot be resolved from outside the
+        // process, so the interception happens one step earlier: a
+        // `PreToolUse` entry matched to this one tool posts here and
+        // stands suspended while the card offers the same options. An
+        // answer travels back as a deny whose reason IS the answer,
+        // worded so the model continues rather than re-asks; no answer
+        // within `questionPatience` is an empty 200, and the picker
+        // runs in the terminal exactly as it always did.
+        case ("POST", "/hook/ask-user"):
+            guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+                  let call = HookPayload.call(from: object, fallbackID: UUID().uuidString),
+                  call.tool == "AskUserQuestion"
+            else {
+                respond(connection, status: "200 OK", body: "")
+                return
+            }
+            let questions = HookPayload.questions(from: object)
+            guard !questions.isEmpty else {
+                respond(connection, status: "200 OK", body: "")
+                return
+            }
+            watchForHangup(connection, id: call.id, answers: true)
+            Task { [weak self] in
+                guard let self else { return }
+                self.respond(
+                    connection, status: "200 OK",
+                    body: await self.settleQuestion(
+                        call: call, questions: questions,
+                        patience: Self.questionPatience) ?? "")
+            }
 
         // Every Claude Code tool call, standing at this app's own door.
         //
@@ -1076,6 +1118,15 @@ final class ActivityServer: @unchecked Sendable {
             respond(connection, status: "200 OK", body: "")
             return
         }
+        // A question must never be eaten as a permission prompt. When
+        // `PermissionRequest` fires for an `AskUserQuestion`, the right
+        // card is the one with the options on it, and the ask pipeline
+        // is already holding that; deciding here would answer a
+        // question with a yes/no.
+        guard call.tool != "AskUserQuestion" else {
+            respond(connection, status: "200 OK", body: "")
+            return
+        }
         // However long the hook says it will wait, so the card counts
         // down the truth rather than a number this app made up. A hook
         // that sends no timeout is on Claude Code's default of 600.
@@ -1160,6 +1211,11 @@ final class ActivityServer: @unchecked Sendable {
     func settleGate(
         call: HeldCall, patience: TimeInterval, rules: [String]? = nil
     ) async -> String? {
+        // A question is never a permission decision: the ask pipeline
+        // owns `AskUserQuestion`, and a rule broad enough to match it
+        // here would draw an approval card with no options on it while
+        // the question hook holds the same call.
+        guard call.tool != "AskUserQuestion" else { return nil }
         // A live grant is somebody who already answered this exact
         // question, so it answers allow outright — and writes it down,
         // because a gate that answers for you and keeps no account of
@@ -1192,6 +1248,39 @@ final class ActivityServer: @unchecked Sendable {
         let decision = await gate.hold(call)
         await MainActor.run { self.sessions?.clearApproval(id: call.id) }
         return HookPayload.response(for: decision, event: call.event)
+    }
+
+    /// Everything about holding one intercepted `AskUserQuestion`
+    /// except the connection: the card, the deadline, the wait, and
+    /// the deny-with-the-answer shape. Its own method so the pipeline
+    /// can be proven in a test without a socket.
+    func settleQuestion(
+        call: HeldCall, questions: [SessionStore.Ask.Question], patience: TimeInterval
+    ) async -> String? {
+        let surfaced = await MainActor.run {
+            self.sessions?.holdForElicitation(
+                sessionID: call.sessionID, askID: call.id, questions: questions,
+                cwd: call.cwd.isEmpty ? nil : call.cwd, server: "",
+                intercepted: true) ?? false
+        }
+        // Nowhere to show it, or a question already on that row. Say
+        // nothing and the terminal picker runs untouched.
+        guard surfaced else { return nil }
+        // The deadline the card promises: unanswered, the question goes
+        // back to the terminal picker rather than holding the agent on
+        // a screen nobody is at. Abandoning after an answer landed
+        // finds nothing and does nothing, the store's standing rule.
+        let deadline = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(patience * 1_000_000_000))
+            guard let self, await self.answers.abandon(call.id) else { return }
+            await MainActor.run { self.sessions?.clearAsk(askID: call.id) }
+        }
+        let outcome = await answers.hold(Elicitation(
+            id: call.id, sessionID: call.sessionID, cwd: call.cwd,
+            message: "", server: "", fields: []))
+        deadline.cancel()
+        await MainActor.run { self.sessions?.clearAsk(askID: call.id) }
+        return HookPayload.questionResponse(for: outcome, questions: questions)
     }
 
     /// Let go of anything this session was being held for.

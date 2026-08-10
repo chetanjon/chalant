@@ -451,12 +451,8 @@ private struct SessionDetail: View {
                 }
             }
             if let ask = session.ask, !ask.isFullyAnswered {
-                AskCard(ask: ask, answer: { choices in
-                    sessions.answer(sessionID: session.id, with: choices)
-                }, answerQuestion: { index, choices in
+                AskCard(ask: ask, answerQuestion: { index, choices in
                     sessions.answerQuestion(sessionID: session.id, questionIndex: index, with: choices)
-                }, queue: { label in
-                    sessions.queue(message: label, for: session.id)
                 }, declined: {
                     model.activityServer.decline(askID: ask.id)
                     sessions.clearAsk(askID: ask.id)
