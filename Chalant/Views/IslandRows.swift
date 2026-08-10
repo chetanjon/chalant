@@ -128,9 +128,6 @@ struct MusicRow: View {
                                 .font(Theme.Fonts.timeMono)
                                 .foregroundStyle(Theme.textSecondary)
                             Spacer()
-                            Text(Self.remainingClock(elapsed: shown, duration: playing.duration))
-                                .font(Theme.Fonts.timeMono)
-                                .foregroundStyle(Theme.textSecondary)
                         }
                     }
                 }
@@ -166,12 +163,6 @@ struct MusicRow: View {
             return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
         }
         return String(format: "%d:%02d", total / 60, total % 60)
-    }
-
-    /// The right side of the progress line counts down (founder's
-    /// mockup, 2026-08-10): what is left, not what the whole is.
-    static func remainingClock(elapsed: Double, duration: Double) -> String {
-        "-" + clock(max(0, duration - elapsed))
     }
 
     /// What the bar and clock show: an optimistic seek target until the
