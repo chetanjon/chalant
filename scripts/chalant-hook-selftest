@@ -70,6 +70,21 @@ printf '%s' '{"hook_event_name":"Notification","session_id":"abc123","cwd":"/x/p
 check "claude Notification posts a needs-input pill" \
   '"id": "claude-abc123", "title": "proj-alpha wants you", "state": "needs-input"'
 
+printf '%s' '{"hook_event_name":"Notification","notification_type":"agent_needs_input","session_id":"abc123","cwd":"/x/proj-alpha"}' \
+  | bash "$HOOK"
+check "agent_needs_input gets its own pill" \
+  '"id": "claude-abc123", "title": "proj-alpha needs input", "state": "needs-input"'
+
+printf '%s' '{"hook_event_name":"Notification","notification_type":"agent_completed","session_id":"abc123","cwd":"/x/proj-alpha"}' \
+  | bash "$HOOK"
+check "agent_completed reads as done, not as wanting you" \
+  '"id": "claude-abc123", "title": "proj-alpha finished", "state": "done"'
+
+printf '%s' '{"hook_event_name":"Notification","notification_type":"some_future_type","session_id":"abc123","cwd":"/x/proj-alpha"}' \
+  | bash "$HOOK"
+check "an unrecognised notification type keeps the generic pill" \
+  '"id": "claude-abc123", "title": "proj-alpha wants you", "state": "needs-input"'
+
 printf '%s' '{"hook_event_name":"Stop","session_id":"abc123","cwd":"/x/proj-alpha","stop_hook_active":false}' \
   | bash "$HOOK"
 check "claude Stop posts a done pill" \

@@ -134,7 +134,10 @@ struct KeyboardSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xl) {
             SettingCard(title: "Shortcuts") {
-                ForEach(Array(HotKeyCenter.Action.allCases.enumerated()), id: \.element.id) {
+                ForEach(
+                    Array(HotKeyCenter.Action.allCases.filter(\.isVisible).enumerated()),
+                    id: \.element.id
+                ) {
                     index, action in
                     if index > 0 { SettingDivider() }
                     ShortcutRow(action: action)

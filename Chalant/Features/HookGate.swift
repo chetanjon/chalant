@@ -45,39 +45,59 @@ enum GateDecision: Sendable, Equatable {
     case abstain
 }
 
-/// The held calls, and the suspended agents waiting on them.
+/// Something a hook can stand at the door holding: it knows its own
+/// wire id, and when it arrived.
+protocol HeldAtTheDoor: Sendable, Identifiable where ID == String {
+    var askedAt: Date { get }
+}
+
+/// An outcome family whose zero is "say nothing": the agent's own flow
+/// runs exactly as it would if this app were not installed. It is what
+/// a duplicate, a hang-up, and a walked-away human all resolve to,
+/// because none of them is a decision anybody made.
+protocol AbstainableOutcome: Sendable {
+    static var abstained: Self { get }
+}
+
+/// The held things, and the suspended agents waiting on them.
 ///
 /// An actor rather than a lock because the thing being guarded is not
 /// data, it is a set of continuations: resuming one twice is a trap,
 /// not a race you can lose quietly, and every path that could do it
 /// (two taps, a tap racing a hang-up, a hang-up racing a quit) has to
 /// be serialised against the others.
-actor PendingDecisionStore {
+///
+/// One generic type rather than the two hand-written twins it
+/// replaced. The decision store and the answer store had become
+/// line-for-line duplicates of the same idempotency rules, which meant
+/// a discipline proven for one had to be re-proven, or quietly
+/// forgotten, for the other. What varies is only what is held and what
+/// comes back; the holding is the same everywhere.
+actor HookHoldStore<Held: HeldAtTheDoor, Outcome: AbstainableOutcome> {
     private struct Waiting {
-        let call: HeldCall
-        let continuation: CheckedContinuation<GateDecision, Never>
+        let held: Held
+        let continuation: CheckedContinuation<Outcome, Never>
     }
 
     private var waiting: [String: Waiting] = [:]
 
-    /// Registers the call and suspends until somebody decides.
+    /// Registers the item and suspends until somebody decides.
     ///
     /// No thread is held here. The connection this was called for is a
     /// callback on a serial queue that has already returned; what is
     /// suspended is one Swift task and one agent process, and this app
     /// carries on exactly as if nobody were waiting.
-    func hold(_ call: HeldCall) async -> GateDecision {
+    func hold(_ item: Held) async -> Outcome {
         await withCheckedContinuation { continuation in
             // The same id twice is not a second question, it is the same
             // question arriving again. Answering "not interested" hands
-            // it to the agent's own permission flow, which is strictly
-            // better than displacing the first waiter and stranding it
-            // forever.
-            guard waiting[call.id] == nil else {
-                continuation.resume(returning: .abstain)
+            // it to the agent's own flow, which is strictly better than
+            // displacing the first waiter and stranding it forever.
+            guard waiting[item.id] == nil else {
+                continuation.resume(returning: .abstained)
                 return
             }
-            waiting[call.id] = Waiting(call: call, continuation: continuation)
+            waiting[item.id] = Waiting(held: item, continuation: continuation)
         }
     }
 
@@ -89,9 +109,9 @@ actor PendingDecisionStore {
     /// one that answered, which is what lets a caller tell "decided" from
     /// "already gone".
     @discardableResult
-    func resolve(_ id: String, as decision: GateDecision) -> Bool {
+    func resolve(_ id: String, as outcome: Outcome) -> Bool {
         guard let entry = waiting.removeValue(forKey: id) else { return false }
-        entry.continuation.resume(returning: decision)
+        entry.continuation.resume(returning: outcome)
         return true
     }
 
@@ -100,17 +120,37 @@ actor PendingDecisionStore {
     /// left to do is stop waiting and let the card go.
     @discardableResult
     func abandon(_ id: String) -> Bool {
-        resolve(id, as: .abstain)
+        resolve(id, as: .abstained)
     }
 
     /// Everything standing at the door right now, oldest first.
-    var held: [HeldCall] {
-        waiting.values.map(\.call).sorted { $0.askedAt < $1.askedAt }
+    var held: [Held] {
+        waiting.values.map(\.held).sorted { $0.askedAt < $1.askedAt }
     }
 
     func isHeld(_ id: String) -> Bool { waiting[id] != nil }
 
     var count: Int { waiting.count }
+}
+
+/// The agents suspended inside a hook request, each waiting on an
+/// allow or a deny this app has not given yet.
+typealias PendingDecisionStore = HookHoldStore<HeldCall, GateDecision>
+
+/// And the questions, whose agents are suspended the same way. A
+/// separate store from the decisions on purpose: an answer is not a
+/// decision, and one store holding both would need a type that is
+/// neither.
+typealias PendingAnswerStore = HookHoldStore<Elicitation, ElicitationOutcome>
+
+extension HeldCall: HeldAtTheDoor {}
+
+extension GateDecision: AbstainableOutcome {
+    static var abstained: GateDecision { .abstain }
+}
+
+extension ElicitationOutcome: AbstainableOutcome {
+    static var abstained: ElicitationOutcome { .abstain }
 }
 
 /// An MCP server asking the person something, mid tool call.
@@ -121,7 +161,7 @@ actor PendingDecisionStore {
 /// case like everything else on the wire, and there is no `tool_name`
 /// and no `tool_use_id` at all: this event is not about a tool call, it
 /// is about a question.
-struct Elicitation: Sendable, Equatable {
+struct Elicitation: Sendable, Equatable, Identifiable {
     struct Field: Sendable, Equatable {
         let name: String
         let title: String
@@ -140,7 +180,12 @@ struct Elicitation: Sendable, Equatable {
     let message: String
     let server: String
     let fields: [Field]
+    /// When it arrived, which is what `HookHoldStore` orders held
+    /// things by.
+    var askedAt: Date = Date()
 }
+
+extension Elicitation: HeldAtTheDoor {}
 
 /// What came back from the island.
 enum ElicitationOutcome: Sendable, Equatable {
@@ -153,41 +198,6 @@ enum ElicitationOutcome: Sendable, Equatable {
     case abstain
 }
 
-/// The questions waiting on somebody, and the agents suspended behind
-/// them. The same shape as `PendingDecisionStore` and separate from it
-/// on purpose: an answer is not a decision, and one store holding both
-/// would need a type that is neither.
-actor PendingAnswerStore {
-    private struct Waiting {
-        let ask: Elicitation
-        let continuation: CheckedContinuation<ElicitationOutcome, Never>
-    }
-
-    private var waiting: [String: Waiting] = [:]
-
-    func hold(_ ask: Elicitation) async -> ElicitationOutcome {
-        await withCheckedContinuation { continuation in
-            guard waiting[ask.id] == nil else {
-                continuation.resume(returning: .abstain)
-                return
-            }
-            waiting[ask.id] = Waiting(ask: ask, continuation: continuation)
-        }
-    }
-
-    @discardableResult
-    func resolve(_ id: String, as outcome: ElicitationOutcome) -> Bool {
-        guard let entry = waiting.removeValue(forKey: id) else { return false }
-        entry.continuation.resume(returning: outcome)
-        return true
-    }
-
-    @discardableResult
-    func abandon(_ id: String) -> Bool { resolve(id, as: .abstain) }
-
-    func isHeld(_ id: String) -> Bool { waiting[id] != nil }
-    var count: Int { waiting.count }
-}
 
 /// Reading an agent's hook payload, and writing back the one shape it
 /// will act on.
@@ -397,6 +407,71 @@ enum HookPayload {
         }
         let data = try? JSONSerialization.data(withJSONObject: ["hookSpecificOutput": output])
         return data.flatMap { String(data: $0, encoding: .utf8) }
+    }
+
+    /// The questions inside an `AskUserQuestion` call, read off its own
+    /// `tool_input`: the text, the header, the options with their
+    /// descriptions, and whether several may be picked. Each question's
+    /// `field` is its index, which is the name its answer travels back
+    /// under. Empty when the payload is not a question worth showing,
+    /// which reads as "stand aside" rather than as an error.
+    static func questions(from object: [String: Any]) -> [SessionStore.Ask.Question] {
+        guard let input = object["tool_input"] as? [String: Any],
+              let raw = input["questions"] as? [[String: Any]]
+        else { return [] }
+        return raw.prefix(SessionStore.maxQuestions).enumerated().compactMap { index, entry in
+            guard let question = (entry["question"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !question.isEmpty
+            else { return nil }
+            // Labels and descriptions stay aligned by building them as
+            // pairs: an option with a blank label is dropped whole, so
+            // a description can never slide under its neighbour.
+            let options: [(label: String, described: String)] =
+                ((entry["options"] as? [[String: Any]]) ?? [])
+                .prefix(SessionStore.maxOptions)
+                .compactMap { option in
+                    guard let label = (option["label"] as? String)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty
+                    else { return nil }
+                    let described = ((option["description"] as? String) ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    return (String(label.prefix(SessionStore.askFieldLimit)),
+                            String(described.prefix(SessionStore.askFieldLimit)))
+                }
+            return SessionStore.Ask.Question(
+                header: String(((entry["header"] as? String) ?? "").prefix(60)),
+                question: String(question.prefix(SessionStore.askFieldLimit)),
+                options: options.map(\.label),
+                multiSelect: (entry["multiSelect"] as? Bool) ?? false,
+                field: "q\(index)",
+                optionDescriptions: options.map(\.described))
+        }
+    }
+
+    /// The answer to a held `AskUserQuestion`, in the one shape that
+    /// makes Claude Code act on it: a deny whose reason IS the answer.
+    ///
+    /// There is no supported way to resolve the question's own picker
+    /// from outside the process, so the call is denied with the answer
+    /// in the reason, worded so the model reads it as the answer rather
+    /// than as a refusal: continue, and do not re-ask. Anything short
+    /// of a full set of answers is nil — an empty 200, and the question
+    /// falls through to the terminal picker untouched.
+    static func questionResponse(
+        for outcome: ElicitationOutcome, questions: [SessionStore.Ask.Question]
+    ) -> String? {
+        guard case .accept(let answers) = outcome else { return nil }
+        let parts = questions.compactMap { question -> String? in
+            guard let answer = answers[question.field], !answer.isEmpty else { return nil }
+            guard questions.count > 1 else { return answer }
+            let name = question.header.isEmpty ? question.question : question.header
+            return "\(name): \(answer)"
+        }
+        guard parts.count == questions.count else { return nil }
+        return preToolUse(
+            decision: "deny",
+            reason: "User answered via Chalant: \(parts.joined(separator: "; ")). "
+                + "Treat this as the final answer and continue. Do not re-ask.")
     }
 
     /// The policy engine's answer, which has one more word available to

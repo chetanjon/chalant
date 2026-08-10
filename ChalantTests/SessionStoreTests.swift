@@ -410,7 +410,7 @@ final class SessionStoreTests: XCTestCase {
     /// only `questions.first`).
     func testABundleAttachesAsOneAskCarryingEveryQuestion() {
         let store = storeWithSession()
-        XCTAssertTrue(store.attach(askID: "bundle", to: "s1", questions: bundledQuestions(), native: true))
+        XCTAssertTrue(store.attach(askID: "bundle", to: "s1", questions: bundledQuestions()))
         let ask = store.pendingAsk(sessionID: "s1")
         XCTAssertEqual(ask?.questions.count, 3)
         XCTAssertEqual(ask?.questions.map(\.header), ["Logo", "Mic", "Drag"])
@@ -423,7 +423,7 @@ final class SessionStoreTests: XCTestCase {
     /// zero of three does. Only the last answer changes that.
     func testABundleTwoOfThreeAnsweredIsStillOutstanding() {
         let store = storeWithSession()
-        store.attach(askID: "bundle", to: "s1", questions: bundledQuestions(), native: false)
+        store.attach(askID: "bundle", to: "s1", questions: bundledQuestions())
 
         XCTAssertTrue(store.answerQuestion(sessionID: "s1", questionIndex: 0, with: ["A"]))
         XCTAssertFalse(store.pendingAsk(sessionID: "s1")?.isFullyAnswered ?? true)
@@ -437,32 +437,16 @@ final class SessionStoreTests: XCTestCase {
         let ask = store.pendingAsk(sessionID: "s1")
         XCTAssertEqual(ask?.questions.map(\.answer), [["A"], ["Yes"], ["One"]])
         XCTAssertTrue(ask?.isFullyAnswered ?? false)
-        // Non-native: a fully-answered bundle goes back to working, the
-        // same rule a single-question answer always followed.
+        // A fully-answered bundle goes back to working, the same rule a
+        // single-question answer always followed.
         XCTAssertEqual(store.sessions.first?.state, .working)
-    }
-
-    /// A native bundle's own row never flips back to working just
-    /// because every question got tapped in the card: there is no
-    /// supported way to resolve the real `AskUserQuestion` prompt from
-    /// here, so the row stays needs-input until the transcript itself
-    /// says the question was resolved — same rule a single native
-    /// question always followed.
-    func testANativeBundleFullyAnsweredLeavesTheRowNeedingInput() {
-        let store = storeWithSession()
-        store.attach(askID: "bundle", to: "s1", questions: bundledQuestions(), native: true)
-        for index in 0..<3 {
-            store.answerQuestion(sessionID: "s1", questionIndex: index, with: ["pick"])
-        }
-        XCTAssertTrue(store.pendingAsk(sessionID: "s1")?.isFullyAnswered ?? false)
-        XCTAssertEqual(store.sessions.first?.state, .needsInput)
     }
 
     /// Answering an index outside the bundle, or a session with no ask
     /// at all, is refused rather than silently accepted.
     func testAnsweringAQuestionIndexOutOfRangeIsRefused() {
         let store = storeWithSession()
-        store.attach(askID: "bundle", to: "s1", questions: bundledQuestions(), native: false)
+        store.attach(askID: "bundle", to: "s1", questions: bundledQuestions())
         XCTAssertFalse(store.answerQuestion(sessionID: "s1", questionIndex: 3, with: ["x"]))
         XCTAssertFalse(store.answerQuestion(sessionID: "ghost", questionIndex: 0, with: ["x"]))
     }
@@ -914,32 +898,11 @@ final class SessionStoreTests: XCTestCase {
     }
 
     // MARK: Not asking twice about the same thing
-
-    /// Holding every Bash call is what the founder asked for
-    /// (2026-08-06), and the rule engine's own doc says gating by tool
-    /// name alone was "unlivable" the first time. Both are true. What
-    /// makes the broad version survivable is the thing Claude Code's own
-    /// prompt has and this app did not: "yes, and don't ask again for
-    /// git *". An exception outranks every hold rule.
-    func testAnExceptionOutranksAHoldRule() {
-        let store = SessionStore()
-        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .working)
-
-        XCTAssertFalse(store.holdForApproval(
-            sessionID: "s", id: "call-1", tool: "Bash", detail: "git --version",
-            rules: ["Bash"], exceptions: ["Bash(git *)"]))
-        XCTAssertNil(store.sessions.first?.approval)
-    }
-
-    func testAHoldStillHoldsWhatNoExceptionCovers() {
-        let store = SessionStore()
-        store.markLive(id: "s", name: "n", cwd: "/a", pid: 1, kind: .interactive, status: .working)
-
-        XCTAssertTrue(store.holdForApproval(
-            sessionID: "s", id: "call-1", tool: "Bash", detail: "rm -rf build",
-            rules: ["Bash"], exceptions: ["Bash(git *)"]))
-        XCTAssertEqual(store.sessions.first?.approval?.detail, "rm -rf build")
-    }
+    //
+    // "Yes, and don't ask again for git *" is a Grant now, checked by
+    // `settleGate` where the policy store lives — GatePipelineTests
+    // proves a grant makes the gate stand aside, and PolicyTests proves
+    // the grant itself. This store only answers to the hold rules.
 
     /// The button's text has to be the rule it will write, or somebody
     /// taps "always allow" and gets a different promise than they read.
@@ -970,17 +933,6 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(
             SessionStore.suggestedException(tool: "Write", detail: "/a/b/notes.md"), "Write")
         XCTAssertEqual(SessionStore.suggestedException(tool: "Edit", detail: ""), "Edit")
-    }
-
-    /// Exceptions this app writes must not silently widen: adding the
-    /// same one twice is one rule, and an empty one is not a rule.
-    func testAddingAnExceptionIsIdempotentAndRefusesNothing() {
-        let defaults = UserDefaults(suiteName: "chalant.tests.exceptions.\(UUID().uuidString)")!
-        SessionStore.addException("Bash(git *)", in: defaults)
-        SessionStore.addException("Bash(git *)", in: defaults)
-        SessionStore.addException("   ", in: defaults)
-
-        XCTAssertEqual(SessionStore.approvalExceptions(in: defaults), ["Bash(git *)"])
     }
 
     // MARK: The session that can be picked up on a phone
@@ -1363,28 +1315,6 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertFalse(store.holdForApproval(
             sessionID: "s1", id: "second", tool: "Bash", detail: "two", rules: ["Bash"]))
         XCTAssertEqual(store.sessions.first?.approval?.id, "first")
-    }
-
-    /// Handed over exactly once, the same contract `/ask` and `/outbox`
-    /// keep: the agent has it now, and a card still offering a choice
-    /// already taken is a button that does nothing.
-    func testADecisionIsCollectedExactlyOnce() {
-        let store = storeWithSession()
-        _ = store.holdForApproval(
-            sessionID: "s1", id: "c", tool: "Bash", detail: "ls", rules: ["Bash"])
-        store.decide(approvalID: "c", as: .allow)
-
-        XCTAssertEqual(store.collectDecision(approvalID: "c"), .allow)
-        XCTAssertNil(store.collectDecision(approvalID: "c"))
-        XCTAssertNil(store.sessions.first?.approval)
-    }
-
-    func testAnUndecidedCallHandsBackNothing() {
-        let store = storeWithSession()
-        _ = store.holdForApproval(
-            sessionID: "s1", id: "c", tool: "Bash", detail: "ls", rules: ["Bash"])
-        XCTAssertNil(store.collectDecision(approvalID: "c"))
-        XCTAssertNotNil(store.sessions.first?.approval, "still waiting, still shown")
     }
 
     /// The hook gave up and the question went back to the terminal, so
@@ -2155,97 +2085,123 @@ final class SessionStoreTests: XCTestCase {
                        "Running a command")
     }
 
-    // MARK: Claude Code's own AskUserQuestion, read from the transcript
+    // MARK: Claude Code's own AskUserQuestion, read off its own hook payload
 
-    func testAnAskUserQuestionToolCallIsReadAsAPendingNativeAsk() {
-        let text = """
-        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"Pick","question":"Which one?","multiSelect":false,"options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]}]}}]}}
-        """
-        let ask = SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk
-        XCTAssertEqual(ask?.id, "toolu_1")
-        XCTAssertEqual(ask?.questions.first?.header, "Pick")
-        XCTAssertEqual(ask?.questions.first?.question, "Which one?")
-        // Only the label travels; description and preview are dropped,
-        // the same options shape the scripted `chalant ask` already sends.
-        XCTAssertEqual(ask?.questions.first?.options, ["A", "B"])
-        XCTAssertEqual(ask?.questions.first?.multiSelect, false)
+    /// The interception parser: `tool_input.questions` straight off the
+    /// held `PreToolUse` payload, labels and descriptions kept as the
+    /// aligned pairs the card renders, each question's field its index
+    /// so the answer travels back under a name both sides know.
+    func testAnAskUserQuestionPayloadReadsAsQuestions() {
+        let payload: [String: Any] = [
+            "tool_input": ["questions": [
+                [
+                    "header": "Pick", "question": "Which one?", "multiSelect": false,
+                    "options": [
+                        ["label": "A", "description": "first"],
+                        ["label": "B", "description": "second"],
+                    ],
+                ] as [String: Any],
+            ]],
+        ]
+        let questions = HookPayload.questions(from: payload)
+        XCTAssertEqual(questions.count, 1)
+        XCTAssertEqual(questions.first?.header, "Pick")
+        XCTAssertEqual(questions.first?.question, "Which one?")
+        XCTAssertEqual(questions.first?.options, ["A", "B"])
+        XCTAssertEqual(questions.first?.optionDescriptions, ["first", "second"])
+        XCTAssertEqual(questions.first?.field, "q0")
     }
 
-    /// `AskUserQuestion` routinely bundles several questions into one
-    /// call (a real one, in this app's own transcript, asked about the
-    /// logo, the microphone and drag scope together) — every one of
-    /// them is kept now, in order, none dropped.
-    func testABundledAskKeepsEveryQuestionInOrder() {
-        let text = """
-        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"First","question":"q1?","options":[{"label":"A"}],"multiSelect":false},{"header":"Second","question":"q2?","options":[{"label":"B"},{"label":"C"}],"multiSelect":true},{"header":"Third","question":"q3?","options":[{"label":"D"}]}]}}]}}
-        """
-        let ask = SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk
-        XCTAssertEqual(ask?.questions.map(\.header), ["First", "Second", "Third"])
-        XCTAssertEqual(ask?.questions.map(\.question), ["q1?", "q2?", "q3?"])
-        XCTAssertEqual(ask?.questions[1].options, ["B", "C"])
-        XCTAssertEqual(ask?.questions[1].multiSelect, true)
+    func testABundledPayloadKeepsEveryQuestionInOrder() {
+        let payload: [String: Any] = [
+            "tool_input": ["questions": [
+                ["header": "First", "question": "q1?",
+                 "options": [["label": "A"]], "multiSelect": false] as [String: Any],
+                ["header": "Second", "question": "q2?",
+                 "options": [["label": "B"], ["label": "C"]], "multiSelect": true] as [String: Any],
+                ["header": "Third", "question": "q3?",
+                 "options": [["label": "D"]]] as [String: Any],
+            ]],
+        ]
+        let questions = HookPayload.questions(from: payload)
+        XCTAssertEqual(questions.map(\.question), ["q1?", "q2?", "q3?"])
+        XCTAssertEqual(questions.map(\.field), ["q0", "q1", "q2"])
+        XCTAssertEqual(questions[1].options, ["B", "C"])
+        XCTAssertEqual(questions[1].multiSelect, true)
     }
 
-    /// A question with blank text is not worth showing and is dropped
-    /// from the bundle rather than shown blank; the rest of a real
-    /// bundle survives one malformed entry.
-    func testABundledAskDropsAQuestionWithNoText() {
-        let text = """
-        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"First","question":"q1?","options":[{"label":"A"}]},{"header":"Blank","question":"   ","options":[{"label":"B"}]}]}}]}}
-        """
-        let ask = SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk
-        XCTAssertEqual(ask?.questions.map(\.header), ["First"])
+    /// A question with blank text is dropped rather than shown blank,
+    /// and an option with a blank label takes its description with it,
+    /// so the pairs can never slide out of alignment.
+    func testAMalformedPayloadDropsOnlyWhatIsBroken() {
+        let payload: [String: Any] = [
+            "tool_input": ["questions": [
+                ["header": "First", "question": "q1?",
+                 "options": [
+                    ["label": "  ", "description": "orphaned"],
+                    ["label": "B", "description": "kept"],
+                 ]] as [String: Any],
+                ["header": "Blank", "question": "   ",
+                 "options": [["label": "B"]]] as [String: Any],
+            ]],
+        ]
+        let questions = HookPayload.questions(from: payload)
+        XCTAssertEqual(questions.map(\.header), ["First"])
+        XCTAssertEqual(questions.first?.options, ["B"])
+        XCTAssertEqual(questions.first?.optionDescriptions, ["kept"])
     }
 
-    /// The one thing this whole feature turned on: whether a live
-    /// question can be told apart from an already-answered one. Verified
-    /// against a real transcript (native-questions-evidence-2026-08-03.md):
-    /// the answer lands as a `tool_result` wearing the tool_use's own
-    /// id, as the very next record.
-    func testAToolResultAnsweringTheSameIdClearsThePendingAsk() {
-        let text = """
-        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"Pick","question":"Which one?","options":[{"label":"A"}]}]}}]}}
-        {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"answered"}]}}
-        """
-        XCTAssertNil(SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk,
-                     "a matching tool_result means this question stopped being live")
+    func testAPayloadWithNoQuestionsIsEmpty() {
+        XCTAssertTrue(HookPayload.questions(from: [:]).isEmpty)
+        XCTAssertTrue(HookPayload.questions(from: ["tool_input": ["command": "ls"]]).isEmpty)
     }
 
-    func testAToolResultForADifferentIdLeavesThePendingAskAlone() {
-        let text = """
-        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"Pick","question":"Which one?","options":[{"label":"A"}]}]}}]}}
-        {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_something_else","content":"unrelated"}]}}
-        """
-        XCTAssertEqual(SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk?.id, "toolu_1")
+    /// The answer's shape is a contract: a deny whose reason IS the
+    /// answer, worded so the model continues rather than re-asks.
+    func testTheAnswerTravelsBackAsADenyWhoseReasonIsTheAnswer() throws {
+        let questions = [SessionStore.Ask.Question(
+            header: "Pick", question: "Which one?", options: ["A", "B"],
+            multiSelect: false, field: "q0")]
+        let body = try XCTUnwrap(HookPayload.questionResponse(
+            for: .accept(["q0": "B"]), questions: questions))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(body.utf8)) as? [String: Any])
+        let output = try XCTUnwrap(object["hookSpecificOutput"] as? [String: Any])
+        XCTAssertEqual(output["permissionDecision"] as? String, "deny")
+        XCTAssertEqual(
+            output["permissionDecisionReason"] as? String,
+            "User answered via Chalant: B. Treat this as the final answer and continue. "
+            + "Do not re-ask.")
     }
 
-    /// A newer AskUserQuestion replaces an older pending one, same
-    /// last-write-wins rule the rest of this fold already follows.
-    func testANewerAskUserQuestionReplacesAnOlderPendingOne() {
-        let text = """
-        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"First","question":"q1?","options":[{"label":"A"}]}]}}]}}
-        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_2","name":"AskUserQuestion","input":{"questions":[{"header":"Second","question":"q2?","options":[{"label":"B"}]}]}}]}}
-        """
-        XCTAssertEqual(SessionDiscovery.parseMetadata(text, path: "t.jsonl").pendingNativeAsk?.id, "toolu_2")
+    func testABundlesAnswersAllRideOneReason() throws {
+        let questions = [
+            SessionStore.Ask.Question(header: "Logo", question: "Which?", options: ["A"],
+                                      multiSelect: false, field: "q0"),
+            SessionStore.Ask.Question(header: "Mic", question: "Move?", options: ["Yes"],
+                                      multiSelect: false, field: "q1"),
+        ]
+        let body = try XCTUnwrap(HookPayload.questionResponse(
+            for: .accept(["q0": "A", "q1": "Yes"]), questions: questions))
+        let reason = try XCTUnwrap((((JSONSerialization.jsonObject(
+            with: Data(body.utf8)) as? [String: Any])?["hookSpecificOutput"]
+            as? [String: Any])?["permissionDecisionReason"]) as? String)
+        XCTAssertTrue(reason.contains("Logo: A; Mic: Yes"), reason)
     }
 
-    /// A `SessionStore.attach` carrying `native: true` is what
-    /// `SessionDiscovery` calls for one of these; `AskCard` reads the
-    /// flag to know it can only queue a pick, never answer.
-    func testANativeAskIsMarkedAsSuchOnTheStore() {
-        let store = storeWithSession()
-        store.attach(askID: "toolu_1", to: "s1", header: "Pick", question: "Which one?",
-                     options: ["A"], multiSelect: false, native: true)
-        XCTAssertEqual(store.pendingAsk(sessionID: "s1")?.native, true)
-    }
-
-    /// The scripted `chalant ask` path is unaffected: it never passes
-    /// `native`, and must keep defaulting to false.
-    func testAnUnmarkedAttachIsNotNative() {
-        let store = storeWithSession()
-        store.attach(askID: "q", to: "s1", header: "h", question: "q?",
-                     options: ["A"], multiSelect: false)
-        XCTAssertEqual(store.pendingAsk(sessionID: "s1")?.native, false)
+    /// Anything short of a full set of answers is no answer at all: an
+    /// empty 200, and the picker runs in the terminal untouched.
+    func testAPartialOrDeclinedAnswerFallsThrough() {
+        let questions = [
+            SessionStore.Ask.Question(header: "Logo", question: "Which?", options: ["A"],
+                                      multiSelect: false, field: "q0"),
+            SessionStore.Ask.Question(header: "Mic", question: "Move?", options: ["Yes"],
+                                      multiSelect: false, field: "q1"),
+        ]
+        XCTAssertNil(HookPayload.questionResponse(
+            for: .accept(["q0": "A"]), questions: questions))
+        XCTAssertNil(HookPayload.questionResponse(for: .decline, questions: questions))
+        XCTAssertNil(HookPayload.questionResponse(for: .abstain, questions: questions))
     }
 
     // MARK: A window that comes back to a changed desk
@@ -3290,10 +3246,15 @@ final class SessionStoreTests: XCTestCase {
 
     /// A tool switched off is not somewhere to open onto, exactly as
     /// `restoreLastTabIfWanted` already refuses to reopen into one.
+    /// Sessions sits second in the preference order, but only while it
+    /// is in the build at all (the dark-ship, FeatureFlags): hidden,
+    /// the fallback walks straight past it to focus.
     func testTheFallbackSkipsToolsTheUserSwitchedOff() {
         let defaults = Self.emptyDefaults()
         defaults.set(false, forKey: NotchViewModel.Tab.clipboard.toolKey!)
-        XCTAssertEqual(NotchViewModel.landingTab(todayCanSee: false, in: defaults), .sessions)
+        XCTAssertEqual(
+            NotchViewModel.landingTab(todayCanSee: false, in: defaults),
+            FeatureFlags.sessionsVisible ? .sessions : .focus)
     }
 
     /// And if every tool is off, Today is still the only place left. A
@@ -3382,7 +3343,12 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(DashboardSection.named("island"), .island)
         XCTAssertEqual(DashboardSection.named("Island"), .island)
         XCTAssertEqual(DashboardSection.named("what shows"), .whatShows)
-        XCTAssertEqual(DashboardSection.named("sessions"), .sessions)
+        // A dark-shipped section answers to no name at all, so the
+        // harness cannot steer to a page that is not listed
+        // (FeatureFlags).
+        XCTAssertEqual(
+            DashboardSection.named("sessions"),
+            FeatureFlags.sessionsVisible ? .sessions : nil)
         XCTAssertNil(DashboardSection.named("nonexistent"))
     }
 
@@ -3434,18 +3400,21 @@ final class SessionStoreTests: XCTestCase {
         // opened the island, collapsed it and opened it again while the
         // founder was typing (2026-08-03).
         store.upsert(id: "s1", title: "one turn", cwd: "/a", branch: nil,
-                     lastPrompt: nil, state: .working, lastMessage: "here is what I did")
+                     lastPrompt: nil, state: .working)
+        store.noteLastWords(sessionID: "s1", "here is what I did")
         for _ in 0..<4 {
             store.markLive(id: "s1", name: "one turn", cwd: "/a", pid: 1,
                            kind: .interactive, hasTerminal: true, status: .idle)
             store.upsert(id: "s1", title: "one turn", cwd: "/a", branch: nil,
-                         lastPrompt: nil, state: .working, lastMessage: "here is what I did")
+                         lastPrompt: nil, state: .working)
         }
         XCTAssertEqual(announced, ["one turn"], "one finished turn is one announcement")
 
-        // A genuinely new turn produces new words, and is announced.
+        // A genuinely new turn produces new words — delivered by its
+        // Stop hook — and is announced.
         store.upsert(id: "s1", title: "one turn", cwd: "/a", branch: nil,
-                     lastPrompt: nil, state: .working, lastMessage: "and then this")
+                     lastPrompt: nil, state: .working)
+        store.noteLastWords(sessionID: "s1", "and then this")
         store.markLive(id: "s1", name: "one turn", cwd: "/a", pid: 1,
                        kind: .interactive, hasTerminal: true, status: .idle)
         XCTAssertEqual(announced.count, 2, "new words are a new turn")

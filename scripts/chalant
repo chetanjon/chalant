@@ -12,6 +12,7 @@
 #   chalant pending                        what is held at the door
 #   chalant approve <call-id>
 #   chalant deny    <call-id>
+#   chalant tail                           live-tail every hook event
 #
 # The id defaults to "cli"; give one to run several statuses at once.
 set -euo pipefail
@@ -142,8 +143,23 @@ for choice in body.get("answer") or []:
       sleep 1
     done
     ;;
+  tail)
+    # chalant tail
+    #
+    # One line per hook event reaching the island: timestamp, event,
+    # notification_type verbatim when there is one, tool when there is
+    # one, and what Chalant answered. This is how you read the literal
+    # type strings off a real session. (For FULL payloads, the separate
+    # switch: defaults write com.cj.chalant hookPayloadLog -bool true,
+    # then hook-payloads.jsonl beside this log.)
+    LOG="$HOME/Library/Application Support/Chalant/wire.log"
+    [ -f "$LOG" ] || { echo "chalant: no wire log yet at $LOG" >&2; \
+      echo "         launch Chalant (1.9.0+) and let any hook fire once." >&2; exit 1; }
+    echo "tailing $LOG  (ctrl-c to stop)"
+    exec tail -n 40 -f "$LOG"
+    ;;
   *)
-    sed -n '2,13p' "$0"
+    sed -n '2,14p' "$0"
     exit 1
     ;;
 esac

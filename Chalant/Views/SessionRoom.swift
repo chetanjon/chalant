@@ -438,8 +438,8 @@ private struct SessionDetail: View {
             if let approval = session.approval, approval.decision == nil {
                 ApprovalCard(approval: approval, decide: { decision in
                     sessions.decide(approvalID: approval.id, as: decision)
-                }, repo: session.cwd, grant: { pattern, duration in
-                    model.policy.grant(pattern: pattern, repo: session.cwd, for: duration)
+                }, repo: session.cwd, grant: { pattern, repo, duration in
+                    model.policy.grant(pattern: pattern, repo: repo, for: duration)
                 })
             }
             // Under the held call, for the same reason it sits there on
@@ -451,12 +451,8 @@ private struct SessionDetail: View {
                 }
             }
             if let ask = session.ask, !ask.isFullyAnswered {
-                AskCard(ask: ask, answer: { choices in
-                    sessions.answer(sessionID: session.id, with: choices)
-                }, answerQuestion: { index, choices in
+                AskCard(ask: ask, answerQuestion: { index, choices in
                     sessions.answerQuestion(sessionID: session.id, questionIndex: index, with: choices)
-                }, queue: { label in
-                    sessions.queue(message: label, for: session.id)
                 }, declined: {
                     model.activityServer.decline(askID: ask.id)
                     sessions.clearAsk(askID: ask.id)

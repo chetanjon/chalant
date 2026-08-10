@@ -510,22 +510,16 @@ struct ComposeCard: View {
 /// single question; only the progress line is new.
 struct AskCard: View {
     let ask: SessionStore.Ask
-    let answer: ([String]) -> Void
-    /// Records one question's answer inside a bundle, independent of the
-    /// rest — `SessionStore.answerQuestion`, keyed by index into
-    /// `ask.questions`. Kept separate from `answer` above because that
-    /// one still means "answer the whole (single-question) ask" for the
-    /// scripted `chalant ask` path, and must go on meaning exactly that.
+    /// Records one question's answer, keyed by index into
+    /// `ask.questions` — `SessionStore.answerQuestion`. Every flavor of
+    /// ask answers through this one door: the store fires `onAnswered`
+    /// when the last answer lands, which is what hands a held ask's
+    /// answers to the hook suspended on them, and what the scripted
+    /// `chalant ask` poll reads.
     let answerQuestion: (Int, [String]) -> Void
-    /// Native asks only: queues a label through the session's outbox
-    /// instead of answering. There is no supported way to resolve
-    /// Claude Code's own `AskUserQuestion` from outside the process, so
-    /// this is the honest alternative rather than a button that looks
-    /// like it answers and silently does nothing. Returns whether the
-    /// queue actually took it, so a session that cannot receive
-    /// messages right now can be told rather than left looking answered.
-    let queue: (String) -> Bool
-    /// Elicitation only: says "not answering" to the server that asked.
+    /// Held asks only: hands the question back without answering. An
+    /// MCP server is told "not answering"; an intercepted
+    /// `AskUserQuestion` falls through to its own terminal picker.
     var declined: (() -> Void)?
 
     /// Only used when several may be picked. A single-choice question
@@ -536,12 +530,6 @@ struct AskCard: View {
     /// options: it replaces them.
     @State private var writingOther = false
     @State private var otherText = ""
-    /// Set once a native ask's last question has been queued, replacing
-    /// the options with what actually happened. Never cleared back: the
-    /// tap already happened, and offering the buttons again would invite
-    /// a second, different pick queued behind the one Claude Code is
-    /// still waiting on in its terminal.
-    @State private var queuedOutcome: String?
 
     @Environment(\.chalantAccent) private var accent
 
@@ -573,7 +561,7 @@ struct AskCard: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             SectionHeader(title: currentQuestion.header.isEmpty ? "Question" : currentQuestion.header, tint: accent)
-            if ask.questions.count > 1, queuedOutcome == nil {
+            if ask.questions.count > 1 {
                 Text("Question \(currentIndex + 1) of \(ask.questions.count)")
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
@@ -582,62 +570,69 @@ struct AskCard: View {
                 .font(Theme.Fonts.body)
                 .foregroundStyle(Theme.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
-            if ask.elicitation, !ask.server.isEmpty, queuedOutcome == nil {
+            if ask.elicitation, !ask.server.isEmpty {
                 Text("\(ask.server) is waiting on this, inside the call it is making now.")
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if ask.native, queuedOutcome == nil {
-                Text("Claude Code asked this itself, in its own terminal. Chalant can't answer it "
-                     + "there directly: tapping a choice queues it as a message for this "
-                     + "session's next turn instead.")
+            if ask.intercepted {
+                // The deadline is a promise, so it names the real
+                // number, and what happens when it runs out is the
+                // outcome the person already had before this card
+                // existed.
+                Text("Claude Code is waiting on this, inside the call it is making now. "
+                     + "Unanswered in \(Int(ActivityServer.questionPatience)) seconds, it "
+                     + "goes back to the picker in its terminal.")
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let queuedOutcome {
-                Text(queuedOutcome)
-                    .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    ForEach(currentQuestion.options, id: \.self) { option in
-                        optionRow(option)
-                    }
-                    otherRow
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                ForEach(Array(currentQuestion.options.enumerated()), id: \.offset) { offset, option in
+                    optionRow(option, number: offset + 1, described: description(at: offset))
                 }
-                if ask.elicitation {
-                    HStack(spacing: Theme.Space.m) {
-                        Spacer(minLength: 0)
-                        Button("Not answering") { decline() }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .help("Tells "
-                                  + (ask.server.isEmpty ? "the server that asked" : ask.server)
-                                  + " you are not answering, rather than leaving it waiting.")
-                    }
-                }
-                if currentQuestion.multiSelect {
-                    // Hoisted rather than inlined into the Button call:
-                    // a ternary inline in a SwiftUI modifier chain is
-                    // exactly the shape that has hung this project's
-                    // type-checker before.
-                    let isLastQuestion = currentIndex == ask.questions.count - 1
-                    Button(isLastQuestion ? "Send" : "Next") {
-                        respond(with: Array(picked), label: picked.sorted().joined(separator: ", "))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .tint(accent)
-                    // Nothing chosen is not an answer, and sending one
-                    // would tell the agent the user decided when they
-                    // did not.
-                    .disabled(picked.isEmpty)
+                otherRow
+            }
+            if ask.elicitation {
+                HStack(spacing: Theme.Space.m) {
+                    Spacer(minLength: 0)
+                    Button(ask.intercepted ? "Answer in terminal" : "Not answering") { decline() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help(ask.intercepted
+                              ? "Hands the question straight back to the picker in its terminal."
+                              : "Tells "
+                                + (ask.server.isEmpty ? "the server that asked" : ask.server)
+                                + " you are not answering, rather than leaving it waiting.")
                 }
             }
+            if currentQuestion.multiSelect {
+                // Hoisted rather than inlined into the Button call:
+                // a ternary inline in a SwiftUI modifier chain is
+                // exactly the shape that has hung this project's
+                // type-checker before.
+                let isLastQuestion = currentIndex == ask.questions.count - 1
+                Button(isLastQuestion ? "Send" : "Next") {
+                    respond(with: Array(picked))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(accent)
+                // Nothing chosen is not an answer, and sending one
+                // would tell the agent the user decided when they
+                // did not.
+                .disabled(picked.isEmpty)
+            }
         }
+    }
+
+    /// The description riding option `offset`, or empty where there is
+    /// none: the two arrays are aligned by the store and this stays
+    /// safe even if a malformed payload left them ragged.
+    private func description(at offset: Int) -> String {
+        let descriptions = currentQuestion.optionDescriptions
+        return offset < descriptions.count ? descriptions[offset] : ""
     }
 
     /// The answer that is not on the list.
@@ -701,32 +696,50 @@ struct AskCard: View {
     private func sendOther() {
         let text = otherText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        respond(with: [text], label: text)
+        respond(with: [text])
         otherText = ""
         writingOther = false
     }
 
     /// One real row per option: a selection glyph, the full label
     /// wrapping rather than truncating, a hover lift and a press sink,
-    /// exactly what "obviously tappable" asks for.
-    private func optionRow(_ option: String) -> some View {
+    /// exactly what "obviously tappable" asks for. An intercepted
+    /// question's options are numbered and carry their descriptions,
+    /// the same two things the terminal picker shows, so the card and
+    /// the picker read as the same question.
+    private func optionRow(_ option: String, number: Int, described: String) -> some View {
         let on = picked.contains(option)
         return Button {
             guard currentQuestion.multiSelect else {
-                respond(with: [option], label: option)
+                respond(with: [option])
                 return
             }
             if on { picked.remove(option) } else { picked.insert(option) }
         } label: {
             HStack(alignment: .top, spacing: Theme.Space.m) {
+                if ask.intercepted {
+                    Text("\(number).")
+                        .font(Theme.Fonts.body)
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.textTertiary)
+                }
                 Image(systemName: currentQuestion.multiSelect ? (on ? "checkmark.square.fill" : "square") : "circle")
                     .font(Theme.Fonts.icon(.m))
                     .foregroundStyle(on ? accent : Theme.textTertiary)
-                Text(option)
-                    .font(Theme.Fonts.body)
-                    .foregroundStyle(on ? Theme.textPrimary : Theme.textSecondary)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(option)
+                        .font(Theme.Fonts.body)
+                        .foregroundStyle(on ? Theme.textPrimary : Theme.textSecondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !described.isEmpty {
+                        Text(described)
+                            .font(Theme.Fonts.caption)
+                            .foregroundStyle(Theme.textTertiary)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, Theme.Space.m)
@@ -747,67 +760,33 @@ struct AskCard: View {
         .accessibilityAddTraits(on ? [.isSelected, .isButton] : .isButton)
     }
 
-    /// Where a tap actually goes: a real answer for the scripted
-    /// `chalant ask` — always exactly one question, so answering it is
-    /// answering the whole ask, unchanged from before bundles existed —
-    /// or, for one Claude Code asked on its own, this question's answer
-    /// recorded on its own (see `ask.native`), and only once every
-    /// question in the bundle has one, a single queued message carrying
-    /// all of them together. There is no supported way to resolve the
-    /// real `AskUserQuestion` prompt from outside the process, so a
-    /// native bundle is never "answered" here, only ever queued.
-    private func respond(with choices: [String], label: String) {
-        guard ask.native else {
-            answer(choices)
-            return
-        }
-        let index = currentIndex
-        answerQuestion(index, choices)
+    /// Where a tap actually goes: this question's answer, recorded on
+    /// the store against `currentIndex` — always the first unanswered
+    /// question, so a bundle advances one answer at a time. When the
+    /// last one lands the store fires `onAnswered`, which is what hands
+    /// the whole set to whoever is waiting: the hook suspended on a
+    /// held ask, or the `/ask` poll of a scripted one.
+    private func respond(with choices: [String]) {
+        answerQuestion(currentIndex, choices)
         picked = []
         writingOther = false
         otherText = ""
-        // Not the last question: the next render picks up wherever
-        // `currentIndex` now points, straight off the store.
-        guard index == ask.questions.count - 1 else { return }
-        // Every earlier answer already lives on `ask.questions` — set by
-        // this same function, on an earlier render — except this last
-        // one, which `ask` will not reflect until the next render.
-        let summary = ask.questions.count == 1 ? label
-            : ask.questions.enumerated().map { i, question -> String in
-                let header = question.header.isEmpty ? "Q\(i + 1)" : question.header
-                let text = i == index ? label : (question.answer?.joined(separator: ", ") ?? "")
-                return "\(header): \(text)"
-            }.joined(separator: "\n")
-        let delivered = ask.questions.count == 1
-            ? "Queued \u{201C}\(summary)\u{201D}. Arrives when this session next takes a turn. "
-                + "The terminal prompt still needs its own answer to move past it now."
-            : "Queued all \(ask.questions.count) answers together. Arrives when this session "
-                + "next takes a turn. The terminal prompt still needs its own answer to move "
-                + "past it now."
-        queuedOutcome = queue(summary) ? delivered : "Could not queue that; this session can't take a message right now."
     }
 }
 
-/// A tool call held at the door.
-///
-/// The only card in this app whose buttons change what a running agent
-/// does. Everything else here reports, or leaves something for an agent
-/// to collect on its own schedule; this one has an agent standing still
-/// on the other side of it.
-///
-/// So it shows the call verbatim and never summarises: a paraphrase of
-/// a command you are being asked to authorise is a paraphrase of the
-/// wrong thing. And it says out loud that not answering is an option
-/// with a known outcome, because a dialog that looks like it might trap
-/// an agent forever is one people learn to avoid rather than use.
 /// Claude Code asking, in its own terminal, with the island watching.
 ///
-/// Deliberately not styled as a decision. Nothing here can answer this
-/// prompt: a hook returning a decision on the event is ignored, and
-/// typing the answer in from outside selected the wrong option and
-/// wrote a permission rule nobody agreed to (both measured 2026-08-06).
-/// So this card names what is stuck and hands over a door, and says so
-/// rather than implying a button might work.
+/// Deliberately not styled as a decision, because nothing is holding
+/// this one: it reached the island as a report from the `Notification`
+/// hook, not as a suspended `PermissionRequest`. A prompt that hook
+/// holds gets an `ApprovalCard` with working buttons — the old claim
+/// here that a decision on the event is ignored came from a 2026-08-06
+/// test that answered with the PreToolUse field name; the event obeys
+/// `decision.behavior` (HookPayload.response(for:event:)). What remains
+/// true is narrower: typing the answer into the terminal from outside
+/// selected the wrong option and wrote a permission rule nobody agreed
+/// to (measured 2026-08-06). So for the prompts this app is not
+/// holding, this card names what is stuck and hands over a door.
 struct TerminalPromptCard: View {
     let prompt: SessionStore.PendingPrompt
     let session: SessionStore.Session
@@ -923,14 +902,29 @@ struct TerminalPromptCard: View {
     }
 }
 
+/// A tool call held at the door.
+///
+/// The only card in this app whose buttons change what a running agent
+/// does. Everything else here reports, or leaves something for an agent
+/// to collect on its own schedule; this one has an agent standing still
+/// on the other side of it.
+///
+/// So it shows the call verbatim and never summarises: a paraphrase of
+/// a command you are being asked to authorise is a paraphrase of the
+/// wrong thing. And it says out loud that not answering is an option
+/// with a known outcome, because a dialog that looks like it might trap
+/// an agent forever is one people learn to avoid rather than use.
 struct ApprovalCard: View {
     let approval: SessionStore.Approval
     let decide: (SessionStore.Approval.Decision) -> Void
-    /// The folder this call is being made in, which is the only place a
-    /// grant made here will ever apply. Empty means nowhere to scope
-    /// one to, and the offer is withdrawn rather than widened.
+    /// The folder this call is being made in, which is where a timed
+    /// grant made here applies. Empty means nowhere to scope one to,
+    /// and only the everywhere-forever shape is offered.
     var repo: String = ""
-    var grant: ((String, TimeInterval) -> Void)?
+    /// Writes one grant: the pattern, the folder ("" for everywhere),
+    /// and how long (nil for forever). The card owns which combination
+    /// each control means; the caller just hands this to PolicyStore.
+    var grant: ((String, String, TimeInterval?) -> Void)?
     @Environment(\.chalantAccent) private var accent
 
     /// Whatever the hook holding this one will actually wait, which is
@@ -1018,13 +1012,12 @@ struct ApprovalCard: View {
                 // the same `git status` forever, which is how a person
                 // stops reading the ones that matter. Says the exact
                 // rule it will write, because a button that promises
-                // something wider than it says is not consent.
-                // Narrowed from what this used to be. It wrote a rule
-                // with no folder and no end date, which is a strange
-                // thing to be handed for pressing a button once while
-                // looking at one command in one repo. Now it says the
-                // pattern, the folder and how long, and every one of
-                // those is a limit on what is being agreed to.
+                // something wider than it says is not consent. Every
+                // choice here is one grant in PolicyStore: the timed
+                // ones scoped to this folder, and "always" the
+                // everywhere-forever shape that button has always
+                // meant, all of them revocable in Dashboard, Sessions,
+                // and none of them able to cover the always-ask list.
                 if let grant, !repo.isEmpty {
                     // No `fixedSize`. With it the menu refused to
                     // compress, the row could not fit the room's ~370pt
@@ -1036,26 +1029,31 @@ struct ApprovalCard: View {
                     Menu("Allow \(exceptionLabel) for…") {
                         ForEach(Grant.expiries(), id: \.label) { choice in
                             Button(choice.label) {
-                                grant(exception, choice.seconds)
+                                grant(exception, repo, choice.seconds)
                                 decide(.allow)
                             }
+                        }
+                        Divider()
+                        Button("Always, everywhere") {
+                            grant(exception, "", nil)
+                            decide(.allow)
                         }
                     }
                     .menuStyle(.borderlessButton)
                     .controlSize(.small)
                     .layoutPriority(-1)
                     .help("Allows \(exception) in \((repo as NSString).lastPathComponent) "
-                          + "and nowhere else, until it runs out. "
+                          + "until it runs out, or always and everywhere. "
                           + "Undo it in Dashboard, Sessions.")
-                } else {
+                } else if let grant {
                     Button("Always allow \(exceptionLabel)") {
-                        SessionStore.addException(exception)
+                        grant(exception, "", nil)
                         decide(.allow)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .help("Adds \(exception) to the calls Chalant never holds. "
-                          + "Undo it in Dashboard, Sessions.")
+                    .help("Allows \(exception) everywhere, until you revoke it "
+                          + "in Dashboard, Sessions.")
                 }
                 Spacer(minLength: 0)
             }

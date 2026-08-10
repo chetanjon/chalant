@@ -164,13 +164,35 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(verdict("Bash", "npm run build", grants: [expired]), .silent)
     }
 
-    func testAGrantWithNoFolderCoversNothing() {
+    func testAGrantWithNoFolderCoversEverywhere() {
+        // The "Always allow" shape: everywhere, including a call that
+        // carried no cwd at all, which is what a headless agent sends.
         let global = Grant(
             id: "g", pattern: "Bash(npm *)", repo: "",
             grantedAt: Date(timeIntervalSince1970: 0),
             expires: Date(timeIntervalSince1970: 9_000_000))
-        XCTAssertFalse(global.covers(tool: "Bash", detail: "npm run build", cwd: repo,
-                                     at: Date(timeIntervalSince1970: 1_000_000)))
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertTrue(global.covers(tool: "Bash", detail: "npm run build", cwd: repo, at: now))
+        XCTAssertTrue(global.covers(tool: "Bash", detail: "npm run build", cwd: "", at: now))
+        XCTAssertFalse(global.covers(tool: "Bash", detail: "cargo build", cwd: repo, at: now))
+    }
+
+    func testAGrantWithNoEndDateNeverRunsOut() {
+        let forever = Grant(
+            id: "g", pattern: "Bash(git *)", repo: "",
+            grantedAt: Date(timeIntervalSince1970: 0), expires: nil)
+        // Far enough out that any accidental default expiry would show.
+        XCTAssertTrue(forever.isLive(at: Date(timeIntervalSince1970: 9_999_999_999)))
+        XCTAssertTrue(isAllow(verdict(
+            "Bash", "git status", grants: [forever],
+            now: Date(timeIntervalSince1970: 9_999_999_999))))
+    }
+
+    func testAForeverGrantStillCannotCoverTheAlwaysAskList() {
+        let forever = Grant(
+            id: "g", pattern: "Bash(git *)", repo: "",
+            grantedAt: Date(timeIntervalSince1970: 0), expires: nil)
+        XCTAssertTrue(isAsk(verdict("Bash", "git push --force", grants: [forever])))
     }
 
     // MARK: At the prompt, where a person is already being asked
@@ -215,15 +237,58 @@ final class PolicyTests: XCTestCase {
     }
 
     @MainActor
-    func testAGrantIsRefusedWithoutAnAbsoluteFolder() {
+    func testAScopedGrantIsRefusedWithoutAnAbsoluteFolder() {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("chalant-policy-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }
         let store = PolicyStore(url: url)
-        XCTAssertNil(store.grant(pattern: "Bash(npm *)", repo: "", for: 60))
-        XCTAssertNil(store.grant(pattern: "Bash(npm *)", repo: "relative/path", for: 60))
+        // Empty is "everywhere", a shape the Always button makes on
+        // purpose. Anything else must be absolute or it would silently
+        // scope to nothing.
+        XCTAssertNotNil(store.grant(pattern: "Bash(npm *)", repo: "", for: 60))
+        XCTAssertNil(store.grant(pattern: "Bash(cargo *)", repo: "relative/path", for: 60))
         XCTAssertNil(store.grant(pattern: "  ", repo: repo, for: 60))
-        XCTAssertTrue(store.grants.isEmpty)
+        XCTAssertEqual(store.grants.map(\.pattern), ["Bash(npm *)"])
+    }
+
+    @MainActor
+    func testAForeverGrantSurvivesARestart() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("chalant-policy-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = PolicyStore(url: url)
+        store.grant(pattern: "Bash(git *)", repo: "", for: nil)
+
+        let reopened = PolicyStore(url: url)
+        XCTAssertEqual(reopened.grants.map(\.pattern), ["Bash(git *)"])
+        XCTAssertNil(reopened.grants.first?.expires)
+    }
+
+    // MARK: The old store, folded in
+
+    @MainActor
+    func testLegacyExceptionsBecomeForeverGrantsAndTheKeyEmpties() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("chalant-policy-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let suite = "chalant.tests.migration.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("Bash(echo *)\n  \nBash(git *)", forKey: PolicyStore.legacyExceptionsKey)
+
+        let store = PolicyStore(url: url)
+        store.migrateLegacyExceptions(from: defaults)
+
+        XCTAssertEqual(store.grants.map(\.pattern), ["Bash(echo *)", "Bash(git *)"])
+        XCTAssertTrue(store.grants.allSatisfy { $0.repo.isEmpty && $0.expires == nil },
+                      "an exception was always global and forever; the grant must say so")
+        XCTAssertNil(defaults.string(forKey: PolicyStore.legacyExceptionsKey),
+                     "the old store must empty, or it migrates again forever")
+
+        // Running again — a second launch — must not duplicate anything.
+        defaults.set("Bash(echo *)", forKey: PolicyStore.legacyExceptionsKey)
+        store.migrateLegacyExceptions(from: defaults)
+        XCTAssertEqual(store.grants.count, 2)
     }
 
     @MainActor

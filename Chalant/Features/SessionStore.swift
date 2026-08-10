@@ -358,12 +358,6 @@ final class SessionStore: ObservableObject {
         var finishedAt: Date
     }
 
-    /// One or several questions asked together and answered one at a
-    /// time. `AskUserQuestion` routinely bundles two to four questions
-    /// into a single call; the scripted `chalant ask` only ever sends
-    /// one. Both are this same array — the single-question shape is it
-    /// holding one element, not a second type running alongside this
-    /// one that everything would have to be kept in step with.
     /// A tool call an agent is holding at the door, waiting to be told
     /// yes or no.
     ///
@@ -386,13 +380,11 @@ final class SessionStore: ObservableObject {
         var detail: String
         var askedAt: Date
         var decision: Decision?
-        /// How long the agent will actually wait, which is not one
-        /// number any more. The shell shim polls for 25 seconds and then
-        /// hands the question back; an HTTP hook is suspended inside the
-        /// request and waits out its own `timeout`, 600 seconds by
-        /// default. The card counts this down out loud, so it has to be
-        /// the real one.
-        var patience: TimeInterval = 25
+        /// How long the agent will actually wait: its hook's own
+        /// `timeout`, carried in the payload, 600 seconds unless
+        /// somebody configured otherwise. The card counts this down out
+        /// loud, so it has to be the real one.
+        var patience: TimeInterval = 600
         /// Whether the same question is also on screen in the session's
         /// own terminal.
         ///
@@ -405,27 +397,32 @@ final class SessionStore: ObservableObject {
         var alsoInTerminal: Bool = false
     }
 
+    /// One or several questions asked together and answered one at a
+    /// time. `AskUserQuestion` routinely bundles two to four questions
+    /// into a single call; the scripted `chalant ask` only ever sends
+    /// one. Both are this same array — the single-question shape is it
+    /// holding one element, not a second type running alongside this
+    /// one that everything would have to be kept in step with.
     struct Ask: Identifiable, Equatable {
         let id: String
         var questions: [Question]
         var askedAt: Date
-        /// True for a question Claude Code asked itself (its own
-        /// `AskUserQuestion` tool call, read from the transcript), false
-        /// for the scripted `chalant ask`. There is no supported way to
-        /// resolve a native one from outside the process, so the island
-        /// never calls `answer()` for these: it can only queue a pick
-        /// through the outbox, arriving at a later turn boundary rather
-        /// than answering the prompt itself. `AskCard` reads this to
-        /// decide which of the two it is doing, and to say so.
-        var native: Bool = false
 
-        /// An MCP server's `elicitation/create`, held inside its hook.
-        /// Unlike a native ask this one really can be answered from
-        /// here: the agent is suspended waiting on the hook's reply, so
-        /// the card's buttons resolve it rather than queueing a message
-        /// for later. It can also be turned down, which is a real
-        /// answer of its own and the only kind of ask that has one.
+        /// A question held inside a hook, answerable in place: an MCP
+        /// server's `elicitation/create`, or an intercepted
+        /// `AskUserQuestion`. The agent is suspended waiting on the
+        /// hook's reply, so the card's buttons resolve it rather than
+        /// queueing a message for later. It can also be turned down,
+        /// which is a real answer of its own.
         var elicitation: Bool = false
+        /// True for an `AskUserQuestion` held at the `PreToolUse` door
+        /// (its answer travels back as a deny whose reason is the
+        /// answer), false for an MCP elicitation. Only the card reads
+        /// it, to say which kind of wait this is and what not answering
+        /// does. The transcript-scraped, queue-only "native" ask this
+        /// flag replaced is gone: interception answers the prompt
+        /// itself instead of leaving a note for the next turn.
+        var intercepted: Bool = false
         /// Which MCP server asked, so the card can say whose question
         /// this is.
         var server: String = ""
@@ -447,6 +444,12 @@ final class SessionStore: ObservableObject {
             /// MCP server asked for, and nothing else in the card knows
             /// that name.
             var field: String = ""
+            /// One description per option, aligned by index with
+            /// `options`, empty where an option has none. Carried for an
+            /// intercepted `AskUserQuestion`, whose options arrive as
+            /// label-and-description pairs; everything else leaves it
+            /// empty.
+            var optionDescriptions: [String] = []
         }
 
         /// True once every question in the bundle has an answer. For a
@@ -619,7 +622,7 @@ final class SessionStore: ObservableObject {
         id: String, title: String, cwd: String, branch: String?,
         lastPrompt: String?, state: State, activity: String? = nil,
         agent: Agent = .claude, updatedAt: Date = Date(), startedAt: Date = Date(),
-        lastMessage: String? = nil, transcriptPath: String? = nil
+        transcriptPath: String? = nil
     ) {
         let alreadyKnown = sessions.first { $0.id == id }
         // A warm file is not a session.
@@ -641,7 +644,7 @@ final class SessionStore: ObservableObject {
             ?? Session(
                 id: id, title: title, cwd: cwd, branch: branch,
                 lastPrompt: lastPrompt, activity: activity, agent: agent,
-                state: state, ask: nil, lastMessage: lastMessage,
+                state: state, ask: nil,
                 startedAt: startedAt, updatedAt: updatedAt
             )
         // A row appearing for the first time this launch is exactly the
@@ -658,12 +661,11 @@ final class SessionStore: ObservableObject {
         session.lastPrompt = lastPrompt
         session.activity = activity
         session.agent = agent
-        // Only ever replaced by something real: a rescan that read a
-        // tail with no text block in it must not blank what the row is
-        // already showing.
-        if let lastMessage, !lastMessage.isEmpty { session.lastMessage = lastMessage }
-        // Same rule, same reason: the registry can upsert a row it made
-        // itself, and it has no path to offer. Never blank a real one.
+        // `lastMessage` is deliberately not written here any more: what
+        // the assistant last said arrives on the Stop hook's own
+        // payload (`noteLastWords`), not from a transcript rescan.
+        // The registry can upsert a row it made itself, and it has no
+        // path to offer. Never blank a real one.
         if let transcriptPath { session.transcriptPath = transcriptPath }
         // An outstanding question outranks whatever discovery inferred.
         //
@@ -788,27 +790,39 @@ final class SessionStore: ObservableObject {
     @discardableResult
     func attach(
         askID: String, to sessionID: String, questions rawQuestions: [Ask.Question],
-        native: Bool = false, elicitation: Bool = false, server: String = ""
+        elicitation: Bool = false, intercepted: Bool = false, server: String = ""
     ) -> Bool {
         let questions: [Ask.Question] = rawQuestions.prefix(Self.maxQuestions).compactMap { raw in
             let question = String(raw.question.prefix(Self.askFieldLimit))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !question.isEmpty else { return nil }
+            // Options and their descriptions stay aligned by walking
+            // them together: dropping a blank label drops its
+            // description with it, never sliding one under a
+            // neighbour.
+            let kept: [(label: String, described: String)] = raw.options
+                .prefix(Self.maxOptions).enumerated().compactMap { offset, label in
+                    let trimmedLabel = String(label.prefix(Self.askFieldLimit))
+                    guard !trimmedLabel.isEmpty else { return nil }
+                    let described = offset < raw.optionDescriptions.count
+                        ? String(raw.optionDescriptions[offset].prefix(Self.askFieldLimit))
+                        : ""
+                    return (trimmedLabel, described)
+                }
             return Ask.Question(
                 header: String(raw.header.prefix(Self.askFieldLimit)),
                 question: question,
-                options: raw.options.prefix(Self.maxOptions)
-                    .map { String($0.prefix(Self.askFieldLimit)) }
-                    .filter { !$0.isEmpty },
+                options: kept.map(\.label),
                 multiSelect: raw.multiSelect,
-                field: raw.field
+                field: raw.field,
+                optionDescriptions: kept.map(\.described)
             )
         }
         guard !questions.isEmpty, let index = sessions.firstIndex(where: { $0.id == sessionID })
         else { return false }
         sessions[index].ask = Ask(
-            id: askID, questions: questions, askedAt: Date(), native: native,
-            elicitation: elicitation, server: server)
+            id: askID, questions: questions, askedAt: Date(),
+            elicitation: elicitation, intercepted: intercepted, server: server)
         let wasAlreadyAsking = sessions[index].state == .needsInput
         sessions[index].state = .needsInput
         sessions[index].updatedAt = Date()
@@ -831,12 +845,11 @@ final class SessionStore: ObservableObject {
     @discardableResult
     func attach(
         askID: String, to sessionID: String, header: String, question: String,
-        options: [String], multiSelect: Bool, native: Bool = false
+        options: [String], multiSelect: Bool
     ) -> Bool {
         attach(
             askID: askID, to: sessionID,
-            questions: [Ask.Question(header: header, question: question, options: options, multiSelect: multiSelect)],
-            native: native
+            questions: [Ask.Question(header: header, question: question, options: options, multiSelect: multiSelect)]
         )
     }
 
@@ -845,10 +858,9 @@ final class SessionStore: ObservableObject {
     /// answered stays right there — needs-input — until the last one
     /// lands: `isFullyAnswered` below is what decides that, not this
     /// single question's own answer. Only once every question has one
-    /// does the session go back to working, and even then only for a
-    /// non-native ask — a native one waits for the transcript to say the
-    /// real prompt was resolved, exactly as a single native question
-    /// always did (see `Ask.native`; `AskCard` never calls this for one).
+    /// does the session go back to working and `onAnswered` fire, which
+    /// is what hands a held ask's answers to the hook suspended on
+    /// them.
     @discardableResult
     func answerQuestion(sessionID: String, questionIndex: Int, with choices: [String]) -> Bool {
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }),
@@ -857,7 +869,7 @@ final class SessionStore: ObservableObject {
         else { return false }
         ask.questions[questionIndex].answer = choices
         sessions[index].ask = ask
-        if ask.isFullyAnswered, !ask.native {
+        if ask.isFullyAnswered {
             sessions[index].state = .working
         }
         sessions[index].updatedAt = Date()
@@ -889,8 +901,9 @@ final class SessionStore: ObservableObject {
     @discardableResult
     func holdForElicitation(
         sessionID: String, askID: String, questions: [Ask.Question], cwd: String?,
-        server: String
+        server: String, intercepted: Bool = false
     ) -> Bool {
+        guard surfacesCards else { return false }
         if !sessions.contains(where: { $0.id == sessionID }) {
             sessions.append(Session(
                 id: sessionID,
@@ -913,7 +926,7 @@ final class SessionStore: ObservableObject {
         }
         return attach(
             askID: askID, to: sessionID, questions: questions,
-            native: false, elicitation: true, server: server)
+            elicitation: true, intercepted: intercepted, server: server)
     }
 
     func pendingAsk(sessionID: String) -> Ask? {
@@ -1479,37 +1492,14 @@ final class SessionStore: ObservableObject {
     }
 
     // MARK: Not asking twice
-
-    /// Calls that are never held, whatever the hold rules say.
-    ///
-    /// The hold list alone could only be made broad by making it
-    /// unlivable: an agent runs dozens of harmless commands for every
-    /// one worth a second look, and "hold every Bash call" without a way
-    /// out means approving so much that you stop reading, which is worse
-    /// than not asking at all.
-    ///
-    /// Claude Code's own prompt has always had the way out, as its
-    /// second option: "Yes, and don't ask again for: git *". This is
-    /// that option. It is what makes the founder's choice (2026-08-06,
-    /// hold anything that touches the machine) something a person can
-    /// live with past the first hour.
-    static let approvalExceptionsKey = "approvalExceptions"
-
-    nonisolated static func approvalExceptions(in defaults: UserDefaults = .standard) -> [String] {
-        (defaults.string(forKey: approvalExceptionsKey) ?? "")
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-    }
-
-    nonisolated static func addException(_ rule: String, in defaults: UserDefaults = .standard) {
-        let trimmed = rule.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        var rules = approvalExceptions(in: defaults)
-        guard !rules.contains(trimmed) else { return }
-        rules.append(trimmed)
-        defaults.set(rules.joined(separator: "\n"), forKey: approvalExceptionsKey)
-    }
+    //
+    // The way out of a broad hold rule — "Yes, and don't ask again for:
+    // git *" — is a Grant now, in PolicyStore. It used to be a second
+    // store here (UserDefaults "exceptions", global and forever), which
+    // meant the island's Always allow button and the approval card's
+    // timed grants wrote to different places and only one of them was
+    // ever consulted per pipeline. `PolicyStore.migrateLegacyExceptions`
+    // moved the old key's contents into grants on first launch.
 
     /// The rule an "always allow this" button would write, in the same
     /// words the button says.
@@ -1563,18 +1553,29 @@ final class SessionStore: ObservableObject {
     /// existed.
     func holdForApproval(
         sessionID: String, id: String, tool: String, detail: String,
-        cwd: String? = nil,
-        rules: [String] = SessionStore.approvalRules(),
-        exceptions: [String] = SessionStore.approvalExceptions()
+        cwd: String? = nil, patience: TimeInterval = 600,
+        rules: [String] = SessionStore.approvalRules()
     ) -> Bool {
-        // Checked first and cheapest. An exception is somebody having
-        // already answered this exact question, and asking it again is
-        // how a supervision feature turns into a thing people switch
-        // off. See `approvalExceptionsKey`.
-        guard !exceptions.contains(where: { Self.rule($0, holds: tool, detail) }) else { return false }
+        guard surfacesCards else { return false }
+        // Only the rules decide here. The way out of a broad rule — a
+        // grant somebody made from an earlier card — is checked by the
+        // caller (`settleGate`), where the policy store lives, before
+        // this is ever reached.
         guard rules.contains(where: { Self.rule($0, holds: tool, detail) }) else { return false }
-        return register(sessionID: sessionID, id: id, tool: tool, detail: detail, cwd: cwd)
+        return register(
+            sessionID: sessionID, id: id, tool: tool, detail: detail, cwd: cwd,
+            patience: patience)
     }
+
+    /// Whether this store may surface cards at all. True by default so
+    /// the gate engine keeps its full test coverage; the app wires in
+    /// `FeatureFlags.sessionsVisible` at startup. False, every hold
+    /// below is refused on arrival, which is the server's existing
+    /// "nowhere to show it" path: an instant empty 200, and the
+    /// agent's own terminal flow untouched. This is what keeps an
+    /// upgrader with armed hooks from waiting out a patience window on
+    /// a card that cannot be drawn.
+    var surfacesCards = true
 
     /// A permission prompt Claude Code is putting on screen right now,
     /// with its own hook suspended inside this app waiting for an
@@ -1591,7 +1592,8 @@ final class SessionStore: ObservableObject {
         sessionID: String, id: String, tool: String, detail: String,
         cwd: String? = nil, patience: TimeInterval, agent: Agent = .claude
     ) -> Bool {
-        register(
+        guard surfacesCards else { return false }
+        return register(
             sessionID: sessionID, id: id, tool: tool, detail: detail, cwd: cwd,
             patience: patience, alsoInTerminal: true, agent: agent)
     }
@@ -1600,7 +1602,7 @@ final class SessionStore: ObservableObject {
     /// for it, and put the call on it.
     private func register(
         sessionID: String, id: String, tool: String, detail: String,
-        cwd: String?, patience: TimeInterval = 25, alsoInTerminal: Bool = false,
+        cwd: String?, patience: TimeInterval, alsoInTerminal: Bool = false,
         agent: Agent = .claude
     ) -> Bool {
         // A session nobody has heard of, with a process standing in a
@@ -1669,11 +1671,9 @@ final class SessionStore: ObservableObject {
         return true
     }
 
-    /// Told the instant somebody decides, so an agent suspended inside
-    /// an HTTP hook can be answered rather than left to come back and
-    /// ask again. The polling shim needs none of this: it collects from
-    /// `collectDecision` on its own schedule, which is why this pushes
-    /// rather than replacing that.
+    /// Told the instant somebody decides, so the agent suspended inside
+    /// its hook is answered rather than left waiting on an answer
+    /// nobody is going to deliver twice.
     var onDecided: ((String, Approval.Decision) -> Void)?
 
     func decide(approvalID: String, as decision: Approval.Decision) {
@@ -1693,27 +1693,30 @@ final class SessionStore: ObservableObject {
         sessions[index].updatedAt = Date()
     }
 
-    /// The hook's side: the answer, handed over exactly once.
-    ///
-    /// Cleared on the way out for the same reason `/ask` and `/outbox`
-    /// clear theirs. The agent has it now, and a card still sitting
-    /// there offering a choice that has already been taken is a button
-    /// that does nothing.
-    func collectDecision(approvalID: String) -> Approval.Decision? {
-        guard let index = sessions.firstIndex(where: { $0.approval?.id == approvalID }),
-              let decision = sessions[index].approval?.decision
-        else { return nil }
-        sessions[index].approval = nil
-        sessions[index].updatedAt = Date()
-        return decision
-    }
-
     /// The agent stopped waiting. Its hook timed out and the question
     /// went back to the terminal, so the card must go: a choice nobody
     /// is listening for any more is worse than no choice at all.
     func abandonApproval(id: String) {
         guard let index = sessions.firstIndex(where: { $0.approval?.id == id }) else { return }
         sessions[index].approval = nil
+        sessions[index].updatedAt = Date()
+    }
+
+    /// The turn's closing words, straight off the Stop hook's own
+    /// payload (`last_assistant_message`) rather than scraped from a
+    /// transcript tail: the hook states what the assistant last said,
+    /// where the scrape guessed at it and broke the day the format
+    /// moved. This is what a finished row's summary is made of, and
+    /// the words the came-to-rest announcement identifies a turn by.
+    ///
+    /// Bounded like everything else that arrives over the local API:
+    /// this came from another process and lands in a one-line rail row.
+    func noteLastWords(sessionID: String, _ message: String) {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let index = sessions.firstIndex(where: { $0.id == sessionID })
+        else { return }
+        sessions[index].lastMessage = String(trimmed.prefix(ActivityServer.maxDetail))
         sessions[index].updatedAt = Date()
     }
 

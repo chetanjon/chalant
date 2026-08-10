@@ -66,13 +66,17 @@ struct GeneralSection: View {
             }
 
             SettingCard(title: "Opening the island") {
-                SettingToggle(label: "Open when an agent finishes", isOn: $openOnFinish)
-                SettingNote(
-                    "The island opens on the session that just finished, showing what it said "
-                    + "with the reply box under it. It stays out of the way while you are "
-                    + "dictating or already typing in it."
-                )
-                SettingDivider()
+                // The finish announcement is a sessions behaviour, so
+                // its switch dark-ships with the surface (FeatureFlags).
+                if FeatureFlags.sessionsVisible {
+                    SettingToggle(label: "Open when an agent finishes", isOn: $openOnFinish)
+                    SettingNote(
+                        "The island opens on the session that just finished, showing what it said "
+                        + "with the reply box under it. It stays out of the way while you are "
+                        + "dictating or already typing in it."
+                    )
+                    SettingDivider()
+                }
                 SettingToggle(label: "Remember last tab", isOn: $rememberLastTab)
                 SettingNote(
                     "On, the island reopens on whatever you were last looking at. Off, it always "
@@ -163,7 +167,6 @@ struct SessionsSection: View {
     @Environment(\.chalantAccent) private var accent
 
     @AppStorage(SessionStore.approvalRulesKey) private var approvalRulesRaw = ""
-    @AppStorage(SessionStore.approvalExceptionsKey) private var approvalExceptionsRaw = ""
     @State private var draftRule = ""
 
     // The room's dials. Defaults repeated from where the readers live,
@@ -204,19 +207,6 @@ struct SessionsSection: View {
 
     private func remove(_ rule: String) {
         approvalRulesRaw = rules.filter { $0 != rule }.joined(separator: "\n")
-    }
-
-    /// Read the same way `rules` is, so tapping Always allow on the
-    /// island redraws this list without a relaunch.
-    private var exceptions: [String] {
-        approvalExceptionsRaw
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-    }
-
-    private func removeException(_ rule: String) {
-        approvalExceptionsRaw = exceptions.filter { $0 != rule }.joined(separator: "\n")
     }
 
     /// Your agents, on your phone.
@@ -350,28 +340,11 @@ struct SessionsSection: View {
                     .foregroundStyle(Theme.textTertiary)
                 WrappingRules(rules: unused) { add($0) }
             }
-            if !exceptions.isEmpty {
-                SettingDivider()
-                Text("Never held")
-                    .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.textTertiary)
-                SettingNote(
-                    "You tapped Always allow on these. They skip the rules above, so a rule as "
-                    + "broad as Bash stays livable."
-                )
-                ForEach(exceptions, id: \.self) { rule in
-                    HStack(spacing: Theme.Space.m) {
-                        Text(rule)
-                            .font(Theme.Fonts.captionMono)
-                            .foregroundStyle(Theme.textPrimary)
-                        Spacer(minLength: 0)
-                        HoverGlyphButton(
-                            symbol: "xmark", label: "Start holding \(rule) again",
-                            scale: .s, tint: Theme.textTertiary
-                        ) { removeException(rule) }
-                    }
-                }
-            }
+            SettingNote(
+                "The way out of a broad rule is Always allow on the card itself, which "
+                + "makes a standing permission below, so a rule as broad as Bash stays "
+                + "livable."
+            )
             SettingDivider()
             armRow(armed: armed)
             if !rules.isEmpty, !armed {
@@ -615,9 +588,10 @@ struct SessionsSection: View {
         let live = policy.live()
         return SettingCard(title: "Standing permissions") {
             SettingNote(
-                "Made from an approval card, with Allow … here for. Each one is a pattern in "
-                + "one folder with an end time, never everywhere and never forever, and none of "
-                + "them can allow the things Chalant always asks about."
+                "Made from an approval card. Allow … for makes one in that folder with an "
+                + "end time; Always allow makes one everywhere with none. None of them can "
+                + "allow the things Chalant always asks about, and every one is revocable "
+                + "here."
             )
             if live.isEmpty {
                 SettingNote("Nothing standing. Every call is decided as it comes.")
@@ -627,11 +601,13 @@ struct SessionsSection: View {
                         Text(grant.pattern)
                             .font(Theme.Fonts.captionMono)
                             .foregroundStyle(Theme.textPrimary)
-                        Text("in \((grant.repo as NSString).lastPathComponent)")
+                        Text(grant.repo.isEmpty
+                             ? "everywhere"
+                             : "in \((grant.repo as NSString).lastPathComponent)")
                             .font(Theme.Fonts.caption)
                             .foregroundStyle(Theme.textSecondary)
                         Spacer(minLength: Theme.Space.m)
-                        Text(Self.until(grant.expires))
+                        Text(grant.expires.map { Self.until($0) } ?? "until revoked")
                             .font(Theme.Fonts.caption)
                             .foregroundStyle(Theme.textTertiary)
                         Button("Revoke") { policy.revoke(id: grant.id) }
@@ -1188,24 +1164,32 @@ struct WhatShowsSection: View {
                 SettingToggle(label: "Notes", isOn: $toolNotes)
                 SettingDivider()
                 SettingToggle(label: "Focus & timers", isOn: $toolFocus)
-                SettingDivider()
-                SettingToggle(label: "Sessions", isOn: $toolSessions)
+                // Dark-shipped tools keep no switch: a row for a tab
+                // that cannot appear is a promise the switcher breaks
+                // (FeatureFlags).
+                if FeatureFlags.sessionsVisible {
+                    SettingDivider()
+                    SettingToggle(label: "Sessions", isOn: $toolSessions)
+                }
                 if stats.battery != nil {
                     SettingDivider()
                     SettingToggle(label: "Battery", isOn: $toolBattery)
                 }
-                SettingDivider()
-                SettingToggle(label: "Chat", isOn: $toolChat)
-                if toolChat {
-                    SettingPicker(
-                        label: "Service",
-                        selection: $chatService,
-                        options: [("Claude", "claude"), ("ChatGPT", "chatgpt"), ("Gemini", "gemini")]
-                    )
-                    SettingNote(
-                        "Your own account, in a small built-in browser. Chalant is not affiliated "
-                        + "with Anthropic, OpenAI, or Google."
-                    )
+                if FeatureFlags.chatVisible {
+                    SettingDivider()
+                    SettingToggle(label: "Chat", isOn: $toolChat)
+                    if toolChat {
+                        SettingPicker(
+                            label: "Service",
+                            selection: $chatService,
+                            options: [("Claude", "claude"), ("ChatGPT", "chatgpt"),
+                                      ("Gemini", "gemini")]
+                        )
+                        SettingNote(
+                            "Your own account, in a small built-in browser. Chalant is not affiliated "
+                            + "with Anthropic, OpenAI, or Google."
+                        )
+                    }
                 }
             }
         }
@@ -1349,13 +1333,15 @@ struct GlanceSection: View {
                     + "MacBook keeps the bare pill so it still matches the hardware."
                 )
                 SettingDivider()
-                SettingToggle(label: "Agents running", isOn: $glanceAgents)
-                SettingNote(
-                    "A mark beside the notch while Claude Code or Cursor sessions are going. It "
-                    + "breathes while they work and holds still, in the accent, the moment one is "
-                    + "waiting on you."
-                )
-                SettingDivider()
+                if FeatureFlags.sessionsVisible {
+                    SettingToggle(label: "Agents running", isOn: $glanceAgents)
+                    SettingNote(
+                        "A mark beside the notch while Claude Code or Cursor sessions are going. It "
+                        + "breathes while they work and holds still, in the accent, the moment one is "
+                        + "waiting on you."
+                    )
+                    SettingDivider()
+                }
                 SettingToggle(label: "Battery", isOn: $glanceBattery)
                 SettingNote(
                     "The charge, last in line: it only takes the space when nothing else beside the "
@@ -1394,19 +1380,22 @@ struct AboutSection: View {
 
             SettingCard(title: "Privacy") {
                 SettingNote(
-                    "Everything Chalant reads stays on this Mac: what is playing, your day, your "
-                    + "sessions. Nothing is sent anywhere."
+                    "Everything Chalant reads stays on this Mac: what is playing, your day"
+                    + (FeatureFlags.sessionsVisible ? ", your sessions" : "")
+                    + ". Nothing is sent anywhere."
                 )
                 SettingDivider()
                 SettingNote(
                     "Speech is transcribed by macOS itself, and the recording is deleted the moment "
                     + "the phrase is understood."
                 )
-                SettingDivider()
-                SettingNote(
-                    "Chat opens your own accounts in a small built-in browser. Chalant is not "
-                    + "affiliated with the services it opens."
-                )
+                if FeatureFlags.chatVisible {
+                    SettingDivider()
+                    SettingNote(
+                        "Chat opens your own accounts in a small built-in browser. Chalant is not "
+                        + "affiliated with the services it opens."
+                    )
+                }
             }
         }
     }
