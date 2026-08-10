@@ -11,6 +11,10 @@ struct MusicRow: View {
     /// Local slider value while the user is dragging, so the 1s
     /// player poll can't yank the knob back mid-gesture.
     @State private var volumeOverride: Double?
+    /// An optimistic seek target held until the player's slow poll
+    /// converges on it (or 3s pass), so the bar never snaps back to
+    /// the stale position after a release.
+    @State private var pendingSeek: (target: Double, at: Date)?
 
     var body: some View {
         if let playing = music.nowPlaying {
@@ -112,19 +116,24 @@ struct MusicRow: View {
                 // what keeps the island's measured height out of it.
                 TimelineView(.periodic(from: .now, by: 0.5)) { context in
                     let livePosition = music.position(at: context.date)
+                    let shown = Self.displayPosition(
+                        live: livePosition, pending: pendingSeek, now: context.date)
                     VStack(spacing: Theme.Space.m) {
                         ScrubBar(
-                            position: livePosition,
+                            position: shown,
                             duration: max(playing.duration, 1),
                             tint: Color.white.opacity(0.9),
-                            onSeek: { music.seek(to: $0) }
+                            onSeek: {
+                                pendingSeek = (target: $0, at: Date())
+                                music.seek(to: $0)
+                            }
                         )
                         HStack {
-                            Text(Self.clock(livePosition))
+                            Text(Self.clock(shown))
                                 .font(Theme.Fonts.timeMono)
                                 .foregroundStyle(Theme.textSecondary)
                             Spacer()
-                            Text(Self.remainingClock(elapsed: livePosition, duration: playing.duration))
+                            Text(Self.remainingClock(elapsed: shown, duration: playing.duration))
                                 .font(Theme.Fonts.timeMono)
                                 .foregroundStyle(Theme.textSecondary)
                         }
@@ -168,6 +177,18 @@ struct MusicRow: View {
     /// mockup, 2026-08-10): what is left, not what the whole is.
     static func remainingClock(elapsed: Double, duration: Double) -> String {
         "-" + clock(max(0, duration - elapsed))
+    }
+
+    /// What the bar and clock show: an optimistic seek target until the
+    /// player's slow poll catches up (within 2s of the target), capped
+    /// at 3s so a player that ignored the seek cannot pin a lie.
+    static func displayPosition(
+        live: Double, pending: (target: Double, at: Date)?, now: Date
+    ) -> Double {
+        guard let pending else { return live }
+        if now.timeIntervalSince(pending.at) > 3 { return live }
+        if abs(live - pending.target) <= 2 { return live }
+        return pending.target
     }
 }
 

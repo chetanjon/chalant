@@ -35,4 +35,26 @@ final class MotionPourTests: XCTestCase {
             defaults.object(forKey: "chalant.crashSeenAt") as? Date, date)
         defaults.removeObject(forKey: "chalant.crashSeenAt")
     }
+
+    func testAFreshSeekHoldsTheBarAtItsTarget() {
+        let now = Date()
+        XCTAssertEqual(
+            MusicRow.displayPosition(live: 84, pending: (target: 140, at: now), now: now),
+            140)
+    }
+
+    func testTheSeekReleasesOnceThePlayerCatchesUp() {
+        let now = Date()
+        XCTAssertEqual(
+            MusicRow.displayPosition(
+                live: 139.2, pending: (target: 140, at: now), now: now),
+            139.2, "within two seconds of the target, the live clock rules again")
+    }
+
+    func testTheSeekNeverHoldsLongerThanThreeSeconds() {
+        let then = Date(timeIntervalSinceNow: -3.5)
+        XCTAssertEqual(
+            MusicRow.displayPosition(live: 84, pending: (target: 140, at: then), now: Date()),
+            84, "a player that never catches up gets the truth back after 3s")
+    }
 }
