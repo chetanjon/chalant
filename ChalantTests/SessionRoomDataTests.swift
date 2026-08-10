@@ -334,11 +334,33 @@ final class SessionRoomDataTests: XCTestCase {
     func testTheRecordRemembersWhatTheSessionLastSaid() {
         let store = store()
         store.upsert(id: "s", title: "s", cwd: "/a", branch: "main", lastPrompt: nil,
-                     state: .working, lastMessage: "rebased clean", transcriptPath: "/t/s.jsonl")
+                     state: .working, transcriptPath: "/t/s.jsonl")
+        // What the Stop hook's own payload delivers at the turn
+        // boundary — the record's summary is made of this, not of a
+        // transcript scrape.
+        store.noteLastWords(sessionID: "s", "rebased clean")
         store.markGone(["s"])
         XCTAssertEqual(store.finished.first?.lastMessage, "rebased clean")
         XCTAssertEqual(store.finished.first?.transcriptPath, "/t/s.jsonl")
         XCTAssertEqual(store.finished.first?.branch, "main")
+    }
+
+    /// The Stop payload's words are bounded and trimmed on the way in,
+    /// like everything else that arrives over the local API, and blank
+    /// words never blank what the row already shows.
+    func testLastWordsAreBoundedAndNeverBlankTheRow() {
+        let store = store()
+        store.upsert(id: "s", title: "s", cwd: "/a", branch: nil, lastPrompt: nil,
+                     state: .working)
+        store.noteLastWords(sessionID: "s", "  done.  ")
+        XCTAssertEqual(store.sessions.first?.lastMessage, "done.")
+
+        store.noteLastWords(sessionID: "s", "   ")
+        XCTAssertEqual(store.sessions.first?.lastMessage, "done.",
+                       "a Stop with nothing to say must not erase the last real words")
+
+        store.noteLastWords(sessionID: "s", String(repeating: "a", count: 1000))
+        XCTAssertEqual(store.sessions.first?.lastMessage?.count, ActivityServer.maxDetail)
     }
 
     /// The registry loses a session through a long quiet turn and finds

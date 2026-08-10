@@ -753,8 +753,17 @@ final class ActivityServer: @unchecked Sendable {
         case ("POST", "/hook/stop"), ("POST", "/hook/session-end"):
             let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any]
             let ended = (object?["session_id"] as? String) ?? ""
+            // The turn's closing words ride the Stop payload itself.
+            // Recorded after the response is already on the wire, like
+            // everything else here: a lifecycle event must never block.
+            let lastWords = (object?["last_assistant_message"] as? String) ?? ""
             respond(connection, status: "200 OK", body: "")
             guard !ended.isEmpty else { return }
+            if !lastWords.isEmpty {
+                Task { @MainActor in
+                    self.sessions?.noteLastWords(sessionID: ended, lastWords)
+                }
+            }
             Task { await self.releaseHolds(inSession: ended) }
 
         // Decide, and hold it if a person is actually needed.

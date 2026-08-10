@@ -22,10 +22,6 @@ final class SessionDiscovery {
     struct ParsedMetadata: Equatable {
         var aiTitle: String?
         var lastPrompt: String?
-        /// The last plain-text thing the assistant said, as opposed to
-        /// the last tool it reached for. Both ride the same content
-        /// blocks; this is the half a person would want to read.
-        var lastMessage: String?
         var mode: String?
         var permissionMode: String?
         /// Recorded by Claude Code on every message record, so a live
@@ -129,7 +125,6 @@ final class SessionDiscovery {
         var branch: String?
         var lastPrompt: String?
         var activity: String?
-        var lastMessage: String?
     }
 
     /// A burst of fs events for one file (title, then prompt, then mode
@@ -305,8 +300,7 @@ final class SessionDiscovery {
                 lastPrompt: metadata.lastPrompt,
                 activity: metadata.lastTool.map {
                     Self.activityPhrase(forTool: $0, detail: metadata.lastToolDetail)
-                },
-                lastMessage: metadata.lastMessage
+                }
             )
         }
         guard let entry = tracked[id] else { return }
@@ -316,7 +310,7 @@ final class SessionDiscovery {
             id: id, title: entry.title, cwd: entry.cwd, branch: entry.branch,
             lastPrompt: entry.lastPrompt, state: state,
             activity: entry.activity, updatedAt: mtime,
-            lastMessage: entry.lastMessage, transcriptPath: path
+            transcriptPath: path
         )
     }
 
@@ -471,15 +465,11 @@ final class SessionDiscovery {
                             metadata.lastToolDetail = (block["input"] as? [String: Any])
                                 .flatMap { Self.toolDetail(fromInput: $0, tool: name) }
                         }
-                    case "text":
-                        // File order is turn order, so the last one
-                        // standing is what it said most recently.
-                        if let text = (block["text"] as? String)?
-                            .trimmingCharacters(in: .whitespacesAndNewlines),
-                           !text.isEmpty {
-                            metadata.lastMessage = text
-                        }
                     default:
+                        // Plain text blocks included: what the assistant
+                        // last SAID now arrives on the Stop hook's own
+                        // payload (last_assistant_message) instead of
+                        // being scraped from a tail read of this file.
                         break
                     }
                 }

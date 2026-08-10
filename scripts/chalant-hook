@@ -88,9 +88,9 @@ fi
 # not established, so this is read defensively on purpose (ponytail: a
 # handful of guessed keys, not a schema; widen the list if a founder
 # capture ever shows the real one).
-read -r EVENT SESSION STOP_ACTIVE TITLE <<EOF
+read -r EVENT SESSION STOP_ACTIVE NTYPE TITLE <<EOF
 $(printf '%s' "$PAYLOAD" | python3 -c '
-import json, sys
+import json, re, sys
 try:
     d = json.load(sys.stdin)
     if not isinstance(d, dict):
@@ -125,12 +125,17 @@ title = where or (session[:8] if session else "") or "a session"
 # below, which does not depend on this at all, and which only Claude
 # Code is even asked for.
 stop_active = "1" if d.get("stop_hook_active") else "0"
-print(event or "-", session or "-", stop_active, title.replace(" ", " "))
+# Which kind of Notification, sanitised down to one shell-safe word:
+# it decides a case branch below, and an unrecognised or hostile
+# value must read as "no type" rather than as its own text.
+ntype = re.sub(r"[^a-z_]", "", first("notification_type"))
+print(event or "-", session or "-", stop_active, ntype or "-", title.replace(" ", " "))
 ' 2>/dev/null)
 EOF
 
 [ "${EVENT:-}" = "-" ] && EVENT=""
 [ "${SESSION:-}" = "-" ] && SESSION=""
+[ "${NTYPE:-}" = "-" ] && NTYPE=""
 
 # Cursor's own event name, passed as $1 rather than trusted from the
 # payload (see header). Wins over whatever the JSON said, since it is
@@ -167,7 +172,20 @@ case "$EVENT" in
   # permission-request events: the closest thing any of the three has
   # to "a question arrived" (Cursor names it; Claude Code only
   # approximates it with Notification).
-  Notification|PermissionRequest) STATE="needs-input"; WHAT="$TITLE wants you" ;;
+  #
+  # The two named types get their own pill: an agent waiting on input
+  # and an agent that finished are different facts, and painting both
+  # "wants you" made the pill a shrug. permission_prompt keeps the
+  # generic pill (its subject arrives separately, below), and any type
+  # this script has never heard of keeps it too, so a new Claude Code
+  # cannot silence the island by inventing a word.
+  Notification|PermissionRequest)
+    STATE="needs-input"; WHAT="$TITLE wants you"
+    case "$NTYPE" in
+      agent_needs_input) WHAT="$TITLE needs input" ;;
+      agent_completed)   STATE="done"; WHAT="$TITLE finished" ;;
+    esac
+    ;;
   Stop)                           STATE="done";        WHAT="$TITLE finished" ;;
   *)                              exit 0 ;;
 esac

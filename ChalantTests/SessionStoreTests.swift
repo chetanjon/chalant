@@ -3390,18 +3390,21 @@ final class SessionStoreTests: XCTestCase {
         // opened the island, collapsed it and opened it again while the
         // founder was typing (2026-08-03).
         store.upsert(id: "s1", title: "one turn", cwd: "/a", branch: nil,
-                     lastPrompt: nil, state: .working, lastMessage: "here is what I did")
+                     lastPrompt: nil, state: .working)
+        store.noteLastWords(sessionID: "s1", "here is what I did")
         for _ in 0..<4 {
             store.markLive(id: "s1", name: "one turn", cwd: "/a", pid: 1,
                            kind: .interactive, hasTerminal: true, status: .idle)
             store.upsert(id: "s1", title: "one turn", cwd: "/a", branch: nil,
-                         lastPrompt: nil, state: .working, lastMessage: "here is what I did")
+                         lastPrompt: nil, state: .working)
         }
         XCTAssertEqual(announced, ["one turn"], "one finished turn is one announcement")
 
-        // A genuinely new turn produces new words, and is announced.
+        // A genuinely new turn produces new words — delivered by its
+        // Stop hook — and is announced.
         store.upsert(id: "s1", title: "one turn", cwd: "/a", branch: nil,
-                     lastPrompt: nil, state: .working, lastMessage: "and then this")
+                     lastPrompt: nil, state: .working)
+        store.noteLastWords(sessionID: "s1", "and then this")
         store.markLive(id: "s1", name: "one turn", cwd: "/a", pid: 1,
                        kind: .interactive, hasTerminal: true, status: .idle)
         XCTAssertEqual(announced.count, 2, "new words are a new turn")

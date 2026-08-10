@@ -622,7 +622,7 @@ final class SessionStore: ObservableObject {
         id: String, title: String, cwd: String, branch: String?,
         lastPrompt: String?, state: State, activity: String? = nil,
         agent: Agent = .claude, updatedAt: Date = Date(), startedAt: Date = Date(),
-        lastMessage: String? = nil, transcriptPath: String? = nil
+        transcriptPath: String? = nil
     ) {
         let alreadyKnown = sessions.first { $0.id == id }
         // A warm file is not a session.
@@ -644,7 +644,7 @@ final class SessionStore: ObservableObject {
             ?? Session(
                 id: id, title: title, cwd: cwd, branch: branch,
                 lastPrompt: lastPrompt, activity: activity, agent: agent,
-                state: state, ask: nil, lastMessage: lastMessage,
+                state: state, ask: nil,
                 startedAt: startedAt, updatedAt: updatedAt
             )
         // A row appearing for the first time this launch is exactly the
@@ -661,12 +661,11 @@ final class SessionStore: ObservableObject {
         session.lastPrompt = lastPrompt
         session.activity = activity
         session.agent = agent
-        // Only ever replaced by something real: a rescan that read a
-        // tail with no text block in it must not blank what the row is
-        // already showing.
-        if let lastMessage, !lastMessage.isEmpty { session.lastMessage = lastMessage }
-        // Same rule, same reason: the registry can upsert a row it made
-        // itself, and it has no path to offer. Never blank a real one.
+        // `lastMessage` is deliberately not written here any more: what
+        // the assistant last said arrives on the Stop hook's own
+        // payload (`noteLastWords`), not from a transcript rescan.
+        // The registry can upsert a row it made itself, and it has no
+        // path to offer. Never blank a real one.
         if let transcriptPath { session.transcriptPath = transcriptPath }
         // An outstanding question outranks whatever discovery inferred.
         //
@@ -1687,6 +1686,24 @@ final class SessionStore: ObservableObject {
     func abandonApproval(id: String) {
         guard let index = sessions.firstIndex(where: { $0.approval?.id == id }) else { return }
         sessions[index].approval = nil
+        sessions[index].updatedAt = Date()
+    }
+
+    /// The turn's closing words, straight off the Stop hook's own
+    /// payload (`last_assistant_message`) rather than scraped from a
+    /// transcript tail: the hook states what the assistant last said,
+    /// where the scrape guessed at it and broke the day the format
+    /// moved. This is what a finished row's summary is made of, and
+    /// the words the came-to-rest announcement identifies a turn by.
+    ///
+    /// Bounded like everything else that arrives over the local API:
+    /// this came from another process and lands in a one-line rail row.
+    func noteLastWords(sessionID: String, _ message: String) {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let index = sessions.firstIndex(where: { $0.id == sessionID })
+        else { return }
+        sessions[index].lastMessage = String(trimmed.prefix(ActivityServer.maxDetail))
         sessions[index].updatedAt = Date()
     }
 
