@@ -82,7 +82,7 @@ struct ExpandedView: View {
     /// The island you get by reaching for it: everything at once, small,
     /// and gone the moment you look away.
     private var glanceContent: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.l) {
+        VStack(alignment: .leading, spacing: Theme.Space.zone) {
             // Rows come from the layout rather than being written here,
             // so rearranging one is data rather than a code change.
             // Ordering, hiding and pairing all live in IslandLayout.
@@ -374,11 +374,10 @@ struct ExpandedView: View {
             // neighbour, so five rows read as five equal claims on the
             // eye. What is playing and what is sounding belong
             // together; the switcher and its panel are a different
-            // thing, and the gap says so before the rule does.
-            Rectangle()
-                .fill(Theme.hairlineFaint)
-                .frame(height: 1)
-                .padding(.top, Theme.Space.xs)
+            // thing. A hairline used to say so; now `Theme.Space.zone`
+            // (the VStack spacing above) gives every row the same air,
+            // and the line is gone (founder, 2026-08-10: "air only, no
+            // dividers").
             Switcher(model: model, updates: model.updates,
                      todayEnabled: todayEnabled, tools: enabledTools)
         case .input:
