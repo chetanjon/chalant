@@ -87,8 +87,16 @@ struct ExpandedView: View {
             // so rearranging one is data rather than a code change.
             // Ordering, hiding and pairing all live in IslandLayout.
             ForEach(layoutRows) { row in
+                // The row's position among today's rows, purely for the
+                // pour-in delay below. `layoutRows` keeps `ForEach`'s
+                // identity exactly as before (`IslandRow.id`, the
+                // elements' names joined); this is a second, separate
+                // read of it rather than a change to what identifies a
+                // row, so rows never re-identify because of it.
+                let index = layoutRows.firstIndex(of: row) ?? 0
                 if row.elements.count == 1 {
                     element(row.elements[0])
+                        .staggeredReveal(index)
                 } else {
                     // Tighter than the gap between rows (below), so a
                     // two-up row's pair reads as one group and the rows
@@ -99,6 +107,7 @@ struct ExpandedView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
+                    .staggeredReveal(index)
                 }
             }
 
