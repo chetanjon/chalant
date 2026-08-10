@@ -154,109 +154,14 @@ TITLE="${TITLE// / }"
 
 esc() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read())[1:-1])'; }
 
-# A tool call, before it runs. Claude Code will honour a
-# `permissionDecision` returned here, which makes this the one place
-# this app can decide something rather than only report it.
-#
-# It fires before EVERY tool call, so the shape matters: ask Chalant
-# first, and only wait if Chalant says it wants this one. An ungated
-# tool costs one loopback round trip and nothing else. Chalant not
-# running, no token, a refused connection, a malformed answer: all of
-# them fall straight through to Claude Code's own permission layer,
-# which is what happened before any of this existed.
-#
-# Claude-only. Cursor and Codex have no established contract for
-# returning a decision, and guessing at one could block a command their
-# own hook was about to allow.
-if [ "$AGENT" = "claude" ] && [ "$EVENT" = "PreToolUse" ]; then
-  read -r TOOL_NAME TOOL_USE_ID <<EOF
-$(printf '%s' "$PAYLOAD" | python3 -c '
-import json, sys
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-print(d.get("tool_name") or "-", d.get("tool_use_id") or "-")
-' 2>/dev/null)
-EOF
-  [ "${TOOL_NAME:--}" = "-" ] && exit 0
-  [ "${TOOL_USE_ID:--}" = "-" ] && exit 0
-  # Sanitised once, and the same value is used to register the hold and
-  # to ask after it. Sanitising only at the URL would have the hook
-  # polling for an id the app never stored, which fails by waiting the
-  # full patience every time and then falling through: correct, and
-  # silently useless.
-  CALL_ID="$(printf '%s' "$TOOL_USE_ID" | sed 's/[^A-Za-z0-9_-]/-/g')"
-
-  # What is actually about to happen, in the words of the thing about
-  # to do it. Never summarised: a paraphrase of a command you are being
-  # asked to authorise is a paraphrase of the wrong thing.
-  DETAIL="$(printf '%s' "$PAYLOAD" | python3 -c '
-import json, sys
-try:
-    d = json.load(sys.stdin).get("tool_input") or {}
-except Exception:
-    d = {}
-if not isinstance(d, dict):
-    d = {}
-for key in ("command", "file_path", "path", "url", "pattern", "query"):
-    v = d.get(key)
-    if isinstance(v, str) and v.strip():
-        print(v.strip()[:400]); break
-else:
-    print("")
-' 2>/dev/null)"
-
-  # Sent so a session the app has never heard of can still be drawn.
-  # Anything headless (`claude -p`, an SDK worker) registers nowhere, so
-  # this folder is the only name its row will ever have.
-  CALL_CWD="$(printf '%s' "$PAYLOAD" | python3 -c '
-import json, sys
-try:
-    cwd = json.load(sys.stdin).get("cwd") or ""
-except Exception:
-    cwd = ""
-print(cwd if cwd.startswith("/") else "")' 2>/dev/null)"
-
-  GATE="$(curl -s --connect-timeout 1 --max-time 2 -H "X-Chalant-Token: $TOKEN" \
-    "$BASE/permission" \
-    -d "{\"session\":\"$(esc "$SESSION")\",\"id\":\"$CALL_ID\",\"tool\":\"$(esc "$TOOL_NAME")\",\"detail\":\"$(esc "$DETAIL")\",\"cwd\":\"$(esc "$CALL_CWD")\"}" \
-    2>/dev/null | python3 -c 'import json,sys
-try: print("yes" if json.load(sys.stdin).get("gate") else "no")
-except Exception: print("no")' 2>/dev/null)"
-  [ "$GATE" = "yes" ] || exit 0
-
-  # Held. Stand at the door, but not forever: a decision nobody makes
-  # has to hand the question back to the terminal rather than leave an
-  # agent waiting on someone who walked away. The withdrawal below is
-  # what takes the card off the island when that happens.
-  WAITED=0
-  while [ "$WAITED" -lt "${CHALANT_APPROVAL_WAIT:-25}" ]; do
-    DECISION="$(curl -s --connect-timeout 1 --max-time 2 -H "X-Chalant-Token: $TOKEN" \
-      "$BASE/permission/$CALL_ID" \
-      2>/dev/null | python3 -c 'import json,sys
-try: print(json.load(sys.stdin).get("decision") or "")
-except Exception: print("")' 2>/dev/null)"
-    case "$DECISION" in
-      allow|deny)
-        python3 -c '
-import json, sys
-print(json.dumps({"hookSpecificOutput": {
-    "hookEventName": "PreToolUse",
-    "permissionDecision": sys.argv[1],
-    "permissionDecisionReason": "Chalant: " + ("allowed" if sys.argv[1] == "allow" else "denied")
-      + " from the island.",
-}}))' "$DECISION"
-        exit 0 ;;
-    esac
-    sleep 1
-    WAITED=$((WAITED + 1))
-  done
-  curl -s -X DELETE --max-time 2 -H "X-Chalant-Token: $TOKEN" \
-    "$BASE/permission/$CALL_ID" >/dev/null 2>&1
-  exit 0
-fi
-
+# PreToolUse is not handled here any more. The gate went native: an
+# HTTP hook written by the app (HookInstall.arm) posts every tool call
+# to /hook/pre-tool-use and stays suspended inside the request until
+# somebody decides, which is one held connection instead of the three
+# processes and one-second poll this script used to run. An old
+# settings entry still pointing this script at PreToolUse falls through
+# the case below and exits silently, which is the correct answer: no
+# opinion, the agent's own permission flow untouched.
 case "$EVENT" in
   # Claude Code's permission prompt, and Cursor's two named
   # permission-request events: the closest thing any of the three has

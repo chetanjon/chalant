@@ -63,15 +63,16 @@ final class PromptGateTests: XCTestCase {
         XCTAssertEqual(approval?.alsoInTerminal, true)
     }
 
-    func testTheShimsHeldCallStillCountsDownTwentyFiveAndOwnsTheScreen() {
-        // The other door has not changed: the polling shim waits 25
-        // seconds and its prompt is not on screen anywhere else.
+    func testAGateHeldCallCarriesItsHooksRealPatienceAndOwnsTheScreen() {
+        // The gate is an HTTP hook now: the agent waits out its own
+        // configured timeout, suspended inside the request, and its
+        // prompt is not on screen anywhere else.
         let store = SessionStore()
         _ = store.holdForApproval(
             sessionID: "s1", id: "toolu_1", tool: "Bash", detail: "ls", cwd: "/tmp",
-            rules: ["Bash"], exceptions: [])
+            patience: 480, rules: ["Bash"], exceptions: [])
         let approval = store.sessions.first { $0.id == "s1" }?.approval
-        XCTAssertEqual(approval?.patience, 25)
+        XCTAssertEqual(approval?.patience, 480)
         XCTAssertEqual(approval?.alsoInTerminal, false)
     }
 

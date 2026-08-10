@@ -386,13 +386,11 @@ final class SessionStore: ObservableObject {
         var detail: String
         var askedAt: Date
         var decision: Decision?
-        /// How long the agent will actually wait, which is not one
-        /// number any more. The shell shim polls for 25 seconds and then
-        /// hands the question back; an HTTP hook is suspended inside the
-        /// request and waits out its own `timeout`, 600 seconds by
-        /// default. The card counts this down out loud, so it has to be
-        /// the real one.
-        var patience: TimeInterval = 25
+        /// How long the agent will actually wait: its hook's own
+        /// `timeout`, carried in the payload, 600 seconds unless
+        /// somebody configured otherwise. The card counts this down out
+        /// loud, so it has to be the real one.
+        var patience: TimeInterval = 600
         /// Whether the same question is also on screen in the session's
         /// own terminal.
         ///
@@ -1563,7 +1561,7 @@ final class SessionStore: ObservableObject {
     /// existed.
     func holdForApproval(
         sessionID: String, id: String, tool: String, detail: String,
-        cwd: String? = nil,
+        cwd: String? = nil, patience: TimeInterval = 600,
         rules: [String] = SessionStore.approvalRules(),
         exceptions: [String] = SessionStore.approvalExceptions()
     ) -> Bool {
@@ -1573,7 +1571,9 @@ final class SessionStore: ObservableObject {
         // off. See `approvalExceptionsKey`.
         guard !exceptions.contains(where: { Self.rule($0, holds: tool, detail) }) else { return false }
         guard rules.contains(where: { Self.rule($0, holds: tool, detail) }) else { return false }
-        return register(sessionID: sessionID, id: id, tool: tool, detail: detail, cwd: cwd)
+        return register(
+            sessionID: sessionID, id: id, tool: tool, detail: detail, cwd: cwd,
+            patience: patience)
     }
 
     /// A permission prompt Claude Code is putting on screen right now,
@@ -1600,7 +1600,7 @@ final class SessionStore: ObservableObject {
     /// for it, and put the call on it.
     private func register(
         sessionID: String, id: String, tool: String, detail: String,
-        cwd: String?, patience: TimeInterval = 25, alsoInTerminal: Bool = false,
+        cwd: String?, patience: TimeInterval, alsoInTerminal: Bool = false,
         agent: Agent = .claude
     ) -> Bool {
         // A session nobody has heard of, with a process standing in a
@@ -1669,11 +1669,9 @@ final class SessionStore: ObservableObject {
         return true
     }
 
-    /// Told the instant somebody decides, so an agent suspended inside
-    /// an HTTP hook can be answered rather than left to come back and
-    /// ask again. The polling shim needs none of this: it collects from
-    /// `collectDecision` on its own schedule, which is why this pushes
-    /// rather than replacing that.
+    /// Told the instant somebody decides, so the agent suspended inside
+    /// its hook is answered rather than left waiting on an answer
+    /// nobody is going to deliver twice.
     var onDecided: ((String, Approval.Decision) -> Void)?
 
     func decide(approvalID: String, as decision: Approval.Decision) {
@@ -1691,21 +1689,6 @@ final class SessionStore: ObservableObject {
         guard let index = sessions.firstIndex(where: { $0.approval?.id == id }) else { return }
         sessions[index].approval = nil
         sessions[index].updatedAt = Date()
-    }
-
-    /// The hook's side: the answer, handed over exactly once.
-    ///
-    /// Cleared on the way out for the same reason `/ask` and `/outbox`
-    /// clear theirs. The agent has it now, and a card still sitting
-    /// there offering a choice that has already been taken is a button
-    /// that does nothing.
-    func collectDecision(approvalID: String) -> Approval.Decision? {
-        guard let index = sessions.firstIndex(where: { $0.approval?.id == approvalID }),
-              let decision = sessions[index].approval?.decision
-        else { return nil }
-        sessions[index].approval = nil
-        sessions[index].updatedAt = Date()
-        return decision
     }
 
     /// The agent stopped waiting. Its hook timed out and the question

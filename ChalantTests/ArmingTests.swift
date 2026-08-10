@@ -53,7 +53,7 @@ final class ArmingTests: XCTestCase {
           "SessionStart":[{"hooks":[{"type":"command","command":"/other/tool.js"}]}]
         }}
         """)
-        guard case .armed = HookInstall.arm(at: settings) else { return XCTFail("should arm") }
+        guard case .armed = HookInstall.arm(port: 4242, token: "t", at: settings) else { return XCTFail("should arm") }
         let after = try read()
         XCTAssertEqual(after["model"] as? String, "opus")
         XCTAssertEqual(hooks(after, "Stop").count, 1)
@@ -67,14 +67,14 @@ final class ArmingTests: XCTestCase {
         try write("""
         {"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"/other/guard.js"}]}]}}
         """)
-        guard case .armed = HookInstall.arm(at: settings) else { return XCTFail("should arm") }
+        guard case .armed = HookInstall.arm(port: 4242, token: "t", at: settings) else { return XCTFail("should arm") }
         let entries = hooks(try read(), "PreToolUse")
         XCTAssertEqual(entries.count, 2)
         XCTAssertTrue(HookInstall.holdsToolCalls(settings: try read()))
     }
 
     func testArmingAnEmptyMachineCreatesTheFile() throws {
-        guard case .armed(let backup) = HookInstall.arm(at: settings) else {
+        guard case .armed(let backup) = HookInstall.arm(port: 4242, token: "t", at: settings) else {
             return XCTFail("should arm")
         }
         // Nothing existed, so nothing was backed up, and the card says
@@ -84,10 +84,63 @@ final class ArmingTests: XCTestCase {
     }
 
     func testArmingTwiceWritesNothingTheSecondTime() throws {
-        _ = HookInstall.arm(at: settings)
+        _ = HookInstall.arm(port: 4242, token: "t", at: settings)
         let first = try Data(contentsOf: settings)
-        XCTAssertEqual(HookInstall.arm(at: settings), .alreadyArmed)
+        XCTAssertEqual(HookInstall.arm(port: 4242, token: "t", at: settings), .alreadyArmed)
         XCTAssertEqual(try Data(contentsOf: settings), first)
+    }
+
+    /// The gate is an HTTP hook, the same shape and the same literal
+    /// token `armPrompts` writes, pointed at the gate's own path.
+    func testArmingWritesAnHttpGateEntry() throws {
+        _ = HookInstall.arm(port: 4242, token: "sekrit", at: settings)
+        let entries = hooks(try read(), "PreToolUse")
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries[0]["matcher"] as? String, "*")
+        let hook = try XCTUnwrap((entries[0]["hooks"] as? [[String: Any]])?.first)
+        XCTAssertEqual(hook["type"] as? String, "http")
+        XCTAssertEqual(hook["url"] as? String, "http://127.0.0.1:4242/hook/pre-tool-use")
+        XCTAssertEqual(hook["timeout"] as? Int, HookInstall.promptTimeout)
+        XCTAssertEqual((hook["headers"] as? [String: String])?["Authorization"], "Bearer sekrit")
+    }
+
+    /// An install armed before the gate went HTTP carries the command
+    /// entry running the bundled script. It reads as armed, and arming
+    /// again upgrades it in place: one write, no second asker.
+    func testArmingUpgradesTheLegacyCommandEntryInTheSameWrite() throws {
+        try write("""
+        {"hooks":{"PreToolUse":[
+          {"hooks":[{"type":"command","command":"/old/app/chalant-hook","timeout":40}]},
+          {"hooks":[{"type":"command","command":"/other/guard.js"}]}]}}
+        """)
+        XCTAssertTrue(HookInstall.holdsToolCalls(settings: try read()),
+                      "the legacy shape still counts as armed")
+
+        guard case .armed = HookInstall.arm(port: 4242, token: "t", at: settings) else {
+            return XCTFail("should upgrade")
+        }
+
+        let entries = hooks(try read(), "PreToolUse")
+        XCTAssertEqual(entries.count, 2, "the other tool's entry plus our HTTP one")
+        let commands = entries.flatMap { ($0["hooks"] as? [[String: Any]]) ?? [] }
+            .compactMap { $0["command"] as? String }
+        XCTAssertEqual(commands, ["/other/guard.js"],
+                       "the old polling entry must not survive beside the HTTP one")
+        let urls = entries.flatMap { ($0["hooks"] as? [[String: Any]]) ?? [] }
+            .compactMap { $0["url"] as? String }
+        XCTAssertEqual(urls, ["http://127.0.0.1:4242/hook/pre-tool-use"])
+    }
+
+    func testAMovedPortRewritesTheGateEntryRatherThanAddingASecond() throws {
+        _ = HookInstall.arm(port: 4242, token: "t", at: settings)
+        guard case .armed = HookInstall.arm(port: 4301, token: "t2", at: settings) else {
+            return XCTFail("expected a rewrite")
+        }
+        let entries = hooks(try read(), "PreToolUse")
+        XCTAssertEqual(entries.count, 1)
+        let hook = try XCTUnwrap((entries[0]["hooks"] as? [[String: Any]])?.first)
+        XCTAssertEqual(hook["url"] as? String, "http://127.0.0.1:4301/hook/pre-tool-use")
+        XCTAssertEqual((hook["headers"] as? [String: String])?["Authorization"], "Bearer t2")
     }
 
     // MARK: Refusing, which matters more
@@ -98,7 +151,7 @@ final class ArmingTests: XCTestCase {
     func testUnparseableSettingsAreRefusedAndLeftExactlyAsTheyWere() throws {
         let broken = "{\"hooks\": { oh dear ,,, }"
         try write(broken)
-        guard case .refused = HookInstall.arm(at: settings) else {
+        guard case .refused = HookInstall.arm(port: 4242, token: "t", at: settings) else {
             return XCTFail("should refuse to touch a file it cannot read")
         }
         XCTAssertEqual(try String(contentsOf: settings, encoding: .utf8), broken)
@@ -108,7 +161,7 @@ final class ArmingTests: XCTestCase {
 
     func testTheOldFileIsCopiedAsideBeforeItIsChanged() throws {
         try write(#"{"model":"opus","hooks":{}}"#)
-        guard case .armed(let backup) = HookInstall.arm(at: settings),
+        guard case .armed(let backup) = HookInstall.arm(port: 4242, token: "t", at: settings),
               let backup
         else { return XCTFail("should back up an existing file") }
         let saved = try XCTUnwrap(
@@ -122,7 +175,7 @@ final class ArmingTests: XCTestCase {
         try write("""
         {"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"/other/guard.js"}]}]}}
         """)
-        _ = HookInstall.arm(at: settings)
+        _ = HookInstall.arm(port: 4242, token: "t", at: settings)
         XCTAssertEqual(hooks(try read(), "PreToolUse").count, 2)
         guard case .armed = HookInstall.disarm(at: settings) else { return XCTFail("should disarm") }
         let left = hooks(try read(), "PreToolUse")
@@ -159,7 +212,7 @@ final class ArmingTests: XCTestCase {
         {"model":"opus","permissions":{"allow":["Bash(ls:*)"]},
          "hooks":{"Stop":[{"hooks":[{"type":"command","command":"/other/tool.js"}]}]}}
         """)
-        _ = HookInstall.arm(at: settings)
+        _ = HookInstall.arm(port: 4242, token: "t", at: settings)
         _ = HookInstall.disarm(at: settings)
         let after = try read()
         XCTAssertEqual(after["model"] as? String, "opus")
@@ -176,7 +229,7 @@ final class ArmingTests: XCTestCase {
         let real = dir.appendingPathComponent("real-settings.json")
         try #"{"model":"opus","hooks":{}}"#.write(to: real, atomically: true, encoding: .utf8)
         try FileManager.default.createSymbolicLink(at: settings, withDestinationURL: real)
-        guard case .armed = HookInstall.arm(at: settings) else { return XCTFail("should arm") }
+        guard case .armed = HookInstall.arm(port: 4242, token: "t", at: settings) else { return XCTFail("should arm") }
         let attributes = try FileManager.default.attributesOfItem(atPath: settings.path)
         XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeSymbolicLink)
         let written = try XCTUnwrap(

@@ -1365,28 +1365,6 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.sessions.first?.approval?.id, "first")
     }
 
-    /// Handed over exactly once, the same contract `/ask` and `/outbox`
-    /// keep: the agent has it now, and a card still offering a choice
-    /// already taken is a button that does nothing.
-    func testADecisionIsCollectedExactlyOnce() {
-        let store = storeWithSession()
-        _ = store.holdForApproval(
-            sessionID: "s1", id: "c", tool: "Bash", detail: "ls", rules: ["Bash"])
-        store.decide(approvalID: "c", as: .allow)
-
-        XCTAssertEqual(store.collectDecision(approvalID: "c"), .allow)
-        XCTAssertNil(store.collectDecision(approvalID: "c"))
-        XCTAssertNil(store.sessions.first?.approval)
-    }
-
-    func testAnUndecidedCallHandsBackNothing() {
-        let store = storeWithSession()
-        _ = store.holdForApproval(
-            sessionID: "s1", id: "c", tool: "Bash", detail: "ls", rules: ["Bash"])
-        XCTAssertNil(store.collectDecision(approvalID: "c"))
-        XCTAssertNotNil(store.sessions.first?.approval, "still waiting, still shown")
-    }
-
     /// The hook gave up and the question went back to the terminal, so
     /// the card has to go with it.
     func testAnAbandonedCallLeavesNoCardBehind() {

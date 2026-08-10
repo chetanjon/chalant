@@ -140,15 +140,26 @@ final class ActivityServer: @unchecked Sendable {
     @MainActor
     func start(store: ActivityStore, sessions: SessionStore? = nil,
                policy: PolicyStore? = nil) {
+        wire(store: store, sessions: sessions, policy: policy)
+        token = Self.loadOrCreateToken()
+        queue.async { [self] in
+            remainingPorts = Self.portCandidates()
+            bindNext()
+        }
+    }
+
+    /// The store wiring `start` does, on its own: tests drive the gate
+    /// through this so nothing mints a token or opens a socket.
+    @MainActor
+    func wire(store: ActivityStore? = nil, sessions: SessionStore? = nil,
+              policy: PolicyStore? = nil) {
         self.store = store
         self.sessions = sessions
         self.policy = policy
-        token = Self.loadOrCreateToken()
         // A tap on the island reaching an agent suspended inside a hook.
-        // `resolve` returning false means nobody was waiting on that id
-        // over HTTP, which is the ordinary case for a call held by the
-        // polling shim: that one collects its own answer on its own
-        // schedule, so the card has to stay put for it.
+        // `resolve` returning false means nobody was waiting on that id,
+        // which is what a double tap or a tap racing a hang-up looks
+        // like from here, and both are safe to ignore.
         sessions?.onDecided = { [weak self] id, decision in
             guard let self else { return }
             Task { await self.gate.resolve(id, as: decision == .allow ? .allow : .deny) }
@@ -167,10 +178,6 @@ final class ActivityServer: @unchecked Sendable {
                 }
                 await self.answers.resolve(askID, as: .accept(given))
             }
-        }
-        queue.async { [self] in
-            remainingPorts = Self.portCandidates()
-            bindNext()
         }
     }
 
@@ -269,9 +276,17 @@ final class ActivityServer: @unchecked Sendable {
         // If the port moved because something else had 4242, every
         // prompt would post into a closed door and the island would go
         // quiet with nothing anywhere saying why. Only ever a refresh of
-        // an entry that is already there: this never arms anybody.
-        guard HookInstall.answersPrompts() else { return }
-        HookInstall.armPrompts(port: port, token: token)
+        // entries that are already there: this never arms anybody.
+        if HookInstall.answersPrompts() {
+            HookInstall.armPrompts(port: port, token: token)
+        }
+        // Same refresh for the gate. This is also where an install armed
+        // before the gate went HTTP is upgraded: `holdsToolCalls` still
+        // recognises the old command entry, and `arm` replaces it with
+        // the HTTP one in a single write.
+        if HookInstall.holdsToolCalls() {
+            HookInstall.arm(port: port, token: token)
+        }
     }
 
     func stop() {
@@ -456,16 +471,13 @@ final class ActivityServer: @unchecked Sendable {
         // browser's own same-origin policy; the writing routes refuse
         // anything wearing browser headers outright.
         //
-        // Three GETs are writes in disguise: `/outbox/<id>`, `/ask/<id>`
-        // and `/permission/<id>` each hand over something exactly once
-        // and clear it in the same breath, so a page that guessed an id
-        // could otherwise consume a queued message, a pending answer, or
-        // an authorisation that was never meant for it. All three need
-        // the real token too, but this is the second wall, not the only
-        // one (EC-14).
+        // Two GETs are writes in disguise: `/outbox/<id>` and `/ask/<id>`
+        // each hand over something exactly once and clear it in the same
+        // breath, so a page that guessed an id could otherwise consume a
+        // queued message or a pending answer. Both need the real token
+        // too, but this is the second wall, not the only one (EC-14).
         let consumesGET = request.method == "GET"
-            && (request.path.hasPrefix("/outbox/") || request.path.hasPrefix("/ask/")
-                || request.path.hasPrefix("/permission/"))
+            && (request.path.hasPrefix("/outbox/") || request.path.hasPrefix("/ask/"))
         if request.fromBrowser, request.method != "GET" || consumesGET {
             respond(connection, status: "403 Forbidden",
                     body: #"{"ok":false,"error":"cross-origin writes refused"}"#)
@@ -609,54 +621,6 @@ final class ActivityServer: @unchecked Sendable {
                 self.respond(connection, status: "200 OK", body: #"{"ok":true}"#)
             }
 
-        // A tool call at the door. The one route in this app that can
-        // change what a running agent does, so it answers the common
-        // case first and fastest: "not interested", which is what every
-        // ungated tool gets, in one loopback round trip and no wait.
-        //
-        // Only a `gate: true` answer means the hook should stand there
-        // and poll. Anything else, including this app not running at
-        // all, and the call goes to Claude Code's own permission layer
-        // exactly as it always did.
-        case ("POST", "/permission"):
-            guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
-                  let session = object["session"] as? String, !session.isEmpty,
-                  let id = object["id"] as? String, !id.isEmpty,
-                  let tool = object["tool"] as? String, !tool.isEmpty
-            else {
-                respond(connection, status: "400 Bad Request",
-                        body: #"{"ok":false,"error":"need session, id and tool"}"#)
-                return
-            }
-            let detail = object["detail"] as? String ?? ""
-            // Only used when this session has no row yet, which happens
-            // for anything headless: it is the only name such a row will
-            // ever have. Ignored entirely for a session already on the
-            // rail, whose folder came from a source that checked it.
-            let cwd = (object["cwd"] as? String).flatMap { $0.hasPrefix("/") ? $0 : nil }
-            Task { @MainActor in
-                let held = self.sessions?.holdForApproval(
-                    sessionID: session, id: id, tool: tool, detail: detail, cwd: cwd) ?? false
-                self.respond(
-                    connection, status: "200 OK",
-                    body: held ? #"{"ok":true,"gate":true}"# : #"{"ok":true,"gate":false}"#)
-            }
-
-        // The hook standing at the door, asking whether it may come in
-        // yet. `null` means still waiting; the hook keeps polling until
-        // its own patience runs out, then withdraws the card itself.
-        case ("GET", let path) where path.hasPrefix("/permission/"):
-            let id = String(path.dropFirst("/permission/".count)).removingPercentEncoding ?? ""
-            Task { @MainActor in
-                guard let decision = self.sessions?.collectDecision(approvalID: id) else {
-                    self.respond(connection, status: "200 OK",
-                                 body: #"{"ok":true,"decision":null}"#)
-                    return
-                }
-                self.respond(connection, status: "200 OK",
-                             body: #"{"ok":true,"decision":"\#(decision.rawValue)"}"#)
-            }
-
         // What is being held right now, and deciding it from outside the
         // island. Here for the same reason `/outbox` is: everything else
         // in this app can be driven from a terminal and checked, and a
@@ -690,16 +654,6 @@ final class ActivityServer: @unchecked Sendable {
             }
             Task { @MainActor in
                 self.sessions?.decide(approvalID: id, as: decision)
-                self.respond(connection, status: "200 OK", body: #"{"ok":true}"#)
-            }
-
-        // The hook gave up and handed the question back to the terminal.
-        // The card goes with it: a choice nobody is listening for is a
-        // button that does nothing.
-        case ("DELETE", let path) where path.hasPrefix("/permission/"):
-            let id = String(path.dropFirst("/permission/".count)).removingPercentEncoding ?? ""
-            Task { @MainActor in
-                self.sessions?.abandonApproval(id: id)
                 self.respond(connection, status: "200 OK", body: #"{"ok":true}"#)
             }
 
@@ -883,13 +837,16 @@ final class ActivityServer: @unchecked Sendable {
         case ("POST", "/hook/elicitation"):
             askOnTheIsland(request, on: connection)
 
-        // Every tool call, before there is a prompt to answer.
+        // Every Claude Code tool call, standing at this app's own door.
         //
-        // This one never holds anything and never waits. It fires for
-        // calls nobody asked to supervise, dozens per turn, so the only
-        // acceptable shape is to decide in microseconds and get out of
-        // the way. Silence is the answer almost every time, and silence
-        // means the agent's own permission flow runs untouched.
+        // The gate, as one held request. This is what the polling shim
+        // used to approximate with three processes and a one-second
+        // poll: the hook is now suspended inside this request exactly
+        // the way a `PermissionRequest` is above, and answered from the
+        // same store. The common case is still "not interested",
+        // answered with an empty 200 in one loopback round trip: the
+        // arming rules decide which calls are held, and everything else
+        // runs exactly as it would if this app were not installed.
         case ("POST", "/hook/pre-tool-use"):
             guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
                   let call = HookPayload.call(from: object, fallbackID: UUID().uuidString)
@@ -897,12 +854,17 @@ final class ActivityServer: @unchecked Sendable {
                 respond(connection, status: "200 OK", body: "")
                 return
             }
-            Task { @MainActor in
-                let verdict = PolicyEngine.evaluate(
-                    tool: call.tool, detail: call.detail, cwd: call.cwd,
-                    grants: self.policy?.live() ?? [])
+            // However long the hook says it will wait, so the card
+            // counts down the truth rather than a number this app made
+            // up.
+            let patience = (object["timeout"] as? TimeInterval)
+                ?? TimeInterval(HookInstall.promptTimeout)
+            watchForHangup(connection, id: call.id)
+            Task { [weak self] in
+                guard let self else { return }
                 self.respond(
-                    connection, status: "200 OK", body: self.settle(verdict, for: call) ?? "")
+                    connection, status: "200 OK",
+                    body: await self.settleGate(call: call, patience: patience) ?? "")
             }
 
         // Deciding a held call from outside the island, and seeing what
@@ -1186,14 +1148,42 @@ final class ActivityServer: @unchecked Sendable {
         }
     }
 
+    /// Everything about holding one gated call except the connection:
+    /// the rules, the card, the wait, and the answer's shape. Its own
+    /// method so the whole pipeline can be proven in a test without a
+    /// socket.
+    ///
+    /// Unlike `hold(_:on:event:)` above, which holds unconditionally
+    /// because Claude Code already decided that call needs a person,
+    /// this one holds only what the arming rules name. Nil is silence:
+    /// an empty 200, and the agent's own permission flow untouched.
+    func settleGate(
+        call: HeldCall, patience: TimeInterval,
+        rules: [String]? = nil, exceptions: [String]? = nil
+    ) async -> String? {
+        let surfaced = await MainActor.run {
+            self.sessions?.holdForApproval(
+                sessionID: call.sessionID, id: call.id, tool: call.tool,
+                detail: call.detail, cwd: call.cwd.isEmpty ? nil : call.cwd,
+                patience: patience,
+                rules: rules ?? SessionStore.approvalRules(),
+                exceptions: exceptions ?? SessionStore.approvalExceptions()) ?? false
+        }
+        // Not on the list, or nowhere to show it. Either way the call
+        // runs exactly as it would have before this app existed.
+        guard surfaced else { return nil }
+        let decision = await gate.hold(call)
+        await MainActor.run { self.sessions?.clearApproval(id: call.id) }
+        return HookPayload.response(for: decision, event: call.event)
+    }
+
     /// Let go of anything this session was being held for.
     ///
-    /// Only ever releases what this app is itself holding over HTTP. A
-    /// call held by the polling shim is left exactly where it is: that
-    /// one comes back and collects its own answer on its own schedule,
-    /// and withdrawing its card from here would take the question away
-    /// from somebody mid-decision.
-    private func releaseHolds(inSession sessionID: String) async {
+    /// Releases what this app is holding over HTTP for the session that
+    /// ended: the suspended hooks are answered with "no opinion" and
+    /// their cards go, because a turn cannot end while a prompt is
+    /// standing, so whatever was held is already settled somewhere else.
+    func releaseHolds(inSession sessionID: String) async {
         let (heldCall, heldAsk) = await MainActor.run { () -> (String?, String?) in
             guard let session = self.sessions?.sessions.first(where: { $0.id == sessionID })
             else { return (nil, nil) }

@@ -121,13 +121,20 @@ enum HookInstall {
     /// other, and telling them the whole thing is installed when the
     /// deciding half is missing would be the worst kind of wrong: the
     /// rules would sit there looking armed.
+    ///
+    /// Two shapes count. The HTTP entry is the real thing; a command
+    /// entry running the old bundled script is an install armed before
+    /// the gate went HTTP, and the person who armed it meant it. It
+    /// reads as armed here so the next launch upgrades it in place
+    /// (`arm` removes it in the same write that adds the HTTP entry)
+    /// rather than telling them their own decision is off.
     static func holdsToolCalls(settings: [String: Any]?) -> Bool {
         guard let settings,
               let hooks = settings["hooks"] as? [String: Any],
               let entries = hooks["PreToolUse"] as? [[String: Any]]
         else { return false }
         return entries.contains { entry in
-            (entry["hooks"] as? [[String: Any]])?.contains {
+            isOurs(entry, path: gatePath) || (entry["hooks"] as? [[String: Any]])?.contains {
                 ($0["command"] as? String)?.contains("chalant-hook") ?? false
             } ?? false
         }
@@ -138,21 +145,28 @@ enum HookInstall {
         return holdsToolCalls(settings: object)
     }
 
-    /// The line that arms the rules. Its own snippet rather than a
-    /// bigger version of the main one: this hook can stop a command
-    /// from running, so adding it is a decision of its own and should
-    /// read like one.
+    /// The entry that arms the rules, for pasting by hand. Its own
+    /// snippet rather than a bigger version of the main one: this hook
+    /// can stop a command from running, so adding it is a decision of
+    /// its own and should read like one.
     ///
-    /// The generous timeout is the hook's patience plus room to answer.
-    /// A shorter one than the hook waits would have Claude Code kill it
-    /// mid-question and the card would outlive the agent asking.
+    /// The same HTTP shape `arm()` writes. The token is filled in when
+    /// the server has published one, and named by its file when it has
+    /// not, because a snippet with a placeholder that looks real is a
+    /// 401 with nothing anywhere saying why.
     static var holdSnippet: String {
-        let path = bundledScriptPath ?? "/path/to/scripts/chalant-hook"
+        let (port, token) = serverConfig()
+            ?? (ActivityServer.port,
+                "<the token from ~/Library/Application Support/Chalant/server.json>")
         return """
         {
           "hooks": {
             "PreToolUse": [
-              { "hooks": [ { "type": "command", "command": "\(path)", "timeout": 40 } ] }
+              { "matcher": "*",
+                "hooks": [ { "type": "http",
+                             "url": "http://127.0.0.1:\(port)\(gatePath)",
+                             "timeout": \(promptTimeout),
+                             "headers": { "Authorization": "Bearer \(token)" } } ] }
             ]
           }
         }
@@ -189,14 +203,46 @@ enum HookInstall {
         case refused(String)
     }
 
-    /// The `PreToolUse` entry this app installs, and the only one it
-    /// will ever remove.
-    private static func holdEntry() -> [String: Any]? {
-        guard let path = bundledScriptPath else { return nil }
-        return ["hooks": [["type": "command", "command": path, "timeout": 40]]]
+    /// The path the gate answers on: a `PreToolUse` held open until
+    /// somebody decides, or nobody does.
+    static let gatePath = "/hook/pre-tool-use"
+
+    /// Our command hooks removed from inside each entry, the other
+    /// halves kept. Shared by `arm` (which upgrades the old command
+    /// entry to HTTP in the same write) and `disarm` (which has to
+    /// reach inside a hand-built entry mixing our hook with another
+    /// tool's — `holdsToolCalls` counts such an entry as armed, so
+    /// removal has to match the same way or it could never be turned
+    /// off from here).
+    private static func withoutOurCommandHooks(
+        _ entries: [[String: Any]]
+    ) -> [[String: Any]] {
+        entries.compactMap { entry in
+            guard var inner = entry["hooks"] as? [[String: Any]] else { return entry }
+            inner.removeAll { ($0["command"] as? String)?.contains("chalant-hook") ?? false }
+            guard !inner.isEmpty else { return nil }
+            var kept = entry
+            kept["hooks"] = inner
+            return kept
+        }
     }
 
     /// Add the hook that lets the island hold a tool call.
+    ///
+    /// An HTTP hook, since the gate went native. The command shape this
+    /// used to write ran the bundled script on every tool call, which
+    /// asked this app whether to hold and then polled once a second for
+    /// the answer: three processes and a busy-wait per held call, with
+    /// a 25-second patience the polling imposed. The HTTP entry is one
+    /// request that stays open until somebody decides, the same shape
+    /// `PermissionRequest` already uses, answered from the same store.
+    /// A legacy command entry found here is upgraded in the same write,
+    /// so an install armed before this keeps working without a button
+    /// press.
+    ///
+    /// Adding and refreshing are one operation, exactly like
+    /// `armPrompts`: re-running when nothing changed writes no file at
+    /// all, and re-running after the port moved fixes the entry.
     ///
     /// Everything here is in service of one rule: a settings file this
     /// app does not fully understand is a settings file it does not
@@ -211,11 +257,20 @@ enum HookInstall {
     /// `SessionStore`'s `outboxDirectory` is: a test must never be one
     /// typo away from rewriting the real install's Claude config.
     @discardableResult
-    static func arm(at url: URL? = nil) -> ArmOutcome {
-        let settingsURL = url ?? Self.settingsURL
-        guard let entry = holdEntry() else {
-            return .refused("Chalant can't find its own hook script inside the app bundle.")
+    static func arm(
+        port: UInt16? = nil, token: String? = nil, at url: URL? = nil
+    ) -> ArmOutcome {
+        let resolved: (port: UInt16, token: String)
+        if let port, let token {
+            resolved = (port, token)
+        } else if let found = serverConfig() {
+            resolved = found
+        } else {
+            return .refused(
+                "Chalant's own door isn't open yet, so there is no address to point Claude "
+                + "Code at. Try again in a moment.")
         }
+        let settingsURL = url ?? Self.settingsURL
         var settings: [String: Any]
         switch fileState(at: settingsURL) {
         case .parsed(let object):
@@ -229,33 +284,29 @@ enum HookInstall {
                 "Your ~/.claude/settings.json has something in it that isn't valid JSON. "
                 + "Chalant won't rewrite a file it can't read. Fix the file and try again.")
         }
-        if holdsToolCalls(settings: settings) { return .alreadyArmed }
-
         var hooks = settings["hooks"] as? [String: Any] ?? [:]
-        var preToolUse = hooks["PreToolUse"] as? [[String: Any]] ?? []
-        preToolUse.append(entry)
-        hooks["PreToolUse"] = preToolUse
-        settings["hooks"] = hooks
-
-        guard let data = try? JSONSerialization.data(
-            withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
-        else { return .refused("Chalant could not build the new settings file.") }
-
-        let backup = backUpSettings(settingsURL)
-        // Through the symlink, not over it: some people keep their
-        // Claude config in a dotfiles repo and point at it from here,
-        // and replacing the link would quietly disconnect them from
-        // their own versioned file.
-        let destination = settingsURL.resolvingSymlinksInPath()
-        do {
-            try FileManager.default.createDirectory(
-                at: destination.deletingLastPathComponent(),
-                withIntermediateDirectories: true)
-            try data.write(to: destination, options: .atomic)
-        } catch {
-            return .refused("Chalant could not write \(destination.path): \(error.localizedDescription)")
+        var entries = hooks["PreToolUse"] as? [[String: Any]] ?? []
+        var changed = false
+        // The legacy command entry goes in the same write that adds the
+        // HTTP one. Kept alongside, every held call would be asked
+        // about twice, one of the askers polling an answer this app
+        // stopped publishing.
+        let upgraded = withoutOurCommandHooks(entries)
+        if !NSArray(array: upgraded).isEqual(to: entries) {
+            entries = upgraded
+            changed = true
         }
-        return .armed(backup: backup)
+        let wanted = entry(path: gatePath, port: resolved.port, token: resolved.token)
+        let ours = entries.filter { isOurs($0, path: gatePath) }
+        if !(ours.count == 1 && NSDictionary(dictionary: ours[0]).isEqual(to: wanted)) {
+            entries.removeAll { isOurs($0, path: gatePath) }
+            entries.append(wanted)
+            changed = true
+        }
+        guard changed else { return .alreadyArmed }
+        hooks["PreToolUse"] = entries
+        settings["hooks"] = hooks
+        return commit(settings, to: settingsURL)
     }
 
     // MARK: Answering the prompt itself
@@ -752,10 +803,14 @@ enum HookInstall {
 
     /// Take the hook back out, leaving every other hook alone.
     ///
-    /// Matches on the command containing `chalant-hook`, the same test
-    /// `holdsToolCalls` uses, so an entry somebody wrote themselves
-    /// pointing at this app's script is removed too. That is the right
-    /// answer: they asked for it gone.
+    /// Removes both shapes this app has ever installed: the HTTP gate
+    /// entry, and the old command entry running the bundled script —
+    /// including one somebody wrote themselves pointing at this app's
+    /// script, which is the right answer: they asked for it gone. An
+    /// entry mixing our command hook with another tool's loses only our
+    /// half (`withoutOurCommandHooks`), because detection counts such
+    /// an entry as armed and removal has to be able to undo whatever
+    /// detection can see.
     @discardableResult
     static func disarm(at url: URL? = nil) -> ArmOutcome {
         let settingsURL = url ?? Self.settingsURL
@@ -763,34 +818,20 @@ enum HookInstall {
             return .refused("Chalant can't read your ~/.claude/settings.json.")
         }
         guard var hooks = settings["hooks"] as? [String: Any],
-              var preToolUse = hooks["PreToolUse"] as? [[String: Any]]
+              let preToolUse = hooks["PreToolUse"] as? [[String: Any]]
         else { return .armed(backup: nil) }
-        // Reaches inside each entry rather than removing entries whole.
-        // `holdsToolCalls` counts an entry as armed if ANY inner hook is
-        // ours, so removal has to match the same way: an entry somebody
-        // hand-built mixing this app's hook with another tool's used to
-        // read as armed forever, because the old all-or-nothing removal
-        // would never touch it. The other tool's half stays put.
-        preToolUse = preToolUse.compactMap { entry in
-            guard var inner = entry["hooks"] as? [[String: Any]] else { return entry }
-            inner.removeAll { ($0["command"] as? String)?.contains("chalant-hook") ?? false }
-            guard !inner.isEmpty else { return nil }
-            var kept = entry
-            kept["hooks"] = inner
-            return kept
+        var entries = withoutOurCommandHooks(preToolUse)
+        entries.removeAll { isOurs($0, path: gatePath) }
+        guard !NSArray(array: entries).isEqual(to: preToolUse) else {
+            return .armed(backup: nil)
         }
-        if preToolUse.isEmpty { hooks.removeValue(forKey: "PreToolUse") } else { hooks["PreToolUse"] = preToolUse }
+        if entries.isEmpty {
+            hooks.removeValue(forKey: "PreToolUse")
+        } else {
+            hooks["PreToolUse"] = entries
+        }
         settings["hooks"] = hooks
-        guard let data = try? JSONSerialization.data(
-            withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
-        else { return .refused("Chalant could not build the new settings file.") }
-        let backup = backUpSettings(settingsURL)
-        do {
-            try data.write(to: settingsURL.resolvingSymlinksInPath(), options: .atomic)
-        } catch {
-            return .refused("Chalant could not write your settings: \(error.localizedDescription)")
-        }
-        return .armed(backup: backup)
+        return commit(settings, to: settingsURL)
     }
 
     /// A dated copy beside the original, so undo never depends on this
