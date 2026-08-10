@@ -764,16 +764,14 @@ struct TodayView: View {
         }
     }
 
-    /// One header for the whole day, anchored by the date.
+    /// The date is the panel's headline; a weather line joins the
+    /// right side in a later round.
     private var header: some View {
         HStack(spacing: Theme.Space.s) {
-            SectionHeader(title: "Today")
-            Rectangle()
-                .fill(Theme.hairlineFaint)
-                .frame(height: 1)
             Text(Self.dateFormatter.string(from: Date()))
-                .font(Theme.Fonts.microMono)
-                .foregroundStyle(Theme.textGhost)
+                .font(Theme.Fonts.headline)
+                .foregroundStyle(Theme.textPrimary)
+            Spacer()
         }
     }
 
@@ -819,11 +817,11 @@ struct TodayView: View {
     private var clearDay: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             Text("Clear water.")
-                .font(Theme.Fonts.reading)
+                .font(Theme.Fonts.subhead)
                 .foregroundStyle(Theme.textSecondary)
             Text(Self.clearDayDetail(seesCalendar: seesCalendar, seesReminders: seesReminders))
-                .font(Theme.Fonts.caption)
-                .foregroundStyle(Theme.textHint)
+                .font(Theme.Fonts.subhead)
+                .foregroundStyle(Theme.textTertiary)
         }
         .padding(.vertical, Theme.Space.s)
     }
