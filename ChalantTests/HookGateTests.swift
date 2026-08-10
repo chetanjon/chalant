@@ -157,6 +157,76 @@ final class HookGateTests: XCTestCase {
         XCTFail("\(id) was never held", file: file, line: line)
     }
 
+    // MARK: The answer store keeps the same discipline
+
+    // Both stores are the same generic actor now (`HookHoldStore`), so
+    // these prove the discipline holds through the answer-shaped
+    // instantiation too: the twins used to be hand-written duplicates,
+    // and a rule proven for one had to be re-proven for the other.
+
+    private func ask(id: String = "ask_1") -> Elicitation {
+        Elicitation(id: id, sessionID: "s1", cwd: "/tmp", message: "Which one?",
+                    server: "srv", fields: [])
+    }
+
+    private func waitUntilAsked(
+        _ id: String, in store: PendingAnswerStore, file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<200 {
+            if await store.isHeld(id) { return }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTFail("\(id) was never held", file: file, line: line)
+    }
+
+    func testAnAnswerIsResolvedExactlyOnce() async {
+        let store = PendingAnswerStore()
+        let held = ask()
+        async let outcome = store.hold(held)
+        await waitUntilAsked(held.id, in: store)
+
+        let first = await store.resolve(held.id, as: .accept(["answer": "B"]))
+        let second = await store.resolve(held.id, as: .decline)
+        let third = await store.abandon(held.id)
+
+        XCTAssertTrue(first)
+        XCTAssertFalse(second, "a second answer must not resume anything")
+        XCTAssertFalse(third, "a hang-up after an answer must not resume anything")
+        let answered = await outcome
+        XCTAssertEqual(answered, .accept(["answer": "B"]))
+        let outstanding = await store.count
+        XCTAssertEqual(outstanding, 0)
+    }
+
+    func testAnAbandonedAnswerFallsThrough() async {
+        let store = PendingAnswerStore()
+        let held = ask(id: "ask_2")
+        async let outcome = store.hold(held)
+        await waitUntilAsked(held.id, in: store)
+
+        let abandoned = await store.abandon(held.id)
+        let answered = await outcome
+
+        XCTAssertTrue(abandoned)
+        XCTAssertEqual(answered, .abstain,
+                       "never an accept and never a decline: the agent's own dialog runs")
+    }
+
+    func testTheSameAskTwiceDoesNotStrandTheFirstWaiter() async {
+        let store = PendingAnswerStore()
+        let held = ask(id: "ask_3")
+        async let first = store.hold(held)
+        await waitUntilAsked(held.id, in: store)
+
+        let second = await store.hold(held)
+        XCTAssertEqual(second, .abstain, "the duplicate falls through instead of taking over")
+
+        await store.resolve(held.id, as: .decline)
+        let answer = await first
+        XCTAssertEqual(answer, .decline, "the original waiter is still the one answered")
+    }
+
     // MARK: The two schemas that are not the same schema
 
     func testPermissionRequestAndPreToolUseAnswerInDifferentShapes() throws {

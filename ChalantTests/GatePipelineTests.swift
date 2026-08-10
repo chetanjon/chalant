@@ -267,6 +267,57 @@ final class GatePipelineTests: XCTestCase {
         XCTAssertNil(answer, "declining must fall through, never deny the question itself")
     }
 
+    func testSessionEndReleasesAHeldQuestion() async {
+        // The same release the gate's holds get: a turn cannot end while
+        // a question is standing, so session-end is proof it was settled
+        // somewhere else, and the card must not outlive it.
+        let (server, sessions) = makeGate()
+        let held = questionCall(id: "toolu_ask_5")
+        async let body = server.settleQuestion(
+            call: held, questions: oneQuestion(), patience: 600)
+        await waitForAsk(held.id, in: sessions)
+
+        await server.releaseHolds(inSession: held.sessionID)
+
+        let answer = await body
+        XCTAssertNil(answer)
+        XCTAssertNil(sessions.sessions.first(where: { $0.id == held.sessionID })?.ask)
+    }
+
+    func testAQuestionHangupWithdrawsTheCardAndAnswersNothing() async {
+        // What `watchForHangup(answers: true)` does when the asking
+        // side of the wire goes quiet.
+        let (server, sessions) = makeGate()
+        let held = questionCall(id: "toolu_ask_6")
+        async let body = server.settleQuestion(
+            call: held, questions: oneQuestion(), patience: 600)
+        await waitForAsk(held.id, in: sessions)
+
+        let found = await server.answers.abandon(held.id)
+        XCTAssertTrue(found)
+
+        let answer = await body
+        XCTAssertNil(answer, "an abandoned question must not become an answer")
+        XCTAssertNil(sessions.sessions.first?.ask, "the card goes with the asker")
+    }
+
+    // MARK: Who owns the preferred port
+
+    func testOnlyAChalantShapedAnswerReadsAsAnotherChalant() {
+        // The guard that keeps a fallback-port instance from rewriting
+        // the owner's config: /health answers with the app's name, and
+        // even its 401 names the app. Anything else on the port is not
+        // one of us, and the hooks must follow this instance instead.
+        XCTAssertTrue(ActivityServer.portOwnerIsChalant(
+            Data(#"{"ok":true,"app":"Chalant","version":"1.8.2"}"#.utf8)))
+        XCTAssertTrue(ActivityServer.portOwnerIsChalant(
+            Data(#"{"ok":false,"error":"send X-Chalant-Token or Authorization: Bearer, see ~/Library/Application Support/Chalant/server.json"}"#.utf8)))
+        XCTAssertFalse(ActivityServer.portOwnerIsChalant(
+            Data(#"{"ok":true,"app":"SomethingElse"}"#.utf8)))
+        XCTAssertFalse(ActivityServer.portOwnerIsChalant(Data()))
+        XCTAssertFalse(ActivityServer.portOwnerIsChalant(nil))
+    }
+
     func testTheGateStandsAsideForAQuestionEvenWhenARuleMatchesIt() async {
         // A rule broad enough to name AskUserQuestion must not draw an
         // approval card with no options on it: the ask pipeline owns
