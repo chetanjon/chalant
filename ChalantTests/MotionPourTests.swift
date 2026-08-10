@@ -25,4 +25,14 @@ final class MotionPourTests: XCTestCase {
         XCTAssertEqual(shape.topRadius, 30)
         XCTAssertEqual(shape.tipRadius, 8)
     }
+
+    func testACrashIsMarkedSeenWithoutForgettingItThisSession() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: "chalant.crashSeenAt")
+        let date = Date(timeIntervalSince1970: 1_754_500_000)
+        CrashWatch.markSeen(date)
+        XCTAssertEqual(
+            defaults.object(forKey: "chalant.crashSeenAt") as? Date, date)
+        defaults.removeObject(forKey: "chalant.crashSeenAt")
+    }
 }

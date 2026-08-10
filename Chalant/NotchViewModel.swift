@@ -307,6 +307,7 @@ final class NotchViewModel: ObservableObject {
             state: .needsInput
         )
         flashGlance("Chalant crashed last time. Say \u{201C}crash report\u{201D}.", seconds: 8)
+        crashWatch.markSeenNow() // shown is seen; the card and verbs still work this session
     }
 
     func replayWelcome() {

@@ -82,6 +82,19 @@ final class CrashWatch: ObservableObject {
         unreported = nil
     }
 
+    /// The report has been put in front of the user (the card pushed,
+    /// the glance flashed): record that, so the next launch stays
+    /// quiet, but keep `unreported` for this session so "crash report"
+    /// can still read it out. The card's X never called acknowledge(),
+    /// which is how one August crash greeted every launch for days.
+    static func markSeen(_ date: Date) {
+        UserDefaults.standard.set(date, forKey: seenKey)
+    }
+
+    func markSeenNow() {
+        if let date = unreported?.date { Self.markSeen(date) }
+    }
+
     /// The whole report on the pasteboard, for pasting into an issue.
     /// Explicit action only: these files name paths and loaded
     /// libraries, so nothing copies itself.
