@@ -62,6 +62,15 @@ final class MotionPourTests: XCTestCase {
             84, "a player that never catches up gets the truth back after 3s")
     }
 
+    /// The Displays sliders do not start at zero (inner padding runs
+    /// 8...36, and kin), which the volume call sites never exercised.
+    func testThinSliderMathHandlesARangeThatDoesNotStartAtZero() {
+        XCTAssertEqual(ThinSlider.value(atX: 0, width: 180, in: 8...36), 8)
+        XCTAssertEqual(ThinSlider.value(atX: 90, width: 180, in: 8...36), 22)
+        XCTAssertEqual(ThinSlider.value(atX: 180, width: 180, in: 8...36), 36)
+        XCTAssertEqual(ThinSlider.value(atX: -40, width: 180, in: 8...36), 8)
+    }
+
     func testThinSliderMathMapsAndClampsAcrossItsRange() {
         XCTAssertEqual(ThinSlider.value(atX: 42, width: 84, in: 0...100), 50)
         XCTAssertEqual(ThinSlider.value(atX: -5, width: 84, in: 0...100), 0)

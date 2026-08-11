@@ -98,6 +98,7 @@ struct MusicRow: View {
                                     }
                                 ),
                                 in: 0...100,
+                                label: "Volume",
                                 onCommit: { target in
                                     music.commitVolume(target)
                                     volumeOverride = nil
@@ -323,7 +324,7 @@ struct AmbienceRow: View {
                     Image(systemName: "speaker.wave.2.fill")
                         .font(Theme.Fonts.icon(.xs))
                         .foregroundStyle(Theme.textTertiary)
-                    ThinSlider(value: $ambience.volume, in: 0...1, onCommit: nil)
+                    ThinSlider(value: $ambience.volume, in: 0...1, label: "Ambience volume")
                 }
                 .transition(.opacity)
             }

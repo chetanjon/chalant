@@ -257,12 +257,22 @@ struct DisplaysSection: View {
         unit: String
     ) -> some View {
         let value = displays.config(forKey: screen.id)[keyPath: path]
+        // The store speaks CGFloat and ThinSlider speaks Double, and a
+        // Binding of one is not a Binding of the other however freely
+        // the scalars convert, so the bridge is written out here.
+        let stored = binding(screen, path)
         return SettingRow(label: label) {
             HStack(spacing: Theme.Space.m) {
-                Slider(value: binding(screen, path), in: range)
-                    .controlSize(.small)
-                    .frame(width: 180)
-                    .accessibilityLabel(label)
+                ThinSlider(
+                    value: Binding(
+                        get: { Double(stored.wrappedValue) },
+                        set: { stored.wrappedValue = CGFloat($0) }
+                    ),
+                    in: Double(range.lowerBound)...Double(range.upperBound),
+                    label: label,
+                    width: 180,
+                    describe: { "\(Int($0))\(unit)" }
+                )
                 // The number, not just the knob: a slider alone cannot
                 // be matched between two displays.
                 Text("\(Int(value))\(unit)")

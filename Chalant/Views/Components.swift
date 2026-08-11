@@ -739,13 +739,40 @@ struct ThinSlider: View {
     @State private var dragging = false
     @State private var hovered = false
 
-    // The memberwise init would label this parameter `range:`; call
+    /// What this slider is called, for assistive tech. Required rather
+    /// than defaulted: the first version hardcoded "Volume", which was
+    /// correct at both volume call sites and a trap for every later one.
+    var label: String
+    /// The track's drawn width. Volume rides at 84 beside its speaker;
+    /// a settings row has a whole column to spend.
+    var width: CGFloat = 84
+    /// How the current value reads aloud. Volume is a percentage of its
+    /// range; a measurement says its own number and unit.
+    var describe: ((Double) -> String)?
+
+    // The memberwise init would label the range parameter `range:`; call
     // sites read as a slider (`in: 0...1`, matching ScrubBar's own
     // static function below) so the label is spelled out here.
-    init(value: Binding<Double>, in range: ClosedRange<Double> = 0...1, onCommit: ((Double) -> Void)? = nil) {
+    init(
+        value: Binding<Double>,
+        in range: ClosedRange<Double> = 0...1,
+        label: String,
+        width: CGFloat = 84,
+        describe: ((Double) -> String)? = nil,
+        onCommit: ((Double) -> Void)? = nil
+    ) {
         self._value = value
         self.range = range
+        self.label = label
+        self.width = width
+        self.describe = describe
         self.onCommit = onCommit
+    }
+
+    private var spokenValue: String {
+        if let describe { return describe(value) }
+        let span = max(range.upperBound - range.lowerBound, 0.0001)
+        return "\(Int((value - range.lowerBound) / span * 100)) percent"
     }
 
     static func value(atX x: CGFloat, width: CGFloat, in range: ClosedRange<Double>) -> Double {
@@ -783,12 +810,12 @@ struct ThinSlider: View {
                     }
             )
         }
-        .frame(width: 84, height: 16)
+        .frame(width: width, height: 16)
         .onHover { hovered = $0 }
         .animation(Theme.Motion.hover, value: hovered || dragging)
         .accessibilityElement()
-        .accessibilityLabel("Volume")
-        .accessibilityValue(Text("\(Int((value - range.lowerBound) / max(range.upperBound - range.lowerBound, 0.0001) * 100)) percent"))
+        .accessibilityLabel(label)
+        .accessibilityValue(Text(spokenValue))
         .accessibilityAdjustableAction { direction in
             let step = (range.upperBound - range.lowerBound) * 0.05
             let delta = direction == .increment ? step : -step
