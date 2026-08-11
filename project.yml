@@ -73,7 +73,13 @@ targets:
         NSSpeechRecognitionUsageDescription: "Turns your words into actions. The transcription is macOS dictation, which runs on this Mac when its local model is ready and through Apple's service when it is not. The answer itself never leaves."
         NSRemindersFullAccessUsageDescription: Chalant creates the reminders you set.
         NSCalendarsFullAccessUsageDescription: Chalant adds events and reads today's agenda.
+        # Both spellings on purpose: macOS reads the classic key, but
+        # CLLocationManager's authorization ask is documented to do
+        # NOTHING unless the WhenInUse key is present too. Only the
+        # classic one shipped for a while, and the location prompt
+        # never appeared at all.
         NSLocationUsageDescription: Chalant reads your approximate location to show the weather beside your day.
+        NSLocationWhenInUseUsageDescription: Chalant reads your approximate location to show the weather beside your day.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cj.chalant

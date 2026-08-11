@@ -18,9 +18,9 @@ struct ExpandedView: View {
     /// `stats.battery` to decide whether the tab even exists.
     @ObservedObject var stats: SystemStatsController
 
-    // Modular blocks, each shows only if the user keeps it on. Media,
-    // ambience and the tools are on out of the box; your day (calendar,
-    // reminders) is opt-in, so a fresh island stays quiet and private.
+    // Modular blocks, each shows only if the user keeps it on. All of
+    // them ship on, the day included: macOS's own permission ask is
+    // the real privacy gate there, not a second hidden switch.
     @AppStorage("showMedia") private var showMedia = true
     @AppStorage("showAmbience") private var showAmbience = true
     @AppStorage("showCalendar") private var showCalendar = true
@@ -788,9 +788,11 @@ struct TodayView: View {
                     // two flags as values, and the `@AppStorage` that
                     // owns them (ExpandedView, the settings window) is
                     // watching these exact keys, so both surfaces catch
-                    // up on the same write.
-                    UserDefaults.standard.set(true, forKey: "showCalendar")
-                    UserDefaults.standard.set(true, forKey: "showReminders")
+                    // up on the same write. Only the switch the label
+                    // names is touched; a source that is already on is
+                    // not written at all.
+                    if !showCalendar { UserDefaults.standard.set(true, forKey: "showCalendar") }
+                    if !showReminders { UserDefaults.standard.set(true, forKey: "showReminders") }
                     Task { await events.refresh() }
                 }
                 .buttonStyle(.bordered)
@@ -839,12 +841,15 @@ struct TodayView: View {
             if showWeather,
                let reading = WeatherController.usableReading(weather.reading, now: Date()) {
                 HStack(spacing: Theme.Space.xs) {
-                    Image(systemName: "sun.max")
+                    Image(systemName: WeatherController.skyGlyph(code: reading.code))
                         .font(Theme.Fonts.iconThin(.m))
                     Text(WeatherController.line(
                         reading, celsius: WeatherController.wantsCelsius(locale: .current)
                     ))
-                    .font(Theme.Fonts.subhead)
+                    // Numbers are monospace (design law): the degrees
+                    // hold still across refreshes while the sky word
+                    // keeps the subhead voice.
+                    .font(Theme.Fonts.subhead.monospacedDigit())
                 }
                 .foregroundStyle(Theme.textSecondary)
             }

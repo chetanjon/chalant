@@ -159,10 +159,9 @@ enum Theme {
         }
 
         /// Thin outline glyphs, the finish's icon voice. Regular, not
-        /// semibold: the row reads by brightness, never by bulk.
-        /// Reserved for the finish's later rounds (the weather glyph
-        /// is its first consumer), so having no view callers yet is
-        /// intent, not leftovers.
+        /// semibold: the row reads by brightness, never by bulk. The
+        /// weather glyph on Today wears it; later finish rounds add
+        /// more.
         static func iconThin(_ scale: IconScale) -> Font {
             .system(size: scale.rawValue, weight: .regular)
         }

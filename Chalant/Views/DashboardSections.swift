@@ -1276,10 +1276,12 @@ struct WhatShowsSection: View {
             }
             reminderLists = lists
         }
-        // Flipping on starts the controller (start() is idempotent); flipping off keeps
-        // running until relaunch, the same pattern EventKitService's toggles follow.
+        // The toggle is the controller's whole lifecycle: on starts it,
+        // off stops it (timer, wake observer, location asks, all of it).
+        // Off-then-on is also the one user action that can re-raise the
+        // macOS location prompt while it is still undecided.
         .onChange(of: showWeather) { _, on in
-            if on { weather.start() }
+            if on { weather.start() } else { weather.stop() }
         }
     }
 }

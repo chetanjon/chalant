@@ -1,6 +1,12 @@
 import AppKit
 import CoreLocation
 import Foundation
+import os
+
+/// File-scope so the URLSession callback (not on the main actor) can
+/// speak too. Console is the only place weather ever complains; the
+/// line itself stays silent by design.
+private let log = Logger(subsystem: "com.cj.chalant", category: "weather")
 
 /// The weather line beside the date on Today. Keyless (Open-Meteo needs
 /// no account, no API key) and approximate on purpose: CoreLocation's
@@ -55,9 +61,10 @@ final class WeatherController: NSObject, ObservableObject, CLLocationManagerDele
 
     // MARK: - Lifecycle
 
-    /// Gated by the caller on the "showWeather" default: starting is
-    /// what turns the fetch on, not just the line's visibility, so a
-    /// toggled-off block never quietly asks CoreLocation for anything.
+    /// Gated by the caller on `showsWeather`: starting is what turns
+    /// the fetch on, not just the line's visibility. `stop()` is the
+    /// other half, so a toggled-off block never quietly asks
+    /// CoreLocation for anything.
     func start() {
         guard !started else { return }
         started = true
@@ -77,19 +84,36 @@ final class WeatherController: NSObject, ObservableObject, CLLocationManagerDele
         }
     }
 
+    /// Off means quiet, not hidden: the timer and the wake observer
+    /// come down and `started` resets, so nothing asks CoreLocation
+    /// for anything until a fresh `start()`. Resetting `started` is
+    /// also what makes the toggle a real second chance at the system
+    /// prompt: flipping it back on re-runs the ask from a genuine
+    /// user action.
+    func stop() {
+        started = false
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+        }
+        wakeObserver = nil
+    }
+
     /// Notdetermined asks; already-authorized just fetches. Denied,
     /// restricted, or any other status does nothing at all, the same
     /// silent fallthrough every other path here uses.
     private func requestIfAuthorized() {
         switch manager.authorizationStatus {
         case .notDetermined:
-            // macOS has no "when in use" tier of its own
-            // (kCLAuthorizationStatusAuthorizedWhenInUse is unavailable
-            // here); requesting "always" is the one system prompt
-            // there is, and it reads its reason from
-            // NSLocationUsageDescription, the classic Mac key, not the
-            // iOS/Catalyst *WhenInUse* ones.
-            manager.requestAlwaysAuthorization()
+            // The ask that actually works on macOS: the "always"
+            // variant is documented (CLLocationManager.h) to do
+            // NOTHING unless both iOS-style *WhenInUse* keys are in
+            // Info.plist, and a when-in-use grant surfaces as
+            // .authorized/.authorizedAlways here anyway, which the
+            // cases below already accept.
+            log.info("location not determined, asking")
+            manager.requestWhenInUseAuthorization()
         case .authorizedAlways, .authorized:
             manager.requestLocation()
         default:
@@ -102,6 +126,7 @@ final class WeatherController: NSObject, ObservableObject, CLLocationManagerDele
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         // The toggle governs the fetch, so an unstarted controller ignores its manager.
         guard started else { return }
+        log.info("location authorization now \(manager.authorizationStatus.rawValue)")
         switch manager.authorizationStatus {
         case .authorizedAlways, .authorized:
             manager.requestLocation()
@@ -118,8 +143,10 @@ final class WeatherController: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        // Silent: whatever the cache already holds keeps showing until
-        // it goes stale on its own (`usableReading` at read time).
+        // Silent in the UI: whatever the cache already holds keeps
+        // showing until it goes stale on its own (`usableReading` at
+        // read time). Console still hears about it.
+        log.error("location failed: \(error.localizedDescription)")
     }
 
     // MARK: - Network
@@ -135,8 +162,11 @@ final class WeatherController: NSObject, ObservableObject, CLLocationManagerDele
         // up anything on the main thread, and hopping back to
         // MainActor by hand inside the callback is the whole point of
         // that shape here.
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            guard let data, let decoded = Self.decode(data) else { return }
+        URLSession.shared.dataTask(with: url) { [weak self] data, _, error in
+            guard let data, let decoded = Self.decode(data) else {
+                log.error("fetch dropped: \(error?.localizedDescription ?? "undecodable reply", privacy: .public)")
+                return
+            }
             Task { @MainActor in
                 guard let self else { return }
                 let fresh = Reading(temperature: decoded.temperature, code: decoded.code, at: Date())
@@ -159,6 +189,33 @@ final class WeatherController: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     // MARK: - Statics (pinned by WeatherTests)
+
+    /// One rule in one place (the `EventKitService.showsCalendar`
+    /// pattern): unset means ON, an explicit false is honoured, and
+    /// the two `@AppStorage("showWeather")` declarations carry the
+    /// same default.
+    static func showsWeather(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: "showWeather") == nil || defaults.bool(forKey: "showWeather")
+    }
+
+    /// The WMO table again, as glyphs, so the icon agrees with the
+    /// word: rain reads as rain, not a sun over a downpour. The case
+    /// ranges mirror `skyWord` exactly; an unrecognized code falls
+    /// back to the sun the same way it falls back to "Sky".
+    static func skyGlyph(code: Int) -> String {
+        switch code {
+        case 0: return "sun.max"
+        case 1, 2: return "cloud.sun"
+        case 3: return "cloud"
+        case 45, 48: return "cloud.fog"
+        case 51...67: return "cloud.rain"
+        case 71...77: return "cloud.snow"
+        case 80...82: return "cloud.rain"
+        case 85, 86: return "cloud.snow"
+        case 95...99: return "cloud.bolt"
+        default: return "sun.max"
+        }
+    }
 
     /// The WMO weather-code table, collapsed to the words the glance
     /// needs. An unrecognized code (a future Open-Meteo addition) still

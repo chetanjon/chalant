@@ -34,6 +34,8 @@
 	<true/>
 	<key>NSLocationUsageDescription</key>
 	<string>Chalant reads your approximate location to show the weather beside your day.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Chalant reads your approximate location to show the weather beside your day.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Hold the notch to talk. macOS turns your speech into text on this Mac when its local model is ready, and through Apple's dictation service when it is not.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
