@@ -270,7 +270,7 @@ struct DashboardView: View {
         // What shows and Island). The window's controls speak the
         // island's monochrome finish; the accent still reaches whatever
         // asks for it by name, below.
-        .tint(Color.white.opacity(0.9))
+        .tint(Theme.controlTint)
         .environment(\.chalantAccent, Theme.fixedAccent(for: accentMode) ?? model.music.accent)
     }
 
@@ -379,7 +379,7 @@ struct SettingToggle: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.mini)
-                .tint(Color.white.opacity(0.9))
+                .tint(Theme.controlTint)
                 // The switch alone is the control; the row's text is its
                 // name, and without this a screen reader announces an
                 // unlabelled switch.

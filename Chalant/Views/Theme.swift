@@ -64,6 +64,10 @@ enum Theme {
     // under tertiary, so the hierarchy still reads.
     static let textGhost = Color.white.opacity(0.45)
 
+    /// The settings window's controls: the finish speaks in white, so a control that is on or
+    /// current reads the same as the text that names it.
+    static let controlTint = Color.white.opacity(0.9)
+
     static let danger = Color(red: 1.0, green: 0.45, blue: 0.45)
     /// A status reading as healthy rather than merely quiet: the Stop
     /// hook installed, a check passing. Grey never says "this is fine,"

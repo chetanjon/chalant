@@ -23,7 +23,7 @@ struct GeneralSection: View {
     @State private var inputDevices: [(name: String, uid: String)] = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             SettingCard(title: "Startup") {
                 SettingToggle(label: "Start at login", isOn: Binding(
                     get: { launchAtLogin },
@@ -47,7 +47,7 @@ struct GeneralSection: View {
                     Button("Install Chalant \(latest)", action: onInstallUpdate)
                         .buttonStyle(.bordered)
                         .controlSize(.regular)
-                        .tint(Color.white.opacity(0.9))
+                        .tint(Theme.controlTint)
                 }
                 SettingDivider()
                 SettingToggle(label: "Show in Dock", isOn: Binding(
@@ -114,7 +114,7 @@ struct GeneralSection: View {
                     .pickerStyle(.menu)
                     .labelsHidden()
                     .controlSize(.small)
-                    .tint(Color.white.opacity(0.9))
+                    .tint(Theme.controlTint)
                     .fixedSize()
                     .accessibilityLabel("Microphone")
                 }
@@ -128,7 +128,7 @@ struct GeneralSection: View {
                 Button("Show the welcome tour again", action: onReplayTour)
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
-                    .tint(Color.white.opacity(0.9))
+                    .tint(Theme.controlTint)
                 SettingNote("The four cards you saw the first time Chalant opened.")
             }
         }
@@ -809,7 +809,7 @@ struct SessionsSection: View {
             uniqueKeysWithValues: HookInstall.Agent.allCases.map { ($0, HookInstall.status(agent: $0)) }
         )
         let allInstalled = statuses.values.allSatisfy { $0 == .installed }
-        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             // Not installed means a session can never announce itself
             // and a queued message can never arrive, with nothing on
             // screen saying why, so this leads the tab rather than
@@ -1125,7 +1125,7 @@ struct WhatShowsSection: View {
     @State private var reminderLists: [(title: String, id: String)] = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             SettingCard(title: "Blocks") {
                 SettingToggle(label: "Media", isOn: $showMedia)
                 SettingDivider()
@@ -1145,7 +1145,7 @@ struct WhatShowsSection: View {
                         .pickerStyle(.menu)
                         .labelsHidden()
                         .controlSize(.small)
-                        .tint(Color.white.opacity(0.9))
+                        .tint(Theme.controlTint)
                         .fixedSize()
                         .accessibilityLabel("Save reminders to")
                     }
@@ -1225,7 +1225,7 @@ struct IslandSection: View {
     @AppStorage("accentMode") private var accentMode = "silver"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             SettingCard(title: "Look") {
                 SettingPicker(
                     label: "Material",
@@ -1315,7 +1315,7 @@ struct GlanceSection: View {
     @AppStorage("showCalendar") private var showCalendar = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             SettingCard(title: "Beside the notch") {
                 SettingPicker(
                     label: "While playing",
@@ -1371,11 +1371,11 @@ struct GlanceSection: View {
 
 struct AboutSection: View {
     private var version: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             SettingCard(title: "Version") {
                 SettingRow(label: "Chalant") {
                     Text(version)

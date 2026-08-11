@@ -42,7 +42,7 @@ struct WelcomeView: View {
                 )
             }
         case 1:
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
                 Text("Say it.")
                     .font(Theme.Fonts.headline)
                     .foregroundStyle(Theme.textPrimary)
@@ -60,7 +60,7 @@ struct WelcomeView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         case 2:
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
                 Text("Say yes once.")
                     .font(Theme.Fonts.headline)
                     .foregroundStyle(Theme.textPrimary)
