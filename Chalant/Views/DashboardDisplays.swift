@@ -28,7 +28,7 @@ struct DisplaysSection: View {
     @State private var selection: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             if attached.isEmpty {
                 SettingCard(title: "Displays") {
                     Text("No displays reported a stable identity.")

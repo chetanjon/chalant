@@ -82,6 +82,23 @@ final class CrashWatch: ObservableObject {
         unreported = nil
     }
 
+    /// The report has been put in front of the user (the card pushed,
+    /// the glance flashed): record that, so the next launch stays
+    /// quiet, but keep `unreported` for this session so "crash report"
+    /// can still read it out. The card's X never called acknowledge(),
+    /// which is how one August crash greeted every launch for days.
+    /// `defaults` is injectable so tests get their own domain: this
+    /// bundle runs inside the app, so `standard` here is the founder's
+    /// real preferences, and a test that erases this key re-arms a
+    /// crash banner on their machine.
+    static func markSeen(_ date: Date, in defaults: UserDefaults = .standard) {
+        defaults.set(date, forKey: seenKey)
+    }
+
+    func markSeenNow() {
+        if let date = unreported?.date { Self.markSeen(date) }
+    }
+
     /// The whole report on the pasteboard, for pasting into an issue.
     /// Explicit action only: these files name paths and loaded
     /// libraries, so nothing copies itself.

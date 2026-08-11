@@ -18,7 +18,7 @@ struct LayoutSection: View {
     @ObservedObject var layout: IslandLayoutStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             SettingCard(title: "In the island") {
                 ForEach(Array(layout.layout.rows.enumerated()), id: \.element.id) { index, row in
                     if index > 0 { SettingDivider() }

@@ -82,13 +82,21 @@ struct ExpandedView: View {
     /// The island you get by reaching for it: everything at once, small,
     /// and gone the moment you look away.
     private var glanceContent: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.l) {
+        VStack(alignment: .leading, spacing: Theme.Space.zone) {
             // Rows come from the layout rather than being written here,
             // so rearranging one is data rather than a code change.
             // Ordering, hiding and pairing all live in IslandLayout.
             ForEach(layoutRows) { row in
+                // The row's position among today's rows, purely for the
+                // pour-in delay below. `layoutRows` keeps `ForEach`'s
+                // identity exactly as before (`IslandRow.id`, the
+                // elements' names joined); this is a second, separate
+                // read of it rather than a change to what identifies a
+                // row, so rows never re-identify because of it.
+                let index = layoutRows.firstIndex(of: row) ?? 0
                 if row.elements.count == 1 {
                     element(row.elements[0])
+                        .staggeredReveal(index)
                 } else {
                     // Tighter than the gap between rows (below), so a
                     // two-up row's pair reads as one group and the rows
@@ -99,6 +107,7 @@ struct ExpandedView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
+                    .staggeredReveal(index)
                 }
             }
 
@@ -263,9 +272,9 @@ struct ExpandedView: View {
             }
         }
         .animation(Theme.Motion.hover, value: face.isDropTargeted)
-        .animation(Theme.Motion.content, value: model.tab)
-        .animation(Theme.Motion.content, value: chatFull)
-        .animation(Theme.Motion.content, value: model.pane)
+        .animation(Theme.Motion.island, value: model.tab)
+        .animation(Theme.Motion.island, value: chatFull)
+        .animation(Theme.Motion.island, value: model.pane)
         .animation(Theme.Motion.content, value: music.nowPlaying != nil)
         .animation(Theme.Motion.content, value: ambience.active)
         .animation(Theme.Motion.content, value: model.pendingContext != nil)
@@ -374,11 +383,10 @@ struct ExpandedView: View {
             // neighbour, so five rows read as five equal claims on the
             // eye. What is playing and what is sounding belong
             // together; the switcher and its panel are a different
-            // thing, and the gap says so before the rule does.
-            Rectangle()
-                .fill(Theme.hairlineFaint)
-                .frame(height: 1)
-                .padding(.top, Theme.Space.xs)
+            // thing. A hairline used to say so; now `Theme.Space.zone`
+            // (the VStack spacing above) gives every row the same air,
+            // and the line is gone (founder, 2026-08-10: "air only, no
+            // dividers").
             Switcher(model: model, updates: model.updates,
                      todayEnabled: todayEnabled, tools: enabledTools)
         case .input:
@@ -413,6 +421,7 @@ struct ExpandedView: View {
             if todayEnabled {
                 TodayView(
                     events: model.events,
+                    weather: model.weather,
                     showCalendar: showCalendar,
                     showReminders: showReminders,
                     onLeaveForSettings: { model.collapse() }
@@ -685,6 +694,7 @@ struct MicButton: View {
 /// independent blocks; reminders tick off in place. Live from EventKit.
 struct TodayView: View {
     @ObservedObject var events: EventKitService
+    @ObservedObject var weather: WeatherController
     let showCalendar: Bool
     let showReminders: Bool
     /// System Settings is about to take focus, so the island gets out of
@@ -692,6 +702,10 @@ struct TodayView: View {
     /// to. Same move the gear makes.
     var onLeaveForSettings: () -> Void = {}
     @Environment(\.chalantAccent) private var accent
+    /// Read directly (not passed in) so a flip in Settings re-renders
+    /// this header the instant it happens, the same reason every other
+    /// block's toggle is read this way from inside its own view.
+    @AppStorage("showWeather") private var showWeather = true
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -700,8 +714,8 @@ struct TodayView: View {
     }()
 
     var body: some View {
-        // Empty sections vanish instead of announcing their
-        // emptiness; a fully clear day gets one graceful line.
+        // Empty sections vanish instead of announcing their emptiness;
+        // an empty day is just the date and, when on, the weather.
         let hasEvents = showCalendar && !events.calendarDenied && !events.events.isEmpty
         let hasReminders = showReminders && !events.remindersDenied && !events.reminders.isEmpty
         let denials = denials
@@ -740,16 +754,6 @@ struct TodayView: View {
             } else {
                 dayRows(hasEvents: hasEvents, hasReminders: hasReminders)
             }
-            // Speaks for the sources that can actually see. It used to
-            // fall silent the moment anything was denied, so a granted
-            // reminders list with nothing due said nothing at all and
-            // the whole panel was one denial line. With every source
-            // denied there is still nothing to report: "the day is
-            // yours" over a permission wall is a guess dressed as a
-            // fact, and the denial above is the whole story.
-            if !hasEvents, !hasReminders, canSeeAnything {
-                clearDay
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .task { await events.refresh() }
@@ -764,16 +768,35 @@ struct TodayView: View {
         }
     }
 
-    /// One header for the whole day, anchored by the date.
+    /// The date is the panel's headline; the weather line joins the
+    /// right side once a reading exists and the toggle is on. A
+    /// stale (3h+) or never-fetched reading shows nothing rather than
+    /// a wrong or empty-looking line.
     private var header: some View {
         HStack(spacing: Theme.Space.s) {
-            SectionHeader(title: "Today")
-            Rectangle()
-                .fill(Theme.hairlineFaint)
-                .frame(height: 1)
+            // Quiet, not a headline. At headline weight the date was
+            // the loudest thing on the panel while saying the least,
+            // and on an empty day it sat there alone shouting a fact
+            // the menu bar already carries (founder, 2026-08-10: "why
+            // is the date visually so appearing, it feels a bit
+            // distracting"). It names the day the rows below belong
+            // to; the rows are the content.
             Text(Self.dateFormatter.string(from: Date()))
-                .font(Theme.Fonts.microMono)
-                .foregroundStyle(Theme.textGhost)
+                .font(Theme.Fonts.subhead)
+                .foregroundStyle(Theme.textSecondary)
+            Spacer()
+            if showWeather,
+               let reading = WeatherController.usableReading(weather.reading, now: Date()) {
+                HStack(spacing: Theme.Space.xs) {
+                    Image(systemName: "sun.max")
+                        .font(Theme.Fonts.iconThin(.m))
+                    Text(WeatherController.line(
+                        reading, celsius: WeatherController.wantsCelsius(locale: .current)
+                    ))
+                    .font(Theme.Fonts.subhead)
+                }
+                .foregroundStyle(Theme.textSecondary)
+            }
         }
     }
 
@@ -808,34 +831,6 @@ struct TodayView: View {
 
     private var seesCalendar: Bool { showCalendar && !events.calendarDenied }
     private var seesReminders: Bool { showReminders && !events.remindersDenied }
-    private var canSeeAnything: Bool { seesCalendar || seesReminders }
-
-    /// The empty moment, in the island's own voice.
-    ///
-    /// Claims only what it looked at. Half a view of the day cannot say
-    /// the day is yours, and saying it anyway beside a line admitting
-    /// the calendar is hidden is the app contradicting itself in two
-    /// consecutive sentences.
-    private var clearDay: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Text("Clear water.")
-                .font(Theme.Fonts.reading)
-                .foregroundStyle(Theme.textSecondary)
-            Text(Self.clearDayDetail(seesCalendar: seesCalendar, seesReminders: seesReminders))
-                .font(Theme.Fonts.caption)
-                .foregroundStyle(Theme.textHint)
-        }
-        .padding(.vertical, Theme.Space.s)
-    }
-
-    static func clearDayDetail(seesCalendar: Bool, seesReminders: Bool) -> String {
-        switch (seesCalendar, seesReminders) {
-        case (true, true): return "Nothing scheduled, nothing due. The day is yours."
-        case (true, false): return "Nothing scheduled."
-        case (false, true): return "Nothing due."
-        case (false, false): return ""
-        }
-    }
 
     private var eventRows: some View {
         let now = Date()

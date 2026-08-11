@@ -115,6 +115,12 @@ final class NotchWindowController {
     private var clickMonitor: Any?
     private var hoverTimer: Timer?
     private var stateSub: AnyCancellable?
+    /// A one-shot re-check of expanded containment, armed on every
+    /// expand and fired the next time `expandedSize` actually lands
+    /// (see `stateChanged`). Reassigning cancels whatever the last
+    /// expand armed, so a second expand beating the first to firing
+    /// simply replaces it rather than stacking subscriptions.
+    private var expandedSizeResync: AnyCancellable?
     private var napActivity: NSObjectProtocol?
     private var pointerInside = false
     /// Drag-in-flight sensing: the drag pasteboard's changeCount moves
@@ -892,16 +898,45 @@ final class NotchWindowController {
         case .collapsed:
             pointerInside = false
             lastCollapseAt = Date()
+            expandedSizeResync = nil
         case .expanded:
             lastOpenAt = Date()
-            if let id = viewModel.expandedDisplayID,
-               let screen = NSScreen.screens.first(where: { $0.displayID == id }),
-               let face = faces[id] {
-                pointerInside = expandedZone(on: screen, face: face).contains(NSEvent.mouseLocation)
-            }
+            recheckExpandedContainment()
+            // This runs one run-loop turn after the flip, and a pour
+            // whose open is taller or shorter than the one just closed
+            // may not have landed its measured height yet, so the read
+            // just above can still be checking against the PREVIOUS
+            // open's height. Re-run the same check once more, the next
+            // time expandedSize actually changes, then let the
+            // subscription go; a second expand before that fires just
+            // replaces it (see `expandedSizeResync`).
+            // @Published emits on willSet, so without the hop below
+            // the sink would still read the property's old value; the
+            // receive(on:) defers delivery to the next run loop turn,
+            // after the new size has actually landed.
+            expandedSizeResync = viewModel.$expandedSize
+                .dropFirst()
+                .prefix(1)
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.recheckExpandedContainment()
+                    self?.expandedSizeResync = nil
+                }
         case .listening:
-            break
+            // A voice session is not an open to re-check.
+            expandedSizeResync = nil
         }
+    }
+
+    /// The expanded-state containment check: whether the pointer sits
+    /// inside this display's `expandedZone` right now. Shared by
+    /// `stateChanged`'s read on the flip and its one-shot re-check
+    /// once the real height lands, so the two can never drift apart.
+    private func recheckExpandedContainment() {
+        guard let id = viewModel.expandedDisplayID,
+              let screen = NSScreen.screens.first(where: { $0.displayID == id }),
+              let face = faces[id] else { return }
+        pointerInside = expandedZone(on: screen, face: face).contains(NSEvent.mouseLocation)
     }
 
     /// The door's size on a pill display: the same fixed size the

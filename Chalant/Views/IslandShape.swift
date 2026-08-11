@@ -29,12 +29,24 @@ struct IslandShape: InsettableShape {
     var tipRadius: CGFloat = 5
     var insetAmount: CGFloat = 0
 
-    var animatableData: AnimatablePair<CGFloat, AnimatablePair<CGFloat, CGFloat>> {
-        get { AnimatablePair(eave, AnimatablePair(bottomRadius, belly)) }
+    /// Every parameter rides the animation. topRadius and tipRadius
+    /// were left out once, and the pill's top corners snapped between
+    /// states while the bottom glided (round 2, the pour, fixed it).
+    var animatableData: AnimatablePair<
+        AnimatablePair<CGFloat, CGFloat>,
+        AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat>
+    > {
+        get {
+            AnimatablePair(
+                AnimatablePair(eave, bottomRadius),
+                AnimatablePair(AnimatablePair(belly, topRadius), tipRadius))
+        }
         set {
-            eave = newValue.first
-            bottomRadius = newValue.second.first
-            belly = newValue.second.second
+            eave = newValue.first.first
+            bottomRadius = newValue.first.second
+            belly = newValue.second.first.first
+            topRadius = newValue.second.first.second
+            tipRadius = newValue.second.second
         }
     }
 

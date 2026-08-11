@@ -307,6 +307,7 @@ final class NotchViewModel: ObservableObject {
             state: .needsInput
         )
         flashGlance("Chalant crashed last time. Say \u{201C}crash report\u{201D}.", seconds: 8)
+        crashWatch.markSeenNow() // shown is seen; the card and verbs still work this session
     }
 
     func replayWelcome() {
@@ -364,6 +365,7 @@ final class NotchViewModel: ObservableObject {
     let shelf = ShelfStore()
     let notes = NotesStore()
     let events = EventKitService()
+    let weather = WeatherController()
     let timer = CountdownController()
     let stopwatch = StopwatchController()
     let ambience = AmbienceController()
@@ -845,6 +847,11 @@ final class NotchViewModel: ObservableObject {
             }
         }
         events.startGlanceTicker()
+        // Unset means on: a fresh install shows the weather line, same
+        // default the toggle itself carries in Settings.
+        if UserDefaults.standard.object(forKey: "showWeather") as? Bool ?? true {
+            weather.start()
+        }
         updates.onNewVersion = { [weak self] version in
             self?.flashGlance("\(version) is out", seconds: 8)
         }

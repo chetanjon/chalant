@@ -1,114 +1,61 @@
 import AppKit
 import SwiftUI
 
-/// The music row: dimensional artwork that glows while it plays, a
-/// now-playing equalizer, title/artist, and a scrubber with elapsed and
-/// total time. Rich but still one tight block, volume lives on the
-/// system keys, not here.
+/// The music row: flat 56pt artwork, stacked title/artist, bare thin
+/// transport glyphs, and a full-width scrub line with elapsed and
+/// remaining time beneath. The sheen and now-playing equalizer are
+/// gone (premium finish, spec 2026-08-10): the row reads by
+/// typography and brightness, never decoration. One quiet exception
+/// (round 3, task 6): a soft accent-colored pool breathes behind the
+/// zone while music plays, matching the album's own color.
 struct MusicRow: View {
     @ObservedObject var music: MusicController
     @Environment(\.chalantAccent) private var accent
-    @State private var scrubPosition: Double?
     /// Local slider value while the user is dragging, so the 1s
     /// player poll can't yank the knob back mid-gesture.
     @State private var volumeOverride: Double?
+    /// An optimistic seek target held until the player's slow poll
+    /// converges on it (or 3s pass), so the bar never snaps back to
+    /// the stale position after a release.
+    @State private var pendingSeek: (target: Double, at: Date)?
+    /// Drives the background pool's slow opacity breath. Only ever
+    /// animated through withAnimation in updateBreathing, never by an
+    /// .animation modifier, so the repeatForever loop can't leak onto
+    /// sibling views.
+    @State private var breathing = false
 
     var body: some View {
         if let playing = music.nowPlaying {
-            HStack(spacing: Theme.Space.l) {
-                Button {
-                    music.openMusicApp()
-                } label: {
-                    artworkView(isPlaying: playing.isPlaying)
-                }
-                .buttonStyle(PressableStyle())
-                .help("Open \(playing.source.displayName)")
-                .background(
-                    // The album's own light spilling out from under
-                    // the artwork: the row warms to whatever plays,
-                    // without ever drawing a box around itself.
-                    //
-                    // endRadius must not outrun the frame's shorter
-                    // half. At 190 inside a box 150 tall the gradient
-                    // was still around 60% opaque where the frame
-                    // stopped, so it ended on a hard horizontal line
-                    // under the artwork instead of fading out. Matching
-                    // the radius to the half-height lands it exactly on
-                    // clear at the edge, in every direction.
-                    RadialGradient(
-                        colors: [accent.opacity(playing.isPlaying ? 0.22 : 0.10), .clear],
-                        center: .center,
-                        startRadius: 4,
-                        endRadius: 80
-                    )
-                    .frame(width: 360, height: 160)
-                    .allowsHitTesting(false)
-                )
+            VStack(spacing: Theme.Space.m) {
+                HStack(spacing: Theme.Space.xl) {
+                    Button {
+                        music.openMusicApp()
+                    } label: {
+                        artworkView()
+                    }
+                    .buttonStyle(PressableStyle())
+                    .help("Open \(playing.source.displayName)")
 
-                VStack(alignment: .leading, spacing: Theme.Space.snug) {
-                    HStack(spacing: Theme.Space.s) {
+                    VStack(alignment: .leading, spacing: Theme.Space.stacked) {
                         Text(playing.track)
-                            .font(Theme.Fonts.bodyEmphasis)
+                            .font(Theme.Fonts.headline)
                             .foregroundStyle(Theme.textPrimary)
                             .lineLimit(1)
                         Text(playing.artist)
-                            .font(Theme.Fonts.caption)
+                            .font(Theme.Fonts.subhead)
                             .foregroundStyle(Theme.textSecondary)
                             .lineLimit(1)
-                        Spacer(minLength: 0)
-                        if playing.isPlaying {
-                            NowPlayingBars(accent: accent)
-                                .transition(.opacity)
-                        }
                     }
-                    // Position is projected between the player's 1s
-                    // polls, so the knob and clock glide instead of
-                    // stepping once a second. Times flank a bounded
-                    // bar: one tight line instead of a wire across
-                    // the whole island.
-                    TimelineView(.periodic(from: .now, by: 0.5)) { context in
-                        let livePosition = music.position(at: context.date)
-                        HStack(spacing: Theme.Space.s) {
-                            Text(Self.clock(scrubPosition ?? livePosition))
-                                .font(Theme.Fonts.microMono)
-                                .foregroundStyle(Theme.textSecondary)
-                            Slider(
-                                value: Binding(
-                                    get: { scrubPosition ?? livePosition },
-                                    set: { scrubPosition = $0 }
-                                ),
-                                in: 0...max(playing.duration, 1),
-                                onEditingChanged: { editing in
-                                    if !editing, let target = scrubPosition {
-                                        music.seek(to: target)
-                                        scrubPosition = nil
-                                    }
-                                }
-                            )
-                            .controlSize(.mini)
-                            .tint(accent)
-                            .frame(maxWidth: 190)
-                            Text(Self.clock(playing.duration))
-                                .font(Theme.Fonts.microMono)
-                                .foregroundStyle(Theme.textGhost)
-                            Spacer(minLength: 0)
-                        }
-                    }
-                }
 
-                // Trailing, not centred: the transport row changes width
-                // when a player that supports shuffle takes over, and
-                // centred rows made the volume slider slide sideways
-                // underneath the pointer as it did. Both rows hang off
-                // the same right edge instead.
-                VStack(alignment: .trailing, spacing: Theme.Space.xs) {
-                    HStack(spacing: Theme.Space.s) {
+                    Spacer()
+
+                    HStack(spacing: Theme.Space.xxl) {
                         if playing.supportsShuffle {
                             HoverGlyphButton(
                                 symbol: "shuffle",
                                 label: "Shuffle",
                                 scale: .xs,
-                                tint: playing.shuffling ? accent : Theme.textTertiary
+                                tint: playing.shuffling ? Theme.textPrimary : Theme.textTertiary
                             ) {
                                 music.toggleShuffle()
                             }
@@ -116,7 +63,7 @@ struct MusicRow: View {
                         }
                         HoverGlyphButton(
                             symbol: "backward.fill", label: "Previous track",
-                            scale: .s, tint: Theme.textPrimary
+                            scale: .m, tint: Theme.textPrimary, weight: .regular
                         ) {
                             music.previous()
                         }
@@ -124,62 +71,117 @@ struct MusicRow: View {
                             playing.isPlaying ? music.pause() : music.play()
                         } label: {
                             Image(systemName: playing.isPlaying ? "pause.fill" : "play.fill")
-                                .font(Theme.Fonts.icon(.m, weight: .bold))
-                                .foregroundStyle(Color.black)
-                                .frame(width: 32, height: 32)
-                                .background(
-                                    Circle()
-                                        .fill(Color.white.opacity(0.96))
-                                        .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
-                                )
-                                .contentShape(Circle())
+                                .font(Theme.Fonts.icon(.l))
+                                .foregroundStyle(Theme.textPrimary)
+                                .frame(minWidth: 22, minHeight: 22)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(PressableStyle())
                         HoverGlyphButton(
                             symbol: "forward.fill", label: "Next track",
-                            scale: .s, tint: Theme.textPrimary
+                            scale: .m, tint: Theme.textPrimary, weight: .regular
                         ) {
                             music.next()
                         }
-                    }
-                    HStack(spacing: Theme.Space.xs) {
-                        Image(systemName: "speaker.wave.2.fill")
-                            .font(Theme.Fonts.icon(.xs))
-                            .foregroundStyle(Theme.textTertiary)
-                        Slider(
-                            value: Binding(
-                                get: { volumeOverride ?? playing.volume },
-                                set: { value in
-                                    volumeOverride = value
-                                    // Applied live but debounced, so the
-                                    // drag feels attached to the sound.
-                                    music.previewVolume(value)
-                                }
-                            ),
-                            in: 0...100,
-                            onEditingChanged: { editing in
-                                if !editing, let target = volumeOverride {
+                        HStack(spacing: Theme.Space.xs) {
+                            Image(systemName: "speaker.wave.2.fill")
+                                .font(Theme.Fonts.icon(.xs))
+                                .foregroundStyle(Theme.textTertiary)
+                            ThinSlider(
+                                value: Binding(
+                                    get: { volumeOverride ?? playing.volume },
+                                    set: { value in
+                                        volumeOverride = value
+                                        // Applied live but debounced, so the
+                                        // drag feels attached to the sound.
+                                        music.previewVolume(value)
+                                    }
+                                ),
+                                in: 0...100,
+                                onCommit: { target in
                                     music.commitVolume(target)
                                     volumeOverride = nil
                                 }
+                            )
+                        }
+                        .help(
+                            playing.source.scriptable == nil
+                                ? "System volume"
+                                : "\(playing.source.displayName) volume"
+                        )
+                    }
+                }
+
+                // Position is projected between the player's 1s polls,
+                // so the line and clocks glide instead of stepping once
+                // a second. The fill width still relayouts every tick,
+                // but inside ScrubBar's own fixed 16pt frame, so it is
+                // what keeps the island's measured height out of it.
+                TimelineView(.periodic(from: .now, by: 0.5)) { context in
+                    let livePosition = music.position(at: context.date)
+                    let shown = Self.displayPosition(
+                        live: livePosition, pending: pendingSeek, now: context.date)
+                    VStack(spacing: Theme.Space.m) {
+                        ScrubBar(
+                            position: shown,
+                            duration: max(playing.duration, 1),
+                            tint: Color.white.opacity(0.9),
+                            onSeek: {
+                                pendingSeek = (target: $0, at: Date())
+                                music.seek(to: $0)
                             }
                         )
-                        .controlSize(.mini)
-                        .tint(Color.white.opacity(0.5))
-                        .frame(width: 68)
+                        HStack {
+                            Text(Self.clock(shown))
+                                .font(Theme.Fonts.timeMono)
+                                .foregroundStyle(Theme.textSecondary)
+                            Spacer()
+                        }
                     }
-                    .help(
-                        playing.source.scriptable == nil
-                            ? "System volume"
-                            : "\(playing.source.displayName) volume"
+                }
+            }
+            .background {
+                if playing.isPlaying {
+                    // The one drop of color the founder asked back: the album's own
+                    // light, pooled soft behind the zone, breathing slowly while the
+                    // music plays. Feel-gated: Still means a quiet, motionless pool.
+                    RadialGradient(
+                        colors: [accent.opacity(0.14), .clear],
+                        center: .init(x: 0.22, y: 0.35),
+                        startRadius: 8, endRadius: 220
                     )
+                    .blur(radius: 18)
+                    .opacity(breathing ? 1.0 : 0.7)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
                 }
             }
             .animation(Theme.Motion.content, value: playing.isPlaying)
+            .onAppear { updateBreathing(isPlaying: playing.isPlaying) }
+            .onChange(of: playing.isPlaying) { _, isPlaying in
+                updateBreathing(isPlaying: isPlaying)
+            }
         }
     }
 
-    private func artworkView(isPlaying: Bool) -> some View {
+    /// Starts (or stops) the pool's breathing loop. The repeatForever
+    /// animation is attached to this state change alone, never to an
+    /// .animation modifier on the view, so it can't leak onto siblings
+    /// and dies with the view's @State when MusicRow unmounts.
+    private func updateBreathing(isPlaying: Bool) {
+        if isPlaying, Theme.Feel.current.ambient {
+            withAnimation(
+                .easeInOut(duration: 3.2 * Theme.Motion.ambientSlow)
+                    .repeatForever(autoreverses: true)
+            ) {
+                breathing = true
+            }
+        } else {
+            breathing = false
+        }
+    }
+
+    private func artworkView() -> some View {
         Group {
             if let artwork = music.artwork {
                 Image(nsImage: artwork)
@@ -194,37 +196,30 @@ struct MusicRow: View {
                 }
             }
         }
-        .frame(width: 54, height: 54)
+        .frame(width: 56, height: 56)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.artwork, style: .continuous))
-        // Top-lit sheen: the art reads as a physical, lit surface.
-        .overlay(
-            LinearGradient(
-                colors: [Color.white.opacity(0.22), .clear],
-                startPoint: .top, endPoint: .center
-            )
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.artwork, style: .continuous))
-            .allowsHitTesting(false)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.artwork, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
-        )
-        // Album-colored glow while playing; a plain drop shadow when paused.
-        .shadow(
-            color: isPlaying ? accent.opacity(0.38) : Color.black.opacity(0.4),
-            radius: isPlaying ? 9 : 5,
-            y: 3
-        )
     }
 
     /// Hours appear only when needed: videos and live streams run
     /// long, songs stay "3:41".
-    private static func clock(_ seconds: Double) -> String {
+    static func clock(_ seconds: Double) -> String {
         let total = max(0, Int(seconds))
         if total >= 3600 {
             return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
         }
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    /// What the bar and clock show: an optimistic seek target until the
+    /// player's slow poll catches up (within 2s of the target), capped
+    /// at 3s so a player that ignored the seek cannot pin a lie.
+    static func displayPosition(
+        live: Double, pending: (target: Double, at: Date)?, now: Date
+    ) -> Double {
+        guard let pending else { return live }
+        if now.timeIntervalSince(pending.at) > 3 { return live }
+        if abs(live - pending.target) <= 2 { return live }
+        return pending.target
     }
 }
 
@@ -291,74 +286,46 @@ struct NowPlayingBars: View {
     }
 }
 
-/// The ambience row: a label that names the feature (and the sound
-/// that's playing), then the sound icons. Hover an icon for its name;
-/// the active one tints and reveals a volume slider.
+/// The ambience row: text chips, one per sound, no label zone and no
+/// icons. The active chip is white (`Theme.textPrimary`); tapping it
+/// is how you stop it, same button as the one that started it. The
+/// volume control appears only while a sound is actually playing.
 struct AmbienceRow: View {
     @ObservedObject var ambience: AmbienceController
-    @Environment(\.chalantAccent) private var accent
 
     var body: some View {
-        HStack(spacing: Theme.Space.s) {
-            Group {
-                if let active = ambience.active {
-                    // While a sound plays its name becomes a quiet accent
-                    // pill; tapping it stops. Reads as "on, tap to stop"
-                    // the way the sound chips already do.
-                    Button {
-                        ambience.stop()
-                    } label: {
-                        Text(active.displayName)
-                            .font(Theme.Fonts.caption)
-                            .foregroundStyle(accent)
-                            .lineLimit(1)
-                            .padding(.horizontal, Theme.Space.s)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(accent.opacity(0.14)))
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(PressableStyle())
-                    .help("Stop \(active.displayName)")
-                } else if let failure = ambience.failure {
-                    // The chip has already gone dark; this says why,
-                    // rather than leaving the tap looking ignored.
-                    Text("No sound")
-                        .font(Theme.Fonts.caption)
-                        .foregroundStyle(Theme.textHint)
-                        .lineLimit(1)
-                        .help("Tried to play, but \(failure).")
-                } else {
-                    Text("Ambience")
-                        .font(Theme.Fonts.caption)
-                        .foregroundStyle(Theme.textTertiary)
+        HStack(spacing: Theme.Space.xxl) {
+            ForEach(NoiseEngine.NoiseColor.chipChoices, id: \.self) { color in
+                Button {
+                    ambience.toggle(color)
+                } label: {
+                    Text(color.displayName)
+                        .font(ambience.active == color
+                              ? Theme.Fonts.bodyEmphasis : Theme.Fonts.body)
+                        .foregroundStyle(ambience.active == color
+                                         ? Theme.textPrimary : Theme.textSecondary)
                 }
+                .buttonStyle(PressableStyle())
+                .help(ambience.active == color
+                      ? "Stop \(color.displayName)" : "Play \(color.displayName)")
             }
-            .frame(width: 92, alignment: .leading)
-
-            // White is gone from the row: piercing, nobody's friend.
-            // On one track, for the same reason the switcher below is:
-            // five loose glyphs above seven more read as one scatter of
-            // twelve, with nothing to say where one row ends.
-            HStack(spacing: Theme.Space.s) {
-                ForEach(NoiseEngine.NoiseColor.chipChoices, id: \.self) { color in
-                    NoiseButton(
-                        color: color,
-                        selected: ambience.active == color,
-                        compact: true
-                    ) {
-                        ambience.toggle(color)
-                    }
-                }
+            if let failure = ambience.failure {
+                Text("No sound")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textHint)
+                    .help("Tried to play, but \(failure).")
             }
-            .padding(.horizontal, Theme.Space.xs)
-            .background(Capsule().fill(Theme.surface))
             Spacer(minLength: 0)
+            // The founder's rule, already true here and staying true:
+            // the volume control exists only while a sound is on.
             if ambience.active != nil {
-                Slider(value: $ambience.volume, in: 0...1)
-                    .controlSize(.mini)
-                    .tint(Color.white.opacity(0.5))
-                    .frame(width: 44)
-                    .transition(.opacity)
+                HStack(spacing: Theme.Space.m) {
+                    Image(systemName: "speaker.wave.2.fill")
+                        .font(Theme.Fonts.icon(.xs))
+                        .foregroundStyle(Theme.textTertiary)
+                    ThinSlider(value: $ambience.volume, in: 0...1, onCommit: nil)
+                }
+                .transition(.opacity)
             }
         }
         .animation(Theme.Motion.content, value: ambience.active)

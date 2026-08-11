@@ -73,6 +73,7 @@ targets:
         NSSpeechRecognitionUsageDescription: "Turns your words into actions. The transcription is macOS dictation, which runs on this Mac when its local model is ready and through Apple's service when it is not. The answer itself never leaves."
         NSRemindersFullAccessUsageDescription: Chalant creates the reminders you set.
         NSCalendarsFullAccessUsageDescription: Chalant adds events and reads today's agenda.
+        NSLocationUsageDescription: Chalant reads your approximate location to show the weather beside your day.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cj.chalant

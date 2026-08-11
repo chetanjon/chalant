@@ -3221,19 +3221,6 @@ final class SessionStoreTests: XCTestCase {
     /// The line used to vanish entirely whenever anything was denied, so
     /// a granted reminders list with nothing in it said nothing at all
     /// and the panel was one denial and a date.
-    func testTheEmptyDayClaimsOnlyWhatItActuallyLookedAt() {
-        XCTAssertEqual(
-            TodayView.clearDayDetail(seesCalendar: true, seesReminders: true),
-            "Nothing scheduled, nothing due. The day is yours.")
-        XCTAssertEqual(
-            TodayView.clearDayDetail(seesCalendar: false, seesReminders: true), "Nothing due.")
-        XCTAssertEqual(
-            TodayView.clearDayDetail(seesCalendar: true, seesReminders: false), "Nothing scheduled.")
-        XCTAssertTrue(
-            TodayView.clearDayDetail(seesCalendar: false, seesReminders: false).isEmpty,
-            "with nothing visible there is nothing to report")
-    }
-
     /// Not simply the next tab along. `ask` sits second in the switcher
     /// and is empty until something asks, so falling through to it would
     /// trade one blank screen for another.

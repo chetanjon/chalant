@@ -132,7 +132,7 @@ struct ShortcutRow: View {
 /// The shortcuts section: every action, one row each.
 struct KeyboardSection: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             SettingCard(title: "Shortcuts") {
                 ForEach(
                     Array(HotKeyCenter.Action.allCases.filter(\.isVisible).enumerated()),

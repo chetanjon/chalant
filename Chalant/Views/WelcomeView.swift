@@ -13,7 +13,7 @@ struct WelcomeView: View {
     @State private var priming = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.l) {
+        VStack(alignment: .leading, spacing: Theme.Space.xl) {
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 0)
@@ -27,7 +27,7 @@ struct WelcomeView: View {
     private var content: some View {
         switch model.welcomeStep {
         case 0:
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
                 ChalantWordmark()
                     .frame(width: 104, height: 22)
                     .foregroundStyle(Theme.textPrimary)
@@ -42,9 +42,9 @@ struct WelcomeView: View {
                 )
             }
         case 1:
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
                 Text("Say it.")
-                    .font(Theme.Fonts.title)
+                    .font(Theme.Fonts.headline)
                     .foregroundStyle(Theme.textPrimary)
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     verb("remind me to call amma at 6")
@@ -56,16 +56,16 @@ struct WelcomeView: View {
                 }
                 Text("Recognition is Apple's standard dictation, the same path Notes and Messages use. Your music ducks while you speak.")
                     .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.textHint)
+                    .foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         case 2:
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
                 Text("Say yes once.")
-                    .font(Theme.Fonts.title)
+                    .font(Theme.Fonts.headline)
                     .foregroundStyle(Theme.textPrimary)
                 Text("The island uses the mic and speech for talking, Reminders and Calendar for your day, and Contacts for the texts you send. One tap asks for all five now, instead of ambushing you one feature at a time. When music first plays or a text first sends, macOS asks once more; that yes is for the app doing the work.")
-                    .font(Theme.Fonts.body)
+                    .font(Theme.Fonts.subhead)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button {
@@ -80,7 +80,7 @@ struct WelcomeView: View {
                     Text(primed
                         ? "Asked. Anything denied lives in System Settings."
                         : priming ? "Asking…" : "Allow mic, speech, reminders, calendar, contacts")
-                        .font(Theme.Fonts.body)
+                        .font(Theme.Fonts.subhead)
                         .foregroundStyle(primed ? Theme.textSecondary : .black)
                         .padding(.horizontal, Theme.Space.l)
                         .padding(.vertical, Theme.Space.s)
@@ -91,7 +91,7 @@ struct WelcomeView: View {
                 .buttonStyle(PressableStyle())
                 Text("Windows snapping asks for Accessibility separately, the first time you say left half.")
                     .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.textHint)
+                    .foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         default:
@@ -110,9 +110,9 @@ struct WelcomeView: View {
         title: String,
         lines: [(String, String)]
     ) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
             Text(title)
-                .font(Theme.Fonts.title)
+                .font(Theme.Fonts.headline)
                 .foregroundStyle(Theme.textPrimary)
             ForEach(lines, id: \.1) { symbol, text in
                 HStack(alignment: .firstTextBaseline, spacing: Theme.Space.m) {

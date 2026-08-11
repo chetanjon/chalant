@@ -22,10 +22,8 @@ struct GeneralSection: View {
     /// appears; (name, uid) pairs for the Microphone picker.
     @State private var inputDevices: [(name: String, uid: String)] = []
 
-    @Environment(\.chalantAccent) private var accent
-
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             SettingCard(title: "Startup") {
                 SettingToggle(label: "Start at login", isOn: Binding(
                     get: { launchAtLogin },
@@ -49,7 +47,7 @@ struct GeneralSection: View {
                     Button("Install Chalant \(latest)", action: onInstallUpdate)
                         .buttonStyle(.bordered)
                         .controlSize(.regular)
-                        .tint(accent)
+                        .tint(Theme.controlTint)
                 }
                 SettingDivider()
                 SettingToggle(label: "Show in Dock", isOn: Binding(
@@ -116,7 +114,7 @@ struct GeneralSection: View {
                     .pickerStyle(.menu)
                     .labelsHidden()
                     .controlSize(.small)
-                    .tint(accent)
+                    .tint(Theme.controlTint)
                     .fixedSize()
                     .accessibilityLabel("Microphone")
                 }
@@ -130,7 +128,7 @@ struct GeneralSection: View {
                 Button("Show the welcome tour again", action: onReplayTour)
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
-                    .tint(accent)
+                    .tint(Theme.controlTint)
                 SettingNote("The four cards you saw the first time Chalant opened.")
             }
         }
@@ -811,7 +809,7 @@ struct SessionsSection: View {
             uniqueKeysWithValues: HookInstall.Agent.allCases.map { ($0, HookInstall.status(agent: $0)) }
         )
         let allInstalled = statuses.values.allSatisfy { $0 == .installed }
-        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             // Not installed means a session can never announce itself
             // and a queued message can never arrive, with nothing on
             // screen saying why, so this leads the tab rather than
@@ -1105,11 +1103,13 @@ struct WhatShowsSection: View {
     /// dead control, the same call made for the tab itself
     /// (ExpandedView.swift).
     @ObservedObject var stats: SystemStatsController
+    @ObservedObject var weather: WeatherController
 
     @AppStorage("showMedia") private var showMedia = true
     @AppStorage("showAmbience") private var showAmbience = true
     @AppStorage("showCalendar") private var showCalendar = false
     @AppStorage("showReminders") private var showReminders = false
+    @AppStorage("showWeather") private var showWeather = true
     @AppStorage("toolGo") private var toolGo = true
     @AppStorage("toolClips") private var toolClips = true
     @AppStorage("toolShelf") private var toolShelf = true
@@ -1124,10 +1124,8 @@ struct WhatShowsSection: View {
     /// Writable reminder lists, refreshed each time this section appears.
     @State private var reminderLists: [(title: String, id: String)] = []
 
-    @Environment(\.chalantAccent) private var accent
-
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             SettingCard(title: "Blocks") {
                 SettingToggle(label: "Media", isOn: $showMedia)
                 SettingDivider()
@@ -1147,11 +1145,14 @@ struct WhatShowsSection: View {
                         .pickerStyle(.menu)
                         .labelsHidden()
                         .controlSize(.small)
-                        .tint(accent)
+                        .tint(Theme.controlTint)
                         .fixedSize()
                         .accessibilityLabel("Save reminders to")
                     }
                 }
+                SettingDivider()
+                SettingToggle(label: "Weather", isOn: $showWeather)
+                SettingNote("A rough reading from Open-Meteo, no account or key needed.")
             }
 
             SettingCard(title: "Tools") {
@@ -1201,6 +1202,11 @@ struct WhatShowsSection: View {
             }
             reminderLists = lists
         }
+        // Flipping on starts the controller (start() is idempotent); flipping off keeps
+        // running until relaunch, the same pattern EventKitService's toggles follow.
+        .onChange(of: showWeather) { _, on in
+            if on { weather.start() }
+        }
     }
 }
 
@@ -1219,7 +1225,7 @@ struct IslandSection: View {
     @AppStorage("accentMode") private var accentMode = "silver"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             SettingCard(title: "Look") {
                 SettingPicker(
                     label: "Material",
@@ -1309,7 +1315,7 @@ struct GlanceSection: View {
     @AppStorage("showCalendar") private var showCalendar = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             SettingCard(title: "Beside the notch") {
                 SettingPicker(
                     label: "While playing",
@@ -1365,11 +1371,11 @@ struct GlanceSection: View {
 
 struct AboutSection: View {
     private var version: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xl) {
+        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             SettingCard(title: "Version") {
                 SettingRow(label: "Chalant") {
                     Text(version)
@@ -1382,7 +1388,16 @@ struct AboutSection: View {
                 SettingNote(
                     "Everything Chalant reads stays on this Mac: what is playing, your day"
                     + (FeatureFlags.sessionsVisible ? ", your sessions" : "")
-                    + ". Nothing is sent anywhere."
+                    + "."
+                )
+                SettingDivider()
+                // The one honest exception to the note above: weather is
+                // the only thing this app ever sends off the Mac, so it
+                // gets its own line rather than sitting quietly folded
+                // into a blanket "nothing is sent anywhere."
+                SettingNote(
+                    "Weather asks Open-Meteo for the sky above your approximate area. "
+                    + "Nothing else Chalant reads leaves this Mac."
                 )
                 SettingDivider()
                 SettingNote(

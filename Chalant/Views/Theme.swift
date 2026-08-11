@@ -64,6 +64,10 @@ enum Theme {
     // under tertiary, so the hierarchy still reads.
     static let textGhost = Color.white.opacity(0.45)
 
+    /// The settings window's controls: the finish speaks in white, so a control that is on or
+    /// current reads the same as the text that names it.
+    static let controlTint = Color.white.opacity(0.9)
+
     static let danger = Color(red: 1.0, green: 0.45, blue: 0.45)
     /// A status reading as healthy rather than merely quiet: the Stop
     /// hook installed, a check passing. Grey never says "this is fine,"
@@ -103,6 +107,12 @@ enum Theme {
         static let bodyMedium = Font.system(size: 14, weight: .medium)
         static let bodyEmphasis = Font.system(size: 14, weight: .semibold)
         static let title = Font.system(size: 15, weight: .semibold)
+        /// The island's loudest voice (the song title, the date).
+        /// Part of the premium finish (spec 2026-08-10): typography
+        /// carries hierarchy now that the pills are gone.
+        static let headline = Font.system(size: 18, weight: .semibold)
+        /// The quiet line under a headline (the artist, a detail).
+        static let subhead = Font.system(size: 15)
         /// A window's own page title. The island has no room for this
         /// tier; the dashboard is the first surface with the space to
         /// say where you are before it says anything else.
@@ -117,6 +127,11 @@ enum Theme {
         static let microMono = Font.system(size: 11, weight: .medium, design: .monospaced)
         static let captionMono = Font.system(size: 12, weight: .medium, design: .monospaced)
         static let labelMono = Font.system(size: 13, weight: .semibold, design: .monospaced)
+        /// Time on the island: elapsed, remaining, temperatures.
+        static let timeMono = Font.system(size: 13, weight: .medium, design: .monospaced)
+        /// A settings group's name: the same quiet mono voice the
+        /// island uses for numbers, sized down and spaced out.
+        static let groupLabel = Font.system(size: 11, weight: .medium, design: .monospaced)
         static let bodyMono = Font.system(size: 14, design: .monospaced)
         static let bodyEmphasisMono = Font.system(size: 14, weight: .semibold, design: .monospaced)
         static let counterMono = Font.system(size: 17, weight: .semibold, design: .monospaced)
@@ -142,6 +157,15 @@ enum Theme {
         static func icon(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
             .system(size: size, weight: weight)
         }
+
+        /// Thin outline glyphs, the finish's icon voice. Regular, not
+        /// semibold: the row reads by brightness, never by bulk.
+        /// Reserved for the finish's later rounds (the weather glyph
+        /// is its first consumer), so having no view callers yet is
+        /// intent, not leftovers.
+        static func iconThin(_ scale: IconScale) -> Font {
+            .system(size: scale.rawValue, weight: .regular)
+        }
     }
 
     /// Spacing rhythm. Named exceptions live here too, so a raw
@@ -153,8 +177,21 @@ enum Theme {
         static let l: CGFloat = 12
         static let xl: CGFloat = 16
         static let xxl: CGFloat = 22
+        /// Between the island's zones (music, ambience, switcher,
+        /// panel). Air is the only divider; the hairlines are gone
+        /// (founder, 2026-08-10).
+        static let zone: CGFloat = 26
+        /// A settings row's own breathing room, above and below its
+        /// label. The window used to pack rows at card density; the
+        /// finish gives each row the air the island's zones have.
+        static let settingsRow: CGFloat = 13
+        /// Between one settings group and the next.
+        static let settingsGroup: CGFloat = 30
         /// Tight icon-to-label and dot gaps.
         static let snug: CGFloat = 5
+        /// A headline directly over its subhead: the tightest stack
+        /// there is, the two lines read as one object.
+        static let stacked: CGFloat = 2
         /// Collapsed wings sit flush against the physical notch.
         // 7, not 11: the pill's 8pt width tuck (worn by the glass, not
         // the report) took 4 from each wing; the inset gives it back
@@ -178,7 +215,7 @@ enum Theme {
         static let card: CGFloat = 12
         static let row: CGFloat = 10
         static let field: CGFloat = 12
-        static let artwork: CGFloat = 10
+        static let artwork: CGFloat = 14
         /// Small inline thumbnails (clipboard shots).
         static let thumb: CGFloat = 6
     }
@@ -189,8 +226,10 @@ enum Theme {
         static let eaveExpanded: CGFloat = 22
         static let radiusCollapsed: CGFloat = 16
         // 44/10 read as a long empty chin under the last row; the
-        // droplet keeps a hint of belly without the sag.
-        static let radiusExpanded: CGFloat = 34
+        // droplet keeps a hint of belly without the sag. The premium
+        // finish (spec 2026-08-10) raised the settled 34 to 40, with
+        // the founder's mockup as the reference.
+        static let radiusExpanded: CGFloat = 40
         /// Flat, both of them. The bottom edge used to bow below
         /// straight, a point and a half at rest and five when open, as
         /// a droplet flourish. The founder read it as a fault twice,

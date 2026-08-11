@@ -179,19 +179,49 @@ struct DashboardView: View {
 
     var body: some View {
         NavigationSplitView {
-            // Explicit ForEach with a tag rather than
-            // `List(data, selection:)`: that form keys selection off the
-            // element's `id`, which would silently bind a String where
-            // this binds a section, and both spellings compile.
-            List(selection: $selection.section) {
-                ForEach(DashboardSection.visibleCases) { section in
-                    Label(section.title, systemImage: section.symbol)
-                        .font(Theme.Fonts.body)
-                        .tag(section)
+            // Not a `List`: AppKit's NSTableView (what List becomes on
+            // macOS) paints its own blue selection capsule underneath
+            // row content, and no `.listRowBackground(Color.clear)`
+            // reaches under that to suppress it (screenshot-proven,
+            // round 4: "What shows" and "Island" rendered as solid blue
+            // pills). The founder's law is that active is white text,
+            // never a pill, so the List had to go rather than the law:
+            // eight rows do not need a List's keyboard navigation badly
+            // enough to keep the very capsule that broke it.
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    ForEach(DashboardSection.visibleCases) { section in
+                        Button {
+                            selection.section = section
+                        } label: {
+                            HStack(spacing: Theme.Space.m) {
+                                Image(systemName: section.symbol)
+                                    .font(Theme.Fonts.iconThin(.m))
+                                Text(section.title)
+                                    .font(Theme.Fonts.body)
+                                    .lineLimit(1)
+                            }
+                            .foregroundStyle(
+                                selection.section == section ? Theme.textPrimary : Theme.textGhost
+                            )
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .padding(.vertical, Theme.Space.s)
+                            .padding(.horizontal, Theme.Space.s)
+                        }
+                        .buttonStyle(PressableStyle())
+                        // The List used to say which row was current for
+                        // free; a plain Button does not, so this says it
+                        // by hand.
+                        .accessibilityAddTraits(
+                            selection.section == section ? [.isButton, .isSelected] : .isButton
+                        )
+                    }
                 }
+                .padding(.vertical, Theme.Space.m)
+                .padding(.horizontal, Theme.Space.m)
             }
             .navigationSplitViewColumnWidth(min: 176, ideal: 196, max: 240)
-            .scrollContentBackground(.hidden)
             .background(Theme.backdropTop)
             // Pinned at the leading edge beside the traffic lights,
             // where Mail, Notes and Finder all keep it. Left to itself
@@ -234,7 +264,13 @@ struct DashboardView: View {
         // `.balanced` draws the divider in SwiftUI itself instead, so it
         // is never tied to that toolbar layout cache in the first place.
         .navigationSplitViewStyle(.balanced)
-        .tint(Theme.fixedAccent(for: accentMode) ?? model.music.accent)
+        // Not the album accent: that painted every segmented picker,
+        // menu picker and the tour button red against an otherwise
+        // monochrome window (screenshot-proven, round 4, on General,
+        // What shows and Island). The window's controls speak the
+        // island's monochrome finish; the accent still reaches whatever
+        // asks for it by name, below.
+        .tint(Theme.controlTint)
         .environment(\.chalantAccent, Theme.fixedAccent(for: accentMode) ?? model.music.accent)
     }
 
@@ -271,7 +307,7 @@ struct DashboardView: View {
                         )
                     }
                 case .whatShows:
-                    WhatShowsSection(events: model.events, stats: model.stats)
+                    WhatShowsSection(events: model.events, stats: model.stats, weather: model.weather)
                 case .island:
                     IslandSection(music: model.music)
                 case .displays:
@@ -302,27 +338,17 @@ struct SettingCard<Content: View>: View {
     let title: String
     @ViewBuilder let content: Content
 
-    /// One inset, read by both the title and the card's contents.
-    ///
-    /// The title names what is inside the card, so it belongs on the
-    /// same vertical line. It used to sit at 4 while the rows sat at
-    /// 12, which puts two competing left margins down a column of
-    /// stacked settings groups and makes each card read as a detached
-    /// box rather than the body of the thing above it. Held as one
-    /// value so the two cannot drift apart again.
-    private static var inset: CGFloat { Theme.Space.l }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            SectionHeader(title: title)
-                .padding(.leading, Self.inset)
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
+            Text(title.uppercased())
+                .font(Theme.Fonts.groupLabel)
+                .tracking(1.6)
+                .foregroundStyle(Theme.textGhost)
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 content
             }
-            .padding(Self.inset)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .chalantCard()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -335,17 +361,17 @@ struct SettingRow<Control: View>: View {
         HStack {
             Text(label)
                 .font(Theme.Fonts.body)
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(Theme.textPrimary)
             Spacer(minLength: Theme.Space.l)
             control
         }
+        .padding(.vertical, Theme.Space.settingsRow)
     }
 }
 
 struct SettingToggle: View {
     let label: String
     @Binding var isOn: Bool
-    @Environment(\.chalantAccent) private var accent
 
     var body: some View {
         SettingRow(label: label) {
@@ -353,7 +379,7 @@ struct SettingToggle: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.mini)
-                .tint(accent)
+                .tint(Theme.controlTint)
                 // The switch alone is the control; the row's text is its
                 // name, and without this a screen reader announces an
                 // unlabelled switch.
@@ -396,8 +422,9 @@ struct SettingNote: View {
     var body: some View {
         Text(text)
             .font(Theme.Fonts.caption)
-            .foregroundStyle(Theme.textHint)
+            .foregroundStyle(Theme.textTertiary)
             .fixedSize(horizontal: false, vertical: true)
+            .padding(.bottom, Theme.Space.xs)
     }
 }
 
