@@ -1110,6 +1110,7 @@ struct WhatShowsSection: View {
     @AppStorage("showAmbience") private var showAmbience = true
     @AppStorage("showCalendar") private var showCalendar = false
     @AppStorage("showReminders") private var showReminders = false
+    @AppStorage("showWeather") private var showWeather = true
     @AppStorage("toolGo") private var toolGo = true
     @AppStorage("toolClips") private var toolClips = true
     @AppStorage("toolShelf") private var toolShelf = true
@@ -1152,6 +1153,9 @@ struct WhatShowsSection: View {
                         .accessibilityLabel("Save reminders to")
                     }
                 }
+                SettingDivider()
+                SettingToggle(label: "Weather", isOn: $showWeather)
+                SettingNote("A rough reading from Open-Meteo, no account or key needed.")
             }
 
             SettingCard(title: "Tools") {
@@ -1382,7 +1386,16 @@ struct AboutSection: View {
                 SettingNote(
                     "Everything Chalant reads stays on this Mac: what is playing, your day"
                     + (FeatureFlags.sessionsVisible ? ", your sessions" : "")
-                    + ". Nothing is sent anywhere."
+                    + "."
+                )
+                SettingDivider()
+                // The one honest exception to the note above: weather is
+                // the only thing this app ever sends off the Mac, so it
+                // gets its own line rather than sitting quietly folded
+                // into a blanket "nothing is sent anywhere."
+                SettingNote(
+                    "Weather asks Open-Meteo for the sky above your approximate area. "
+                    + "Nothing else leaves this Mac."
                 )
                 SettingDivider()
                 SettingNote(

@@ -365,6 +365,7 @@ final class NotchViewModel: ObservableObject {
     let shelf = ShelfStore()
     let notes = NotesStore()
     let events = EventKitService()
+    let weather = WeatherController()
     let timer = CountdownController()
     let stopwatch = StopwatchController()
     let ambience = AmbienceController()
@@ -846,6 +847,11 @@ final class NotchViewModel: ObservableObject {
             }
         }
         events.startGlanceTicker()
+        // Unset means on: a fresh install shows the weather line, same
+        // default the toggle itself carries in Settings.
+        if UserDefaults.standard.object(forKey: "showWeather") as? Bool ?? true {
+            weather.start()
+        }
         updates.onNewVersion = { [weak self] version in
             self?.flashGlance("\(version) is out", seconds: 8)
         }

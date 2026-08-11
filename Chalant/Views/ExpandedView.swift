@@ -421,6 +421,7 @@ struct ExpandedView: View {
             if todayEnabled {
                 TodayView(
                     events: model.events,
+                    weather: model.weather,
                     showCalendar: showCalendar,
                     showReminders: showReminders,
                     onLeaveForSettings: { model.collapse() }
@@ -693,6 +694,7 @@ struct MicButton: View {
 /// independent blocks; reminders tick off in place. Live from EventKit.
 struct TodayView: View {
     @ObservedObject var events: EventKitService
+    @ObservedObject var weather: WeatherController
     let showCalendar: Bool
     let showReminders: Bool
     /// System Settings is about to take focus, so the island gets out of
@@ -700,6 +702,10 @@ struct TodayView: View {
     /// to. Same move the gear makes.
     var onLeaveForSettings: () -> Void = {}
     @Environment(\.chalantAccent) private var accent
+    /// Read directly (not passed in) so a flip in Settings re-renders
+    /// this header the instant it happens, the same reason every other
+    /// block's toggle is read this way from inside its own view.
+    @AppStorage("showWeather") private var showWeather = true
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -762,14 +768,28 @@ struct TodayView: View {
         }
     }
 
-    /// The date is the panel's headline; a weather line joins the
-    /// right side in a later round.
+    /// The date is the panel's headline; the weather line joins the
+    /// right side once a reading exists and the toggle is on. A
+    /// stale (3h+) or never-fetched reading shows nothing rather than
+    /// a wrong or empty-looking line.
     private var header: some View {
         HStack(spacing: Theme.Space.s) {
             Text(Self.dateFormatter.string(from: Date()))
                 .font(Theme.Fonts.headline)
                 .foregroundStyle(Theme.textPrimary)
             Spacer()
+            if showWeather,
+               let reading = WeatherController.usableReading(weather.reading, now: Date()) {
+                HStack(spacing: Theme.Space.xs) {
+                    Image(systemName: "sun.max")
+                        .font(Theme.Fonts.iconThin(.m))
+                    Text(WeatherController.line(
+                        reading, celsius: WeatherController.wantsCelsius(locale: .current)
+                    ))
+                    .font(Theme.Fonts.subhead)
+                }
+                .foregroundStyle(Theme.textSecondary)
+            }
         }
     }
 
