@@ -1318,7 +1318,11 @@ struct IslandSection: View {
                     )
                 }
                 SettingDivider()
-                SettingToggle(label: "Accent rim on the pill", isOn: $glowOn)
+                // Not "on the pill": Pill is also the name of a display
+                // style now, so that label read as a setting for one
+                // kind of screen when it governs the resting island on
+                // every screen.
+                SettingToggle(label: "Accent rim while resting", isOn: $glowOn)
                 SettingNote("The coloured border that breathes while music or a session runs.")
                 SettingDivider()
                 SettingToggle(label: "Show edge when idle", isOn: $idleEdgeOn)

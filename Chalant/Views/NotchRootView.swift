@@ -228,18 +228,19 @@ struct NotchRootView: View {
                 eave: 0,
                 bottomRadius: radius,
                 belly: expanded ? Theme.Island.bellyExpanded : Theme.Island.bellyCollapsed,
-                // Square at the top when it is small, so the resting
-                // pill HANGS from the screen edge instead of floating
-                // under it. Rounding all four corners made a 120pt
-                // lozenge read as a sticker dropped onto whatever was
-                // behind it, which on a fullscreen window is that app's
-                // own toolbar (founder, 2026-08-10, photographed over
-                // Safari's tab strip). Still not the notch silhouette:
-                // there are no eaves here and nothing pretends to wrap
-                // a cutout, which is the thing that failed before.
-                // Open, it is a panel rather than a strip and keeps its
-                // turned corners; the morph carries topRadius now.
-                topRadius: expanded ? radius : 0
+                // All four corners, always. A square top was tried for
+                // one build to stop the resting pill reading as a
+                // sticker on a fullscreen window's toolbar, and it was
+                // WRONG: this branch runs because the user picked Pill,
+                // the picker calls it "a free-floating bar", and a
+                // setting has to mean what it says (founder, 2026-08-10:
+                // "if the user selects to have a pill on monitor it
+                // should be a pill"). A pill that stops floating is a
+                // different shape wearing the same name. Whatever the
+                // island does about overlapping a fullscreen window, it
+                // does by moving or hiding, never by quietly becoming
+                // something the user did not choose.
+                topRadius: radius
             )
         }
         if face.state == .collapsed {

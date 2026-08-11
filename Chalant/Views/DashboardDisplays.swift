@@ -99,8 +99,19 @@ struct DisplaysSection: View {
         .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
     }
 
+    /// Says the one thing that actually decides how the island behaves
+    /// on this screen. Two displays used to read "2560 x 1440 · main"
+    /// and "3024 x 1964", which are the least useful facts about them:
+    /// what matters is that one has a cutout to cling to and the other
+    /// has nothing, and that is why their islands differ (founder,
+    /// 2026-08-10, "there should be difference between monitor island
+    /// and mac island in the settings"). The icon said it already, at
+    /// the size of an icon.
     private func rowCaption(_ screen: Attached) -> String {
-        screen.isMain ? "\(screen.pixels) · main" : screen.pixels
+        var parts = [screen.pixels]
+        parts.append(screen.hasHardwareNotch ? "has a notch" : "no notch")
+        if screen.isMain { parts.append("main") }
+        return parts.joined(separator: " · ")
     }
 
     // MARK: Settings for the selected screen
@@ -126,7 +137,14 @@ struct DisplaysSection: View {
         }
 
         if resolved != .off {
-            SettingCard(title: "Size") {
+            // Notch only. A pill sizes itself, so under Pill this card
+            // held one sentence explaining that it had no controls: a
+            // heading, a rule and a line of prose saying "nothing
+            // here". That reads as clutter on a page the founder
+            // already called busy, and the sentence belongs beside the
+            // Style picker that causes it, which is where it lives now.
+            if resolved == .notch {
+                SettingCard(title: "Size") {
                 // Width and Height write notchSize, which only the
                 // notch render path reads (NotchWindowController.swift
                 // apply(_:to:) -> NotchRootView.collapsedSize); a
@@ -137,7 +155,6 @@ struct DisplaysSection: View {
                 // set a size by hand" was the one mode where it did
                 // nothing (founder decision, 2026-08-01: drop the
                 // sliders rather than wire them up, no migration).
-                if resolved == .notch {
                     if screen.hasHardwareNotch {
                         SettingToggle(
                             label: "Match the notch",
@@ -166,11 +183,6 @@ struct DisplaysSection: View {
                             "Height", screen, \.height,
                             range: DisplayConfigStore.Config.heightRange, unit: "pt")
                     }
-                } else {
-                    SettingNote(
-                        "A pill hugs whatever it's showing and sizes itself. Choose Notch to set "
-                        + "a size by hand."
-                    )
                 }
             }
 
@@ -208,7 +220,12 @@ struct DisplaysSection: View {
     private func styleNote(_ resolved: DisplayConfigStore.Style) -> String {
         switch resolved {
         case .notch: return "Wraps a notch, real or emulated, and keeps content clear of it."
-        case .pill: return "A free-floating bar with nothing to clear, so content runs full width."
+        // The size sentence lives here, beside the choice that causes
+        // it, rather than in a Size card with nothing else in it.
+        case .pill:
+            return "A free-floating bar with nothing to clear, so content runs full width. "
+                + "It hugs whatever it is showing and sizes itself; choose Notch to set a size "
+                + "by hand."
         case .off: return "No island on this display at all."
         case .auto: return ""
         }
