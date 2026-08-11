@@ -18,55 +18,91 @@ struct LayoutSection: View {
     @ObservedObject var layout: IslandLayoutStore
 
     var body: some View {
+        // Same five cards, same order, as `islandArrangement` and
+        // `collapsedOrder` render them below: "Beside the notch" sits
+        // between "Not shown" and "Presets" today, so it cannot be
+        // reproduced by placing the two builders end to end. This reads
+        // from the same card properties they're built from, not a copy.
         VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
-            SettingCard(title: "In the island") {
-                ForEach(Array(layout.layout.rows.enumerated()), id: \.element.id) { index, row in
-                    if index > 0 { SettingDivider() }
-                    rowEditor(row, at: index)
-                }
-                SettingNote("Drag a row to move it. Top of the list is top of the island.")
-            }
+            inTheIsland
+            notShown
+            collapsedOrder
+            presets
+            startOver
+        }
+    }
 
-            if !hidden.isEmpty {
-                SettingCard(title: "Not shown") {
-                    ForEach(hidden) { element in
-                        HStack(spacing: Theme.Space.m) {
-                            Image(systemName: element.symbol)
-                                .font(Theme.Fonts.icon(.s))
-                                .foregroundStyle(Theme.textTertiary)
-                                .frame(width: 18)
-                            Text(element.title)
-                                .font(Theme.Fonts.body)
-                                .foregroundStyle(Theme.textSecondary)
-                            Spacer(minLength: Theme.Space.m)
-                            Button("Add") { add(element) }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                        }
+    // MARK: Island arrangement
+
+    /// What's on the island, what's held back, saved presets, and the
+    /// reset. Grouped as one unit so a later task can lift it onto its
+    /// own settings page without touching the row/drag machinery below.
+    @ViewBuilder
+    var islandArrangement: some View {
+        inTheIsland
+        notShown
+        presets
+        startOver
+    }
+
+    /// The "beside the notch" precedence card, alone: a later task moves
+    /// it to a different page than `islandArrangement`.
+    @ViewBuilder
+    var collapsedOrder: some View {
+        SettingCard(title: "Beside the notch") {
+            ForEach(Array(layout.layout.collapsed.enumerated()), id: \.element.id) {
+                index, item in
+                if index > 0 { SettingDivider() }
+                collapsedRow(item, at: index)
+            }
+            SettingNote(
+                "Only one of these fits beside a shut island, so this is an order of "
+                + "precedence: the first with something to say gets the space."
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var inTheIsland: some View {
+        SettingCard(title: "In the island") {
+            ForEach(Array(layout.layout.rows.enumerated()), id: \.element.id) { index, row in
+                if index > 0 { SettingDivider() }
+                rowEditor(row, at: index)
+            }
+            SettingNote("Drag a row to move it. Top of the list is top of the island.")
+        }
+    }
+
+    @ViewBuilder
+    private var notShown: some View {
+        if !hidden.isEmpty {
+            SettingCard(title: "Not shown") {
+                ForEach(hidden) { element in
+                    HStack(spacing: Theme.Space.m) {
+                        Image(systemName: element.symbol)
+                            .font(Theme.Fonts.icon(.s))
+                            .foregroundStyle(Theme.textTertiary)
+                            .frame(width: 18)
+                        Text(element.title)
+                            .font(Theme.Fonts.body)
+                            .foregroundStyle(Theme.textSecondary)
+                        Spacer(minLength: Theme.Space.m)
+                        Button("Add") { add(element) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
                     }
                 }
             }
+        }
+    }
 
-            SettingCard(title: "Beside the notch") {
-                ForEach(Array(layout.layout.collapsed.enumerated()), id: \.element.id) {
-                    index, item in
-                    if index > 0 { SettingDivider() }
-                    collapsedRow(item, at: index)
-                }
-                SettingNote(
-                    "Only one of these fits beside a shut island, so this is an order of "
-                    + "precedence: the first with something to say gets the space."
-                )
-            }
-
-            presets
-
-            SettingCard(title: "Start over") {
-                Button("Reset the arrangement") { layout.reset() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
-                SettingNote("Puts every element back where Chalant ships it.")
-            }
+    @ViewBuilder
+    private var startOver: some View {
+        SettingCard(title: "Start over") {
+            Button("Reset the arrangement") { layout.reset() }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+            SettingNote("Puts every element back where Chalant ships it.")
         }
     }
 
