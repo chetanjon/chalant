@@ -179,27 +179,48 @@ struct DashboardView: View {
 
     var body: some View {
         NavigationSplitView {
-            // Explicit ForEach with a tag rather than
-            // `List(data, selection:)`: that form keys selection off the
-            // element's `id`, which would silently bind a String where
-            // this binds a section, and both spellings compile.
-            List(selection: $selection.section) {
-                ForEach(DashboardSection.visibleCases) { section in
-                    HStack(spacing: Theme.Space.m) {
-                        Image(systemName: section.symbol)
-                            .font(Theme.Fonts.iconThin(.m))
-                        Text(section.title)
-                            .font(Theme.Fonts.body)
+            // Not a `List`: AppKit's NSTableView (what List becomes on
+            // macOS) paints its own blue selection capsule underneath
+            // row content, and no `.listRowBackground(Color.clear)`
+            // reaches under that to suppress it (screenshot-proven,
+            // round 4: "What shows" and "Island" rendered as solid blue
+            // pills). The founder's law is that active is white text,
+            // never a pill, so the List had to go rather than the law:
+            // eight rows do not need a List's keyboard navigation badly
+            // enough to keep the very capsule that broke it.
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    ForEach(DashboardSection.visibleCases) { section in
+                        Button {
+                            selection.section = section
+                        } label: {
+                            HStack(spacing: Theme.Space.m) {
+                                Image(systemName: section.symbol)
+                                    .font(Theme.Fonts.iconThin(.m))
+                                Text(section.title)
+                                    .font(Theme.Fonts.body)
+                            }
+                            .foregroundStyle(
+                                selection.section == section ? Theme.textPrimary : Theme.textGhost
+                            )
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .padding(.vertical, Theme.Space.s)
+                            .padding(.horizontal, Theme.Space.m)
+                        }
+                        .buttonStyle(PressableStyle())
+                        // The List used to say which row was current for
+                        // free; a plain Button does not, so this says it
+                        // by hand.
+                        .accessibilityAddTraits(
+                            selection.section == section ? [.isButton, .isSelected] : .isButton
+                        )
                     }
-                    .foregroundStyle(selection.section == section ? Theme.textPrimary : Theme.textGhost)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .tag(section)
-                    .listRowBackground(Color.clear)
                 }
+                .padding(.vertical, Theme.Space.m)
+                .padding(.horizontal, Theme.Space.m)
             }
             .navigationSplitViewColumnWidth(min: 176, ideal: 196, max: 240)
-            .scrollContentBackground(.hidden)
             .background(Theme.backdropTop)
             // Pinned at the leading edge beside the traffic lights,
             // where Mail, Notes and Finder all keep it. Left to itself
@@ -242,7 +263,13 @@ struct DashboardView: View {
         // `.balanced` draws the divider in SwiftUI itself instead, so it
         // is never tied to that toolbar layout cache in the first place.
         .navigationSplitViewStyle(.balanced)
-        .tint(Theme.fixedAccent(for: accentMode) ?? model.music.accent)
+        // Not the album accent: that painted every segmented picker,
+        // menu picker and the tour button red against an otherwise
+        // monochrome window (screenshot-proven, round 4, on General,
+        // What shows and Island). The window's controls speak the
+        // island's monochrome finish; the accent still reaches whatever
+        // asks for it by name, below.
+        .tint(Color.white.opacity(0.9))
         .environment(\.chalantAccent, Theme.fixedAccent(for: accentMode) ?? model.music.accent)
     }
 
