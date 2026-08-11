@@ -774,9 +774,16 @@ struct TodayView: View {
     /// a wrong or empty-looking line.
     private var header: some View {
         HStack(spacing: Theme.Space.s) {
+            // Quiet, not a headline. At headline weight the date was
+            // the loudest thing on the panel while saying the least,
+            // and on an empty day it sat there alone shouting a fact
+            // the menu bar already carries (founder, 2026-08-10: "why
+            // is the date visually so appearing, it feels a bit
+            // distracting"). It names the day the rows below belong
+            // to; the rows are the content.
             Text(Self.dateFormatter.string(from: Date()))
-                .font(Theme.Fonts.headline)
-                .foregroundStyle(Theme.textPrimary)
+                .font(Theme.Fonts.subhead)
+                .foregroundStyle(Theme.textSecondary)
             Spacer()
             if showWeather,
                let reading = WeatherController.usableReading(weather.reading, now: Date()) {
