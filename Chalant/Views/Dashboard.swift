@@ -199,6 +199,7 @@ struct DashboardView: View {
                                     .font(Theme.Fonts.iconThin(.m))
                                 Text(section.title)
                                     .font(Theme.Fonts.body)
+                                    .lineLimit(1)
                             }
                             .foregroundStyle(
                                 selection.section == section ? Theme.textPrimary : Theme.textGhost
@@ -206,7 +207,7 @@ struct DashboardView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                             .padding(.vertical, Theme.Space.s)
-                            .padding(.horizontal, Theme.Space.m)
+                            .padding(.horizontal, Theme.Space.s)
                         }
                         .buttonStyle(PressableStyle())
                         // The List used to say which row was current for

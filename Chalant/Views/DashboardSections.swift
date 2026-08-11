@@ -22,8 +22,6 @@ struct GeneralSection: View {
     /// appears; (name, uid) pairs for the Microphone picker.
     @State private var inputDevices: [(name: String, uid: String)] = []
 
-    @Environment(\.chalantAccent) private var accent
-
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xl) {
             SettingCard(title: "Startup") {
@@ -49,7 +47,7 @@ struct GeneralSection: View {
                     Button("Install Chalant \(latest)", action: onInstallUpdate)
                         .buttonStyle(.bordered)
                         .controlSize(.regular)
-                        .tint(accent)
+                        .tint(Color.white.opacity(0.9))
                 }
                 SettingDivider()
                 SettingToggle(label: "Show in Dock", isOn: Binding(
@@ -116,7 +114,7 @@ struct GeneralSection: View {
                     .pickerStyle(.menu)
                     .labelsHidden()
                     .controlSize(.small)
-                    .tint(accent)
+                    .tint(Color.white.opacity(0.9))
                     .fixedSize()
                     .accessibilityLabel("Microphone")
                 }
@@ -130,7 +128,7 @@ struct GeneralSection: View {
                 Button("Show the welcome tour again", action: onReplayTour)
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
-                    .tint(accent)
+                    .tint(Color.white.opacity(0.9))
                 SettingNote("The four cards you saw the first time Chalant opened.")
             }
         }
@@ -1126,8 +1124,6 @@ struct WhatShowsSection: View {
     /// Writable reminder lists, refreshed each time this section appears.
     @State private var reminderLists: [(title: String, id: String)] = []
 
-    @Environment(\.chalantAccent) private var accent
-
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xl) {
             SettingCard(title: "Blocks") {
@@ -1149,7 +1145,7 @@ struct WhatShowsSection: View {
                         .pickerStyle(.menu)
                         .labelsHidden()
                         .controlSize(.small)
-                        .tint(accent)
+                        .tint(Color.white.opacity(0.9))
                         .fixedSize()
                         .accessibilityLabel("Save reminders to")
                     }
