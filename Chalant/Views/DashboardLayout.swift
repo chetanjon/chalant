@@ -5,13 +5,19 @@ import UniformTypeIdentifiers
 ///
 /// Not a page of its own: `WhatShowsSection` renders `islandArrangement`
 /// and `collapsedOrder` inline as part of its own body, which is why
-/// this is a plain struct rather than a `View`. It still carries an
-/// `@ObservedObject` of its own, because the card builders below read
-/// `layout.layout` and call `layout.apply`/`capture`/`recall`/`reset`
-/// directly; the live-update guarantee itself comes from
-/// `WhatShowsSection` holding its own `@ObservedObject var layout`, so
-/// this one only needs to see current values, not to independently
-/// trigger a redraw.
+/// this is a plain struct rather than a `View`. It holds `layout` as a
+/// plain `let`: a struct that is not a `View` has no body for SwiftUI
+/// to re-invoke, so an `@ObservedObject` here would subscribe to
+/// nothing. The card builders below still read `layout.layout` and
+/// call `layout.apply`/`capture`/`recall`/`reset` directly; the
+/// live-update guarantee comes entirely from `WhatShowsSection`
+/// holding its own `@ObservedObject var layout`, whose body re-runs
+/// (and rebuilds a fresh `ArrangementCards`) on every change, which is
+/// why this type only ever needs to see current values, not to
+/// independently trigger a redraw. `@MainActor` is spelled out below
+/// because `@ObservedObject` used to carry that isolation implicitly;
+/// a plain `let` does not, and `IslandLayoutStore` itself is
+/// `@MainActor`.
 ///
 /// Drag rather than a `List` with `.onMove`: the dashboard's detail is
 /// already a ScrollView, and a List inside one fights it for scrolling.
@@ -24,8 +30,9 @@ import UniformTypeIdentifiers
 ///
 /// `draggable`/`dropDestination` gives the same gesture on an ordinary
 /// stack, and it is the platform's own drag, not a reimplementation.
+@MainActor
 struct ArrangementCards {
-    @ObservedObject var layout: IslandLayoutStore
+    let layout: IslandLayoutStore
 
     // MARK: Island arrangement
 

@@ -63,25 +63,6 @@ struct GeneralSection: View {
                 SettingNote("Off, Chalant lives only in the menu bar and the notch.")
             }
 
-            SettingCard(title: "Opening the island") {
-                // The finish announcement is a sessions behaviour, so
-                // its switch dark-ships with the surface (FeatureFlags).
-                if FeatureFlags.sessionsVisible {
-                    SettingToggle(label: "Open when an agent finishes", isOn: $openOnFinish)
-                    SettingNote(
-                        "The island opens on the session that just finished, showing what it said "
-                        + "with the reply box under it. It stays out of the way while you are "
-                        + "dictating or already typing in it."
-                    )
-                    SettingDivider()
-                }
-                SettingToggle(label: "Remember last tab", isOn: $rememberLastTab)
-                SettingNote(
-                    "On, the island reopens on whatever you were last looking at. Off, it always "
-                    + "reopens on your day."
-                )
-            }
-
             SettingCard(title: "Opening") {
                 SettingToggle(label: "Open on hover", isOn: $expandOnHover)
                 SettingDivider()
@@ -100,6 +81,23 @@ struct GeneralSection: View {
                     // controls of different widths leave a ragged left
                     // edge between rows that are read as a pair.
                     width: 236
+                )
+                SettingDivider()
+                // The finish announcement is a sessions behaviour, so
+                // its switch dark-ships with the surface (FeatureFlags).
+                if FeatureFlags.sessionsVisible {
+                    SettingToggle(label: "Open when an agent finishes", isOn: $openOnFinish)
+                    SettingNote(
+                        "The island opens on the session that just finished, showing what it said "
+                        + "with the reply box under it. It stays out of the way while you are "
+                        + "dictating or already typing in it."
+                    )
+                    SettingDivider()
+                }
+                SettingToggle(label: "Remember last tab", isOn: $rememberLastTab)
+                SettingNote(
+                    "On, the island reopens on whatever you were last looking at. Off, it always "
+                    + "reopens on your day."
                 )
             }
 
@@ -1147,7 +1145,7 @@ struct WhatShowsSection: View {
         // time this body runs so they always read the live layout.
         let cards = ArrangementCards(layout: layout)
         VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
-            SettingCard(title: "Blocks") {
+            SettingCard(title: "What shows") {
                 SettingToggle(label: "Media", isOn: $showMedia)
                 SettingDivider()
                 SettingToggle(label: "Ambience", isOn: $showAmbience)
@@ -1174,9 +1172,7 @@ struct WhatShowsSection: View {
                 SettingDivider()
                 SettingToggle(label: "Weather", isOn: $showWeather)
                 SettingNote("A rough reading from Open-Meteo, no account or key needed.")
-            }
-
-            SettingCard(title: "Tools") {
+                SettingDivider()
                 SettingToggle(label: "Shortcuts", isOn: $toolGo)
                 SettingDivider()
                 SettingToggle(label: "Clipboard", isOn: $toolClips)
@@ -1268,7 +1264,7 @@ struct WhatShowsSection: View {
                 SettingDivider()
                 SettingToggle(label: "Event coming up", isOn: $glanceNextEvent)
                 if !showCalendar {
-                    SettingNote("Needs the Calendar today block on, under What shows.")
+                    SettingNote("Needs the Calendar today block on, above.")
                 }
             }
         }
