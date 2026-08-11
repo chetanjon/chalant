@@ -228,7 +228,18 @@ struct NotchRootView: View {
                 eave: 0,
                 bottomRadius: radius,
                 belly: expanded ? Theme.Island.bellyExpanded : Theme.Island.bellyCollapsed,
-                topRadius: radius
+                // Square at the top when it is small, so the resting
+                // pill HANGS from the screen edge instead of floating
+                // under it. Rounding all four corners made a 120pt
+                // lozenge read as a sticker dropped onto whatever was
+                // behind it, which on a fullscreen window is that app's
+                // own toolbar (founder, 2026-08-10, photographed over
+                // Safari's tab strip). Still not the notch silhouette:
+                // there are no eaves here and nothing pretends to wrap
+                // a cutout, which is the thing that failed before.
+                // Open, it is a panel rather than a strip and keeps its
+                // turned corners; the morph carries topRadius now.
+                topRadius: expanded ? radius : 0
             )
         }
         if face.state == .collapsed {
@@ -550,27 +561,33 @@ struct NotchRootView: View {
 
     /// The countdown at the pill's right, ring and all. A pill has the
     /// room for digits that a notch's narrow wing does not.
+    /// The finish reached this pill last (founder, 2026-08-10: "it
+    /// looks cramped too"). Semibold mono at 13 with a 1.5pt ring five
+    /// points away read as heavy and tight on an external monitor,
+    /// where nothing is Retina and every stroke is a whole pixel. The
+    /// digits now wear the island's own number voice, the ring is drawn
+    /// thinner, and the two have room between them.
     private var sessionCompact: some View {
-        HStack(spacing: Theme.Space.snug) {
+        HStack(spacing: Theme.Space.m) {
             if stopwatch.isActive, !focus.isActive, !timer.isActive {
                 Image(systemName: "stopwatch")
-                    .font(Theme.Fonts.icon(.xs))
+                    .font(Theme.Fonts.iconThin(.xs))
                     .foregroundStyle(accent)
                     .opacity(stopwatch.isRunning ? 1 : 0.5)
                 Text(stopwatch.display)
-                    .font(Theme.Fonts.labelMono)
+                    .font(Theme.Fonts.timeMono)
                     .foregroundStyle(Theme.textPrimary)
                     .opacity(stopwatch.isRunning ? 1 : 0.5)
             } else {
                 ProgressRing(
                     progress: focus.isActive ? focus.progress : timer.progress,
-                    size: 10,
-                    lineWidth: 1.5,
+                    size: 11,
+                    lineWidth: 1.2,
                     tint: accent,
                     trackOpacity: 0.15
                 )
                 Text(focus.isActive ? focus.display : timer.display)
-                    .font(Theme.Fonts.labelMono)
+                    .font(Theme.Fonts.timeMono)
                     .foregroundStyle(Theme.textPrimary)
                     .opacity(focus.isActive && focus.isPaused ? 0.5 : 1)
             }
