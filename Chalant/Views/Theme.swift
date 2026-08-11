@@ -125,6 +125,9 @@ enum Theme {
         static let labelMono = Font.system(size: 13, weight: .semibold, design: .monospaced)
         /// Time on the island: elapsed, remaining, temperatures.
         static let timeMono = Font.system(size: 13, weight: .medium, design: .monospaced)
+        /// A settings group's name: the same quiet mono voice the
+        /// island uses for numbers, sized down and spaced out.
+        static let groupLabel = Font.system(size: 11, weight: .medium, design: .monospaced)
         static let bodyMono = Font.system(size: 14, design: .monospaced)
         static let bodyEmphasisMono = Font.system(size: 14, weight: .semibold, design: .monospaced)
         static let counterMono = Font.system(size: 17, weight: .semibold, design: .monospaced)
@@ -174,6 +177,12 @@ enum Theme {
         /// panel). Air is the only divider; the hairlines are gone
         /// (founder, 2026-08-10).
         static let zone: CGFloat = 26
+        /// A settings row's own breathing room, above and below its
+        /// label. The window used to pack rows at card density; the
+        /// finish gives each row the air the island's zones have.
+        static let settingsRow: CGFloat = 13
+        /// Between one settings group and the next.
+        static let settingsGroup: CGFloat = 30
         /// Tight icon-to-label and dot gaps.
         static let snug: CGFloat = 5
         /// A headline directly over its subhead: the tightest stack

@@ -64,4 +64,14 @@ final class MotionPourTests: XCTestCase {
         XCTAssertEqual(ThinSlider.value(atX: 200, width: 84, in: 0...1), 1)
         XCTAssertEqual(ThinSlider.value(atX: 10, width: 0, in: 0...1), 0)
     }
+
+    /// The finish reached the settings window (round 4): the group
+    /// label is the island's own quiet mono voice, and the card draws
+    /// no box. Pinned because a boxed card is the one thing that made
+    /// the window read as a different app than the island.
+    func testTheSettingsFinishTokensExist() {
+        XCTAssertEqual(Theme.Space.settingsRow, 13)
+        XCTAssertEqual(Theme.Space.settingsGroup, 30)
+        _ = Theme.Fonts.groupLabel
+    }
 }

@@ -302,27 +302,17 @@ struct SettingCard<Content: View>: View {
     let title: String
     @ViewBuilder let content: Content
 
-    /// One inset, read by both the title and the card's contents.
-    ///
-    /// The title names what is inside the card, so it belongs on the
-    /// same vertical line. It used to sit at 4 while the rows sat at
-    /// 12, which puts two competing left margins down a column of
-    /// stacked settings groups and makes each card read as a detached
-    /// box rather than the body of the thing above it. Held as one
-    /// value so the two cannot drift apart again.
-    private static var inset: CGFloat { Theme.Space.l }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            SectionHeader(title: title)
-                .padding(.leading, Self.inset)
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
+            Text(title.uppercased())
+                .font(Theme.Fonts.groupLabel)
+                .tracking(1.6)
+                .foregroundStyle(Theme.textGhost)
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 content
             }
-            .padding(Self.inset)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .chalantCard()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -335,17 +325,17 @@ struct SettingRow<Control: View>: View {
         HStack {
             Text(label)
                 .font(Theme.Fonts.body)
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(Theme.textPrimary)
             Spacer(minLength: Theme.Space.l)
             control
         }
+        .padding(.vertical, Theme.Space.settingsRow)
     }
 }
 
 struct SettingToggle: View {
     let label: String
     @Binding var isOn: Bool
-    @Environment(\.chalantAccent) private var accent
 
     var body: some View {
         SettingRow(label: label) {
@@ -353,7 +343,7 @@ struct SettingToggle: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.mini)
-                .tint(accent)
+                .tint(Color.white.opacity(0.9))
                 // The switch alone is the control; the row's text is its
                 // name, and without this a screen reader announces an
                 // unlabelled switch.
@@ -396,8 +386,9 @@ struct SettingNote: View {
     var body: some View {
         Text(text)
             .font(Theme.Fonts.caption)
-            .foregroundStyle(Theme.textHint)
+            .foregroundStyle(Theme.textTertiary)
             .fixedSize(horizontal: false, vertical: true)
+            .padding(.bottom, Theme.Space.xs)
     }
 }
 
