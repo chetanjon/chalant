@@ -185,9 +185,17 @@ struct DashboardView: View {
             // this binds a section, and both spellings compile.
             List(selection: $selection.section) {
                 ForEach(DashboardSection.visibleCases) { section in
-                    Label(section.title, systemImage: section.symbol)
-                        .font(Theme.Fonts.body)
-                        .tag(section)
+                    HStack(spacing: Theme.Space.m) {
+                        Image(systemName: section.symbol)
+                            .font(Theme.Fonts.iconThin(.m))
+                        Text(section.title)
+                            .font(Theme.Fonts.body)
+                    }
+                    .foregroundStyle(selection.section == section ? Theme.textPrimary : Theme.textGhost)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .tag(section)
+                    .listRowBackground(Color.clear)
                 }
             }
             .navigationSplitViewColumnWidth(min: 176, ideal: 196, max: 240)
