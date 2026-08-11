@@ -1,7 +1,17 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Rearranging what the island shows.
+/// Building blocks for rearranging what the island shows.
+///
+/// Not a page of its own: `WhatShowsSection` renders `islandArrangement`
+/// and `collapsedOrder` inline as part of its own body, which is why
+/// this is a plain struct rather than a `View`. It still carries an
+/// `@ObservedObject` of its own, because the card builders below read
+/// `layout.layout` and call `layout.apply`/`capture`/`recall`/`reset`
+/// directly; the live-update guarantee itself comes from
+/// `WhatShowsSection` holding its own `@ObservedObject var layout`, so
+/// this one only needs to see current values, not to independently
+/// trigger a redraw.
 ///
 /// Drag rather than a `List` with `.onMove`: the dashboard's detail is
 /// already a ScrollView, and a List inside one fights it for scrolling.
@@ -14,29 +24,14 @@ import UniformTypeIdentifiers
 ///
 /// `draggable`/`dropDestination` gives the same gesture on an ordinary
 /// stack, and it is the platform's own drag, not a reimplementation.
-struct LayoutSection: View {
+struct ArrangementCards {
     @ObservedObject var layout: IslandLayoutStore
-
-    var body: some View {
-        // Same five cards, same order, as `islandArrangement` and
-        // `collapsedOrder` render them below: "Beside the notch" sits
-        // between "Not shown" and "Presets" today, so it cannot be
-        // reproduced by placing the two builders end to end. This reads
-        // from the same card properties they're built from, not a copy.
-        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
-            inTheIsland
-            notShown
-            collapsedOrder
-            presets
-            startOver
-        }
-    }
 
     // MARK: Island arrangement
 
     /// What's on the island, what's held back, saved presets, and the
-    /// reset. Grouped as one unit so a later task can lift it onto its
-    /// own settings page without touching the row/drag machinery below.
+    /// reset. Grouped as one unit so it renders as a contiguous block
+    /// on the What shows page, above the collapsed-state card below.
     @ViewBuilder
     var islandArrangement: some View {
         inTheIsland
@@ -45,11 +40,14 @@ struct LayoutSection: View {
         startOver
     }
 
-    /// The "beside the notch" precedence card, alone: a later task moves
-    /// it to a different page than `islandArrangement`.
+    /// The collapsed-state precedence card, alone. Titled "Which one
+    /// gets the space" rather than "Beside the notch": that name now
+    /// belongs to Glance's own card, which sits just above this one on
+    /// the What shows page, and two cards sharing a title on the same
+    /// page would be its own kind of confusing.
     @ViewBuilder
     var collapsedOrder: some View {
-        SettingCard(title: "Beside the notch") {
+        SettingCard(title: "Which one gets the space") {
             ForEach(Array(layout.layout.collapsed.enumerated()), id: \.element.id) {
                 index, item in
                 if index > 0 { SettingDivider() }

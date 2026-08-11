@@ -1104,6 +1104,12 @@ struct WhatShowsSection: View {
     /// (ExpandedView.swift).
     @ObservedObject var stats: SystemStatsController
     @ObservedObject var weather: WeatherController
+    /// Absorbed from the old Arrangement page: its cards render inline
+    /// below, built by `ArrangementCards(layout:)`. `@ObservedObject`
+    /// here, not just passed through, is what makes a drag or a preset
+    /// tap redraw this page: `ArrangementCards` itself is a plain
+    /// struct, not a `View`, so it triggers nothing on its own.
+    @ObservedObject var layout: IslandLayoutStore
 
     @AppStorage("showMedia") private var showMedia = true
     @AppStorage("showAmbience") private var showAmbience = true
@@ -1137,6 +1143,9 @@ struct WhatShowsSection: View {
     @State private var reminderLists: [(title: String, id: String)] = []
 
     var body: some View {
+        // The old Arrangement page's two card groups, built fresh each
+        // time this body runs so they always read the live layout.
+        let cards = ArrangementCards(layout: layout)
         VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             SettingCard(title: "Blocks") {
                 SettingToggle(label: "Media", isOn: $showMedia)
@@ -1206,6 +1215,10 @@ struct WhatShowsSection: View {
                 }
             }
 
+            // Absorbed from the old Arrangement page: what's on the
+            // island, what's held back, saved presets, and the reset.
+            cards.islandArrangement
+
             SettingCard(title: "Beside the notch") {
                 SettingPicker(
                     label: "While playing",
@@ -1244,6 +1257,11 @@ struct WhatShowsSection: View {
                     + "notch has anything to say. It turns red below 20%."
                 )
             }
+
+            // Also absorbed from the old Arrangement page: which one of
+            // the cards above actually gets the collapsed island's one
+            // slot, in order of precedence.
+            cards.collapsedOrder
 
             SettingCard(title: "What interrupts") {
                 SettingToggle(label: "Clear the glance while playing", isOn: $glanceMusic)
