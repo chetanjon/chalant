@@ -27,13 +27,17 @@ final class MotionPourTests: XCTestCase {
     }
 
     func testACrashIsMarkedSeenWithoutForgettingItThisSession() {
-        let defaults = UserDefaults.standard
-        defaults.removeObject(forKey: "chalant.crashSeenAt")
+        // Its own domain on purpose: this bundle runs inside the app,
+        // so `standard` here is the founder's real preferences, and a
+        // test that cleared this key re-armed the crash banner on
+        // their machine every time the suite ran.
+        let suite = "chalant.tests.crashseen.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
         let date = Date(timeIntervalSince1970: 1_754_500_000)
-        CrashWatch.markSeen(date)
-        XCTAssertEqual(
-            defaults.object(forKey: "chalant.crashSeenAt") as? Date, date)
-        defaults.removeObject(forKey: "chalant.crashSeenAt")
+        CrashWatch.markSeen(date, in: defaults)
+        XCTAssertEqual(defaults.object(forKey: "chalant.crashSeenAt") as? Date, date)
+        defaults.removePersistentDomain(forName: suite)
     }
 
     func testAFreshSeekHoldsTheBarAtItsTarget() {
