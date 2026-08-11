@@ -13,6 +13,11 @@
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
 
+	<!-- Where you are, roughly: the weather line beside your day.
+	     The fix is rounded to about a kilometre before it is used. -->
+	<key>com.apple.security.personal-information.location</key>
+	<true/>
+
 	<!-- Deliberately absent: com.apple.security.cs.disable-library-validation.
 	     It was here for the now-playing adapter, on the reasoning that
 	     the system perl loads a framework Apple did not sign. But

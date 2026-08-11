@@ -44,4 +44,35 @@ final class WeatherTests: XCTestCase {
         XCTAssertFalse(WeatherController.wantsCelsius(locale: Locale(identifier: "en_US")))
         XCTAssertTrue(WeatherController.wantsCelsius(locale: Locale(identifier: "en_GB")))
     }
+
+    /// The icon agrees with the word: a storm never wears a sun. Same
+    /// representative codes as the word test, plus the fallback.
+    func testTheSkyGlyphsAgreeWithTheWords() {
+        XCTAssertEqual(WeatherController.skyGlyph(code: 0), "sun.max")
+        XCTAssertEqual(WeatherController.skyGlyph(code: 2), "cloud.sun")
+        XCTAssertEqual(WeatherController.skyGlyph(code: 3), "cloud")
+        XCTAssertEqual(WeatherController.skyGlyph(code: 45), "cloud.fog")
+        XCTAssertEqual(WeatherController.skyGlyph(code: 61), "cloud.rain")
+        XCTAssertEqual(WeatherController.skyGlyph(code: 71), "cloud.snow")
+        XCTAssertEqual(WeatherController.skyGlyph(code: 81), "cloud.rain")
+        XCTAssertEqual(WeatherController.skyGlyph(code: 86), "cloud.snow")
+        XCTAssertEqual(WeatherController.skyGlyph(code: 95), "cloud.bolt")
+        XCTAssertEqual(WeatherController.skyGlyph(code: 999), "sun.max")
+    }
+
+    /// Weather ships ON like the day's sources do: the permission
+    /// prompt is the real gate, and a second invisible one would only
+    /// hide the line the grant was for. An explicit false is honoured.
+    func testWeatherIsOnUntilSomebodyTurnsItOff() {
+        let suite = "chalant.tests.weather.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+
+        XCTAssertTrue(WeatherController.showsWeather(in: defaults), "unset means on")
+        defaults.set(false, forKey: "showWeather")
+        XCTAssertFalse(WeatherController.showsWeather(in: defaults))
+        defaults.set(true, forKey: "showWeather")
+        XCTAssertTrue(WeatherController.showsWeather(in: defaults))
+        defaults.removePersistentDomain(forName: suite)
+    }
 }

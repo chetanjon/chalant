@@ -849,7 +849,7 @@ final class NotchViewModel: ObservableObject {
         events.startGlanceTicker()
         // Unset means on: a fresh install shows the weather line, same
         // default the toggle itself carries in Settings.
-        if UserDefaults.standard.object(forKey: "showWeather") as? Bool ?? true {
+        if WeatherController.showsWeather() {
             weather.start()
         }
         updates.onNewVersion = { [weak self] version in
@@ -1192,8 +1192,8 @@ final class NotchViewModel: ObservableObject {
     /// last open should bring Today straight back.
     private var landing: Tab {
         let defaults = UserDefaults.standard
-        // Both ship off, matching the @AppStorage declarations the
-        // settings window makes, so an unset key means off here too.
+        // Both ship on (unset means on, EventKitService's one rule);
+        // an explicit false from the settings window is honoured.
         let seesCalendar = EventKitService.showsCalendar(in: defaults) && !events.calendarDenied
         let seesReminders = EventKitService.showsReminders(in: defaults) && !events.remindersDenied
         return Self.landingTab(todayCanSee: seesCalendar || seesReminders, in: defaults)
