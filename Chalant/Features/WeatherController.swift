@@ -100,6 +100,8 @@ final class WeatherController: NSObject, ObservableObject, CLLocationManagerDele
     // MARK: - CLLocationManagerDelegate
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        // The toggle governs the fetch, so an unstarted controller ignores its manager.
+        guard started else { return }
         switch manager.authorizationStatus {
         case .authorizedAlways, .authorized:
             manager.requestLocation()
@@ -109,6 +111,8 @@ final class WeatherController: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        // The toggle governs the fetch, so an unstarted controller ignores its manager.
+        guard started else { return }
         guard let coordinate = locations.last?.coordinate else { return }
         fetch(latitude: coordinate.latitude, longitude: coordinate.longitude)
     }

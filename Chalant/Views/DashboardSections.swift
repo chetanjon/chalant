@@ -1105,6 +1105,7 @@ struct WhatShowsSection: View {
     /// dead control, the same call made for the tab itself
     /// (ExpandedView.swift).
     @ObservedObject var stats: SystemStatsController
+    @ObservedObject var weather: WeatherController
 
     @AppStorage("showMedia") private var showMedia = true
     @AppStorage("showAmbience") private var showAmbience = true
@@ -1204,6 +1205,11 @@ struct WhatShowsSection: View {
                 lists.append((title: "Missing list", id: reminderListID))
             }
             reminderLists = lists
+        }
+        // Flipping on starts the controller (start() is idempotent); flipping off keeps
+        // running until relaunch, the same pattern EventKitService's toggles follow.
+        .onChange(of: showWeather) { _, on in
+            if on { weather.start() }
         }
     }
 }
@@ -1395,7 +1401,7 @@ struct AboutSection: View {
                 // into a blanket "nothing is sent anywhere."
                 SettingNote(
                     "Weather asks Open-Meteo for the sky above your approximate area. "
-                    + "Nothing else leaves this Mac."
+                    + "Nothing else Chalant reads leaves this Mac."
                 )
                 SettingDivider()
                 SettingNote(

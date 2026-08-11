@@ -271,7 +271,7 @@ struct DashboardView: View {
                         )
                     }
                 case .whatShows:
-                    WhatShowsSection(events: model.events, stats: model.stats)
+                    WhatShowsSection(events: model.events, stats: model.stats, weather: model.weather)
                 case .island:
                     IslandSection(music: model.music)
                 case .displays:

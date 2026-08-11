@@ -714,8 +714,8 @@ struct TodayView: View {
     }()
 
     var body: some View {
-        // Empty sections vanish instead of announcing their
-        // emptiness; a fully clear day gets one graceful line.
+        // Empty sections vanish instead of announcing their emptiness;
+        // an empty day is just the date and, when on, the weather.
         let hasEvents = showCalendar && !events.calendarDenied && !events.events.isEmpty
         let hasReminders = showReminders && !events.remindersDenied && !events.reminders.isEmpty
         let denials = denials
