@@ -237,7 +237,20 @@ struct NowPlayingBars: View {
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             bars { index in restHeight(index) }
         } else {
-            TimelineView(.animation(minimumInterval: 1 / 30)) { context in
+            // 15, not 30. Every tick of a TimelineView re-runs the
+            // hosting view's whole layout pass, not just this Canvas's
+            // draw: sampled on 2026-08-10, a playing island spent 18%
+            // of its main thread inside NSHostingView.layout() under
+            // the display-cycle observer, and switching this signal off
+            // took that path to ZERO samples. The Canvas fix from
+            // Round 22b stopped the bars invalidating layout by
+            // changing a frame; it could not stop the tick itself.
+            //
+            // Halving the rate halves the passes. Bars still read as
+            // dancing at 15, and the app already holds this precedent:
+            // the aurora runs at 12 deliberately, with "CPU halved, do
+            // not raise" written beside it.
+            TimelineView(.animation(minimumInterval: 1 / 15)) { context in
                 let t = context.date.timeIntervalSinceReferenceDate
                 bars { index in liveHeight(t: t, index: index) }
             }

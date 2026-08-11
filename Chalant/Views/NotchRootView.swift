@@ -413,7 +413,16 @@ struct NotchRootView: View {
                         if glowOn, Theme.Feel.current.ambient,
                            face.state == .collapsed,
                            model.sessionActive || music.nowPlaying?.isPlaying == true {
-                            TimelineView(.animation(minimumInterval: 1 / 15)) { context in
+                            // 8, not 15. This is a breath on a 1.6s
+                            // cycle: nothing in it moves fast enough to
+                            // need fifteen frames a second, and each one
+                            // costs a full hosting-view layout pass (the
+                            // measurement is written up on NowPlayingBars
+                            // in IslandRows.swift). Three stroked borders
+                            // are redrawn per tick, so this was the
+                            // second most expensive thing a resting
+                            // island did while music played.
+                            TimelineView(.animation(minimumInterval: 1 / 8)) { context in
                                 let t = context.date.timeIntervalSinceReferenceDate
                                 let breath = 0.5 + 0.5 * sin(t / (1.6 * Theme.Motion.ambientSlow))
                                 ZStack {
