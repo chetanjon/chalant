@@ -17,8 +17,6 @@ enum DashboardSection: String, CaseIterable, Identifiable {
     case whatShows
     case island
     case displays
-    case layout
-    case glance
     case keyboard
     case about
 
@@ -31,8 +29,6 @@ enum DashboardSection: String, CaseIterable, Identifiable {
         case .whatShows: return "What shows"
         case .island: return "Island"
         case .displays: return "Displays"
-        case .layout: return "Arrangement"
-        case .glance: return "Glance"
         case .keyboard: return "Keyboard"
         case .about: return "About"
         }
@@ -47,8 +43,6 @@ enum DashboardSection: String, CaseIterable, Identifiable {
         // app..." in Shortcuts is the one that opens a window.
         case .island: return "capsule"
         case .displays: return "display.2"
-        case .layout: return "rectangle.3.group"
-        case .glance: return "eye"
         case .keyboard: return "keyboard"
         case .about: return "info.circle"
         }
@@ -307,15 +301,14 @@ struct DashboardView: View {
                         )
                     }
                 case .whatShows:
-                    WhatShowsSection(events: model.events, stats: model.stats, weather: model.weather)
+                    WhatShowsSection(
+                        events: model.events, stats: model.stats, weather: model.weather,
+                        layout: model.layout
+                    )
                 case .island:
                     IslandSection(music: model.music)
                 case .displays:
                     DisplaysSection(displays: model.displays)
-                case .layout:
-                    LayoutSection(layout: model.layout)
-                case .glance:
-                    GlanceSection()
                 case .keyboard:
                     KeyboardSection()
                 case .about:

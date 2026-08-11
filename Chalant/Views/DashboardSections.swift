@@ -63,25 +63,6 @@ struct GeneralSection: View {
                 SettingNote("Off, Chalant lives only in the menu bar and the notch.")
             }
 
-            SettingCard(title: "Opening the island") {
-                // The finish announcement is a sessions behaviour, so
-                // its switch dark-ships with the surface (FeatureFlags).
-                if FeatureFlags.sessionsVisible {
-                    SettingToggle(label: "Open when an agent finishes", isOn: $openOnFinish)
-                    SettingNote(
-                        "The island opens on the session that just finished, showing what it said "
-                        + "with the reply box under it. It stays out of the way while you are "
-                        + "dictating or already typing in it."
-                    )
-                    SettingDivider()
-                }
-                SettingToggle(label: "Remember last tab", isOn: $rememberLastTab)
-                SettingNote(
-                    "On, the island reopens on whatever you were last looking at. Off, it always "
-                    + "reopens on your day."
-                )
-            }
-
             SettingCard(title: "Opening") {
                 SettingToggle(label: "Open on hover", isOn: $expandOnHover)
                 SettingDivider()
@@ -100,6 +81,23 @@ struct GeneralSection: View {
                     // controls of different widths leave a ragged left
                     // edge between rows that are read as a pair.
                     width: 236
+                )
+                SettingDivider()
+                // The finish announcement is a sessions behaviour, so
+                // its switch dark-ships with the surface (FeatureFlags).
+                if FeatureFlags.sessionsVisible {
+                    SettingToggle(label: "Open when an agent finishes", isOn: $openOnFinish)
+                    SettingNote(
+                        "The island opens on the session that just finished, showing what it said "
+                        + "with the reply box under it. It stays out of the way while you are "
+                        + "dictating or already typing in it."
+                    )
+                    SettingDivider()
+                }
+                SettingToggle(label: "Remember last tab", isOn: $rememberLastTab)
+                SettingNote(
+                    "On, the island reopens on whatever you were last looking at. Off, it always "
+                    + "reopens on your day."
                 )
             }
 
@@ -1104,6 +1102,12 @@ struct WhatShowsSection: View {
     /// (ExpandedView.swift).
     @ObservedObject var stats: SystemStatsController
     @ObservedObject var weather: WeatherController
+    /// Absorbed from the old Arrangement page: its cards render inline
+    /// below, built by `ArrangementCards(layout:)`. `@ObservedObject`
+    /// here, not just passed through, is what makes a drag or a preset
+    /// tap redraw this page: `ArrangementCards` itself is a plain
+    /// struct, not a `View`, so it triggers nothing on its own.
+    @ObservedObject var layout: IslandLayoutStore
 
     @AppStorage("showMedia") private var showMedia = true
     @AppStorage("showAmbience") private var showAmbience = true
@@ -1121,12 +1125,27 @@ struct WhatShowsSection: View {
     @AppStorage(ChatController.serviceKey) private var chatService = "claude"
     @AppStorage(EventKitService.reminderListKey) private var reminderListID = ""
 
+    // Moved from GlanceSection (What shows absorbs Glance): the two cards
+    // below used to live on their own page, and `showCalendar` above
+    // already covers the one property both pages read.
+    @AppStorage(MusicController.playingSignalKey) private var playingSignal
+        = MusicController.playingSignalDefault
+    @AppStorage("glanceMusic") private var glanceMusic = true
+    @AppStorage("glanceSession") private var glanceSession = true
+    @AppStorage("glanceBattery") private var glanceBattery = false
+    @AppStorage("collapsedSong") private var collapsedSong = true
+    @AppStorage("glanceAgents") private var glanceAgents = true
+    @AppStorage("glanceNextEvent") private var glanceNextEvent = true
+
     /// Writable reminder lists, refreshed each time this section appears.
     @State private var reminderLists: [(title: String, id: String)] = []
 
     var body: some View {
+        // The old Arrangement page's two card groups, built fresh each
+        // time this body runs so they always read the live layout.
+        let cards = ArrangementCards(layout: layout)
         VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
-            SettingCard(title: "Blocks") {
+            SettingCard(title: "Show or hide") {
                 SettingToggle(label: "Media", isOn: $showMedia)
                 SettingDivider()
                 SettingToggle(label: "Ambience", isOn: $showAmbience)
@@ -1153,9 +1172,7 @@ struct WhatShowsSection: View {
                 SettingDivider()
                 SettingToggle(label: "Weather", isOn: $showWeather)
                 SettingNote("A rough reading from Open-Meteo, no account or key needed.")
-            }
-
-            SettingCard(title: "Tools") {
+                SettingDivider()
                 SettingToggle(label: "Shortcuts", isOn: $toolGo)
                 SettingDivider()
                 SettingToggle(label: "Clipboard", isOn: $toolClips)
@@ -1191,6 +1208,63 @@ struct WhatShowsSection: View {
                             + "with Anthropic, OpenAI, or Google."
                         )
                     }
+                }
+            }
+
+            // Absorbed from the old Arrangement page: what's on the
+            // island, what's held back, saved presets, and the reset.
+            cards.islandArrangement
+
+            SettingCard(title: "Beside the notch") {
+                SettingPicker(
+                    label: "While playing",
+                    selection: $playingSignal,
+                    options: [("Wave", "wave"), ("Quiet", "quiet")]
+                )
+                SettingNote(
+                    "Quiet leaves only the breathing rim, the default. Wave dances beside the notch "
+                    + "for those who want it."
+                )
+                SettingDivider()
+                SettingToggle(label: "Session mark beside the notch", isOn: $glanceSession)
+                SettingNote(
+                    "The small ring or stopwatch glyph while something runs. Off keeps the pill bare; "
+                    + "the rim alone says something is going."
+                )
+                SettingDivider()
+                SettingToggle(label: "What's playing, on the island", isOn: $collapsedSong)
+                SettingNote(
+                    "The song's name beside the resting island, on displays without a notch. A "
+                    + "MacBook keeps the bare pill so it still matches the hardware."
+                )
+                SettingDivider()
+                if FeatureFlags.sessionsVisible {
+                    SettingToggle(label: "Agents running", isOn: $glanceAgents)
+                    SettingNote(
+                        "A mark beside the notch while Claude Code or Cursor sessions are going. It "
+                        + "breathes while they work and holds still, in the accent, the moment one is "
+                        + "waiting on you."
+                    )
+                    SettingDivider()
+                }
+                SettingToggle(label: "Battery", isOn: $glanceBattery)
+                SettingNote(
+                    "The charge, last in line: it only takes the space when nothing else beside the "
+                    + "notch has anything to say. It turns red below 20%."
+                )
+            }
+
+            // Also absorbed from the old Arrangement page: which one of
+            // the cards above actually gets the collapsed island's one
+            // slot, in order of precedence.
+            cards.collapsedOrder
+
+            SettingCard(title: "What interrupts") {
+                SettingToggle(label: "Clear the glance while playing", isOn: $glanceMusic)
+                SettingDivider()
+                SettingToggle(label: "Event coming up", isOn: $glanceNextEvent)
+                if !showCalendar {
+                    SettingNote("Needs the Calendar today block on, above.")
                 }
             }
         }
@@ -1297,72 +1371,6 @@ struct IslandSection: View {
     private func swatch(_ mode: String, _ color: Color, label: String) -> some View {
         SettingsSwatch(color: color, label: label, selected: accentMode == mode) {
             accentMode = mode
-        }
-    }
-}
-
-// MARK: - Glance
-
-struct GlanceSection: View {
-    @AppStorage(MusicController.playingSignalKey) private var playingSignal
-        = MusicController.playingSignalDefault
-    @AppStorage("glanceMusic") private var glanceMusic = true
-    @AppStorage("glanceSession") private var glanceSession = true
-    @AppStorage("glanceBattery") private var glanceBattery = false
-    @AppStorage("collapsedSong") private var collapsedSong = true
-    @AppStorage("glanceAgents") private var glanceAgents = true
-    @AppStorage("glanceNextEvent") private var glanceNextEvent = true
-    @AppStorage("showCalendar") private var showCalendar = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
-            SettingCard(title: "Beside the notch") {
-                SettingPicker(
-                    label: "While playing",
-                    selection: $playingSignal,
-                    options: [("Wave", "wave"), ("Quiet", "quiet")]
-                )
-                SettingNote(
-                    "Quiet leaves only the breathing rim, the default. Wave dances beside the notch "
-                    + "for those who want it."
-                )
-                SettingDivider()
-                SettingToggle(label: "Session mark beside the notch", isOn: $glanceSession)
-                SettingNote(
-                    "The small ring or stopwatch glyph while something runs. Off keeps the pill bare; "
-                    + "the rim alone says something is going."
-                )
-                SettingDivider()
-                SettingToggle(label: "What's playing, on the island", isOn: $collapsedSong)
-                SettingNote(
-                    "The song's name beside the resting island, on displays without a notch. A "
-                    + "MacBook keeps the bare pill so it still matches the hardware."
-                )
-                SettingDivider()
-                if FeatureFlags.sessionsVisible {
-                    SettingToggle(label: "Agents running", isOn: $glanceAgents)
-                    SettingNote(
-                        "A mark beside the notch while Claude Code or Cursor sessions are going. It "
-                        + "breathes while they work and holds still, in the accent, the moment one is "
-                        + "waiting on you."
-                    )
-                    SettingDivider()
-                }
-                SettingToggle(label: "Battery", isOn: $glanceBattery)
-                SettingNote(
-                    "The charge, last in line: it only takes the space when nothing else beside the "
-                    + "notch has anything to say. It turns red below 20%."
-                )
-            }
-
-            SettingCard(title: "What interrupts") {
-                SettingToggle(label: "Clear the glance while playing", isOn: $glanceMusic)
-                SettingDivider()
-                SettingToggle(label: "Event coming up", isOn: $glanceNextEvent)
-                if !showCalendar {
-                    SettingNote("Needs the Calendar today block on, under What shows.")
-                }
-            }
         }
     }
 }
