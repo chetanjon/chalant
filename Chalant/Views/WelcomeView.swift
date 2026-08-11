@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The first hello: three quiet steps inside the island itself. No
+/// The first hello: four quiet steps inside the island itself. No
 /// separate window, no permission wall; macOS asks for things as they
 /// are first used, and the tour just says so.
 struct WelcomeView: View {
@@ -100,7 +100,7 @@ struct WelcomeView: View {
                 lines: [
                     ("tray.and.arrow.down.fill", "Drag any file or screenshot upward; a bubble meets it halfway."),
                     ("doc.on.doc", "Copies land in Clips, files on the Shelf, thoughts in Notes."),
-                    ("calendar", "Your day stays private until you switch Calendar on in Settings."),
+                    ("calendar", "Your day shows once macOS says yes to Calendar, and it never leaves this Mac."),
                 ]
             )
         }

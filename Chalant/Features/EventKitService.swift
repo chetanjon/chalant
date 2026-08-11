@@ -192,13 +192,27 @@ final class EventKitService: ObservableObject {
     // MARK: - Live glance data
 
     /// Reload both feeds. The Today view calls this when it appears and
-    /// after any change, so the glance always matches reality.
+    /// after any change, so the glance always matches reality. Each
+    /// feed honours its own switch before touching EventKit at all.
     func refresh() async {
         await reloadEvents()
         await reloadReminders()
     }
 
     private func reloadEvents() async {
+        // The switch is the privacy master: off means nothing is
+        // requested or read here, which is what the toggle claims.
+        // Status still updates from the prompt-free sync read, so a
+        // denial reads true the moment the switch comes back on.
+        // Saying "join" asks on its own (`joinableEvent`), the one
+        // deliberate exception.
+        guard Self.showsCalendar() else {
+            calendarPermission = Self.decision(for: EKEventStore.authorizationStatus(for: .event))
+            calendarDenied = calendarPermission == .denied
+            events = []
+            recomputeNext()
+            return
+        }
         let granted = await ensureEvents()
         calendarDenied = !granted
         calendarPermission = Self.decision(for: EKEventStore.authorizationStatus(for: .event))
@@ -354,6 +368,14 @@ final class EventKitService: ObservableObject {
     }
 
     private func reloadReminders() async {
+        // Same privacy master as `reloadEvents`: an off switch reads
+        // nothing and requests nothing.
+        guard Self.showsReminders() else {
+            remindersPermission = Self.decision(for: EKEventStore.authorizationStatus(for: .reminder))
+            remindersDenied = remindersPermission == .denied
+            reminders = []
+            return
+        }
         let granted = await ensureReminders()
         remindersDenied = !granted
         remindersPermission = Self.decision(for: EKEventStore.authorizationStatus(for: .reminder))
