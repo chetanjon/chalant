@@ -1121,6 +1121,18 @@ struct WhatShowsSection: View {
     @AppStorage(ChatController.serviceKey) private var chatService = "claude"
     @AppStorage(EventKitService.reminderListKey) private var reminderListID = ""
 
+    // Moved from GlanceSection (What shows absorbs Glance): the two cards
+    // below used to live on their own page, and `showCalendar` above
+    // already covers the one property both pages read.
+    @AppStorage(MusicController.playingSignalKey) private var playingSignal
+        = MusicController.playingSignalDefault
+    @AppStorage("glanceMusic") private var glanceMusic = true
+    @AppStorage("glanceSession") private var glanceSession = true
+    @AppStorage("glanceBattery") private var glanceBattery = false
+    @AppStorage("collapsedSong") private var collapsedSong = true
+    @AppStorage("glanceAgents") private var glanceAgents = true
+    @AppStorage("glanceNextEvent") private var glanceNextEvent = true
+
     /// Writable reminder lists, refreshed each time this section appears.
     @State private var reminderLists: [(title: String, id: String)] = []
 
@@ -1191,6 +1203,54 @@ struct WhatShowsSection: View {
                             + "with Anthropic, OpenAI, or Google."
                         )
                     }
+                }
+            }
+
+            SettingCard(title: "Beside the notch") {
+                SettingPicker(
+                    label: "While playing",
+                    selection: $playingSignal,
+                    options: [("Wave", "wave"), ("Quiet", "quiet")]
+                )
+                SettingNote(
+                    "Quiet leaves only the breathing rim, the default. Wave dances beside the notch "
+                    + "for those who want it."
+                )
+                SettingDivider()
+                SettingToggle(label: "Session mark beside the notch", isOn: $glanceSession)
+                SettingNote(
+                    "The small ring or stopwatch glyph while something runs. Off keeps the pill bare; "
+                    + "the rim alone says something is going."
+                )
+                SettingDivider()
+                SettingToggle(label: "What's playing, on the island", isOn: $collapsedSong)
+                SettingNote(
+                    "The song's name beside the resting island, on displays without a notch. A "
+                    + "MacBook keeps the bare pill so it still matches the hardware."
+                )
+                SettingDivider()
+                if FeatureFlags.sessionsVisible {
+                    SettingToggle(label: "Agents running", isOn: $glanceAgents)
+                    SettingNote(
+                        "A mark beside the notch while Claude Code or Cursor sessions are going. It "
+                        + "breathes while they work and holds still, in the accent, the moment one is "
+                        + "waiting on you."
+                    )
+                    SettingDivider()
+                }
+                SettingToggle(label: "Battery", isOn: $glanceBattery)
+                SettingNote(
+                    "The charge, last in line: it only takes the space when nothing else beside the "
+                    + "notch has anything to say. It turns red below 20%."
+                )
+            }
+
+            SettingCard(title: "What interrupts") {
+                SettingToggle(label: "Clear the glance while playing", isOn: $glanceMusic)
+                SettingDivider()
+                SettingToggle(label: "Event coming up", isOn: $glanceNextEvent)
+                if !showCalendar {
+                    SettingNote("Needs the Calendar today block on, under What shows.")
                 }
             }
         }
@@ -1297,72 +1357,6 @@ struct IslandSection: View {
     private func swatch(_ mode: String, _ color: Color, label: String) -> some View {
         SettingsSwatch(color: color, label: label, selected: accentMode == mode) {
             accentMode = mode
-        }
-    }
-}
-
-// MARK: - Glance
-
-struct GlanceSection: View {
-    @AppStorage(MusicController.playingSignalKey) private var playingSignal
-        = MusicController.playingSignalDefault
-    @AppStorage("glanceMusic") private var glanceMusic = true
-    @AppStorage("glanceSession") private var glanceSession = true
-    @AppStorage("glanceBattery") private var glanceBattery = false
-    @AppStorage("collapsedSong") private var collapsedSong = true
-    @AppStorage("glanceAgents") private var glanceAgents = true
-    @AppStorage("glanceNextEvent") private var glanceNextEvent = true
-    @AppStorage("showCalendar") private var showCalendar = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
-            SettingCard(title: "Beside the notch") {
-                SettingPicker(
-                    label: "While playing",
-                    selection: $playingSignal,
-                    options: [("Wave", "wave"), ("Quiet", "quiet")]
-                )
-                SettingNote(
-                    "Quiet leaves only the breathing rim, the default. Wave dances beside the notch "
-                    + "for those who want it."
-                )
-                SettingDivider()
-                SettingToggle(label: "Session mark beside the notch", isOn: $glanceSession)
-                SettingNote(
-                    "The small ring or stopwatch glyph while something runs. Off keeps the pill bare; "
-                    + "the rim alone says something is going."
-                )
-                SettingDivider()
-                SettingToggle(label: "What's playing, on the island", isOn: $collapsedSong)
-                SettingNote(
-                    "The song's name beside the resting island, on displays without a notch. A "
-                    + "MacBook keeps the bare pill so it still matches the hardware."
-                )
-                SettingDivider()
-                if FeatureFlags.sessionsVisible {
-                    SettingToggle(label: "Agents running", isOn: $glanceAgents)
-                    SettingNote(
-                        "A mark beside the notch while Claude Code or Cursor sessions are going. It "
-                        + "breathes while they work and holds still, in the accent, the moment one is "
-                        + "waiting on you."
-                    )
-                    SettingDivider()
-                }
-                SettingToggle(label: "Battery", isOn: $glanceBattery)
-                SettingNote(
-                    "The charge, last in line: it only takes the space when nothing else beside the "
-                    + "notch has anything to say. It turns red below 20%."
-                )
-            }
-
-            SettingCard(title: "What interrupts") {
-                SettingToggle(label: "Clear the glance while playing", isOn: $glanceMusic)
-                SettingDivider()
-                SettingToggle(label: "Event coming up", isOn: $glanceNextEvent)
-                if !showCalendar {
-                    SettingNote("Needs the Calendar today block on, under What shows.")
-                }
-            }
         }
     }
 }
