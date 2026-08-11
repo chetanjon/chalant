@@ -273,31 +273,22 @@ struct DisplaysSection: View {
         range: ClosedRange<CGFloat>,
         unit: String
     ) -> some View {
-        let value = displays.config(forKey: screen.id)[keyPath: path]
         // The store speaks CGFloat and ThinSlider speaks Double, and a
         // Binding of one is not a Binding of the other however freely
         // the scalars convert, so the bridge is written out here.
-        let stored = binding(screen, path)
-        return SettingRow(label: label) {
-            HStack(spacing: Theme.Space.m) {
-                ThinSlider(
-                    value: Binding(
-                        get: { Double(stored.wrappedValue) },
-                        set: { stored.wrappedValue = CGFloat($0) }
-                    ),
-                    in: Double(range.lowerBound)...Double(range.upperBound),
-                    label: label,
-                    width: 180,
-                    describe: { "\(Int($0))\(unit)" }
-                )
-                // The number, not just the knob: a slider alone cannot
-                // be matched between two displays.
-                Text("\(Int(value))\(unit)")
-                    .font(Theme.Fonts.captionMono)
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 40, alignment: .trailing)
-            }
-        }
+        DisplaySlider(
+            label: label,
+            unit: unit,
+            range: Double(range.lowerBound)...Double(range.upperBound),
+            stored: Binding(
+                get: { Double(displays.config(forKey: screen.id)[keyPath: path]) },
+                set: { newValue in
+                    var config = displays.config(forKey: screen.id)
+                    config[keyPath: path] = CGFloat(newValue)
+                    displays.set(config, forKey: screen.id)
+                }
+            )
+        )
     }
 
     private func refresh() {
@@ -316,6 +307,47 @@ struct DisplaysSection: View {
         // sliders that write nowhere.
         if let selection, !attached.contains(where: { $0.id == selection }) {
             self.selection = attached.first?.id
+        }
+    }
+}
+
+/// One Displays slider row. The drag moves only this view's local
+/// preview; the store (a JSON encode, a defaults write, and a full
+/// island rebuild through its onChange) hears ONE write, on release.
+/// Before this, dragging "Expanded width" rebuilt every island window
+/// on every frame.
+private struct DisplaySlider: View {
+    let label: String
+    let unit: String
+    let range: ClosedRange<Double>
+    @Binding var stored: Double
+    @State private var preview: Double?
+
+    var body: some View {
+        SettingRow(label: label) {
+            HStack(spacing: Theme.Space.m) {
+                ThinSlider(
+                    value: Binding(
+                        get: { preview ?? stored },
+                        set: { preview = $0 }
+                    ),
+                    in: range,
+                    label: label,
+                    width: 180,
+                    describe: { "\(Int($0))\(unit)" },
+                    onCommit: { target in
+                        stored = target
+                        preview = nil
+                    }
+                )
+                // The number, not just the knob: a slider alone cannot
+                // be matched between two displays. It follows the drag
+                // live even though the store hears only the release.
+                Text("\(Int(preview ?? stored))\(unit)")
+                    .font(Theme.Fonts.captionMono)
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 40, alignment: .trailing)
+            }
         }
     }
 }
