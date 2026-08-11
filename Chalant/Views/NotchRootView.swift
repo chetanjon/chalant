@@ -194,12 +194,19 @@ struct NotchRootView: View {
 
     /// Whether this island is currently keeping out of the way.
     ///
+    /// Two reasons to: the user asked for it always ("hide until
+    /// reached for"), or a fullscreen app owns this display and a
+    /// resting PILL yields to it the way the menu bar does (a notch
+    /// island never needs to, fullscreen keeps clear of real housing;
+    /// and reshaping the pill instead was overruled: a pill the user
+    /// chose stays a pill).
+    ///
     /// Only ever true at rest: an open island, a voice session and a
-    /// toast all outrank it, so the setting can never swallow
-    /// something the user is looking at or something the island is
-    /// trying to tell them.
+    /// toast all outrank it, so neither reason can swallow something
+    /// the user is looking at or something the island is trying to
+    /// tell them. Reaching for the top edge brings it back either way.
     private var hiddenUntilReachedFor: Bool {
-        autoHideIsland
+        (autoHideIsland || (face.style == .pill && face.fullscreenBelow))
             && face.state == .collapsed
             && !face.pointerNear
             && model.glanceToast == nil

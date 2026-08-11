@@ -77,6 +77,13 @@ final class IslandFace: ObservableObject {
     /// window controller's hover poll, quantized so casual movement
     /// costs a few re-renders per second, not twenty. nil = no light.
     @Published var pointerUnit: CGFloat?
+    /// A fullscreen app owns this display right now, written by the
+    /// window controller's slow sensing lane. A resting pill yields to
+    /// it (`NotchRootView.hiddenUntilReachedFor`) the way the menu bar
+    /// does, and comes back when the pointer reaches for the top edge.
+    /// Never consulted on a notch style: fullscreen apps already keep
+    /// clear of real housing.
+    @Published var fullscreenBelow = false
     /// A drag is hovering this island: light the accent edge.
     @Published var isDropTargeted = false
     /// This island opened itself for an incoming drag; if the drag

@@ -628,12 +628,34 @@ final class NotchWindowController {
         panels[id] = panel
     }
 
+    /// The hover poll's slow lane: every 40th tick (two seconds at
+    /// 20Hz), ask the window list which displays a fullscreen app owns
+    /// so a resting pill can yield (`IslandFace.fullscreenBelow`).
+    /// Skipped entirely while no face is a pill: a notch island never
+    /// yields, so an all-notch layout never pays for the window list.
+    private var fullscreenTick = 0
+
+    private func senseFullscreenIfDue() {
+        fullscreenTick += 1
+        guard fullscreenTick >= 40 else { return }
+        fullscreenTick = 0
+        guard faces.values.contains(where: { $0.style == .pill }) else { return }
+        let taken = FullscreenSensor.fullscreenDisplays()
+        for (id, face) in faces {
+            let below = taken.contains(id)
+            // @Published fires on every write, equal value or not; a
+            // half-hertz invalidation of every island is not free.
+            if face.fullscreenBelow != below { face.fullscreenBelow = below }
+        }
+    }
+
     private func pointerMoved() {
         let location = NSEvent.mouseLocation
         if let hostScreen = NSScreen.screens.first(where: { $0.frame.contains(location) }),
            let hostID = hostScreen.displayID, let hostFace = faces[hostID] {
             senseDrag(at: location, on: hostScreen, face: hostFace)
         }
+        senseFullscreenIfDue()
         switch viewModel.state {
         case .collapsed:
             // Any display's top edge is a door; every one already has
