@@ -21,7 +21,7 @@
 | Page | Cards | The one question |
 |---|---|---|
 | General | Startup, Opening, Voice, Tour | how the app behaves |
-| What shows | What shows, In the island, Not shown, Presets, Beside the notch, Which one gets the space, What interrupts, Start over | what appears, and where |
+| What shows | Show or hide, In the island, Not shown, Presets, Start over, Beside the notch, Which one gets the space, What interrupts | what appears, and where |
 | Island | Look, Motion, Accent | how the island looks |
 | Displays | unchanged | per-screen shape |
 | Keyboard | unchanged | shortcuts |

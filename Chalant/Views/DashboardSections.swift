@@ -1145,7 +1145,7 @@ struct WhatShowsSection: View {
         // time this body runs so they always read the live layout.
         let cards = ArrangementCards(layout: layout)
         VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
-            SettingCard(title: "What shows") {
+            SettingCard(title: "Show or hide") {
                 SettingToggle(label: "Media", isOn: $showMedia)
                 SettingDivider()
                 SettingToggle(label: "Ambience", isOn: $showAmbience)
