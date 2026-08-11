@@ -23,8 +23,8 @@ struct ExpandedView: View {
     // reminders) is opt-in, so a fresh island stays quiet and private.
     @AppStorage("showMedia") private var showMedia = true
     @AppStorage("showAmbience") private var showAmbience = true
-    @AppStorage("showCalendar") private var showCalendar = false
-    @AppStorage("showReminders") private var showReminders = false
+    @AppStorage("showCalendar") private var showCalendar = true
+    @AppStorage("showReminders") private var showReminders = true
     @AppStorage("toolGo") private var toolGo = true
     @AppStorage("toolClips") private var toolClips = true
     @AppStorage("toolShelf") private var toolShelf = true
@@ -754,9 +754,60 @@ struct TodayView: View {
             } else {
                 dayRows(hasEvents: hasEvents, hasReminders: hasReminders)
             }
+            switchedOff
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .task { await events.refresh() }
+    }
+
+    /// Why the panel is empty, when the reason is a switch.
+    ///
+    /// A day with nothing on it says nothing: the founder deleted
+    /// "Clear water. Nothing due." for being noise, and it was. But a
+    /// panel that is empty because a SOURCE IS SWITCHED OFF is a
+    /// different thing entirely, and silence there is the app hiding
+    /// its own feature: the welcome tour asks for the calendar, macOS
+    /// asks again, and then a switch nobody mentioned keeps the answer
+    /// off the screen (founder, 2026-08-10: "the users should know what
+    /// to switch on and off"). This appears only when the panel would
+    /// otherwise be blank, names the switch, and turns it on in place
+    /// rather than sending anyone to look for it.
+    @ViewBuilder
+    private var switchedOff: some View {
+        let blank = !showCalendar || events.events.isEmpty
+        let blankReminders = !showReminders || events.reminders.isEmpty
+        if blank, blankReminders, !showCalendar || !showReminders, denials.isEmpty {
+            HStack(spacing: Theme.Space.s) {
+                Text(offMessage)
+                    .font(Theme.Fonts.subhead)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button(showCalendar || showReminders ? "Turn it on" : "Turn them on") {
+                    // Straight to the defaults: this view is handed the
+                    // two flags as values, and the `@AppStorage` that
+                    // owns them (ExpandedView, the settings window) is
+                    // watching these exact keys, so both surfaces catch
+                    // up on the same write.
+                    UserDefaults.standard.set(true, forKey: "showCalendar")
+                    UserDefaults.standard.set(true, forKey: "showReminders")
+                    Task { await events.refresh() }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(Theme.controlTint)
+            }
+            .padding(.top, Theme.Space.xs)
+        }
+    }
+
+    private var offMessage: String {
+        if !showCalendar, !showReminders {
+            return "Your calendar and reminders are switched off, so there is nothing to show here."
+        }
+        return showCalendar
+            ? "Your reminders are switched off."
+            : "Your calendar is switched off."
     }
 
     @ViewBuilder

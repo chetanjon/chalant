@@ -1194,8 +1194,8 @@ final class NotchViewModel: ObservableObject {
         let defaults = UserDefaults.standard
         // Both ship off, matching the @AppStorage declarations the
         // settings window makes, so an unset key means off here too.
-        let seesCalendar = defaults.bool(forKey: "showCalendar") && !events.calendarDenied
-        let seesReminders = defaults.bool(forKey: "showReminders") && !events.remindersDenied
+        let seesCalendar = EventKitService.showsCalendar(in: defaults) && !events.calendarDenied
+        let seesReminders = EventKitService.showsReminders(in: defaults) && !events.remindersDenied
         return Self.landingTab(todayCanSee: seesCalendar || seesReminders, in: defaults)
     }
 

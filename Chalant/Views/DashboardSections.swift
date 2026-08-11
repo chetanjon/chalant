@@ -1111,8 +1111,8 @@ struct WhatShowsSection: View {
 
     @AppStorage("showMedia") private var showMedia = true
     @AppStorage("showAmbience") private var showAmbience = true
-    @AppStorage("showCalendar") private var showCalendar = false
-    @AppStorage("showReminders") private var showReminders = false
+    @AppStorage("showCalendar") private var showCalendar = true
+    @AppStorage("showReminders") private var showReminders = true
     @AppStorage("showWeather") private var showWeather = true
     @AppStorage("toolGo") private var toolGo = true
     @AppStorage("toolClips") private var toolClips = true

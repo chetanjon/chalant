@@ -299,10 +299,34 @@ final class EventKitService: ObservableObject {
         }
     }
 
+    /// Whether the user wants their day on the island, calendar half
+    /// and reminders half.
+    ///
+    /// Unset means ON, and that is the whole point. These shipped OFF
+    /// while the welcome tour asked for calendar and reminder access in
+    /// the same breath, so a new person granted both and got a Today
+    /// panel that showed nothing, with no hint that a second switch
+    /// existed (founder, 2026-08-10: "the users should know what to
+    /// switch on and off"). macOS already asks before anything is read;
+    /// a second, invisible gate behind it only hides the feature that
+    /// permission was granted for. Turning it off is still one tap, and
+    /// an explicit false is honoured forever.
+    ///
+    /// One rule in one place, because three call sites used to spell it
+    /// three ways: two bare `bool(forKey:)` reads that call unset
+    /// false, and `@AppStorage` declarations carrying their own default.
+    static func showsCalendar(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: "showCalendar") == nil || defaults.bool(forKey: "showCalendar")
+    }
+
+    static func showsReminders(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: "showReminders") == nil || defaults.bool(forKey: "showReminders")
+    }
+
     private func recomputeNext() {
         // Status is read without asking: the collapsed island must never
         // be the thing that pops a permission dialog.
-        guard UserDefaults.standard.bool(forKey: "showCalendar"),
+        guard Self.showsCalendar(),
               EKEventStore.authorizationStatus(for: .event) == .fullAccess else {
             if nextEvent != nil { nextEvent = nil }
             return

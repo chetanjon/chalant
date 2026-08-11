@@ -62,6 +62,28 @@ final class MotionPourTests: XCTestCase {
             84, "a player that never catches up gets the truth back after 3s")
     }
 
+    /// The day's two sources ship ON, because the welcome tour asks for
+    /// both permissions and macOS asks again: a third, silent gate only
+    /// hid the feature those grants were for. An explicit false is
+    /// still honoured forever.
+    func testTheDaysSourcesAreOnUntilSomebodyTurnsThemOff() {
+        let suite = "chalant.tests.day.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+
+        XCTAssertTrue(EventKitService.showsCalendar(in: defaults), "unset means on")
+        XCTAssertTrue(EventKitService.showsReminders(in: defaults), "unset means on")
+
+        defaults.set(false, forKey: "showCalendar")
+        defaults.set(false, forKey: "showReminders")
+        XCTAssertFalse(EventKitService.showsCalendar(in: defaults))
+        XCTAssertFalse(EventKitService.showsReminders(in: defaults))
+
+        defaults.set(true, forKey: "showCalendar")
+        XCTAssertTrue(EventKitService.showsCalendar(in: defaults))
+        defaults.removePersistentDomain(forName: suite)
+    }
+
     /// The Displays sliders do not start at zero (inner padding runs
     /// 8...36, and kin), which the volume call sites never exercised.
     func testThinSliderMathHandlesARangeThatDoesNotStartAtZero() {
