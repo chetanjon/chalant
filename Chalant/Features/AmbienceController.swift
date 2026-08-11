@@ -18,6 +18,8 @@ extension NoiseEngine.NoiseColor {
         }
     }
 
+    /// The collapsed glance's mark for a playing soundscape (the
+    /// island wing while nothing louder owns the space).
     var symbol: String {
         switch self {
         case .brown: return "water.waves"
@@ -73,16 +75,28 @@ final class AmbienceController: ObservableObject {
     /// chip over silence is a lie the user cannot debug.
     @Published private(set) var failure: String?
 
-    @Published var volume: Double = 0.7 {
-        didSet { engine.setVolume(Float(volume)) }
+    /// Remembered across launches: every other dial in the app is,
+    /// and a volume set once should not reset to 0.7 every morning.
+    @Published var volume: Double {
+        didSet {
+            engine.setVolume(Float(volume))
+            defaults.set(volume, forKey: Self.volumeKey)
+        }
     }
 
     let engine: AmbienceSource
+    private let defaults: UserDefaults
+    private static let volumeKey = "ambienceVolume"
 
     /// Defaults to a real engine, so every caller in the app is
-    /// unchanged and only a test ever passes anything else.
-    init(engine: AmbienceSource = NoiseEngine()) {
+    /// unchanged and only a test ever passes anything else. Same for
+    /// the defaults suite (the repo law: a test never touches
+    /// `.standard`).
+    init(engine: AmbienceSource = NoiseEngine(), defaults: UserDefaults = .standard) {
         self.engine = engine
+        self.defaults = defaults
+        let saved = defaults.object(forKey: Self.volumeKey) as? Double
+        self.volume = saved.map { min(max($0, 0), 1) } ?? 0.7
         engine.onSilence = { [weak self] reason in
             Task { @MainActor in
                 guard let self else { return }
@@ -90,6 +104,10 @@ final class AmbienceController: ObservableObject {
                 self.failure = reason
             }
         }
+        // An init assignment fires no didSet, so the restored level is
+        // handed to the engine by hand; without this a saved 0.3 would
+        // play at the engine's own default until the first drag.
+        engine.setVolume(Float(volume))
     }
 
     /// Chip behavior: tap to play, tap the playing one to stop.

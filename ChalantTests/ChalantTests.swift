@@ -586,7 +586,8 @@ final class ChalantTests: XCTestCase {
         XCTAssertNil(ambience.active, "a break must not turn ambient noise on either")
         focus.stop()
         XCTAssertNil(ambience.active)
-        XCTAssertTrue(source.calls.isEmpty, "a whole session asked the sound source for nothing")
+        XCTAssertEqual(source.calls, ["setVolume"],
+                       "construction hands the engine its remembered volume; the session itself asked for nothing")
     }
 
     func testAFocusSessionLeavesTheUsersOwnNoiseAlone() {
@@ -615,9 +616,29 @@ final class ChalantTests: XCTestCase {
         // The stronger form of the same claim, and the one that says it
         // without going through any state at all: the timer started,
         // broke, and ended without ever reaching for the sound.
-        XCTAssertEqual(source.calls, ["start(brown)"],
-                       "only the user's own play, and nothing the timer did")
+        XCTAssertEqual(source.calls, ["setVolume", "start(brown)"],
+                       "construction's volume handoff, the user's own play, and nothing the timer did")
         ambience.stop()
+    }
+
+    func testAmbienceVolumeIsRememberedAcrossLaunches() {
+        // Every other user-facing dial persists; the ambience volume
+        // used to reset to 0.7 every morning. Scratch suite per the
+        // repo law: a test never touches `.standard`.
+        let suite = "chalant.tests.ambience.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+
+        let first = AmbienceController(engine: RecordingAmbienceSource(), defaults: defaults)
+        XCTAssertEqual(first.volume, 0.7, "nothing saved means the old default")
+        first.volume = 0.25
+
+        let source = RecordingAmbienceSource()
+        let second = AmbienceController(engine: source, defaults: defaults)
+        XCTAssertEqual(second.volume, 0.25, "a relaunch keeps the level")
+        XCTAssertEqual(source.calls, ["setVolume"],
+                       "the remembered level reaches the engine at construction")
+        defaults.removePersistentDomain(forName: suite)
     }
 
     func testASourceThatCannotMakeASoundPutsTheChipOut() async {
