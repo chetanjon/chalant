@@ -654,55 +654,6 @@ extension ProgressRing where Center == EmptyView {
     }
 }
 
-/// A soundscape chip that says what it is: icon plus name, or
-/// icon-only with a tooltip where the row is tight.
-struct NoiseButton: View {
-    let color: NoiseEngine.NoiseColor
-    let selected: Bool
-    var compact = false
-    let action: () -> Void
-
-    @Environment(\.chalantAccent) private var accent
-    @State private var hovered = false
-
-    private var name: String { color.displayName }
-    private var symbol: String { color.symbol }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: Theme.Space.xs) {
-                Image(systemName: symbol)
-                    .font(Theme.Fonts.icon(.xs))
-                if !compact {
-                    Text(name)
-                        .font(Theme.Fonts.caption)
-                }
-            }
-            .foregroundStyle(
-                selected ? accent : (hovered ? Theme.textSecondary : Theme.textTertiary)
-            )
-            .padding(.horizontal, compact ? Theme.Space.xs : Theme.Space.s)
-            .frame(minHeight: 22)
-            .background(
-                Capsule().fill(
-                    selected
-                        ? accent.opacity(0.12)
-                        : Color.white.opacity(hovered ? 0.06 : 0)
-                )
-            )
-            .contentShape(Capsule())
-        }
-        .buttonStyle(PressableStyle())
-        .help(name)
-        // Compact mode drops the visible name and leaves only the
-        // glyph (the ambience row's tight track); VoiceOver needs the
-        // same word the tooltip already carries.
-        .accessibilityLabel(name)
-        .onHover { hovered = $0 }
-        .animation(Theme.Motion.hover, value: hovered)
-    }
-}
-
 /// Three dots doing a gentle wave while Chalant works.
 struct ThinkingDots: View {
     @Environment(\.chalantAccent) private var accent

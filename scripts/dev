@@ -1,11 +1,12 @@
 #!/bin/bash
-# Dev loop: regenerate, build, relaunch. Signing team is overridden on the
-# command line rather than in project.yml so the upstream config stays intact.
+# Dev loop: regenerate, build, relaunch. Signing team defaults to the same
+# pinned team project.yml ships with (a different identity would reset the
+# app's Keychain and TCC grants between dev and installed builds).
 # Override with CHALANT_TEAM=<id> if you sign with a different team.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-TEAM="${CHALANT_TEAM:-QGCP5G9LVQ}"
+TEAM="${CHALANT_TEAM:-WV59PZX4A3}"
 
 command -v xcodegen >/dev/null && xcodegen --quiet
 
