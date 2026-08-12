@@ -14,7 +14,7 @@ The name: chalant is nonchalant without the non. French chaloir meant to care; n
 brew install --cask chetanjon/chalant/chalant
 ```
 
-Open the disk image, drag Chalant to Applications, open it. Chalant is signed with a Developer ID certificate and notarized by Apple, so there is no warning to click past and no flag to pass. After that, updates take care of themselves: the island mentions a new version once, and one click installs it in place and relaunches (Sparkle, with updates signed by the project's own key; no browser, no re-download dance). Speech recognition is Apple standard dictation, there are no API keys anywhere, and beyond the optional Chat tab, Chalant asks the internet only for: whether a newer version exists (a daily check, switchable off in Settings), the update itself when you say yes, album art for what you play, and favicons for sites you save, each fetched from its own source, never through a third-party service. The Live status API listens on localhost only; nothing it hears leaves the machine.
+Open the disk image, drag Chalant to Applications, open it. Chalant is signed with a Developer ID certificate and notarized by Apple, so there is no warning to click past and no flag to pass. After that, updates take care of themselves: the island mentions a new version once, and one click installs it in place and relaunches (Sparkle, with updates signed by the project's own key; no browser, no re-download dance). Speech recognition is Apple standard dictation, there are no API keys anywhere, and Chalant asks the internet only for: whether a newer version exists (a daily check, switchable off in Settings), the update itself when you say yes, album art for what you play, favicons for sites you save, and the weather for your rounded location while that line is switched on. Each is fetched straight from its own source; this project runs nothing in the middle. The Live status API listens on localhost only; nothing it hears leaves the machine.
 
 ## v1 feature set
 
@@ -33,20 +33,41 @@ Open the disk image, drag Chalant to Applications, open it. Chalant is signed wi
 - `text amma: on my way` or `tell amma i'm on my way` reads the message back; only the word `send` fires it, as an iMessage through Messages. Nothing ever sends unconfirmed, and any other command drops the staged text. (`tell me ...` stays a question.)
 - Dates parsed deterministically with NSDataDetector. Verbs by prefix. Zero network, zero key, instant.
 - `read my screen` captures the front window, runs on-device OCR (Vision, keyless), and attaches the words as context for your next question; `summarize my screen` does it and answers in one breath; explain, describe, translate, and tldr lead the same way (`translate my screen to hindi`). Nothing is stored, nothing leaves the Mac; needs one Screen Recording yes.
+- `left half`, `right half`, `maximize`, `center` snap the frontmost window. Bind the island to a key and it is a window manager with no chrome at all.
+- `find parcel`, `where's the invoice`, `look for the contract` search your notes, clips, files, and today's day at once, and land you on whatever holds it.
 - `what's new` reads the latest release notes right in the island.
-- Anything beyond the verbs goes to the Mac's own on-device model, keyless. Long conversations belong to the Chat tab and your own subscription.
+- Anything beyond the verbs goes to the Mac's own on-device model, keyless.
 
 **Voice**
 - Hold to talk or tap the mic; recognition is Apple standard dictation, on-device when the model is warm, Apple dictation service otherwise, the same path Notes and Messages use. Your music ducks while you speak.
 
+**Today** (the day, without opening Calendar)
+- Today's events and reminders in one pane, in the order the day happens. Each meeting row carries a tap-to-join chip, and the glance beside the notch marks a joinable meeting with a small camera.
+- A weather line rides along the top: the current temperature and a sky glyph for your location. On by default, though nothing is fetched until you grant location, and one switch in Settings turns it off for good.
+- Calendar and Reminders have a switch each. Off is not cosmetic: the pane never touches the store, so the day stays private until you ask for it.
+
+**Go** (the launcher grid)
+- A quiet grid of the things you open all day: websites, apps, folders, and your own Shortcuts.app shortcuts, one tap each. Click and the island slips shut behind you.
+- Built-in one-tap actions live on the same grid: Screenshot, Lock Screen, Dark Mode, Keep Awake, Mute, Screen Record.
+
+**Notes**
+- `note: something` captures without opening anything; the tab lists what you kept, and the notes live locally.
+
+**Keyboard shortcuts**
+- Any of the island's doors can take a system-wide combination: open or close the island, start listening, ask, clips, shelf, notes, Go, focus, settings. Record them in Settings; none is bound until you bind it.
+- They go through Carbon's hot key API, not a global event monitor, so Chalant never asks for Accessibility and never sees a key it was not given.
+
+**Battery**
+- A panel with what is left, whether it is plugged in, and how the cells are holding up. The optional glance beside the notch is off by default, since the menu bar already carries a battery.
+
 **Music**
 - Whatever plays, anywhere: Spotify, Apple Music, YouTube in a browser, any app the system hears. While playing, the pill stays bare and a breathing album-color rim carries the signal; a small wave can dance beside the notch if you switch it on. Expand for artwork, transport, and scrubbing. Wave, rim, and the session mark each have their own switch in Settings, so the closed pill can be exactly as lively or as bare as you like.
 - With music and a session running together, the wave keeps the left wing and the session mark crosses to the right.
-- The opened island comes in two materials, ink or liquid glass, in Settings under Life. Closed, it is always ink; melting into the notch is its job.
+- The opened island comes in two materials, ink or liquid glass, in Settings under Island. Closed, it is always ink; melting into the notch is its job.
 - On a notchless monitor the collapsed island shows nothing at rest; the top edge still opens it on hover. One thing counts as a reason to surface briefly: a passing toast (a timer finishing, an update landing). It lives six seconds and clears itself.
 
 **Clips** (clipboard history)
-- Last 30 copies. Password-manager copies (concealed/transient) never stored.
+- Every copy is kept, text and images alike; disk is the only limit, the same as Finder or Photos. Pin the ones worth keeping to the top, remove any row by hand, or clear the lot at once (pins survive it). Password-manager copies (concealed/transient) are never stored.
 - Brow glyph on any clip attaches it to Do: summarize, rewrite, translate.
 
 **Shelf** (file drop)
@@ -67,12 +88,7 @@ Open the disk image, drag Chalant to Applications, open it. Chalant is signed wi
 - `scripts/chalant` wraps it for humans and scripts and reads the token for you: `chalant working "Deploying"`, `chalant needs-input "Waiting on you"`, `chalant done "Build finished"`, `chalant clear`. Copy it into your PATH if you like it. `CHALANT_TOKEN` overrides.
 - Made for the things that have no home: build scripts, deploys, renders, long downloads. The open island lists them attention-first (needs-input wears the accent); the closed pill never grows for any of it, and finished things fade on their own. Nothing posts unless you point it here.
 
-**Chat** (bring your own subscription)
-- A small built-in browser under the notch pointing at Claude, ChatGPT, or Gemini; pick the service in Settings.
-- You sign in with your own account, once; nothing is scraped, proxied, or automated, and no API key is involved.
-- Chalant is not affiliated with or endorsed by Anthropic, OpenAI, or Google.
-
-**Deliberately cut:** webcam mirror, notes-as-panel, wallpapers, widget packs. (Agent monitoring was cut in v1 and un-cut in 1.0.63; the world filled with agents.)
+**Deliberately cut:** webcam mirror, notes-as-panel, wallpapers, widget packs.
 
 ## Permission prompts, in order of appearance
 
@@ -121,8 +137,7 @@ The rules every round is built under, in the order they were paid for:
 ## Known trade-offs
 
 - Now-playing rides a vendored MediaRemote adapter (BSD-3) loaded through `/usr/bin/perl`; if a future macOS closes that door, the app falls back to AppleScript polling for Spotify and Apple Music only.
-- No conversation memory in ask, each question is fresh. Long conversations belong to the Chat tab.
-- No global hotkey, by choice: every summon key collided with something. Hover, the mic, or the typed bar open the island.
+- No conversation memory in ask, each question is fresh.
 - Texting sends over iMessage only. A number that lives on the green side isn't reachable yet; SMS relay is untested ground and stays out until it can be tested honestly.
 - Signed with a Developer ID certificate and notarized by Apple.
 
@@ -132,7 +147,7 @@ The honest version, since this app can touch a lot.
 
 - **On device.** Every "ask" (voice, typed, screen reading) is answered by Apple's on-device model. Your screen's text and your clipboard never leave the Mac. There are no API keys and no cloud inference; the API-key era was deleted, not disabled.
 - **Dictation is the one exception, and it is worth being plain about.** Turning speech into text is macOS's own dictation, the same path Notes and Messages use: on this Mac when the local speech model is ready, and through Apple's dictation service when it is not. Strict on-device-only was tried and spent a day answering "sound but no words" whenever that model was cold, so reliability won. Everything downstream of the transcript, the answer included, stays here. Type instead of talking and nothing is spoken to anyone.
-- **What does reach the internet, all over HTTPS:** dictation audio when the local speech model is cold (above), the daily update check (GitHub, switchable off), the update download when you say yes (signed with the project's EdDSA key, so a forged update cannot install), album art for Apple Music tracks missing local art (the track's title and artist go to Apple's public iTunes Search API), favicons for sites you save (one request to each site), and whatever you do in the optional Chat tab under your own login. Nothing else.
+- **What does reach the internet, all over HTTPS:** dictation audio when the local speech model is cold (above), the daily update check (GitHub, switchable off), the update download when you say yes (signed with the project's EdDSA key, so a forged update cannot install), album art for Apple Music tracks missing local art (the track's title and artist go to Apple's public iTunes Search API), favicons for sites you save (one request to each site), and the weather while that line is on. **The weather one is the only place your location is involved, so it is worth being plain about:** your latitude and longitude, rounded to two decimals (about a kilometre) before they leave, go to the public Open-Meteo API over HTTPS. No account, no identifier, nothing else about you, and nothing at all until you grant location and leave the line on. Switch the weather off in Settings and the request is never made. Nothing else.
 - **The Live status API** listens on loopback only and now refuses any request wearing browser headers, so a web page you visit cannot push or spoof a pill. Local processes still can, by design; that is the whole feature.
 - **Outbound messages** are never sent unheard: Chalant reads the exact words and recipient back to you and fires only when you say "send." The text is escaped before it touches AppleScript, so a message body can never become a command.
 - **No sandbox, and that is deliberate:** automating your music and Messages, reading the front window, snapping windows, and launching apps all require reaching outside a sandbox. The app runs with your privileges and no more. The trade you are making is trust, and the answer to trust is that the whole source is [right here](https://github.com/chetanjon/chalant), and the build is reproducible from it.
@@ -149,6 +164,7 @@ The honest version, since this app can touch a lot.
 - Rain ambience: derived from ["Calm rain.wav"](https://commons.wikimedia.org/wiki/File:Calm_rain.wav) (Wikimedia Commons, CC BY-SA 4.0), trimmed, normalized, edge-faded.
 - Cafe ambience: derived from ["Cafe ambiance.ogg"](https://commons.wikimedia.org/wiki/File:Cafe_ambiance.ogg) (Wikimedia Commons, CC0), level-reduced and seam-crossfaded for a calmer room.
 - Fire ambience: derived from ["Campfire sound ambience.ogg"](https://commons.wikimedia.org/wiki/File:Campfire_sound_ambience.ogg) by Glaneur de sons (Wikimedia Commons, CC BY 3.0), normalized, softened, edge-faded.
+- Weather: [Open-Meteo](https://open-meteo.com) (data CC BY 4.0), queried directly with a location rounded to about a kilometre.
 - Brown, white and pink noise are synthesized in real time, in stereo.
 
 Chalant is free, and its source is public so the trust above is checkable. The code is not licensed for reuse; all rights stay with the author.
