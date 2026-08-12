@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Point the landing page at a custom domain, in one go.
+#
+#   scripts/set-domain chalant.dev
+#
+# RUN THIS ONLY AFTER the domain is bought and its DNS is set (below).
+# A CNAME committed before DNS resolves takes the live github.io page
+# down: Pages starts answering for a domain that does not reach it.
+#
+# DNS to set at the registrar first, for the APEX (bare) domain:
+#
+#   A     @    185.199.108.153
+#   A     @    185.199.109.153
+#   A     @    185.199.110.153
+#   A     @    185.199.111.153
+#   CNAME www  chetanjon.github.io.
+#
+# Those four are GitHub's Pages apex addresses. If you would rather
+# serve www.<domain> as the real home, put the www CNAME in and set
+# this script's argument to www.<domain> instead.
+
+set -euo pipefail
+
+domain="${1:-}"
+if [[ -z "$domain" ]]; then
+  echo "usage: scripts/set-domain <domain>   (e.g. chalant.dev)" >&2
+  exit 2
+fi
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+echo "==> checking that $domain already points at GitHub Pages"
+# Capture, never `| grep -q`: under pipefail a matching grep -q kills the
+# upstream with SIGPIPE and returns 141, so a SUCCESS reads as failure.
+ips="$(dig +short A "$domain" 2>/dev/null || true)"
+case "$ips" in
+  *185.199.10[89].153*|*185.199.11[01].153*)
+    echo "    ok, resolves to GitHub Pages"
+    ;;
+  "")
+    echo "    STOP: $domain does not resolve yet. Set the DNS above, wait for it" >&2
+    echo "    to propagate, then run this again. Committing now would break the" >&2
+    echo "    live page at https://chetanjon.github.io/chalant/." >&2
+    exit 1
+    ;;
+  *)
+    echo "    STOP: $domain resolves, but not to GitHub Pages:" >&2
+    echo "$ips" | sed 's/^/      /' >&2
+    echo "    Fix the A records before running this." >&2
+    exit 1
+    ;;
+esac
+
+echo "==> writing docs/CNAME"
+printf '%s\n' "$domain" > docs/CNAME
+
+echo "==> pointing the repo homepage at it"
+gh api -X PATCH "repos/chetanjon/chalant" -f homepage="https://$domain" --silent
+
+echo "==> committing"
+git add docs/CNAME
+git commit -q -m "docs: serve the landing page from $domain
+
+Custom domain for the Pages site, replacing the chetanjon.github.io
+path. DNS was verified pointing at GitHub's apex addresses before
+this landed.
+"
+git push -q origin HEAD
+
+echo "==> telling Pages about it"
+gh api -X PUT "repos/chetanjon/chalant/pages" -f cname="$domain" --silent 2>/dev/null || true
+# HTTPS can only be enforced once the certificate is issued, which takes
+# a few minutes. Retry quietly rather than failing the whole run.
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  if gh api -X PUT "repos/chetanjon/chalant/pages" -F https_enforced=true --silent 2>/dev/null; then
+    echo "    HTTPS enforced"
+    break
+  fi
+  sleep 20
+done
+
+echo
+echo "Done. https://$domain should serve within a few minutes."
+echo "The certificate can take up to ~15 minutes the first time."
+echo
+echo "Still to update by hand once it is live:"
+echo "  - README download links, if you want them on the new domain"
+echo "  - the appcast URL in the Sparkle feed, ONLY if you move it;"
+echo "    leaving it on chetanjon.github.io keeps existing installs updating"
