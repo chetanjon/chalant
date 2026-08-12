@@ -795,11 +795,49 @@ final class NotchWindowController {
 
     private var dropDock: NSPanel?
 
-    /// Built once: a small transparent panel whose whole face is the
-    /// dashed stash card, floating where a rising drag will meet it.
+    /// How far down the screen the bubble's centre sits.
+    ///
+    /// It only has to clear Mission Control's top-edge reveal, which
+    /// fires within a few points of the edge and cannot be disabled for
+    /// file drags on this macOS. A third of the way down was further
+    /// than that needed and read as landing in the middle of the screen
+    /// (founder, 2026-08-11). A fifth is ~290pt clear on a 1440pt
+    /// display, still nowhere near the edge, and close enough to the
+    /// island to read as belonging to it.
+    ///
+    /// Raise it further only with a real file drag in hand. The
+    /// island's panel is 1000x720 hanging from the top edge, so BOTH
+    /// this position and the old one sit inside its frame; the bubble
+    /// works anyway because a drag over the panel's transparent
+    /// regions passes through to whatever is behind rather than
+    /// lighting `isDropTargeted`. Where that stops being true is the
+    /// visible island itself, and nobody has measured how close is too
+    /// close. If a raised bubble ever blinks out as the drag arrives,
+    /// this is why, and the answer is to come back down.
+    private static let dockDropFromTop: CGFloat = 0.20
+
+    /// The bubble, which is exactly as big as it looks.
+    ///
+    /// Wide and short rather than large and square. It was 360x200 and
+    /// read as landing in the middle of your work; 220x120 fixed that
+    /// and went too far the other way, and 320x120 was still small
+    /// (founder, 2026-08-11, over three passes). Height is what costs a
+    /// card its welcome, because it is what covers the window
+    /// underneath, so every pass since has spent its growth on width:
+    /// this is wider than the original and 30% shorter.
+    ///
+    /// Shrinking only the drawn card and leaving the panel large was
+    /// tried on paper and rejected: a transparent region of a
+    /// borderless panel passes drags THROUGH to the window behind, so
+    /// the margin would have been a dead zone that looks catchable and
+    /// is not. What you see is what catches.
+    private static let dockSize = CGSize(width: 400, height: 140)
+
+    /// Built once: a panel whose whole face is the dashed stash card,
+    /// floating where a rising drag will meet it.
     private func ensureDropDock() -> NSPanel {
         if let dropDock { return dropDock }
-        let size = CGSize(width: 360, height: 200)
+        let size = Self.dockSize
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -810,9 +848,14 @@ final class NotchWindowController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        // A shadow is most of why this read as popping up OVER the
+        // desktop rather than simply being there. The dashed edge is
+        // already enough to separate it from whatever is behind.
+        panel.hasShadow = false
         panel.isMovable = false
-        let hosting = DropHostingView(rootView: DropStashCard().frame(width: size.width, height: size.height))
+        let card = DropStashCard(compact: true)
+            .frame(width: size.width, height: size.height)
+        let hosting = DropHostingView(rootView: card)
         hosting.frame = NSRect(origin: .zero, size: size)
         hosting.enableDrops()
         hosting.acceptsDrop = { [weak viewModel] in
@@ -854,7 +897,7 @@ final class NotchWindowController {
         let size = dock.frame.size
         let origin = NSPoint(
             x: screen.frame.midX - size.width / 2,
-            y: screen.frame.maxY - screen.frame.height * 0.34 - size.height / 2
+            y: screen.frame.maxY - screen.frame.height * Self.dockDropFromTop - size.height / 2
         )
         // Rise a few points while fading in; arriving, not popping.
         dock.setFrameOrigin(NSPoint(x: origin.x, y: origin.y - 12))
