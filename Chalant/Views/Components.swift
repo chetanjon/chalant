@@ -532,6 +532,36 @@ struct HoverGlyphButton: View {
     }
 }
 
+/// A word that acts, for the rare action no glyph can say plainly.
+///
+/// Same manners as `HoverGlyphButton`: dim until the cursor finds it,
+/// then one step up the text hierarchy. No plate behind it and no
+/// capsule, so colour carries the whole state and the laws stay kept.
+struct QuietTextButton: View {
+    let title: String
+    /// Defaults to the title; set it when the word alone is thinner
+    /// than what the action really does.
+    var label: String?
+    let action: () -> Void
+
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(hovered ? Theme.textSecondary : Theme.textTertiary)
+                .frame(minHeight: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle())
+        .onHover { hovered = $0 }
+        .animation(Theme.Motion.hover, value: hovered)
+        .help(label ?? title)
+        .accessibilityLabel(label ?? title)
+    }
+}
+
 /// The one close affordance, everywhere a surface can be dismissed.
 ///
 /// Reused past its own name for anything an X can end (stop a focus

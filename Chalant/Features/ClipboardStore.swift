@@ -208,6 +208,28 @@ final class ClipboardStore: ObservableObject {
         saveIndex()
     }
 
+    /// Everything the user did not pin, gone, images deleted from disk
+    /// alongside their entries.
+    ///
+    /// Pins survive on purpose. Pinning is this app's standing promise
+    /// that something stays, said out loud in the empty state ("Pin or
+    /// shelf what should stay"), and a bulk clear that broke it would
+    /// delete files somebody had deliberately marked as keepers, with
+    /// no undo. Unpin first if a pin should go.
+    func clearUnpinned() {
+        for clip in clips where !clip.pinned {
+            clip.imageURL.map { try? FileManager.default.removeItem(at: $0) }
+        }
+        clips.removeAll { !$0.pinned }
+        saveIndex()
+    }
+
+    /// Whether `clearUnpinned` would actually do anything, so the
+    /// control can stay away when it cannot act.
+    var hasUnpinned: Bool {
+        clips.contains { !$0.pinned }
+    }
+
     /// What the history costs on disk, in bytes.
     ///
     /// Nothing is evicted any more, which is what "I don't lose

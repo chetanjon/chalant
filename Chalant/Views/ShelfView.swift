@@ -14,10 +14,24 @@ struct ShelfView: View {
         if shelf.items.isEmpty {
             EmptyPaneHint(message: "Drop files or links on the notch and they stay here until you take them back.")
         } else {
-            HuggingList {
-                ForEach(shelf.items) { item in
-                    ShelfRow(item: item, model: model, shelf: shelf)
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                HuggingList {
+                    ForEach(shelf.items) { item in
+                        ShelfRow(item: item, model: model, shelf: shelf)
+                    }
                 }
+                // Emptying the shelf loses nothing: it holds bookmarks,
+                // and every file stays where it already lived.
+                HStack {
+                    Spacer()
+                    QuietTextButton(
+                        title: "Clear all",
+                        label: "Empty the Shelf. Your files are not deleted."
+                    ) {
+                        shelf.clearAll()
+                    }
+                }
+                .padding(.horizontal, Theme.Space.s)
             }
         }
     }

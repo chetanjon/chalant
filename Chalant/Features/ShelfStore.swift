@@ -84,6 +84,18 @@ final class ShelfStore: ObservableObject {
         save()
     }
 
+    /// Empties the shelf.
+    ///
+    /// Nothing is deleted. The shelf only ever held bookmarks to files
+    /// that live wherever the user already keeps them, so this forgets
+    /// where they were and leaves every file untouched. That is why it
+    /// needs no confirmation, unlike the clipboard's clear, which does
+    /// delete the screenshots it owns.
+    func clearAll() {
+        items.removeAll()
+        save()
+    }
+
     // MARK: Persistence
 
     /// Bookmarks, not paths: a stashed file keeps resolving after the

@@ -1002,6 +1002,66 @@ final class ChalantTests: XCTestCase {
             .appendingPathComponent("chalant-clip-test-\(UUID().uuidString)", isDirectory: true)
     }
 
+    func testClearAllLeavesPinnedClipsStanding() {
+        // "Pin or shelf what should stay" is a promise the empty state
+        // makes out loud, and a bulk clear is exactly where it would
+        // quietly break.
+        let dir = clipboardScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let store = ClipboardStore(clipsDirectory: dir)
+        store.addText("keep me")
+        store.addText("history one")
+        store.addText("history two")
+        guard let toPin = store.clips.first(where: { $0.text == "keep me" }) else {
+            return XCTFail("the clip to pin was never stored")
+        }
+        store.togglePin(toPin)
+        XCTAssertEqual(store.clips.count, 3)
+        XCTAssertTrue(store.hasUnpinned)
+
+        store.clearUnpinned()
+
+        XCTAssertEqual(store.clips.map(\.text), ["keep me"])
+        XCTAssertTrue(store.clips.allSatisfy(\.pinned))
+        // Nothing left to clear, so the control has nothing to offer
+        // and the view stops drawing it.
+        XCTAssertFalse(store.hasUnpinned)
+    }
+
+    func testClearAllSurvivesARelaunch() {
+        // Clearing has to reach the index on disk, not just the array:
+        // a clear that only emptied memory would come back on launch.
+        let dir = clipboardScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let store = ClipboardStore(clipsDirectory: dir)
+        store.addText("pinned")
+        store.addText("gone")
+        if let toPin = store.clips.first(where: { $0.text == "pinned" }) {
+            store.togglePin(toPin)
+        }
+        store.clearUnpinned()
+
+        let reloaded = ClipboardStore(clipsDirectory: dir)
+        XCTAssertEqual(reloaded.clips.map(\.text), ["pinned"])
+    }
+
+    func testClearAllOnAllPinnedHistoryRemovesNothing() {
+        let dir = clipboardScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let store = ClipboardStore(clipsDirectory: dir)
+        store.addText("one")
+        store.addText("two")
+        store.clips.forEach { store.togglePin($0) }
+        XCTAssertFalse(store.hasUnpinned)
+
+        store.clearUnpinned()
+
+        XCTAssertEqual(store.clips.count, 2)
+    }
+
     func testClipHistoryPersistsAcrossRelaunchIncludingUnpinnedClips() {
         let dir = clipboardScratchDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }

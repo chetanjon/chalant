@@ -51,6 +51,22 @@ struct ClipboardView: View {
                             pageControls(current: currentPage, count: pageCount)
                         }
                     }
+                    // Only while there is unpinned history to lose. Once
+                    // everything left is pinned, this button could not
+                    // do anything, so it is not there.
+                    if clipboard.hasUnpinned {
+                        HStack {
+                            Spacer()
+                            QuietTextButton(
+                                title: "Clear all",
+                                label: "Delete the copy history. Pinned clips stay."
+                            ) {
+                                clipboard.clearUnpinned()
+                                page = 0
+                            }
+                        }
+                        .padding(.horizontal, Theme.Space.s)
+                    }
                 }
                 .animation(Theme.Motion.content, value: pageClips.map(\.id))
                 .onChange(of: query) { _, _ in page = 0 }
