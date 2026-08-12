@@ -39,9 +39,14 @@ final class EventTapMonitor: @unchecked Sendable {
     func start() -> Bool {
         guard tap == nil else { return true }
 
-        let mask = (1 << CGEventType.flagsChanged.rawValue)
-            | (1 << CGEventType.tapDisabledByTimeout.rawValue)
-            | (1 << CGEventType.tapDisabledByUserInput.rawValue)
+        // ONLY the events actually being watched. The two `tapDisabled` types
+        // are delivered to the callback whether or not they are in the mask,
+        // and their raw values are 0xFFFFFFFE and 0xFFFFFFFF: shifting 1 by
+        // those is undefined behaviour and corrupts the mask into something
+        // that matches nothing. The tap then installs cleanly, logs success,
+        // and never fires, which is indistinguishable from a permissions
+        // problem. Found by standing up a second identical tap that did work.
+        let mask = CGEventMask(1) << CGEventType.flagsChanged.rawValue
 
         let callback: CGEventTapCallBack = { _, type, event, refcon in
             guard let refcon else { return Unmanaged.passUnretained(event) }
@@ -55,7 +60,7 @@ final class EventTapMonitor: @unchecked Sendable {
             // Listen only. Part 0 §0.3 keeps insertion on AppleScript, and a
             // tap that cannot alter events is a smaller thing to trust.
             options: .listenOnly,
-            eventsOfInterest: CGEventMask(mask),
+            eventsOfInterest: mask,
             callback: callback,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
