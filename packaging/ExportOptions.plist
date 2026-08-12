@@ -14,11 +14,16 @@
   <key>teamID</key>
   <string>WV59PZX4A3</string>
 
-  <!-- Chalant's entitlements are hardened runtime entitlements rather
-       than capability entitlements, so no provisioning profile is
-       involved and Xcode can resolve the identity on its own. -->
+  <!-- Manual, to match the Release configuration in project.yml. The
+       archive is already Developer ID signed by the time it gets here,
+       and automatic signing would try to re-resolve an identity it was
+       never asked to choose. Chalant's entitlements are hardened
+       runtime entitlements rather than capability entitlements, so no
+       provisioning profile is involved either way. -->
   <key>signingStyle</key>
-  <string>automatic</string>
+  <string>manual</string>
+  <key>signingCertificate</key>
+  <string>Developer ID Application</string>
 
   <key>destination</key>
   <string>export</string>

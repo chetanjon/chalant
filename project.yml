@@ -83,7 +83,12 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cj.chalant
-        CODE_SIGN_STYLE: Automatic
+        # CODE_SIGN_STYLE lives per-configuration below, not here.
+        # Automatic signing picks the identity itself and REFUSES a
+        # hand-picked one: naming Developer ID while leaving this on
+        # Automatic fails the archive outright with "conflicting
+        # provisioning settings".
+        #
         # One team, two identities, on purpose (see configs below).
         # Development signing is local and fast, and keeps a build's
         # Keychain and TCC grants stable across rebuilds; ad-hoc
@@ -117,10 +122,21 @@ targets:
         # a Mac that is not this one, so they are the only build that
         # pays for a Developer ID identity. Everything else keeps the
         # fast local one.
+        #
+        # The styles differ because the identities do. Development wants
+        # Automatic, which fetches and renews certificates on its own
+        # and is what makes scripts/dev a one-liner. Developer ID has to
+        # be Manual: under Automatic, Xcode insists on choosing the
+        # identity itself and rejects the build for naming one.
         Debug:
+          CODE_SIGN_STYLE: Automatic
           CODE_SIGN_IDENTITY: "Apple Development"
         Release:
+          CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: "Developer ID Application"
+          # Developer ID signing for a Mac app outside the App Store
+          # needs no profile; saying so stops Xcode looking for one.
+          PROVISIONING_PROFILE_SPECIFIER: ""
   ChalantTests:
     type: bundle.unit-test
     platform: macOS
