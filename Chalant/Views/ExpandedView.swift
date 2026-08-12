@@ -776,6 +776,27 @@ struct TodayView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .task { await events.refresh() }
+        // While a denial is on screen, the user is very likely off in
+        // System Settings doing exactly what it asks. Watch for them
+        // finishing.
+        //
+        // Keyed on whether a denial exists, so it starts when one
+        // appears and is cancelled the moment the last one clears. No
+        // extra view carries it: a zero-height spacer inside a spaced
+        // VStack still takes its spacing, and would open a gap under
+        // the header.
+        //
+        // Two seconds is affordable because the work behind it is a
+        // synchronous, prompt-free status read that reloads only on an
+        // actual change.
+        .task(id: denials.isEmpty) {
+            guard !denials.isEmpty else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if Task.isCancelled { return }
+                await events.syncPermissionsIfChanged()
+            }
+        }
     }
 
     /// Why the panel is empty, when the reason is a switch.

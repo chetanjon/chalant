@@ -262,6 +262,36 @@ final class EventKitService: ObservableObject {
         return linked.first { $0.start > now }
     }
 
+    /// The two decisions as of the last look, so a re-check can tell
+    /// "nothing moved" from "the user just flipped it in System
+    /// Settings" without doing any work in the overwhelmingly common
+    /// case where nothing moved.
+    private var lastSeenCalendarStatus: EKAuthorizationStatus?
+    private var lastSeenRemindersStatus: EKAuthorizationStatus?
+
+    /// Re-read both authorizations and reload only if one actually
+    /// changed. Safe to call as often as you like: the status read is a
+    /// synchronous property that never prompts, and the expensive part
+    /// behind it runs only on a real change.
+    ///
+    /// This exists because the app cannot hear a permission being
+    /// granted. System Settings is another process, `didBecomeActive`
+    /// was the only trigger, and Chalant is `LSUIElement`, so it has no
+    /// Dock icon and no switcher entry: there is no "coming back to
+    /// it". A user could press this pane's own Open Settings button,
+    /// grant access, return, and be told access was still off until
+    /// they quit and relaunched. The app sent them to fix something and
+    /// then refused to notice they had (founder, 2026-08-12).
+    func syncPermissionsIfChanged() async {
+        let calendar = EKEventStore.authorizationStatus(for: .event)
+        let reminders = EKEventStore.authorizationStatus(for: .reminder)
+        guard calendar != lastSeenCalendarStatus
+                || reminders != lastSeenRemindersStatus else { return }
+        lastSeenCalendarStatus = calendar
+        lastSeenRemindersStatus = reminders
+        await refresh()
+    }
+
     /// Keep `nextEvent` current: a slow timer for the passage of time,
     /// plus the store's change notification for edits made elsewhere.
     func startGlanceTicker() {
@@ -271,7 +301,13 @@ final class EventKitService: ObservableObject {
         // caused, permanently and invisibly.
         stopGlanceTicker()
         let timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.recomputeNext() }
+            Task { @MainActor in
+                self?.recomputeNext()
+                // The backstop for a grant made while the island is
+                // shut: the pane's own faster watch only runs while a
+                // denial is on screen, and nothing is on screen then.
+                await self?.syncPermissionsIfChanged()
+            }
         }
         timer.tolerance = 5
         glanceTimer = timer
