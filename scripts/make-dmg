@@ -1,0 +1,125 @@
+#!/bin/bash
+# Builds the disk image people download from the site: a black window
+# with Chalant on the left, the Applications folder on the right, and
+# one arrow between them. Drag, eject, done.
+#
+# Sparkle never sees this file. Updates take the zip, because Sparkle
+# unpacks an archive in place and has no use for a Finder window.
+#
+# Give it an app that is ALREADY stapled. A ticket stapled after the
+# image is built does not reach the copy inside it.
+#
+# Usage: scripts/make-dmg <path/to/Chalant.app> <path/to/out.dmg>
+set -euo pipefail
+
+APP="${1:?usage: make-dmg <Chalant.app> <out.dmg>}"
+OUT="${2:?usage: make-dmg <Chalant.app> <out.dmg>}"
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BACKGROUND="$REPO/packaging/dmg-background.tiff"
+VOLNAME="Chalant"
+CONTENT_W=660          # matches "width" in scripts/make-dmg-background.py
+CONTENT_H=420          # matches "height"
+ICON_AXIS=200          # matches "axis"
+ICON_LEFT_X=165
+ICON_RIGHT_X=495
+
+# Finder's "bounds" measures the whole window, chrome included, while
+# the background image and every icon position are measured from the
+# top-left of the content area below it. Asking for bounds of exactly
+# CONTENT_H therefore buys a content area one title bar short, which
+# hangs the bottom of the background off the window and drops the
+# composition low. Add the title bar back.
+#
+# A viewer who has switched Finder's tab bar on loses a further 37pt
+# off the bottom. That is a global Finder preference with no per-window
+# override and no .DS_Store key, so no disk image can control it. The
+# composition survives it: the icons and their labels end well above
+# where that cut falls.
+TITLEBAR=28
+
+[ -d "$APP" ] || { echo "make-dmg: no app bundle at $APP" >&2; exit 1; }
+[ -f "$BACKGROUND" ] || {
+  echo "make-dmg: no background at $BACKGROUND" >&2
+  echo "make-dmg: run python3 scripts/make-dmg-background.py" >&2
+  exit 1
+}
+
+# Finder caches a volume's window state by mount path, so a /Volumes/
+# Chalant left over from an earlier build gets its stale icon positions
+# applied to this one, and the styling below silently does nothing.
+# Refuse rather than ship a disk image that looks wrong for reasons
+# nothing in this script can see.
+if [ -d "/Volumes/$VOLNAME" ]; then
+  echo "make-dmg: /Volumes/$VOLNAME is already mounted." >&2
+  echo "make-dmg: Finder would style this build from that one's cache." >&2
+  echo "make-dmg: run  hdiutil detach /Volumes/$VOLNAME" >&2
+  exit 1
+fi
+
+WORK="$(mktemp -d)"
+STAGE="$WORK/stage"
+MOUNT=""
+cleanup() {
+  [ -n "$MOUNT" ] && hdiutil detach "$MOUNT" -quiet 2>/dev/null
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
+
+mkdir -p "$STAGE/.background"
+ditto "$APP" "$STAGE/$(basename "$APP")"
+ln -s /Applications "$STAGE/Applications"
+cp "$BACKGROUND" "$STAGE/.background/background.tiff"
+
+# hdiutil sizes a -srcfolder image to fit exactly, which leaves Finder
+# no room to write the .DS_Store that carries every window setting
+# below. Ask for the contents plus 50MB of slack.
+SIZE_KB=$(( $(du -sk "$STAGE" | cut -f1) + 51200 ))
+
+rm -f "$OUT"
+hdiutil create -srcfolder "$STAGE" -volname "$VOLNAME" -fs HFS+ \
+  -format UDRW -size "${SIZE_KB}k" -ov -quiet "$WORK/rw.dmg"
+
+MOUNT="$(hdiutil attach "$WORK/rw.dmg" -readwrite -nobrowse -noautoopen |
+         grep -Eo '/Volumes/.+$' | tail -1)"
+[ -n "$MOUNT" ] || { echo "make-dmg: the image did not mount" >&2; exit 1; }
+
+# Finder is the only thing that can set a window's background and icon
+# positions, and AppleScript is the only way to ask it. This needs
+# Automation permission for whatever terminal is running.
+if ! osascript <<APPLESCRIPT
+tell application "Finder"
+  tell disk "$VOLNAME"
+    open
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set the bounds of container window to {200, 120, $((200 + CONTENT_W)), $((120 + CONTENT_H + TITLEBAR))}
+    set opts to the icon view options of container window
+    set arrangement of opts to not arranged
+    set icon size of opts to 128
+    set background picture of opts to file ".background:background.tiff"
+    set position of item "Chalant.app" of container window to {$ICON_LEFT_X, $ICON_AXIS}
+    set position of item "Applications" of container window to {$ICON_RIGHT_X, $ICON_AXIS}
+    close
+    open
+    update without registering applications
+    delay 2
+  end tell
+end tell
+APPLESCRIPT
+then
+  echo "make-dmg: Finder refused to style the window." >&2
+  echo "make-dmg: if this was a permission error, allow this terminal" >&2
+  echo "make-dmg: under System Settings, Privacy and Security, Automation." >&2
+  exit 1
+fi
+
+sync
+hdiutil detach "$MOUNT" -quiet
+MOUNT=""
+
+hdiutil convert "$WORK/rw.dmg" -format UDZO -imagekey zlib-level=9 \
+  -o "$OUT" -quiet
+
+echo "make-dmg: wrote $OUT ($(du -h "$OUT" | cut -f1))"
