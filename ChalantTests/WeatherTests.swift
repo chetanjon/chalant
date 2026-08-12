@@ -6,6 +6,11 @@ import XCTest
 final class WeatherTests: XCTestCase {
     func testTheSkyWordsCoverTheWMOTable() {
         XCTAssertEqual(WeatherController.skyWord(code: 0), "Clear")
+        // WMO 1 is "mainly clear" and 2 is "partly cloudy". They shipped
+        // sharing a word, so a mainly-clear Phoenix afternoon read as
+        // "Partly cloudy" while the station said Mostly Clear (founder,
+        // 2026-08-12). 1 was the only code this test never covered.
+        XCTAssertEqual(WeatherController.skyWord(code: 1), "Mainly clear")
         XCTAssertEqual(WeatherController.skyWord(code: 2), "Partly cloudy")
         XCTAssertEqual(WeatherController.skyWord(code: 3), "Cloudy")
         XCTAssertEqual(WeatherController.skyWord(code: 45), "Fog")

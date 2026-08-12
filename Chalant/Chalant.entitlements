@@ -18,6 +18,29 @@
 	<key>com.apple.security.personal-information.location</key>
 	<true/>
 
+	<!-- Today's events, and the verbs that make them.
+
+	     MISSING FROM 1.10.0 UNTIL 1.12.3, WHICH IS WHY THE DAY PANE
+	     WOULD NOT SHOW A CALENDAR NO MATTER WHAT THE USER GRANTED.
+	     Under the hardened runtime tccd refuses outright and logs
+	     "kTCCServiceCalendar requires entitlement
+	     com.apple.security.personal-information.calendars but it is
+	     missing", with Auth Right: Unknown (None) and DB Action: None.
+	     It never reaches the user as a prompt and never records a
+	     decision, so System Settings has nothing to toggle and the
+	     denial card is telling the truth. The 1.12.1 and 1.12.2
+	     permission work fixed a real staleness bug underneath this
+	     one, but could never have cured it. -->
+	<key>com.apple.security.personal-information.calendars</key>
+	<true/>
+
+	<!-- The name you say when texting, so it can find a number.
+	     Missing for exactly as long, and failing the same silent way:
+	     kTCCServiceAddressBook requires
+	     com.apple.security.personal-information.addressbook. -->
+	<key>com.apple.security.personal-information.addressbook</key>
+	<true/>
+
 	<!-- Deliberately absent: com.apple.security.cs.disable-library-validation.
 	     It was here for the now-playing adapter, on the reasoning that
 	     the system perl loads a framework Apple did not sign. But

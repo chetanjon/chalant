@@ -205,7 +205,10 @@ final class WeatherController: NSObject, ObservableObject, CLLocationManagerDele
     static func skyGlyph(code: Int) -> String {
         switch code {
         case 0: return "sun.max"
-        case 1, 2: return "cloud.sun"
+        // Mainly clear is a sun sky, not a sun-behind-cloud one; the
+        // word carries the difference from a bare "Clear".
+        case 1: return "sun.max"
+        case 2: return "cloud.sun"
         case 3: return "cloud"
         case 45, 48: return "cloud.fog"
         case 51...67: return "cloud.rain"
@@ -223,7 +226,11 @@ final class WeatherController: NSObject, ObservableObject, CLLocationManagerDele
     static func skyWord(code: Int) -> String {
         switch code {
         case 0: return "Clear"
-        case 1, 2: return "Partly cloudy"
+        // 1 and 2 are different skies and shipped sharing a word. WMO 1
+        // is "mainly clear", which is what a Phoenix afternoon at 37C
+        // actually looked like while this line called it partly cloudy.
+        case 1: return "Mainly clear"
+        case 2: return "Partly cloudy"
         case 3: return "Cloudy"
         case 45, 48: return "Fog"
         case 51...67: return "Rain"
