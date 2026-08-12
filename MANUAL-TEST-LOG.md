@@ -61,3 +61,55 @@ Two permissions are outstanding, both needing a human:
   synthetic right-Option `flagsChanged` events are visible to a listen-only
   tap. So once Input Monitoring is granted, M0 can be exercised end to end
   without a human at the keyboard.
+
+---
+
+## 2026-08-12 — M0, transcription PROVEN. Insertion blocked on Automation.
+
+### Transcription works, measured
+
+Two successful utterances through the full chain, driven by the `say` harness:
+
+| Said | Transcribed | finalize |
+|---|---|---|
+| "The quick brown fox jumps over the lazy dog" | `The quick brown fox jumps over the lazy dog. Yeah, yeah.` | 0.040s |
+| "Testing insertion into TextEdit" | `Testing insertion into text edit. Uh.` | 0.033s |
+
+**Finalization measured at 33-40ms.** Part 0 §0.5 warned the 250ms p95 budget
+might be unachievable because two independent sources measured 1.45s warm and
+2.2s cold. On this hardware, with `prepareToAnalyze()` at key-down, it is two
+orders of magnitude better. Treat as provisional: these are short utterances of
+clean synthesized speech, not the corpus. But the pessimistic reading of §0.5
+does not reproduce here.
+
+**Both utterances hallucinated on the trailing silence** ("Yeah, yeah.", "Uh.")
+This is exactly the fabricated-text-on-silence class Part 0 §0.18 predicts, and
+it appeared on the very first successful utterance rather than as a rare tail
+case. §0.18's guardrail stage is not optional.
+
+### Blocked
+
+Insertion never lands: Automation of System Events is not granted, so every
+outcome is `leftOnClipboard`. The text is never lost, which is the invariant
+holding, but M0 is not accepted until it reaches TextEdit twice in a row.
+
+### Findings
+
+- **A missing timeout cost 120 seconds.** With Automation ungranted, the
+  default AppleEvent timeout froze the insert for two full minutes. Fixed with
+  `with timeout of 3 seconds`, measured at 3.06s after.
+- **But a short timeout then races the consent dialog**, so the permission can
+  never be granted through the script path at all. Resolved by asking
+  explicitly with `AEDeterminePermissionToAutomateTarget` before the paste.
+- **That call answers -600 (procNotFound) when System Events is asleep**, and
+  will not launch it. System Events is launched on demand, so a fresh login
+  hits this instead of a prompt. The app now wakes it first, without stealing
+  focus.
+- **The `say` harness is not reliable for this app.** A run fed 51 buffers
+  (~5s of audio) and still transcribed nothing: the buffers arrive but contain
+  silence. Output volume was 100 and unmuted, routed to the built-in speakers.
+  The likely cause is macOS voice-processing echo cancellation removing our own
+  speaker output from the microphone input, which is precisely what it is for.
+  Some runs succeed, so it is intermittent rather than absent. **Do not treat a
+  harness "nothing heard" as an app failure without checking the fed-buffer
+  count first.**

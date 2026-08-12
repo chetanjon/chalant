@@ -39,11 +39,33 @@ actor SystemEventsInserter: TextInserter {
         // modifiers to clear.
         await Self.waitForClearModifiers()
 
+        // Settle consent BEFORE the scripted paste, so the script's short
+        // timeout never races the user reading a dialog.
+        switch await AutomationPermission.ensureSystemEvents() {
+        case .granted:
+            break
+        case .denied:
+            return .leftOnClipboard(reason: "Automation of System Events is off in System Settings")
+        case .failed(let status):
+            return .leftOnClipboard(reason: "could not check Automation permission (\(status))")
+        }
+
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
 
+        // `with timeout` is not optional here. Measured 2026-08-12: with
+        // Automation not yet granted, the default AppleEvent timeout left the
+        // insert hanging for **120 seconds** before returning an error, with
+        // the app apparently frozen the whole time. Part 0 §0.3 calls for
+        // timeouts on failure paths for exactly this, and notes Tahoe made
+        // AppleScript error retrieval dramatically slower (FB20174869).
+        //
+        // Three seconds is far beyond a healthy paste, which measures in
+        // milliseconds, and far short of a wait anyone would tolerate.
         let script = """
-        tell application "System Events" to keystroke "v" using command down
+        with timeout of 3 seconds
+            tell application "System Events" to keystroke "v" using command down
+        end timeout
         """
 
         var error: NSDictionary?

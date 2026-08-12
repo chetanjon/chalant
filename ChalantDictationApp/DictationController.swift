@@ -33,6 +33,9 @@ final class DictationController {
     private var target: InsertionTarget?
     private var startedAt: Date?
     private var timings = StageTimings()
+    /// How many audio buffers actually reached the analyzer this utterance.
+    /// Zero with a healthy engine means the microphone is delivering silence.
+    private(set) var fedBuffers = 0
 
     var onStateChange: (@MainActor () -> Void)?
 
@@ -108,9 +111,12 @@ final class DictationController {
             return
         }
         Self.log.info("capturing")
+        fedBuffers = 0
         pumpTask = Task { [transcriber] in
+            var total = 0
             while !Task.isCancelled {
-                await transcriber.drainAndFeed(from: ring)
+                total += await transcriber.drainAndFeed(from: ring)
+                await MainActor.run { self.fedBuffers = total }
                 try? await Task.sleep(for: .milliseconds(10))
             }
         }
@@ -127,8 +133,9 @@ final class DictationController {
         // Drain whatever is left before finalizing, so the tail of the
         // utterance is not cut off. Part 1 §2: never lose the user's text.
         if let ring = await audio.ringHandle() {
-            await transcriber.drainAndFeed(from: ring)
+            fedBuffers += await transcriber.drainAndFeed(from: ring)
         }
+        Self.log.info("fed \(self.fedBuffers, privacy: .public) buffers")
         pumpTask?.cancel()
         pumpTask = nil
         onStateChange?()
