@@ -16,25 +16,23 @@ None of that is true anymore. Download the disk image, drag Chalant to
 Applications, open it. Homebrew is now just
 `brew install --cask chetanjon/chalant/chalant`.
 
-## macOS will ask for your permissions again, once
+## Your permissions should survive
 
-This is the one cost, and it lands on everyone including me.
+macOS ties a permission to the identity of the app that asked for it.
+The certificate changed here, so this was the one thing worth worrying
+about, and it turned out fine: the stored rule pins the developer team
+rather than the individual certificate, and the team did not change.
+Checked after installing, Location and Calendars both carried over
+untouched.
 
-macOS ties every permission you grant to the certificate the app was
-signed with at the moment you granted it. The certificate changed, so
-the grants do not carry over. Chalant will ask again for the ones it
-needs: Accessibility, Screen Recording, Microphone, Contacts,
-Calendars, Reminders and Location. Each feature asks when you first use
-it, the same way it asked the first time.
+If some feature is quiet after updating, the two macOS never re-asks
+for on its own are the ones to check. Open System Settings, Privacy and
+Security, and look under Accessibility (window snapping) and Screen
+Recording (reading the front window). Everything else asks again by
+itself the first time you use it.
 
-It happens once, on this update only. Nothing is lost besides the
-grants themselves. Your settings, your saved things and your streaks
-are untouched.
-
-If a feature seems dead rather than asking, it is one of the two macOS
-does not re-prompt for. Open System Settings, Privacy and Security, and
-look under Accessibility (for window snapping) and Screen Recording
-(for reading the front window).
+Nothing else is lost either way. Your settings, your saved things and
+your streaks are untouched.
 
 ## Updating from 1.10.5 works normally
 
