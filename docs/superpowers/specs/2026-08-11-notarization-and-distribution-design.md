@@ -88,10 +88,21 @@ Developer ID build satisfies that by construction.
 ### Permissions reset once, for everyone
 
 TCC keys every grant to the code signing requirement captured at grant
-time. Moving from `Apple Development (WV59PZX4A3)` to
-`Developer ID Application (new team)` invalidates all of them. Every
-user, the founder included, re-grants Accessibility, Screen Recording,
-Microphone, Contacts, Calendars, Reminders and Location one time.
+time, and that requirement changes even though the team ID did not.
+1.10.5's, read with `codesign -d -r-`:
+
+```
+identifier "com.cj.chalant" and anchor apple generic
+and certificate leaf[subject.CN] = "Apple Development: j.chetan9009@gmail.com (7JK5N68ZSM)"
+and certificate 1[field.1.2.840.113635.100.6.2.1]
+```
+
+The team ID does not appear in it. It pins the leaf certificate's
+Common Name and the development intermediate; a Developer ID build
+pins `leaf[subject.OU] = "WV59PZX4A3"` and intermediate `6.2.6`
+instead. Both clauses change. Every user, the founder included,
+re-grants Accessibility, Screen Recording, Microphone, Contacts,
+Calendars, Reminders and Location one time.
 
 This is unavoidable and it is precisely what the existing comment in
 `project.yml` was protecting against:
@@ -137,10 +148,13 @@ Daily development keeps the fast, local identity. Only archives are
 Developer ID. The `ChalantTests` target keeps `Apple Development`
 unchanged.
 
-`DEVELOPMENT_TEAM` becomes the paid team's ID, read off the new
-certificate rather than assumed. Individual enrollment issues a team
-ID that is generally **not** the personal team's `WV59PZX4A3`, so this
-value is discovered, never guessed.
+`DEVELOPMENT_TEAM` is read off the Membership page rather than assumed.
+
+**Resolved 2026-08-11: it did not change.** Individual enrollment kept
+`WV59PZX4A3`, the same ID the free personal team carried, so this file
+and `packaging/ExportOptions.plist` both needed no edit and the planned
+cutover was a no-op. The lesson survives anyway: discover the value,
+never guess it, in either direction.
 
 ### 2. ExportOptions.plist exists for the first time
 
