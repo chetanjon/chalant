@@ -8,13 +8,13 @@ The name: chalant is nonchalant without the non. French chaloir meant to care; n
 
 ## Download
 
-[**Download Chalant.zip**](https://github.com/chetanjon/chalant/releases/latest/download/Chalant.zip), always the newest build. Apple Silicon, macOS 14+, free. (Release notes live on the [releases page](https://github.com/chetanjon/chalant/releases/latest).) Or through Homebrew:
+[**Download Chalant.dmg**](https://github.com/chetanjon/chalant/releases/latest/download/Chalant.dmg), always the newest build. Apple Silicon, macOS 14+, free. (Release notes live on the [releases page](https://github.com/chetanjon/chalant/releases/latest).) Or through Homebrew:
 
 ```bash
-brew install --cask chetanjon/chalant/chalant --no-quarantine
+brew install --cask chetanjon/chalant/chalant
 ```
 
-Homebrew is the quiet route: the flag above skips the first-open challenge, because macOS only challenges what it saw arrive from a browser. Downloading the zip instead: unzip, drag Chalant to Applications, open it, and macOS asks once. Click Done, not Move to Trash, then System Settings, Privacy and Security, scroll down, Open Anyway. Chalant is unsigned because it is free and independent. After that, updates take care of themselves: the island mentions a new version once, and one click installs it in place and relaunches (Sparkle, with updates signed by the project's own key; no browser, no re-download dance). Speech recognition is Apple standard dictation, there are no API keys anywhere, and beyond the optional Chat tab, Chalant asks the internet only for: whether a newer version exists (a daily check, switchable off in Settings), the update itself when you say yes, album art for what you play, and favicons for sites you save, each fetched from its own source, never through a third-party service. The Live status API listens on localhost only; nothing it hears leaves the machine.
+Open the disk image, drag Chalant to Applications, open it. Chalant is signed with a Developer ID certificate and notarized by Apple, so there is no warning to click past and no flag to pass. After that, updates take care of themselves: the island mentions a new version once, and one click installs it in place and relaunches (Sparkle, with updates signed by the project's own key; no browser, no re-download dance). Speech recognition is Apple standard dictation, there are no API keys anywhere, and beyond the optional Chat tab, Chalant asks the internet only for: whether a newer version exists (a daily check, switchable off in Settings), the update itself when you say yes, album art for what you play, and favicons for sites you save, each fetched from its own source, never through a third-party service. The Live status API listens on localhost only; nothing it hears leaves the machine.
 
 ## v1 feature set
 
@@ -124,11 +124,11 @@ The rules every round is built under, in the order they were paid for:
 - No conversation memory in ask, each question is fresh. Long conversations belong to the Chat tab.
 - No global hotkey, by choice: every summon key collided with something. Hover, the mic, or the typed bar open the island.
 - Texting sends over iMessage only. A number that lives on the green side isn't reachable yet; SMS relay is untested ground and stays out until it can be tested honestly.
-- Unsigned; the first open needs one Open Anyway.
+- Signed with a Developer ID certificate and notarized by Apple.
 
 ## Security posture
 
-The honest version, since you are running an unsigned app that can touch a lot.
+The honest version, since this app can touch a lot.
 
 - **On device.** Every "ask" (voice, typed, screen reading) is answered by Apple's on-device model. Your screen's text and your clipboard never leave the Mac. There are no API keys and no cloud inference; the API-key era was deleted, not disabled.
 - **Dictation is the one exception, and it is worth being plain about.** Turning speech into text is macOS's own dictation, the same path Notes and Messages use: on this Mac when the local speech model is ready, and through Apple's dictation service when it is not. Strict on-device-only was tried and spent a day answering "sound but no words" whenever that model was cold, so reliability won. Everything downstream of the transcript, the answer included, stays here. Type instead of talking and nothing is spoken to anyone.
@@ -140,7 +140,7 @@ The honest version, since you are running an unsigned app that can touch a lot.
 ## Roadmap
 
 - Screen context shipped in 1.0.78, Messages sending in 1.0.66, self-updates in 1.0.86. What remains from the old list: a meeting brief before your next call, still earning its shape. (The menu bar countdown was pruned; the island already carries the countdown on every display, and two surfaces for one number is the kind of thing this app exists to refuse.)
-- Distribution: the Homebrew cask is live (`brew install --cask chetanjon/chalant/chalant --no-quarantine`); a notarized build if enrollment ever earns its $99. The landing page is [live](https://chetanjon.github.io/chalant/).
+- Distribution: signed and notarized since 1.11.0, as a disk image and through the Homebrew cask (`brew install --cask chetanjon/chalant/chalant`). The landing page is [live](https://chetanjon.github.io/chalant/).
 
 ## Attributions
 

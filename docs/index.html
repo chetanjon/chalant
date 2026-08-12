@@ -325,9 +325,9 @@
   </section>
 
   <section class="get">
-    <a class="button" id="get" href="https://github.com/chetanjon/chalant/releases/latest/download/Chalant.zip">Download for Mac</a>
+    <a class="button" id="get" href="https://github.com/chetanjon/chalant/releases/latest/download/Chalant.dmg">Download for Mac</a>
     <div class="fine">apple silicon · macos 14+ · free</div>
-    <div class="fine">unzip · drag chalant to applications · first open: system settings, privacy and security, open anyway</div>
+    <div class="fine">open · drag chalant to applications</div>
   </section>
 
   <dl class="verbs">
@@ -373,15 +373,13 @@
   </section>
 
   <section class="note">
-    <h2>First open</h2>
+    <h2>What it asks of you</h2>
     <p>
-      Homebrew skips the ceremony entirely:
-      <code>brew install --cask chetanjon/chalant/chalant --no-quarantine</code>.
-      That flag is why: macOS only challenges apps it sees arrive from a browser.
-      macOS will ask once: System Settings, Privacy and Security, Open Anyway.
-      That is the only ceremony there will ever be: from then on the island
-      mentions a new version once and one click installs it in place.
-      Chalant is unsigned because it is free and independent. The
+      Chalant is signed with a Developer ID certificate and notarized by
+      Apple, so it opens the way any Mac app opens. Homebrew works too:
+      <code>brew install --cask chetanjon/chalant/chalant</code>.
+      From then on the island mentions a new version once and one click
+      installs it in place. The
       <a href="https://github.com/chetanjon/chalant">source is public</a>,
       speech recognition uses Apple standard dictation, and Chalant itself only asks the
       internet whether a newer version exists, and for the update when you say yes. The optional Chat tab is
@@ -413,7 +411,7 @@
   // domain, the relative href rides the rewrite and stays on-domain.
   if (location.hostname.endsWith("github.io")) {
     document.getElementById("get").href =
-      "https://github.com/chetanjon/chalant/releases/latest/download/Chalant.zip";
+      "https://github.com/chetanjon/chalant/releases/latest/download/Chalant.dmg";
   }
   const el = document.getElementById("verb");
   let i = 0;
