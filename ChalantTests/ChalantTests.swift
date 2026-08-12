@@ -641,6 +641,29 @@ final class ChalantTests: XCTestCase {
         defaults.removePersistentDomain(forName: suite)
     }
 
+    // MARK: The bars' choreography (now sampled for the render server)
+
+    func testTheDanceKeyframesFollowTheLiveMath() {
+        // The keyframe loop must be the same sine stack the
+        // reduced-motion fallback and the old timeline drew, sampled
+        // at 15 a second over the 47s loop, floored at the bar's own
+        // width so a quiet moment stays a dot rather than a sliver.
+        let track = NowPlayingBars.keyframeHeights(index: 1, maxHeight: 7)
+        XCTAssertEqual(track.count, 705, "47 seconds at 15 samples a second")
+        XCTAssertEqual(
+            track[0],
+            max(NowPlayingBars.barWidth,
+                NowPlayingBars.liveHeight(t: 0, index: 1, maxHeight: 7))
+        )
+        XCTAssertTrue(track.allSatisfy { $0 >= NowPlayingBars.barWidth && $0 <= 7 })
+        XCTAssertTrue(Set(track.map { Int($0 * 100) }).count > 50,
+                      "a dance, not a flat line")
+        XCTAssertNotEqual(
+            NowPlayingBars.keyframeHeights(index: 0, maxHeight: 7)[10], track[10],
+            "each bar carries its own phase"
+        )
+    }
+
     func testASourceThatCannotMakeASoundPutsTheChipOut() async {
         // The behaviour that used to decide the test above, written
         // down as a test of its own rather than left as folklore. It is

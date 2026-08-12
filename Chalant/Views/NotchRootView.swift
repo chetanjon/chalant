@@ -415,37 +415,20 @@ struct NotchRootView: View {
                     .animation(Theme.Motion.hover, value: face.pointerUnit)
                     // Breathing accent ring: idle life on the edges when
                     // music or a timer is going. Intensity breathes in
-                    // place, nothing travels along the border.
+                    // place, nothing travels along the border. The
+                    // breath itself plays on Core Animation: the old
+                    // 8Hz TimelineView cost a full hosting-view layout
+                    // pass per tick (the measurement is written up on
+                    // NowPlayingBars in IslandRows.swift), and the rim
+                    // was the second most expensive thing a resting
+                    // island did while music played.
                     .overlay {
                         if glowOn, Theme.Feel.current.ambient,
                            face.state == .collapsed,
                            model.sessionActive || music.nowPlaying?.isPlaying == true {
-                            // 8, not 15. This is a breath on a 1.6s
-                            // cycle: nothing in it moves fast enough to
-                            // need fifteen frames a second, and each one
-                            // costs a full hosting-view layout pass (the
-                            // measurement is written up on NowPlayingBars
-                            // in IslandRows.swift). Three stroked borders
-                            // are redrawn per tick, so this was the
-                            // second most expensive thing a resting
-                            // island did while music played.
-                            TimelineView(.animation(minimumInterval: 1 / 8)) { context in
-                                let t = context.date.timeIntervalSinceReferenceDate
-                                let breath = 0.5 + 0.5 * sin(t / (1.6 * Theme.Motion.ambientSlow))
-                                ZStack {
-                                    islandShape
-                                        .strokeBorder(accent.opacity(0.03 + 0.04 * breath), lineWidth: 4)
-                                    islandShape
-                                        .strokeBorder(accent.opacity(0.08 + 0.10 * breath), lineWidth: 1.5)
-                                    // The belly light breathes with the
-                                    // same rhythm, same clock, no new timer.
-                                    islandShape
-                                        .strokeBorder(Theme.lipLight, lineWidth: 1)
-                                        .opacity(0.10 + 0.20 * breath)
-                                }
-                            }
-                            .allowsHitTesting(false)
-                            .transition(.opacity)
+                            RimLayerView(shape: islandShape, accent: accent)
+                                .allowsHitTesting(false)
+                                .transition(.opacity)
                         }
                     }
                     .overlay(
@@ -874,4 +857,133 @@ struct NotchRootView: View {
         .animation(.easeOut(duration: 0.1), value: voice.level)
     }
 
+}
+
+/// The breathing rim's layer half: the same three strokes the
+/// TimelineView drew, breathing on the render server instead of on
+/// SwiftUI ticks. An autoreversed opacity curve costs the app nothing
+/// per frame, and easeInOut standing in for a true sine is
+/// imperceptible at a tenth of a hertz. Paths are rebuilt only when
+/// the island's size or shape actually changes, which a resting
+/// island's never does.
+private struct RimLayerView: NSViewRepresentable {
+    let shape: IslandShape
+    let accent: Color
+
+    func makeNSView(context: Context) -> RimHostView {
+        let view = RimHostView()
+        view.apply(shape: shape, accent: NSColor(accent))
+        return view
+    }
+
+    func updateNSView(_ view: RimHostView, context: Context) {
+        view.apply(shape: shape, accent: NSColor(accent))
+    }
+
+    final class RimHostView: NSView {
+        /// (lineWidth, resting opacity, breath amplitude), outermost
+        /// first: the two accent strokes, then the belly light. Same
+        /// numbers the stroked borders carried.
+        private static let strokes: [(width: CGFloat, base: Float, amp: Float)] = [
+            (4, 0.03, 0.04), (1.5, 0.08, 0.10), (1, 0.10, 0.20),
+        ]
+        private var accentRings: [CAShapeLayer] = []
+        /// The belly light is Theme.lipLight, a white gradient (clear
+        /// at the top, a tenth at the bottom), so it rides a gradient
+        /// layer wearing its stroke as a mask.
+        private var lipGradient = CAGradientLayer()
+        private let lipMask = CAShapeLayer()
+        private var currentShape: IslandShape?
+        private var breathDuration: Double = 0
+
+        override var isFlipped: Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        func apply(shape: IslandShape, accent: NSColor) {
+            wantsLayer = true
+            if accentRings.isEmpty {
+                accentRings = Self.strokes.prefix(2).map { spec in
+                    let ring = CAShapeLayer()
+                    ring.fillColor = nil
+                    ring.lineWidth = spec.width
+                    ring.opacity = spec.base
+                    layer?.addSublayer(ring)
+                    return ring
+                }
+                lipMask.fillColor = nil
+                lipMask.strokeColor = NSColor.white.cgColor
+                lipMask.lineWidth = Self.strokes[2].width
+                lipGradient.colors = [
+                    NSColor.white.withAlphaComponent(0).cgColor,
+                    NSColor.white.withAlphaComponent(0.10).cgColor,
+                ]
+                lipGradient.startPoint = CGPoint(x: 0.5, y: 0)
+                lipGradient.endPoint = CGPoint(x: 0.5, y: 1)
+                lipGradient.mask = lipMask
+                lipGradient.opacity = Self.strokes[2].base
+                layer?.addSublayer(lipGradient)
+            }
+            currentShape = shape
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            accentRings[0].strokeColor = accent.cgColor
+            accentRings[1].strokeColor = accent.cgColor
+            rebuildPaths()
+            CATransaction.commit()
+            armBreath()
+        }
+
+        override func layout() {
+            super.layout()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            rebuildPaths()
+            CATransaction.commit()
+        }
+
+        private func rebuildPaths() {
+            guard let currentShape, bounds.width > 0, bounds.height > 0 else { return }
+            for (ring, spec) in zip(accentRings, Self.strokes.prefix(2)) {
+                ring.frame = bounds
+                // strokeBorder kept its stroke inside the shape; a
+                // shape layer strokes astride the path, so the path
+                // pulls in by half the width to land identically.
+                let inset = spec.width / 2
+                ring.path = currentShape
+                    .path(in: bounds.insetBy(dx: inset, dy: inset))
+                    .cgPath
+            }
+            lipGradient.frame = bounds
+            lipMask.frame = lipGradient.bounds
+            let lipInset = Self.strokes[2].width / 2
+            lipMask.path = currentShape
+                .path(in: bounds.insetBy(dx: lipInset, dy: lipInset))
+                .cgPath
+        }
+
+        /// One breath cycle, re-armed only when the Feel changes its
+        /// tempo. The sine ran sin(t / (1.6 * ambientSlow)), a period
+        /// of 2pi * 1.6 * ambientSlow; autoreverse walks half of it
+        /// each way.
+        private func armBreath() {
+            let duration = Double.pi * 1.6 * Theme.Motion.ambientSlow
+            guard breathDuration != duration else { return }
+            breathDuration = duration
+            let breathers: [(CALayer, base: Float, amp: Float)] =
+                zip(accentRings, Self.strokes.prefix(2)).map { ($0, $1.base, $1.amp) }
+                + [(lipGradient, Self.strokes[2].base, Self.strokes[2].amp)]
+            for (ring, base, amp) in breathers {
+                ring.removeAnimation(forKey: "breath")
+                let breath = CABasicAnimation(keyPath: "opacity")
+                breath.fromValue = base
+                breath.toValue = base + amp
+                breath.duration = duration
+                breath.autoreverses = true
+                breath.repeatCount = .infinity
+                breath.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                breath.isRemovedOnCompletion = false
+                ring.add(breath, forKey: "breath")
+            }
+        }
+    }
 }

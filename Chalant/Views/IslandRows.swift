@@ -228,41 +228,44 @@ struct MusicRow: View {
 /// playback feedback, not ambient decoration, so it keeps moving under
 /// the Still feel (it disappears the moment playback pauses); only the
 /// system Reduce Motion setting parks it.
+///
+/// The dance itself plays on Core Animation, not SwiftUI ticks. Every
+/// TimelineView tick re-runs the hosting view's whole layout pass, and
+/// this survived two rate cuts (30 to 15 in R171) before a 1.10.4
+/// sample showed a playing island still spending ~5% of CPU in
+/// NSHostingView.layout(), all of it decoration ticks. A keyframe loop
+/// on the render server plays the SAME sine stack, sampled at the same
+/// fifteen steps a second, and the app pays nothing per frame. The
+/// loop repeats every 47 seconds, which nobody has ever noticed about
+/// a two-and-a-half-point capsule.
 struct NowPlayingBars: View {
     let accent: Color
     var barCount = 5
     var maxHeight: CGFloat = 14
 
+    static let barWidth: CGFloat = 2.5
+    static let barSpacing: CGFloat = 2
+
     var body: some View {
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            bars { index in restHeight(index) }
-        } else {
-            // 15, not 30. Every tick of a TimelineView re-runs the
-            // hosting view's whole layout pass, not just this Canvas's
-            // draw: sampled on 2026-08-10, a playing island spent 18%
-            // of its main thread inside NSHostingView.layout() under
-            // the display-cycle observer, and switching this signal off
-            // took that path to ZERO samples. The Canvas fix from
-            // Round 22b stopped the bars invalidating layout by
-            // changing a frame; it could not stop the tick itself.
-            //
-            // Halving the rate halves the passes. Bars still read as
-            // dancing at 15, and the app already holds this precedent:
-            // the aurora runs at 12 deliberately, with "CPU halved, do
-            // not raise" written beside it.
-            TimelineView(.animation(minimumInterval: 1 / 15)) { context in
-                let t = context.date.timeIntervalSinceReferenceDate
-                bars { index in liveHeight(t: t, index: index) }
+        Group {
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                staticBars
+            } else {
+                BarsLayerView(accent: accent, barCount: barCount, maxHeight: maxHeight)
             }
         }
+        .frame(
+            width: CGFloat(barCount) * Self.barWidth
+                + CGFloat(barCount - 1) * Self.barSpacing,
+            height: maxHeight
+        )
     }
 
-    private var barWidth: CGFloat { 2.5 }
-    private var barSpacing: CGFloat { 2 }
-
-    /// Two incommensurate sines plus a slow swell per bar: loop-free,
-    /// organic bounce, the way a real analyzer never quite repeats.
-    private func liveHeight(t: Double, index: Int) -> CGFloat {
+    /// Two incommensurate sines plus a slow swell per bar: organic
+    /// bounce, the way a real analyzer never quite repeats. The one
+    /// source of the choreography: the keyframe sampler and the
+    /// reduced-motion fallback both read it, and the tests pin it.
+    static func liveHeight(t: Double, index: Int, maxHeight: CGFloat) -> CGFloat {
         let phase = Double(index) * 1.9
         let fast = sin(t * 4.6 + phase)
         let cross = sin(t * 2.9 + phase * 2.3)
@@ -271,32 +274,102 @@ struct NowPlayingBars: View {
         return maxHeight * CGFloat(0.22 + 0.78 * unit)
     }
 
-    private func restHeight(_ index: Int) -> CGFloat {
+    static func restHeight(index: Int, maxHeight: CGFloat) -> CGFloat {
         maxHeight * [0.45, 0.8, 0.6, 0.9, 0.5][index % 5]
     }
 
-    /// Drawn in a fixed-size Canvas, not height-animated subviews: a
-    /// `.frame(height:)` that changes 30 times a second invalidates
-    /// layout of the whole island every tick (measured at ~30% of
-    /// main-thread time while collapsed). Drawing repaints only these
-    /// few points of screen and never touches layout.
-    private func bars(_ height: @escaping (Int) -> CGFloat) -> some View {
+    /// One bar's height track, sampled for the render server: 15 steps
+    /// a second over a 47-second loop (odd on purpose, so it never
+    /// beats visibly against the rim's ten-second breath).
+    static func keyframeHeights(index: Int, maxHeight: CGFloat) -> [CGFloat] {
+        stride(from: 0.0, to: 47.0, by: 1.0 / 15.0).map { t in
+            max(barWidth, liveHeight(t: t, index: index, maxHeight: maxHeight))
+        }
+    }
+
+    private var staticBars: some View {
         Canvas { context, size in
             for index in 0..<barCount {
-                let barHeight = max(barWidth, height(index))
+                let barHeight = max(
+                    Self.barWidth, Self.restHeight(index: index, maxHeight: maxHeight)
+                )
                 let rect = CGRect(
-                    x: CGFloat(index) * (barWidth + barSpacing),
+                    x: CGFloat(index) * (Self.barWidth + Self.barSpacing),
                     y: (size.height - barHeight) / 2,
-                    width: barWidth,
+                    width: Self.barWidth,
                     height: barHeight
                 )
                 context.fill(Capsule().path(in: rect), with: .color(accent))
             }
         }
-        .frame(
-            width: CGFloat(barCount) * barWidth + CGFloat(barCount - 1) * barSpacing,
-            height: maxHeight
-        )
+    }
+}
+
+/// The layer half of NowPlayingBars: one rounded layer per bar, each
+/// running a repeating keyframe animation of its height. Height
+/// changes at the layer level never touch AppKit layout, which is the
+/// entire point.
+private struct BarsLayerView: NSViewRepresentable {
+    let accent: Color
+    let barCount: Int
+    let maxHeight: CGFloat
+
+    func makeNSView(context: Context) -> BarsHostView {
+        let view = BarsHostView()
+        view.configure(barCount: barCount, maxHeight: maxHeight)
+        view.setAccent(NSColor(accent))
+        return view
+    }
+
+    func updateNSView(_ view: BarsHostView, context: Context) {
+        view.configure(barCount: barCount, maxHeight: maxHeight)
+        view.setAccent(NSColor(accent))
+    }
+
+    final class BarsHostView: NSView {
+        private var bars: [CALayer] = []
+        private var builtFor: (count: Int, height: CGFloat)?
+
+        override var isFlipped: Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        func configure(barCount: Int, maxHeight: CGFloat) {
+            guard builtFor?.count != barCount || builtFor?.height != maxHeight else { return }
+            builtFor = (barCount, maxHeight)
+            wantsLayer = true
+            bars.forEach { $0.removeFromSuperlayer() }
+            bars = (0..<barCount).map { index in
+                let bar = CALayer()
+                bar.cornerRadius = NowPlayingBars.barWidth / 2
+                bar.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+                let x = CGFloat(index)
+                    * (NowPlayingBars.barWidth + NowPlayingBars.barSpacing)
+                    + NowPlayingBars.barWidth / 2
+                bar.position = CGPoint(x: x, y: maxHeight / 2)
+                bar.bounds = CGRect(
+                    x: 0, y: 0,
+                    width: NowPlayingBars.barWidth, height: NowPlayingBars.barWidth
+                )
+                let dance = CAKeyframeAnimation(keyPath: "bounds.size.height")
+                dance.values = NowPlayingBars.keyframeHeights(
+                    index: index, maxHeight: maxHeight
+                )
+                dance.duration = 47
+                dance.calculationMode = .linear
+                dance.repeatCount = .infinity
+                dance.isRemovedOnCompletion = false
+                bar.add(dance, forKey: "dance")
+                layer?.addSublayer(bar)
+                return bar
+            }
+        }
+
+        func setAccent(_ color: NSColor) {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            bars.forEach { $0.backgroundColor = color.cgColor }
+            CATransaction.commit()
+        }
     }
 }
 
