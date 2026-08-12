@@ -43,3 +43,24 @@ verified with the project's own EdDSA key and that key has not changed.
 ## Nothing else changed
 
 No feature moved. This release is the certificate and the packaging.
+
+---
+
+## Note on this tag, added after release
+
+The `v1.11.0` tag contains three commits that are **not** in the 1.11.0
+build: `fbefe9f` (the mid-screen drop bubble), `da79733` (the outline
+media transport glyphs) and `7d40e72` (Clear all in the clipboard and
+the shelf).
+
+Notarization held this release for an hour and three quarters, and those
+commits landed on `main` during the wait. The build was archived before
+them and the tag was written after, so the tag names work the binary was
+never built from.
+
+The download is unaffected: it is the correct 1.11.0, signed and
+notarized, and it does not contain those three changes. They shipped in
+1.12.0.
+
+`scripts/release` now records the commit it built from and refuses to
+tag if `main` has moved since.
