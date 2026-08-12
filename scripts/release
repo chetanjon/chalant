@@ -1,0 +1,336 @@
+#!/bin/bash
+# The whole release, one command:
+#
+#   scripts/release 1.11.0 --notes-file RELEASE-NOTES-1.11.0.md
+#
+# Bumps, tests, archives, exports with Developer ID, notarizes, staples,
+# builds the disk image, notarizes that too, signs the update for
+# Sparkle, writes the appcast, tags, publishes, kicks the Pages build,
+# and only then asks Gatekeeper whether any of it actually worked.
+#
+# It reports success if and only if spctl agrees. Everything else in
+# here is bookkeeping; that last check is the point.
+#
+# Flags:
+#   --notes-file PATH   release notes for the GitHub release
+#   --skip-tests        for a re-run after notarization failed
+#   --dry-run           preflight only, changes nothing
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+VERSION=""
+NOTES_FILE=""
+SKIP_TESTS=0
+DRY_RUN=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --notes-file) NOTES_FILE="$2"; shift 2 ;;
+    --skip-tests) SKIP_TESTS=1; shift ;;
+    --dry-run)    DRY_RUN=1; shift ;;
+    -*) echo "release: unknown flag $1" >&2; exit 1 ;;
+    *)  VERSION="$1"; shift ;;
+  esac
+done
+
+if [ -z "$VERSION" ]; then
+  echo "usage: scripts/release <version> [--notes-file PATH] [--skip-tests] [--dry-run]" >&2
+  exit 1
+fi
+
+TAG="v$VERSION"
+BUILD_DIR="$REPO/build"
+EXPORT_DIR="$BUILD_DIR/export"
+APP="$EXPORT_DIR/Chalant.app"
+DMG="$BUILD_DIR/Chalant-$VERSION.dmg"
+DMG_STABLE="$BUILD_DIR/Chalant.dmg"
+ZIP="$BUILD_DIR/Chalant-$VERSION.zip"
+ZIP_STABLE="$BUILD_DIR/Chalant.zip"
+NOTARY_PROFILE="chalant-notary"
+GH_REPO="chetanjon/chalant"
+
+BUMPED=0
+
+step() { echo; echo "==> $*"; }
+die() {
+  echo "release: $*" >&2
+  if [ "$BUMPED" -eq 1 ]; then
+    echo >&2
+    echo "release: the tree holds an uncommitted version bump." >&2
+    echo "release: 'git checkout project.yml Chalant/Info.plist' undoes it." >&2
+  fi
+  exit 1
+}
+
+mkdir -p "$BUILD_DIR"
+
+# ---------------------------------------------------------------- 1/16
+step "Preflight"
+
+if [ -n "$(git status --porcelain)" ]; then die "working tree is dirty"; fi
+if [ "$(git rev-parse --abbrev-ref HEAD)" != "main" ]; then
+  die "not on main. The appcast is invisible to users from anywhere else."
+fi
+if git rev-parse "$TAG" >/dev/null 2>&1; then die "$TAG already exists"; fi
+
+for tool in xcodegen gh hdiutil tiffutil xcrun ditto python3; do
+  if ! command -v "$tool" >/dev/null; then die "missing $tool"; fi
+done
+
+# The wrong sign_update is one directory away and signs with the legacy
+# DSA algorithm, which produces a signature Sparkle rejects.
+SIGN_UPDATE="$(find "$HOME/Library/Developer/Xcode/DerivedData" \
+  -path '*artifacts/sparkle/Sparkle/bin/sign_update' \
+  -not -path '*old_dsa_scripts*' -type f 2>/dev/null | head -1)"
+if [ -z "$SIGN_UPDATE" ]; then
+  die "sign_update not found. Build once so SPM resolves Sparkle."
+fi
+
+TEAM="$(awk '/^ *DEVELOPMENT_TEAM:/ {print $2; exit}' project.yml)"
+if [ -z "$TEAM" ]; then die "no DEVELOPMENT_TEAM in project.yml"; fi
+
+# The app target and the test target each name a team. They are allowed
+# to be written twice; they are not allowed to disagree, because then
+# "the team" stops meaning anything and half the tree signs as someone
+# else.
+TEAM_COUNT="$(awk '/^ *DEVELOPMENT_TEAM:/ {print $2}' project.yml | sort -u | wc -l | tr -d ' ')"
+if [ "$TEAM_COUNT" -ne 1 ]; then
+  die "project.yml names more than one DEVELOPMENT_TEAM: $(awk '/^ *DEVELOPMENT_TEAM:/ {print $2}' project.yml | sort -u | tr '\n' ' ')"
+fi
+
+PLIST_TEAM="$(/usr/libexec/PlistBuddy -c 'Print :teamID' packaging/ExportOptions.plist 2>/dev/null || true)"
+if [ "$PLIST_TEAM" != "$TEAM" ]; then
+  die "packaging/ExportOptions.plist says team '$PLIST_TEAM', project.yml says '$TEAM'"
+fi
+
+if ! security find-identity -v -p codesigning | grep -q "Developer ID Application"; then
+  die "no Developer ID Application identity in the Keychain. Enrollment is not done, or the certificate was never created."
+fi
+
+if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+  die "no notary credentials. Run: xcrun notarytool store-credentials \"$NOTARY_PROFILE\" --apple-id <id> --team-id $TEAM --password <app-specific>"
+fi
+
+if [ -n "$NOTES_FILE" ] && [ ! -f "$NOTES_FILE" ]; then
+  die "no notes file at $NOTES_FILE"
+fi
+
+# Finder styles a disk image from whatever it has cached for that mount
+# path, so a leftover volume would silently ruin the window.
+if [ -d "/Volumes/Chalant" ]; then
+  die "/Volumes/Chalant is mounted. Run: hdiutil detach /Volumes/Chalant"
+fi
+
+CURRENT_BUILD="$(awk '/CFBundleVersion:/ {gsub(/"/,"",$2); print $2; exit}' project.yml)"
+NEXT_BUILD=$((CURRENT_BUILD + 1))
+
+echo "    version   $VERSION (build $CURRENT_BUILD -> $NEXT_BUILD)"
+echo "    team      $TEAM"
+echo "    notary    $NOTARY_PROFILE"
+echo "    notes     ${NOTES_FILE:-none}"
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo
+  echo "release: preflight passed. Nothing changed (--dry-run)."
+  exit 0
+fi
+
+# ---------------------------------------------------------------- 2/16
+step "Bump to $VERSION (build $NEXT_BUILD)"
+# Both keys, always. Sparkle compares CFBundleVersion, users read the
+# short string, and xcodegen rewrites Info.plist from these two, so a
+# version set in the plist alone disappears on the next generate.
+sed -i '' "s/CFBundleShortVersionString: .*/CFBundleShortVersionString: $VERSION/" project.yml
+sed -i '' "s/CFBundleVersion: \".*\"/CFBundleVersion: \"$NEXT_BUILD\"/" project.yml
+xcodegen generate --quiet
+BUMPED=1
+
+# ---------------------------------------------------------------- 3/16
+if [ "$SKIP_TESTS" -eq 0 ]; then
+  step "Tests"
+  set +e
+  xcodebuild test -scheme Chalant -destination 'platform=macOS' 2>&1 \
+    | tee "$BUILD_DIR/test.log" \
+    | grep -E "Test Suite .* (passed|failed)|error:|^\*\* TEST" | tail -12
+  TEST_STATUS=${PIPESTATUS[0]}
+  set -e
+  if [ "$TEST_STATUS" -ne 0 ]; then die "tests failed. Full log: $BUILD_DIR/test.log"; fi
+else
+  step "Tests skipped (--skip-tests)"
+fi
+
+# ---------------------------------------------------------------- 4/16
+step "Archive and export"
+rm -rf "$BUILD_DIR/Chalant.xcarchive" "$EXPORT_DIR"
+xcodebuild archive -scheme Chalant -configuration Release \
+  -archivePath "$BUILD_DIR/Chalant.xcarchive" \
+  -allowProvisioningUpdates >"$BUILD_DIR/archive.log" 2>&1 \
+  || die "archive failed. Log: $BUILD_DIR/archive.log"
+
+xcodebuild -exportArchive -archivePath "$BUILD_DIR/Chalant.xcarchive" \
+  -exportPath "$EXPORT_DIR" \
+  -exportOptionsPlist packaging/ExportOptions.plist \
+  -allowProvisioningUpdates >"$BUILD_DIR/export.log" 2>&1 \
+  || die "export failed. Log: $BUILD_DIR/export.log"
+
+if [ ! -d "$APP" ]; then die "no app at $APP after export"; fi
+
+# ---------------------------------------------------------------- 5/16
+step "Verify the signature before Apple sees it"
+# Five minutes in a notary queue is a slow way to learn the identity was
+# wrong, so check here instead.
+codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -2
+AUTHORITY="$(codesign -dvv "$APP" 2>&1 | grep '^Authority=' | head -1)"
+if ! echo "$AUTHORITY" | grep -q "Developer ID Application"; then
+  die "signed with the wrong identity: $AUTHORITY"
+fi
+if ! codesign -dvv "$APP" 2>&1 | grep -q "flags=.*runtime"; then
+  die "hardened runtime is not enabled. Notarization will reject this."
+fi
+echo "    $AUTHORITY"
+
+# ---------------------------------------------------------------- 6/16
+step "Zip"
+rm -f "$ZIP" "$ZIP_STABLE"
+ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
+
+# ---------------------------------------------------------------- 7/16
+step "Notarize the app (this waits on Apple)"
+notarize() {
+  local path="$1" out id
+  if ! out="$(xcrun notarytool submit "$path" \
+        --keychain-profile "$NOTARY_PROFILE" --wait 2>&1)"; then
+    echo "$out"
+    id="$(echo "$out" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+    if [ -n "$id" ]; then
+      xcrun notarytool log "$id" --keychain-profile "$NOTARY_PROFILE" 2>&1 | head -60
+    fi
+    die "notarization failed for $(basename "$path")"
+  fi
+  if ! echo "$out" | grep -q "status: Accepted"; then
+    echo "$out"
+    id="$(echo "$out" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+    if [ -n "$id" ]; then
+      xcrun notarytool log "$id" --keychain-profile "$NOTARY_PROFILE" 2>&1 | head -60
+    fi
+    die "notarization was not Accepted for $(basename "$path")"
+  fi
+  echo "    accepted"
+}
+notarize "$ZIP"
+
+# ---------------------------------------------------------------- 8/16
+step "Staple the app"
+# The ticket goes inside the bundle so a first launch works with no
+# network. Everything downstream must use this stapled copy.
+xcrun stapler staple "$APP" >/dev/null || die "stapling failed"
+
+# The zip in stage 6 was made before stapling, so it holds an unstapled
+# app. Rebuild it from the stapled one.
+rm -f "$ZIP"
+ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
+cp "$ZIP" "$ZIP_STABLE"
+
+# ---------------------------------------------------------------- 9/16
+step "Build the disk image"
+scripts/make-dmg "$APP" "$DMG"
+
+# --------------------------------------------------------------- 10/16
+step "Sign, notarize and staple the disk image"
+# A stapled app inside an unsigned, unnotarized image still gets the
+# image itself blocked on arrival, so the container needs its own pass.
+codesign --sign "Developer ID Application" --timestamp "$DMG" \
+  || die "could not sign the disk image"
+notarize "$DMG"
+xcrun stapler staple "$DMG" >/dev/null || die "stapling the disk image failed"
+# Copied after stapling so both names carry the ticket.
+cp "$DMG" "$DMG_STABLE"
+
+# --------------------------------------------------------------- 11/16
+step "Sign the update for Sparkle"
+SIGN_OUT="$("$SIGN_UPDATE" "$ZIP")"
+ED_SIG="$(echo "$SIGN_OUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')"
+LENGTH="$(echo "$SIGN_OUT" | sed -n 's/.*length="\([^"]*\)".*/\1/p')"
+if [ -z "$ED_SIG" ] || [ -z "$LENGTH" ]; then
+  die "could not read sign_update output: $SIGN_OUT"
+fi
+echo "    $LENGTH bytes"
+
+# --------------------------------------------------------------- 12/16
+step "Write the appcast"
+PUB_DATE="$(date '+%a, %d %b %Y %H:%M:%S %z')"
+python3 - "$VERSION" "$NEXT_BUILD" "$LENGTH" "$ED_SIG" "$PUB_DATE" <<'PYEOF' || die "could not write the appcast"
+import sys
+from pathlib import Path
+
+version, build, length, sig, pub_date = sys.argv[1:6]
+path = Path("docs/appcast.xml")
+text = path.read_text()
+
+item = f"""        <item>
+            <title>{version}</title>
+            <pubDate>{pub_date}</pubDate>
+            <sparkle:version>{build}</sparkle:version>
+            <sparkle:shortVersionString>{version}</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/chetanjon/chalant/releases/download/v{version}/Chalant-{version}.zip" length="{length}" type="application/octet-stream" sparkle:edSignature="{sig}"/>
+        </item>
+"""
+
+anchor = "        <title>Chalant</title>\n"
+if anchor not in text:
+    sys.exit("appcast: could not find the channel title to insert after")
+if f"<title>{version}</title>" in text:
+    sys.exit(f"appcast: {version} is already in there")
+
+path.write_text(text.replace(anchor, anchor + item, 1))
+print(f"    inserted {version} at the top")
+PYEOF
+
+# --------------------------------------------------------------- 13/16
+step "Commit, tag, push"
+git add project.yml docs/appcast.xml Chalant/Info.plist
+git commit -q -m "chore: $VERSION"
+git tag "$TAG"
+git push -q origin main --tags
+BUMPED=0
+
+# --------------------------------------------------------------- 14/16
+step "Publish"
+NOTES_ARG=(--notes "$VERSION")
+if [ -n "$NOTES_FILE" ]; then NOTES_ARG=(--notes-file "$NOTES_FILE"); fi
+gh release create "$TAG" "$DMG" "$DMG_STABLE" "$ZIP" "$ZIP_STABLE" \
+  --title "$VERSION" "${NOTES_ARG[@]}"
+
+# --------------------------------------------------------------- 15/16
+step "Kick the Pages build"
+# Pages does not always rebuild on a push, and until it does, no user's
+# update check can see the new appcast.
+gh api -X POST "repos/$GH_REPO/pages/builds" >/dev/null \
+  && echo "    queued" || echo "    could not queue a build, do it by hand"
+
+# --------------------------------------------------------------- 16/16
+step "Ask Gatekeeper"
+APP_VERDICT="$(spctl -a -vvv -t install "$APP" 2>&1 || true)"
+echo "$APP_VERDICT" | sed 's/^/    /'
+if ! echo "$APP_VERDICT" | grep -q "accepted"; then
+  die "GATEKEEPER REJECTED THE APP. The release is published but it is not safe to hand out."
+fi
+if ! echo "$APP_VERDICT" | grep -q "Notarized Developer ID"; then
+  die "the app is accepted but not as Notarized Developer ID."
+fi
+
+DMG_VERDICT="$(spctl -a -vvv -t open --context context:primary-signature "$DMG" 2>&1 || true)"
+echo "$DMG_VERDICT" | sed 's/^/    /'
+if ! echo "$DMG_VERDICT" | grep -q "accepted"; then
+  die "GATEKEEPER REJECTED THE DISK IMAGE."
+fi
+
+xcrun stapler validate "$APP" >/dev/null || die "the app has no stapled ticket"
+xcrun stapler validate "$DMG" >/dev/null || die "the disk image has no stapled ticket"
+
+echo
+echo "release: $VERSION is out, notarized, and Gatekeeper agrees."
+echo "release: https://github.com/$GH_REPO/releases/tag/$TAG"
