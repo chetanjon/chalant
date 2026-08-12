@@ -207,6 +207,36 @@ case "$SIGINFO" in
 esac
 echo "    $AUTHORITY"
 
+# The app's own signature says nothing about what it carries. Apple
+# checks EVERY Mach-O in the bundle and rejects the lot for one bad
+# one, so walk them here rather than learn it from a notary log five
+# minutes later.
+#
+# This is not hypothetical: 1.11.0 was rejected for
+# Contents/Resources/MediaRemoteAdapterTestClient, a vendored binary
+# copied in as a RESOURCE. Xcode re-signs frameworks, XPC services and
+# nested apps, but a bare executable in Resources/ is just a file to
+# it, so it kept the adhoc linker signature it shipped with.
+UNHARDENED=""
+while IFS= read -r f; do
+  case "$(file "$f" 2>/dev/null)" in
+    *Mach-O*) ;;
+    *) continue ;;
+  esac
+  NESTED="$(codesign -dvv "$f" 2>&1 || true)"
+  case "$NESTED" in
+    *"flags="*"runtime"*) ;;
+    *) UNHARDENED="$UNHARDENED
+      ${f#"$APP/"}" ;;
+  esac
+done <<EOF
+$(find "$APP" -type f -perm +111)
+EOF
+if [ -n "$UNHARDENED" ]; then
+  die "these executables lack the hardened runtime, and Apple will reject the whole bundle for them:$UNHARDENED"
+fi
+echo "    every nested Mach-O carries the hardened runtime"
+
 # ---------------------------------------------------------------- 6/16
 step "Zip"
 rm -f "$ZIP" "$ZIP_STABLE"
