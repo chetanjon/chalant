@@ -140,6 +140,14 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
+# The commit this release is actually built FROM. Checked again before
+# tagging, because the two are far apart in wall-clock time: stage 4
+# archives, stage 7 can wait an hour or more on Apple, and stage 13
+# tags. v1.11.0 was tagged on a main that had gained three commits
+# during that wait, so its tag claims source its binary does not
+# contain. A tag that lies about what shipped is worse than no tag.
+SOURCE_HEAD="$(git rev-parse HEAD)"
+
 # ---------------------------------------------------------------- 2/16
 step "Bump to $VERSION (build $NEXT_BUILD)"
 # Both keys, always. Sparkle compares CFBundleVersion, users read the
@@ -340,6 +348,18 @@ PYEOF
 
 # --------------------------------------------------------------- 13/16
 step "Commit, tag, push"
+# Did main move while Apple was thinking? If it did, this tag would
+# name commits the notarized binary above was never built from.
+NOW_HEAD="$(git rev-parse HEAD)"
+if [ "$NOW_HEAD" != "$SOURCE_HEAD" ]; then
+  die "main moved during this release.
+  built from: $SOURCE_HEAD
+  main is at: $NOW_HEAD
+  $(git log --oneline "$SOURCE_HEAD..$NOW_HEAD" | sed 's/^/    /')
+Tagging now would claim those commits shipped, and they did not. Either
+reset main to the built commit, or re-run the release from the current
+one so the binary and the tag agree."
+fi
 git add project.yml docs/appcast.xml Chalant/Info.plist
 git commit -q -m "chore: $VERSION"
 git tag "$TAG"
