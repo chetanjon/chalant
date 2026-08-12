@@ -2,12 +2,13 @@ import AppKit
 import CoreGraphics
 import os
 
-/// Watches for right Option being held.
+/// Watches for left Option being held.
 ///
-/// Right Option rather than a function key: it is rarely bound to anything on
-/// a Mac, it is comfortable to hold, and it does not collide with Superwhisper,
-/// which is live on the founder's machine and needs to stay usable side by
-/// side while this is evaluated.
+/// Left rather than right: the founder's keyboard has no right Option key at
+/// all, which is a good reminder that "every Mac has it" is a layout
+/// assumption rather than a fact. Left Option exists on every keyboard, sits
+/// under the left hand, and is only meaningful for typing when combined with a
+/// letter, so holding it alone is free.
 ///
 /// A modifier key never produces keyDown/keyUp, only `.flagsChanged`, so the
 /// press and release are derived from the device-dependent right-Option bit
@@ -15,12 +16,12 @@ import os
 final class EventTapMonitor: @unchecked Sendable {
     private static let log = Logger(subsystem: "com.cj.chalant.dictation", category: "hotkey")
 
-    /// `kVK_RightOption`.
-    private static let rightOptionKeyCode: Int64 = 61
-    /// `NX_DEVICERALTKEYMASK`. The general `.maskAlternate` bit cannot tell
-    /// the two Option keys apart, and binding both would make left Option
-    /// unusable for typing accented characters.
-    private static let rightOptionFlag: UInt64 = 0x0000_0040
+    /// `kVK_Option`, the left one.
+    private static let optionKeyCode: Int64 = 58
+    /// `NX_DEVICELALTKEYMASK`. The general `.maskAlternate` bit cannot tell the
+    /// two Option keys apart, and this is the device-dependent bit for the
+    /// left one specifically.
+    private static let optionFlag: UInt64 = 0x0000_0020
 
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -103,10 +104,10 @@ final class EventTapMonitor: @unchecked Sendable {
 
         case .flagsChanged:
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-            guard keyCode == Self.rightOptionKeyCode else { break }
+            guard keyCode == Self.optionKeyCode else { break }
 
-            let down = (event.flags.rawValue & Self.rightOptionFlag) != 0
-            Self.log.info("flagsChanged rightOption down=\(down, privacy: .public) wasDown=\(self.isDown, privacy: .public)")
+            let down = (event.flags.rawValue & Self.optionFlag) != 0
+            Self.log.info("flagsChanged leftOption down=\(down, privacy: .public) wasDown=\(self.isDown, privacy: .public)")
             if down != isDown {
                 isDown = down
                 let handler = onChange

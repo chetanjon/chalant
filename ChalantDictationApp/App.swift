@@ -70,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Hold right Option to dictate", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Hold left Option to dictate", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(
             NSMenuItem(
