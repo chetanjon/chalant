@@ -87,7 +87,8 @@ private extension String {
 
 @MainActor
 final class EventKitService: ObservableObject {
-    private let store = EKEventStore()
+    /// Replaced when access opens up: see remakeStoreIfBornRefused().
+    private var store = EKEventStore()
 
     /// Live data for the Today glance. Empty until `refresh()` runs.
     @Published private(set) var events: [DayEvent] = []
@@ -144,24 +145,61 @@ final class EventKitService: ObservableObject {
         }
     }
 
-    /// Live status is read fresh every call, never cached: a cached
-    /// "granted" would miss a later revoke, and a cached "denied" is
-    /// exactly the bug the glance shipped with (a grant made in System
-    /// Settings sat invisible until relaunch). The check itself is a
-    /// synchronous property read, so asking again costs nothing.
+    /// Neither of these consults `EKEventStore.authorizationStatus`,
+    /// and that is the whole point.
+    ///
+    /// **That value is frozen for the life of the process.** It does
+    /// not move when the user grants access in System Settings, and it
+    /// does not move when they revoke it there either. Trusting it was
+    /// wrong in both directions, and the second is the nastier one:
+    ///
+    /// - Trusting a stale `.denied` left "Calendar access is off" on
+    ///   screen after the founder had switched it on, until relaunch.
+    /// - Trusting a stale `.granted` was worse. Access was revoked, the
+    ///   app never noticed, and the day pane showed an empty day with
+    ///   no warning: a wrong answer that looks like a right one
+    ///   (founder, 2026-08-12, "i turned the toggle off but its now
+    ///   showing anything").
+    ///
+    /// Asking is the only live answer. It cannot surprise anyone:
+    /// macOS prompts only while the answer is undetermined and answers
+    /// silently forever after, so this is safe to call on a timer.
     private func ensureReminders() async -> Bool {
-        switch Self.decision(for: EKEventStore.authorizationStatus(for: .reminder)) {
-        case .granted: return true
-        case .ask: return (try? await store.requestFullAccessToReminders()) ?? false
-        case .denied: return false
-        }
+        settle(granted: (try? await store.requestFullAccessToReminders()) ?? false)
     }
 
     private func ensureEvents() async -> Bool {
-        switch Self.decision(for: EKEventStore.authorizationStatus(for: .event)) {
-        case .granted: return true
-        case .ask: return (try? await store.requestFullAccessToEvents()) ?? false
-        case .denied: return false
+        settle(granted: (try? await store.requestFullAccessToEvents()) ?? false)
+    }
+
+    /// Bookkeeping shared by both asks: a store that wins access after
+    /// being born without it has to be replaced, and a store that loses
+    /// access has to be marked so the next win replaces it again.
+    private func settle(granted: Bool) -> Bool {
+        if granted { remakeStoreIfBornRefused() } else { storeBornRefused = true }
+        return granted
+    }
+
+    /// True while the store in hand was built before access existed.
+    private var storeBornRefused = true
+
+    /// An `EKEventStore` created while access was refused keeps
+    /// answering with nothing after the refusal is lifted: permission
+    /// is bound to the store at birth. Winning access is therefore not
+    /// enough on its own, the store has to be replaced, and its change
+    /// observer has to follow it to the new one.
+    private func remakeStoreIfBornRefused() {
+        guard storeBornRefused else { return }
+        storeBornRefused = false
+        let hadObserver = storeObserver != nil
+        if let storeObserver { NotificationCenter.default.removeObserver(storeObserver) }
+        storeObserver = nil
+        store = EKEventStore()
+        guard hadObserver else { return }
+        storeObserver = NotificationCenter.default.addObserver(
+            forName: .EKEventStoreChanged, object: store, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.recomputeNext() }
         }
     }
 
@@ -215,7 +253,10 @@ final class EventKitService: ObservableObject {
         }
         let granted = await ensureEvents()
         calendarDenied = !granted
-        calendarPermission = Self.decision(for: EKEventStore.authorizationStatus(for: .event))
+        // From the live answer, not the frozen status. An ask always
+        // leaves the question settled, so "not granted" here means
+        // refused, never undecided.
+        calendarPermission = granted ? .granted : .denied
         guard granted else { events = []; return }
         let calendar = Calendar.current
         let start = calendar.startOfDay(for: Date())
@@ -262,17 +303,18 @@ final class EventKitService: ObservableObject {
         return linked.first { $0.start > now }
     }
 
-    /// The two decisions as of the last look, so a re-check can tell
-    /// "nothing moved" from "the user just flipped it in System
-    /// Settings" without doing any work in the overwhelmingly common
-    /// case where nothing moved.
-    private var lastSeenCalendarStatus: EKAuthorizationStatus?
-    private var lastSeenRemindersStatus: EKAuthorizationStatus?
-
-    /// Re-read both authorizations and reload only if one actually
-    /// changed. Safe to call as often as you like: the status read is a
-    /// synchronous property that never prompts, and the expensive part
-    /// behind it runs only on a real change.
+    /// Ask the system what access we have right now, and redraw around
+    /// the answer.
+    ///
+    /// It runs unconditionally rather than only while something is
+    /// refused, because a REVOKE has to be caught as well as a grant.
+    /// An earlier version guarded on `calendarDenied`, which meant a
+    /// permission switched off in System Settings was never noticed and
+    /// the day pane sat there showing an empty day.
+    ///
+    /// It also deliberately does not compare `authorizationStatus`
+    /// before and after: that value is frozen per process, so a check
+    /// built on it can never fire. Only asking reaches the truth.
     ///
     /// This exists because the app cannot hear a permission being
     /// granted. System Settings is another process, `didBecomeActive`
@@ -282,13 +324,7 @@ final class EventKitService: ObservableObject {
     /// grant access, return, and be told access was still off until
     /// they quit and relaunched. The app sent them to fix something and
     /// then refused to notice they had (founder, 2026-08-12).
-    func syncPermissionsIfChanged() async {
-        let calendar = EKEventStore.authorizationStatus(for: .event)
-        let reminders = EKEventStore.authorizationStatus(for: .reminder)
-        guard calendar != lastSeenCalendarStatus
-                || reminders != lastSeenRemindersStatus else { return }
-        lastSeenCalendarStatus = calendar
-        lastSeenRemindersStatus = reminders
+    func revalidateAccess() async {
         await refresh()
     }
 
@@ -303,10 +339,10 @@ final class EventKitService: ObservableObject {
         let timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.recomputeNext()
-                // The backstop for a grant made while the island is
-                // shut: the pane's own faster watch only runs while a
-                // denial is on screen, and nothing is on screen then.
-                await self?.syncPermissionsIfChanged()
+                // Catches both directions while no pane is open to
+                // watch: a permission granted in System Settings, and
+                // one revoked there.
+                await self?.revalidateAccess()
             }
         }
         timer.tolerance = 5
@@ -414,7 +450,7 @@ final class EventKitService: ObservableObject {
         }
         let granted = await ensureReminders()
         remindersDenied = !granted
-        remindersPermission = Self.decision(for: EKEventStore.authorizationStatus(for: .reminder))
+        remindersPermission = granted ? .granted : .denied
         guard granted else { reminders = []; return }
         let predicate = store.predicateForIncompleteReminders(
             withDueDateStarting: nil, ending: nil, calendars: nil

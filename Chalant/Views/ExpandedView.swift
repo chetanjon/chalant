@@ -794,7 +794,7 @@ struct TodayView: View {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 if Task.isCancelled { return }
-                await events.syncPermissionsIfChanged()
+                await events.revalidateAccess()
             }
         }
     }
