@@ -38,6 +38,12 @@ final class AudioRing: @unchecked Sendable {
     /// rather than silently swallowed: a dropped buffer is lost speech, and
     /// Part 0 §0.9 names losing the utterance as the category's worst failure.
     private let overruns = Atomic<UInt64>(0)
+    /// Loudest sample seen since the last read, as a millionth, so the UI can
+    /// show that the microphone is actually hearing something. Stored as an
+    /// integer because `Atomic` needs a fixed-width type, and computed in the
+    /// real-time callback because it is arithmetic over samples already in
+    /// registers: no allocation, no locking, nothing that can block.
+    private let peakMillionths = Atomic<UInt64>(0)
 
     init(format: AVAudioFormat, frameCapacity: AVAudioFrameCount) {
         var built: [AVAudioPCMBuffer] = []
@@ -64,6 +70,12 @@ final class AudioRing: @unchecked Sendable {
 
     var overrunCount: UInt64 { overruns.load(ordering: .relaxed) }
 
+    /// 0...1. The signal the UI needs to prove the microphone is live, and the
+    /// first thing to check when a transcript comes back empty: buffers
+    /// arriving with a peak of zero means silence reached the engine, not that
+    /// the engine failed.
+    var peak: Double { Double(peakMillionths.load(ordering: .relaxed)) / 1_000_000 }
+
     // MARK: - Producer (real-time thread, nothing may block here)
 
     /// Copy one tap buffer into the ring. Called from the audio thread only.
@@ -81,10 +93,18 @@ final class AudioRing: @unchecked Sendable {
 
         guard let src = buffer.floatChannelData, let dst = slot.floatChannelData else { return }
         let channels = Int(buffer.format.channelCount)
+        var peak: Float = 0
         for ch in 0..<channels {
             // memcpy only. No allocation, no locking, no logging.
             dst[ch].update(from: src[ch], count: Int(frames))
+            if ch == 0 {
+                for i in 0..<Int(frames) {
+                    let magnitude = abs(src[ch][i])
+                    if magnitude > peak { peak = magnitude }
+                }
+            }
         }
+        peakMillionths.store(UInt64(min(peak, 1) * 1_000_000), ordering: .relaxed)
         slot.frameLength = frames
         hostTimes[Int(w % UInt64(Self.slotCount))] = hostTime
         frameCounts[Int(w % UInt64(Self.slotCount))] = frames

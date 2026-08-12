@@ -16,6 +16,8 @@ final class DictationController {
     private let audio = AudioEngine()
     private let assets = SpeechAssets()
     private let inserter = SystemEventsInserter()
+    private let panel = ListeningPanel()
+    private var meterTimer: Timer?
     private var transcriber: AppleTranscriber?
     private var pumpTask: Task<Void, Never>?
 
@@ -101,6 +103,8 @@ final class DictationController {
 
         await audio.beginCapture()
         isListening = true
+        panel.show()
+        startMeter()
         onStateChange?()
 
         // Drain the lock-free ring into the analyzer. The ring is polled
@@ -129,6 +133,8 @@ final class DictationController {
 
         let releasedAt = Date()
         await audio.endCapture()
+        stopMeter()
+        panel.hide()
 
         // Drain whatever is left before finalizing, so the tail of the
         // utterance is not cut off. Part 1 §2: never lose the user's text.
@@ -186,6 +192,26 @@ final class DictationController {
             """
         )
         onStateChange?()
+    }
+
+    /// Drive the listening panel while the key is held.
+    private func startMeter() {
+        meterTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let transcriber = self.transcriber else { return }
+                let level = await self.audio.peak
+                let text = await transcriber.liveText
+                self.panel.update(level: level, text: text)
+            }
+        }
+        timer.tolerance = 0.01
+        meterTimer = timer
+    }
+
+    private func stopMeter() {
+        meterTimer?.invalidate()
+        meterTimer = nil
     }
 
     /// Latest measured key-release-to-visible, for the menu bar readout.

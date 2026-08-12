@@ -98,6 +98,7 @@ actor AudioEngine {
     func ringHandle() -> AudioRing? { ring }
 
     var overrunCount: UInt64 { ring?.overrunCount ?? 0 }
+    var peak: Double { ring?.peak ?? 0 }
 
     func stop() {
         guard isRunning else { return }

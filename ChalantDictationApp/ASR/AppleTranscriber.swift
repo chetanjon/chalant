@@ -192,6 +192,10 @@ actor AppleTranscriber: Transcriber {
 
     // MARK: - Internals
 
+    /// What the user should see right now: everything committed plus the
+    /// provisional span, exactly once.
+    var liveText: String { assembler.displayText }
+
     private func publish(_ event: TranscriptEvent) {
         assembler.apply(event)
         eventContinuation?.yield(event)
