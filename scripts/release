@@ -307,7 +307,53 @@ cp "$DMG" "$DMG_STABLE"
 
 # --------------------------------------------------------------- 11/16
 step "Sign the update for Sparkle"
-SIGN_OUT="$("$SIGN_UPDATE" "$ZIP")"
+# sign_update is ad-hoc signed with no team ID, so the Keychain matches it
+# BY PATH, and its path carries a DerivedData hash that changes whenever SPM
+# re-resolves Sparkle. Any previous "Always Allow" dies with that hash and a
+# fresh prompt appears. The prompt is a separate window that can open behind
+# everything, and until it is answered sign_update simply never returns: no
+# output, no error, indistinguishable from a dead process. Two releases were
+# lost to it. So run it in the background and SAY SOMETHING when it stalls.
+SIGN_OUT_FILE="$BUILD_DIR/.sign_update.out"
+rm -f "$SIGN_OUT_FILE"
+"$SIGN_UPDATE" "$ZIP" > "$SIGN_OUT_FILE" 2>&1 &
+SIGN_PID=$!
+SIGN_WAITED=0
+SIGN_WARNED=0
+SIGN_LIMIT=180
+while kill -0 "$SIGN_PID" 2>/dev/null; do
+  if [ "$SIGN_WAITED" -ge "$SIGN_LIMIT" ]; then
+    kill "$SIGN_PID" 2>/dev/null || true
+    wait "$SIGN_PID" 2>/dev/null || true
+    echo >&2
+    die "sign_update never returned (${SIGN_LIMIT}s). This is the Keychain prompt.
+    Recover, in this order, and none of it from inside a release run:
+      1. killall SecurityAgent          (clears prompts whose asker is gone;
+                                         clicking Always Allow on one of those
+                                         does nothing, the answer has nothing
+                                         to attach to)
+      2. $SIGN_UPDATE \"\$(mktemp -d)/probe.zip\"
+                                        run it on a throwaway file to raise a
+                                        LIVE prompt, then answer THAT one and
+                                        choose Always Allow
+      3. run the same probe again and confirm it returns a signature instantly
+      4. start this release over"
+  fi
+  if [ "$SIGN_WAITED" -ge 15 ] && [ "$SIGN_WARNED" -eq 0 ]; then
+    SIGN_WARNED=1
+    echo "    still waiting. A Keychain prompt is almost certainly open behind"
+    echo "    another window: 'sign_update wants to use a key'. Answer it and"
+    echo "    choose Always Allow. Giving it ${SIGN_LIMIT}s before failing."
+  fi
+  sleep 1
+  SIGN_WAITED=$((SIGN_WAITED + 1))
+done
+wait "$SIGN_PID" 2>/dev/null || true
+SIGN_OUT="$(cat "$SIGN_OUT_FILE")"
+rm -f "$SIGN_OUT_FILE"
+if [ "$SIGN_WARNED" -eq 1 ]; then
+  echo "    answered after ${SIGN_WAITED}s, carrying on"
+fi
 ED_SIG="$(echo "$SIGN_OUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')"
 LENGTH="$(echo "$SIGN_OUT" | sed -n 's/.*length="\([^"]*\)".*/\1/p')"
 if [ -z "$ED_SIG" ] || [ -z "$LENGTH" ]; then
