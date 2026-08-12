@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Distribution outside the App Store, signed with Developer ID.
+       This is the only export method whose output notarization will
+       accept. -->
+  <key>method</key>
+  <string>developer-id</string>
+
+  <!-- Must match DEVELOPMENT_TEAM in project.yml, which is where the
+       team is actually decided. scripts/release compares the two and
+       stops if they have drifted apart. -->
+  <key>teamID</key>
+  <string>WV59PZX4A3</string>
+
+  <!-- Chalant's entitlements are hardened runtime entitlements rather
+       than capability entitlements, so no provisioning profile is
+       involved and Xcode can resolve the identity on its own. -->
+  <key>signingStyle</key>
+  <string>automatic</string>
+
+  <key>destination</key>
+  <string>export</string>
+</dict>
+</plist>

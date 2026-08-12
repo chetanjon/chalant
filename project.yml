@@ -84,10 +84,18 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cj.chalant
         CODE_SIGN_STYLE: Automatic
-        # Stable dev-cert signing: ad-hoc re-signing made every rebuild
-        # look like a new app, resetting Keychain and TCC grants.
+        # One team, two identities, on purpose (see configs below).
+        # Development signing is local and fast, and keeps a build's
+        # Keychain and TCC grants stable across rebuilds; ad-hoc
+        # re-signing made every rebuild look like a new app and reset
+        # both. Developer ID is the only identity Gatekeeper accepts on
+        # somebody else's Mac and the only one notarization will take,
+        # so it is reserved for archives.
+        #
+        # This value is the single source of truth for the team.
+        # packaging/ExportOptions.plist and scripts/dev both read it,
+        # and scripts/release refuses to run if they have drifted apart.
         DEVELOPMENT_TEAM: WV59PZX4A3
-        CODE_SIGN_IDENTITY: "Apple Development"
         SWIFT_VERSION: "5.9"
         # The compiler had no opinion on cross-actor access before this,
         # which is why the data race on the audio render thread sat in
@@ -104,6 +112,15 @@ targets:
         # closes are opened one at a time in Chalant.entitlements.
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_ENTITLEMENTS: Chalant/Chalant.entitlements
+      configs:
+        # Archives are the only build that has to satisfy Gatekeeper on
+        # a Mac that is not this one, so they are the only build that
+        # pays for a Developer ID identity. Everything else keeps the
+        # fast local one.
+        Debug:
+          CODE_SIGN_IDENTITY: "Apple Development"
+        Release:
+          CODE_SIGN_IDENTITY: "Developer ID Application"
   ChalantTests:
     type: bundle.unit-test
     platform: macOS

@@ -1,12 +1,14 @@
 #!/bin/bash
-# Dev loop: regenerate, build, relaunch. Signing team defaults to the same
-# pinned team project.yml ships with (a different identity would reset the
-# app's Keychain and TCC grants between dev and installed builds).
-# Override with CHALANT_TEAM=<id> if you sign with a different team.
+# Dev loop: regenerate, build, relaunch. Builds Debug, which project.yml
+# signs with the development identity, so a dev build and an installed
+# build do not fight over Keychain and TCC grants. Override the team
+# with CHALANT_TEAM=<id> if you sign with a different one.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-TEAM="${CHALANT_TEAM:-WV59PZX4A3}"
+# project.yml is the only place the team is written down. A second copy
+# here is a second thing to forget on the day the team changes.
+TEAM="${CHALANT_TEAM:-$(awk '/^ *DEVELOPMENT_TEAM:/ {print $2; exit}' project.yml)}"
 
 command -v xcodegen >/dev/null && xcodegen --quiet
 

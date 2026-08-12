@@ -17,3 +17,10 @@ _bmad-output/*
 !_bmad-output/loop-loop/
 .bmad-loop/
 .claude/
+
+# The single-scale reps that tiffutil folds into the disk image's
+# background. packaging/dmg-background.tiff is the committed artifact;
+# these two are just its ingredients, rebuilt by
+# scripts/make-dmg-background.py whenever GEOMETRY changes.
+packaging/background.png
+packaging/background@2x.png

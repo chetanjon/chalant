@@ -1,0 +1,76 @@
+#!/bin/bash
+# Proves scripts/make-dmg produces a mountable disk image carrying the
+# app, an Applications alias and the background, without needing a real
+# Chalant build (an archive takes minutes; this takes seconds). The app
+# it packages is a stub whose only job is to be a bundle.
+#
+# Run directly: scripts/make-dmg-selftest
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MAKE_DMG="$HERE/make-dmg"
+WORKDIR="$(mktemp -d)"
+MOUNT=""
+cleanup() {
+  [ -n "$MOUNT" ] && hdiutil detach "$MOUNT" -quiet 2>/dev/null
+  rm -rf "$WORKDIR"
+}
+trap cleanup EXIT
+
+STUB="$WORKDIR/Chalant.app"
+mkdir -p "$STUB/Contents/MacOS"
+cat > "$STUB/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key><string>Chalant</string>
+  <key>CFBundleIdentifier</key><string>com.cj.chalant.stub</string>
+  <key>CFBundleName</key><string>Chalant</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+</dict>
+</plist>
+PLIST
+printf '#!/bin/bash\nexit 0\n' > "$STUB/Contents/MacOS/Chalant"
+chmod +x "$STUB/Contents/MacOS/Chalant"
+
+OUT="$WORKDIR/Chalant-test.dmg"
+
+FAILURES=0
+check() {
+  local label="$1"; shift
+  if "$@" >/dev/null 2>&1; then
+    echo "ok - $label"
+  else
+    echo "FAIL - $label"
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+if ! "$MAKE_DMG" "$STUB" "$OUT"; then
+  echo "FAIL - make-dmg exited non-zero"
+  exit 1
+fi
+
+check "the disk image exists" test -f "$OUT"
+check "it is a compressed (UDZO) image" \
+  bash -c "hdiutil imageinfo '$OUT' | grep -q 'Format: UDZO'"
+
+MOUNT="$(hdiutil attach "$OUT" -nobrowse -noautoopen -readonly |
+         grep -Eo '/Volumes/.+$' | tail -1)"
+check "it mounts" test -d "$MOUNT"
+check "the app is on it" test -d "$MOUNT/Chalant.app"
+check "Applications is a symlink" test -L "$MOUNT/Applications"
+check "that symlink points at /Applications" \
+  bash -c "[ \"\$(readlink '$MOUNT/Applications')\" = /Applications ]"
+check "the background rode along" test -f "$MOUNT/.background/background.tiff"
+check "Finder wrote the window settings" test -f "$MOUNT/.DS_Store"
+
+hdiutil detach "$MOUNT" -quiet; MOUNT=""
+
+if [ "$FAILURES" -eq 0 ]; then
+  echo "make-dmg: all checks passed"
+else
+  echo "make-dmg: $FAILURES check(s) failed"
+fi
+exit "$FAILURES"

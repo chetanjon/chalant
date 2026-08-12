@@ -475,7 +475,23 @@ struct ExpandedView: View {
 /// The dashed "Drop to stash" card: over the island body while a drag
 /// hovers it, and inside the mid-screen drop bubble that meets rising
 /// drags away from the screen's top edge.
+///
+/// The two wear different weights on purpose. Over the island body you
+/// are already looking at the island, there is room, and the card is
+/// the whole content, so it says everything. Mid-screen it is landing
+/// unasked over your work while your hand is busy, so it says the least
+/// it can (founder, 2026-08-11: "that box in the center that is popping
+/// up is a bit distracting"). The line it drops is the one explaining
+/// where things land, which teaches on the first drag and lectures on
+/// every one after.
 struct DropStashCard: View {
+    /// Mid-screen weight. The glyph and the title keep their full size:
+    /// what made the old bubble shout was its footprint, its shadow and
+    /// the line of teaching, not the size of the two things worth
+    /// reading. Dropping only the explanation lets the card go wide and
+    /// short instead of large and square.
+    var compact: Bool = false
+
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
@@ -492,9 +508,11 @@ struct DropStashCard: View {
                 Text("Drop to stash")
                     .font(Theme.Fonts.body)
                     .foregroundStyle(Theme.textPrimary)
-                Text("Files and links to the shelf, images and text to clips.")
-                    .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.textHint)
+                if !compact {
+                    Text("Files and links to the shelf, images and text to clips.")
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textHint)
+                }
             }
         }
     }
