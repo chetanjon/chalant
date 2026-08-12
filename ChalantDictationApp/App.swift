@@ -1,9 +1,12 @@
 import AppKit
 import ChalantDictationCore
 
-/// The impure shell, kept as thin as Part 2 §2 demands. Nothing here yet:
-/// setup step 8 stops before any milestone, so this exists only to prove the
-/// target builds, links the core, and launches as an LSUIElement agent.
+/// The impure shell, as thin as Part 2 §2 asks for.
+///
+/// M0's whole UI is a menu bar item: it shows whether the language model is
+/// ready, whether the key is being held, and the last measured latency. Part 3
+/// calls M0 deliberately ugly, and the point is to prove the seam between
+/// audio, ASR and insertion before any logic exists to obscure a failure.
 @main
 enum ChalantDictationApp {
     static func main() {
@@ -15,29 +18,88 @@ enum ChalantDictationApp {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var item: NSStatusItem?
+    private let controller = DictationController()
+    private var monitor: EventTapMonitor?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // M0 gives this a real menu. For now it is proof of life, and proof
-        // that the app target links the pure core.
-        let item = NSStatusBarItem.system()
-        item.button?.title = "◉"
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.menu = NSMenu()
-        item.menu?.addItem(
-            NSMenuItem(title: "Chalant Dictation (scaffold)", action: nil, keyEquivalent: "")
-        )
-        item.menu?.addItem(.separator())
-        item.menu?.addItem(
-            NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        )
         self.item = item
-    }
-}
 
-/// Tiny shim so the line above reads as intent rather than boilerplate.
-private enum NSStatusBarItem {
-    static func system() -> NSStatusItem {
-        NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        controller.onStateChange = { [weak self] in self?.render() }
+        render()
+
+        // Part 2 §5: permissions are requested lazily, one at a time, never at
+        // launch. The tap below is what raises the Accessibility ask, and the
+        // microphone ask comes with the first capture.
+        let monitor = EventTapMonitor { [weak self] down in
+            guard let self else { return }
+            Task { down ? await self.controller.keyDown() : await self.controller.keyUp() }
+        }
+        self.monitor = monitor
+        if !monitor.start() {
+            render(accessibilityMissing: true)
+        }
+
+        Task { await controller.warmUp() }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        monitor?.stop()
+    }
+
+    private func render(accessibilityMissing: Bool = false) {
+        guard let item else { return }
+
+        item.button?.title = controller.isListening ? "◉" : "○"
+
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: statusLine(accessibilityMissing), action: nil, keyEquivalent: ""))
+
+        if let latency = controller.lastLatency {
+            menu.addItem(
+                NSMenuItem(
+                    title: String(format: "Last: %.2fs to visible", latency),
+                    action: nil,
+                    keyEquivalent: ""
+                )
+            )
+        }
+
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Hold right Option to dictate", action: nil, keyEquivalent: ""))
+        menu.addItem(.separator())
+        menu.addItem(
+            NSMenuItem(
+                title: "Quit",
+                action: #selector(NSApplication.terminate(_:)),
+                keyEquivalent: "q"
+            )
+        )
+        item.menu = menu
+    }
+
+    /// The asset state machine rendered as a real UI condition rather than an
+    /// error, which is what Part 0 §0.6 asks for and what M0's acceptance
+    /// criterion turns on.
+    private func statusLine(_ accessibilityMissing: Bool) -> String {
+        if accessibilityMissing {
+            return "Needs Accessibility in System Settings"
+        }
+        switch controller.assetState {
+        case .checking:
+            return "Checking the language model…"
+        case .downloading(let fraction):
+            return "Downloading the language model… \(Int(fraction * 100))%"
+        case .available:
+            return controller.isListening ? "Listening" : "Ready"
+        case .unsupported(let requested):
+            return "No language model for \(requested)"
+        case .failed(let reason):
+            return "Speech unavailable: \(reason)"
+        }
     }
 }
