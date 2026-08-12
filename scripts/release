@@ -105,9 +105,12 @@ if [ "$PLIST_TEAM" != "$TEAM" ]; then
   die "packaging/ExportOptions.plist says team '$PLIST_TEAM', project.yml says '$TEAM'"
 fi
 
-if ! security find-identity -v -p codesigning | grep -q "Developer ID Application"; then
-  die "no Developer ID Application identity in the Keychain. Enrollment is not done, or the certificate was never created."
-fi
+# Captured first, not piped into grep -q: see the note at stage 5.
+IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+case "$IDENTITIES" in
+  *"Developer ID Application"*) ;;
+  *) die "no Developer ID Application identity in the Keychain. Enrollment is not done, or the certificate was never created." ;;
+esac
 
 if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
   die "no notary credentials. Run: xcrun notarytool store-credentials \"$NOTARY_PROFILE\" --apple-id <id> --team-id $TEAM --password <app-specific>"
@@ -182,13 +185,26 @@ step "Verify the signature before Apple sees it"
 # Five minutes in a notary queue is a slow way to learn the identity was
 # wrong, so check here instead.
 codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -2
-AUTHORITY="$(codesign -dvv "$APP" 2>&1 | grep '^Authority=' | head -1)"
-if ! echo "$AUTHORITY" | grep -q "Developer ID Application"; then
-  die "signed with the wrong identity: $AUTHORITY"
-fi
-if ! codesign -dvv "$APP" 2>&1 | grep -q "flags=.*runtime"; then
-  die "hardened runtime is not enabled. Notarization will reject this."
-fi
+
+# Read the signature ONCE into a variable, then match against that.
+#
+# Never pipe a real command straight into `grep -q` under `pipefail`:
+# grep -q exits the instant it matches, the upstream command is still
+# writing, and it dies of SIGPIPE. The pipeline then reports 141 and
+# pipefail turns a SUCCESSFUL match into a failed check. Measured: 141
+# with pipefail, 0 without, deterministically. It rejected a correctly
+# signed 1.11.0, and because it fails closed it reads exactly like a
+# real signing problem, which is the expensive kind of bug.
+SIGINFO="$(codesign -dvv "$APP" 2>&1 || true)"
+AUTHORITY="$(printf '%s\n' "$SIGINFO" | grep '^Authority=' | head -1 || true)"
+case "$AUTHORITY" in
+  *"Developer ID Application"*) ;;
+  *) die "signed with the wrong identity: ${AUTHORITY:-none}" ;;
+esac
+case "$SIGINFO" in
+  *"flags="*"runtime"*) ;;
+  *) die "hardened runtime is not enabled. Notarization will reject this." ;;
+esac
 echo "    $AUTHORITY"
 
 # ---------------------------------------------------------------- 6/16
@@ -209,14 +225,17 @@ notarize() {
     fi
     die "notarization failed for $(basename "$path")"
   fi
-  if ! echo "$out" | grep -q "status: Accepted"; then
+  case "$out" in
+    *"status: Accepted"*) ;;
+    *)
     echo "$out"
     id="$(echo "$out" | grep -Eo '[0-9a-f-]{36}' | head -1)"
     if [ -n "$id" ]; then
       xcrun notarytool log "$id" --keychain-profile "$NOTARY_PROFILE" 2>&1 | head -60
     fi
     die "notarization was not Accepted for $(basename "$path")"
-  fi
+    ;;
+  esac
   echo "    accepted"
 }
 notarize "$ZIP"
@@ -315,18 +334,21 @@ gh api -X POST "repos/$GH_REPO/pages/builds" >/dev/null \
 step "Ask Gatekeeper"
 APP_VERDICT="$(spctl -a -vvv -t install "$APP" 2>&1 || true)"
 echo "$APP_VERDICT" | sed 's/^/    /'
-if ! echo "$APP_VERDICT" | grep -q "accepted"; then
-  die "GATEKEEPER REJECTED THE APP. The release is published but it is not safe to hand out."
-fi
-if ! echo "$APP_VERDICT" | grep -q "Notarized Developer ID"; then
-  die "the app is accepted but not as Notarized Developer ID."
-fi
+case "$APP_VERDICT" in
+  *accepted*) ;;
+  *) die "GATEKEEPER REJECTED THE APP. The release is published but it is not safe to hand out." ;;
+esac
+case "$APP_VERDICT" in
+  *"Notarized Developer ID"*) ;;
+  *) die "the app is accepted but not as Notarized Developer ID." ;;
+esac
 
 DMG_VERDICT="$(spctl -a -vvv -t open --context context:primary-signature "$DMG" 2>&1 || true)"
 echo "$DMG_VERDICT" | sed 's/^/    /'
-if ! echo "$DMG_VERDICT" | grep -q "accepted"; then
-  die "GATEKEEPER REJECTED THE DISK IMAGE."
-fi
+case "$DMG_VERDICT" in
+  *accepted*) ;;
+  *) die "GATEKEEPER REJECTED THE DISK IMAGE." ;;
+esac
 
 xcrun stapler validate "$APP" >/dev/null || die "the app has no stapled ticket"
 xcrun stapler validate "$DMG" >/dev/null || die "the disk image has no stapled ticket"
