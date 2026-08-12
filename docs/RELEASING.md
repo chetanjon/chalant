@@ -99,6 +99,44 @@ GitHub Pages serves `main`'s `/docs` folder at
 appcast committed on a feature branch is invisible to every user.
 Stage 13 pushes to `main` for exactly this reason.
 
+## Updating across the 1.11.0 signing change
+
+Every build before 1.11.0 was signed `Apple Development: (7JK5N68ZSM)`
+under team `WV59PZX4A3`. Everything since is Developer ID and
+notarized. Whether Sparkle would carry someone across that change was
+open until it was traced through Sparkle's own `SUUpdateValidator`
+(2026-08-12), against the real 1.10.5 and 1.12.2 bundles:
+
+- `passesBasicUpdatePolicy` rejects exactly two things: removing an
+  EdDSA key, and removing code signing. This change **adds** signing
+  strength, so it passes. The direction that would break is signed to
+  unsigned, not this.
+- `passedDSACheck` validates the archive against the **old** bundle's
+  public key. `SUPublicEDKey` is byte-identical in 1.10.5 and 1.12.2
+  (`HS35RsdF…AzE=`), so this passes. **This is the load-bearing fact.
+  Rotating the EdDSA key in the same release as a signing-identity
+  change would strand every existing install**, because the only two
+  proofs of continuity would break at once.
+- `passedCodeSigning` compares the new signature against the old one
+  and probably fails, since the leaf certificate genuinely changed.
+  It does not matter: the last gate is `passedDSACheck ||
+  passedCodeSigning`, and Sparkle's own comment says it allows one of
+  them to fail so identities can rotate without breaking the chain.
+- The one rejection left, an update that is code signed but
+  *corruptly* so, needs the new bundle to fail `codesign` on its own.
+  1.12.2 passes `codesign -v --strict` and `spctl` says
+  `source=Notarized Developer ID`.
+
+So the path is sound by construction. **Do not "just try it" on a
+machine you care about.** Launching a pre-1.11.0 build shares the
+`com.cj.chalant` bundle ID with the installed one, and macOS rewrites
+a TCC requirement when the signing identity changes within a team,
+which is the same mechanism that let permissions survive 1.11.0. The
+old development-signed build can therefore rewrite the stored
+requirement back to the development certificate and cost the notarized
+install its permissions. Test it on a spare Mac or a fresh user
+account, never on the daily driver.
+
 ## What each half of updating is for
 
 - Sparkle's own scheduled check is off (`SUEnableAutomaticChecks:
