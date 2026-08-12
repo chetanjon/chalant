@@ -113,3 +113,63 @@ holding, but M0 is not accepted until it reaches TextEdit twice in a row.
   Some runs succeed, so it is intermittent rather than absent. **Do not treat a
   harness "nothing heard" as an app failure without checking the fed-buffer
   count first.**
+
+---
+
+## 2026-08-12 — M0 ACCEPTED
+
+Build `7b8895d` + Accessibility gate. macOS 27.0, arm64, built-in mic.
+
+**The criterion, verbatim:** "you dictate one sentence into TextEdit and it
+appears, twice in a row, on a cold launch." Met.
+
+| Run | Transcribed | finalize | insert | outcome |
+|---|---|---|---|---|
+| 1 | 20 chars | 0.200s | 0.095s | `inserted(systemEvents)` |
+| 2 | 20 chars | 0.186s | 0.026s | `inserted(systemEvents)` |
+
+Both on one cold launch, driven by the `say` harness into TextEdit, confirmed
+by reading the document back.
+
+### Latency, measured rather than assumed
+
+Key-release to text on screen, across five successful utterances:
+finalize 0.033-0.200s, insert 0.026-0.095s, so roughly **0.06s to 0.30s
+end to end**.
+
+Part 0 §0.5 demoted the latency budget to an empirical gate because two
+independent sources measured finalization at 1.45s warm and 2.2s cold, and
+warned the 250ms p95 target was probably unachievable and that "faster than
+cloud" would die with it. **It does not reproduce on this hardware.** With
+`prepareToAnalyze()` at key-down the target looks reachable.
+
+Provisional, and not a public claim yet: these are short utterances of clean
+synthesized speech into a quiet room. The corpus decides. But §0.5's
+pessimistic branch can be treated as not applying here.
+
+### Permissions actually required
+
+Three, and Part 2 §5 lists neither set correctly:
+
+| Permission | Needed for | In §5? |
+|---|---|---|
+| Microphone | capture | yes |
+| **Input Monitoring** | the event tap seeing the key at all | **no** |
+| **Accessibility** | System Events sending the keystroke | yes |
+| Automation | nothing, as it turns out | listed, unnecessary |
+
+The Accessibility failure is the nastiest: `System Events got an error:
+ChalantDictation is not allowed to send keystrokes.` names the app rather than
+the permission and sends you to the wrong settings pane. The app now checks
+`AXIsProcessTrusted()` first and says which switch to turn on.
+
+**Self-inflicted, worth remembering:** the `tccutil reset Accessibility` used
+earlier to clear the ad-hoc-signing poison also removed the grant the paste
+needed, and the next failure was then misdiagnosed as Automation. Resetting one
+service can break a different feature.
+
+### Known and deferred to M1
+
+Insertion is mid-sentence-naive: the text landed as
+`...reads the notchAcceptance test one.` with no leading space. That is case 2
+of the 12-app protocol and M1's job, not a regression.

@@ -39,6 +39,15 @@ actor SystemEventsInserter: TextInserter {
         // modifiers to clear.
         await Self.waitForClearModifiers()
 
+        // Sending keystrokes through System Events needs THIS app trusted for
+        // Accessibility. Checked before the script runs, because the failure
+        // otherwise arrives as "ChalantDictation is not allowed to send
+        // keystrokes", which names the app rather than the permission.
+        if !AccessibilityPermission.isTrusted {
+            AccessibilityPermission.request()
+            return .leftOnClipboard(reason: "Accessibility is off. Turn Chalant Dictation on in System Settings, Privacy & Security, Accessibility.")
+        }
+
         // Settle consent BEFORE the scripted paste, so the script's short
         // timeout never races the user reading a dialog.
         switch await AutomationPermission.ensureSystemEvents() {
