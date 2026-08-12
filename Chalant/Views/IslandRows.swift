@@ -61,8 +61,16 @@ struct MusicRow: View {
                             }
                             .help(playing.shuffling ? "Shuffle is on" : "Shuffle")
                         }
+                        // Outline, and end-style rather than the scan
+                        // arrows. Two reasons. The founder asked for
+                        // this shape (2026-08-11), and the old glyphs
+                        // were lying: backward.fill is the double
+                        // triangle that means "scan backwards", while
+                        // these buttons call previous() and next() and
+                        // skip a whole track. backward.end draws the
+                        // bar these actually hit.
                         HoverGlyphButton(
-                            symbol: "backward.fill", label: "Previous track",
+                            symbol: "backward.end", label: "Previous track",
                             scale: .m, tint: Theme.textPrimary, weight: .regular
                         ) {
                             music.previous()
@@ -70,7 +78,7 @@ struct MusicRow: View {
                         Button {
                             playing.isPlaying ? music.pause() : music.play()
                         } label: {
-                            Image(systemName: playing.isPlaying ? "pause.fill" : "play.fill")
+                            Image(systemName: playing.isPlaying ? "pause" : "play")
                                 .font(Theme.Fonts.icon(.l))
                                 .foregroundStyle(Theme.textPrimary)
                                 .frame(minWidth: 22, minHeight: 22)
@@ -78,7 +86,7 @@ struct MusicRow: View {
                         }
                         .buttonStyle(PressableStyle())
                         HoverGlyphButton(
-                            symbol: "forward.fill", label: "Next track",
+                            symbol: "forward.end", label: "Next track",
                             scale: .m, tint: Theme.textPrimary, weight: .regular
                         ) {
                             music.next()

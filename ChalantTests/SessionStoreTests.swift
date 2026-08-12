@@ -2280,9 +2280,15 @@ final class SessionStoreTests: XCTestCase {
             "laptopcomputer", "display", "checkmark",
             // Glances
             "bolt.fill", "battery.25", "battery.100",
-            // Media row
-            "backward.fill", "forward.fill", "shuffle", "speaker.wave.2.fill",
-            "pause.fill", "play.fill", "mic.fill",
+            // Media row: outline, and end-style rather than the scan
+            // arrows, because these buttons skip a whole track and the
+            // filled double triangle means "scan" instead.
+            "backward.end", "forward.end", "shuffle", "speaker.wave.2.fill",
+            "pause", "play", "mic.fill",
+            // The focus timer and the stopwatch keep the filled pair.
+            // They are transport for a running clock, not for a track,
+            // and nothing about them changed.
+            "pause.fill", "play.fill",
             // Chrome and actions
             "gearshape", "magnifyingglass", "xmark", "minus.circle",
             "line.3.horizontal", "doc.on.doc", "square.and.arrow.up",
