@@ -2,6 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status, 2026-08-11.** Tasks 1 through 6 are **done, tested and committed** on branch `notarized-distribution` (615 tests green). Task 7 is **blocked** on Apple Developer Program enrollment and is the only thing left.
+>
+> Three corrections were made against this plan while executing it, and the committed code is the authority where they differ:
+> - **Task 2:** Finder's `bounds` includes the title bar, so the window is `660x448`, not `660x420`. `scripts/make-dmg` adds `TITLEBAR=28` explicitly.
+> - **Task 3 Step 2:** the version bump was **reverted**. `scripts/release` owns it, and pre-bumping made 1.11.0 land on build 149 instead of 148.
+> - **Task 7 Step 4:** use `sed` on `packaging/ExportOptions.plist`, not PlistBuddy, which strips the file's comments.
+
 **Goal:** Ship Chalant 1.11.0 signed with a Developer ID certificate and notarized by Apple, delivered as a designed DMG, with every apology for being unsigned deleted from the site, the README and the Homebrew cask.
 
 **Architecture:** Signing splits by build configuration so daily development keeps its fast local identity and only archives are Developer ID. A single `scripts/release` runs the whole ritual and refuses to report success until `spctl` agrees the result is notarized. The DMG's background art is generated from code, never hand drawn, following the rule `scripts/make-icon.py` already sets for the app icon.
