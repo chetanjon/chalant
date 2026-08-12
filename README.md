@@ -138,6 +138,7 @@ The rules every round is built under, in the order they were paid for:
 
 - Now-playing rides a vendored MediaRemote adapter (BSD-3) loaded through `/usr/bin/perl`; if a future macOS closes that door, the app falls back to AppleScript polling for Spotify and Apple Music only.
 - No conversation memory in ask, each question is fresh.
+- The weather line is a forecast model (Open-Meteo), not a thermometer, and its grid is coarser than a city. Expect it to sit a degree or three from the Weather app on your phone, which blends real station readings: measured across Phoenix on a August afternoon, actual stations spanned 95F to 100F while the model called the whole valley 99F. It is close enough to dress for and not close enough to argue with. Apple's own WeatherKit would match your phone exactly and was weighed and declined: it wants a provisioning profile and a permanent attribution mark on an island built around not spending space.
 - Texting sends over iMessage only. A number that lives on the green side isn't reachable yet; SMS relay is untested ground and stays out until it can be tested honestly.
 - Signed with a Developer ID certificate and notarized by Apple.
 
