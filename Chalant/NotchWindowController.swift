@@ -805,16 +805,39 @@ final class NotchWindowController {
     /// display, still nowhere near the edge, and close enough to the
     /// island to read as belonging to it.
     ///
-    /// Raise it further only with a real file drag in hand. The
-    /// island's panel is 1000x720 hanging from the top edge, so BOTH
-    /// this position and the old one sit inside its frame; the bubble
-    /// works anyway because a drag over the panel's transparent
+    /// The island's panel is 1000x720 hanging from the top edge, so
+    /// BOTH this position and the old one sit inside its frame; the
+    /// bubble works anyway because a drag over the panel's transparent
     /// regions passes through to whatever is behind rather than
     /// lighting `isDropTargeted`. Where that stops being true is the
-    /// visible island itself, and nobody has measured how close is too
-    /// close. If a raised bubble ever blinks out as the drag arrives,
-    /// this is why, and the answer is to come back down.
+    /// visible island itself.
+    ///
+    /// MEASURED 2026-08-12, which the note here used to say nobody had
+    /// done. `dropClearance(screenHeight:collapsedHeight:)` below is
+    /// the arithmetic, pinned in DropBubbleTests. On this machine:
+    /// 173pt of daylight on the 2560x1440 external, 76pt on the
+    /// 1470x956 built-in, between the bottom of the collapsed island
+    /// and the top of the bubble. A collapsed island is at most
+    /// `height + 3 + 4` (hover growth), so 45pt at the shipped 38.
+    /// The bubble only stops clearing below a ~575pt display, and no
+    /// Mac has one. It also cannot meet an EXPANDED island, because
+    /// the click that begins a drag goes to another app and the global
+    /// click monitor collapses the island on the way past.
+    ///
+    /// So a bubble that blinks out as a drag arrives is not this
+    /// number any more. Look at `face.isDropTargeted` first, which
+    /// hides the bubble on purpose so the island can take the drop.
     private static let dockDropFromTop: CGFloat = 0.20
+
+    /// Points between the bottom of the collapsed island and the top
+    /// of the drop bubble. Negative means they overlap and the bubble
+    /// is about to lose its drags to `isDropTargeted`.
+    static func dropClearance(screenHeight: CGFloat, collapsedHeight: CGFloat) -> CGFloat {
+        // The bubble is centred `dockDropFromTop` of the way down, so
+        // its top edge is half a bubble above that.
+        let bubbleTopFromScreenTop = screenHeight * dockDropFromTop - dockSize.height / 2
+        return bubbleTopFromScreenTop - collapsedHeight
+    }
 
     /// The bubble, which is exactly as big as it looks.
     ///
