@@ -1,0 +1,38 @@
+# xcodegen, matching Chalant's own tooling so the project file stays generated
+# rather than hand-edited. `xcodegen` then `xcodebuild -scheme ChalantDictation`.
+name: ChalantDictation
+options:
+  bundleIdPrefix: com.cj
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+
+packages:
+  ChalantDictationCore:
+    path: .
+
+targets:
+  ChalantDictation:
+    type: application
+    platform: macOS
+    sources:
+      - path: ChalantDictationApp
+    dependencies:
+      - package: ChalantDictationCore
+        product: ChalantDictationCore
+    info:
+      path: ChalantDictationApp/Info.plist
+    entitlements:
+      path: ChalantDictationApp/ChalantDictationApp.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cj.chalant.dictation
+        MARKETING_VERSION: "0.0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        # Part 2 §1: Apple Silicon only. No Intel fallback that could route
+        # audio off-device.
+        ARCHS: arm64
+        ENABLE_HARDENED_RUNTIME: YES
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        GENERATE_INFOPLIST_FILE: NO
