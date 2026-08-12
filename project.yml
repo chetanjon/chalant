@@ -22,11 +22,20 @@ targets:
         product: ChalantDictationCore
     info:
       path: ChalantDictationApp/Info.plist
-    entitlements:
-      path: ChalantDictationApp/ChalantDictationApp.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cj.chalant.dictation
+        # Without a team, Xcode ad-hoc signs and SILENTLY DROPS the
+        # entitlements file, leaving only get-task-allow. That is the same
+        # failure class that left Chalant's calendar broken for nine releases:
+        # a missing entitlement reads as a code bug, never as a signing one.
+        # NOT xcodegen's `entitlements:` key: that GENERATES the file from
+        # `properties:` and silently writes an empty dict over a hand-written
+        # one. Chalant uses this plain setting for the same reason.
+        CODE_SIGN_ENTITLEMENTS: ChalantDictationApp/ChalantDictationApp.entitlements
+        DEVELOPMENT_TEAM: WV59PZX4A3
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "Apple Development"
         MARKETING_VERSION: "0.0.1"
         CURRENT_PROJECT_VERSION: "1"
         # Part 2 §1: Apple Silicon only. No Intel fallback that could route
