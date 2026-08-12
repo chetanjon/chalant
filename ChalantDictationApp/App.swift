@@ -95,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .downloading(let fraction):
             return "Downloading the language model… \(Int(fraction * 100))%"
         case .available:
+            if controller.micPermission == .denied { return "Microphone access is off" }
             return controller.isListening ? "Listening" : "Ready"
         case .unsupported(let requested):
             return "No language model for \(requested)"

@@ -20,6 +20,7 @@ final class DictationController {
     private var pumpTask: Task<Void, Never>?
 
     private(set) var assetState: SpeechAssetState = .checking
+    private(set) var micPermission: MicPermission.Outcome = .pending
     private(set) var isListening = false
 
     /// M0 runs one locale. The en-IN versus en-US experiment that Part 2 §6
@@ -54,9 +55,20 @@ final class DictationController {
     // MARK: - The chain
 
     func keyDown() async {
+        Self.log.info("keyDown entered")
         guard !isListening else { return }
         guard assetState.isReady else {
             Self.log.error("ignoring key: assets are not ready")
+            return
+        }
+
+        // Part 2 §5: lazily, on a real user action, never at launch. Starting
+        // the engine does not prompt on its own for a background app; it just
+        // hands back silence.
+        micPermission = await MicPermission.ensure()
+        guard micPermission == .granted else {
+            Self.log.error("ignoring key: microphone not granted")
+            onStateChange?()
             return
         }
 
@@ -91,7 +103,11 @@ final class DictationController {
         // Drain the lock-free ring into the analyzer. The ring is polled
         // because its producer is a real-time thread that may not resume a
         // continuation (Part 1 §2).
-        guard let ring = await audio.ringHandle() else { return }
+        guard let ring = await audio.ringHandle() else {
+            Self.log.error("no ring handle; capture cannot be drained")
+            return
+        }
+        Self.log.info("capturing")
         pumpTask = Task { [transcriber] in
             while !Task.isCancelled {
                 await transcriber.drainAndFeed(from: ring)
@@ -101,6 +117,7 @@ final class DictationController {
     }
 
     func keyUp() async {
+        Self.log.info("keyUp entered, listening=\(self.isListening, privacy: .public)")
         guard isListening, let transcriber else { return }
         isListening = false
 

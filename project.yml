@@ -20,8 +20,6 @@ targets:
     dependencies:
       - package: ChalantDictationCore
         product: ChalantDictationCore
-    info:
-      path: ChalantDictationApp/Info.plist
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cj.chalant.dictation
@@ -32,6 +30,11 @@ targets:
         # NOT xcodegen's `entitlements:` key: that GENERATES the file from
         # `properties:` and silently writes an empty dict over a hand-written
         # one. Chalant uses this plain setting for the same reason.
+        # Same trap as the entitlements below, and it bit twice: xcodegen's
+        # `info:` key GENERATES an Info.plist from `properties:` and wipes a
+        # hand-written one. Without NSMicrophoneUsageDescription macOS simply
+        # never prompts, and the app records silence forever with no error.
+        INFOPLIST_FILE: ChalantDictationApp/Info.plist
         CODE_SIGN_ENTITLEMENTS: ChalantDictationApp/ChalantDictationApp.entitlements
         DEVELOPMENT_TEAM: WV59PZX4A3
         CODE_SIGN_STYLE: Automatic

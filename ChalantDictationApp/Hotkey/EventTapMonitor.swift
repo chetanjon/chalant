@@ -106,6 +106,7 @@ final class EventTapMonitor: @unchecked Sendable {
             guard keyCode == Self.rightOptionKeyCode else { break }
 
             let down = (event.flags.rawValue & Self.rightOptionFlag) != 0
+            Self.log.info("flagsChanged rightOption down=\(down, privacy: .public) wasDown=\(self.isDown, privacy: .public)")
             if down != isDown {
                 isDown = down
                 let handler = onChange

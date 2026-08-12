@@ -24,6 +24,8 @@ actor AppleTranscriber: Transcriber {
     private var relayTask: Task<Void, Never>?
     private var assembler = TranscriptAssembler()
     private var canonicalLocale: Locale = .init(identifier: "en-US")
+    private var analyzerFormat: AVAudioFormat?
+    private var converter: AVAudioConverter?
 
     private var eventStream: AsyncStream<TranscriptEvent>?
 
@@ -34,18 +36,72 @@ actor AppleTranscriber: Transcriber {
     /// Part 0 §0.5 measured finalization at ~2.2s without preheat against
     /// ~1.45s with `prepareToAnalyze()`, so this is called at hotkey-down
     /// rather than lazily.
-    func prepare(locale: Locale, format: AVAudioFormat?) async {
+    func prepare(locale: Locale, format micFormat: AVAudioFormat?) async {
         guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else { return }
         canonicalLocale = supported
         let module = SpeechTranscriber(locale: supported, preset: .progressiveTranscription)
         let analyzer = SpeechAnalyzer(modules: [module])
         self.transcriber = module
         self.analyzer = analyzer
+
+        // The analyzer does not accept whatever the microphone happens to
+        // produce. Feeding it a raw 48kHz tap buffer traps inside
+        // `AnalyzerInput.init(buffer:)` with EXC_BREAKPOINT, which reads as a
+        // crash in our own code rather than a format mismatch. Ask the
+        // framework what it wants and convert into that.
+        let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(
+            compatibleWith: [module],
+            considering: micFormat
+        )
+        self.analyzerFormat = analyzerFormat
+
+        if let micFormat, let analyzerFormat, micFormat != analyzerFormat {
+            // One converter per session: sample-rate conversion is stateful,
+            // and a fresh one per buffer would click at every boundary.
+            converter = AVAudioConverter(from: micFormat, to: analyzerFormat)
+        } else {
+            converter = nil
+        }
+
         do {
-            try await analyzer.prepareToAnalyze(in: format)
+            try await analyzer.prepareToAnalyze(in: analyzerFormat)
         } catch {
             Self.log.error("prepareToAnalyze failed: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    /// Convert one tap buffer into the analyzer's format.
+    ///
+    /// Returns nil rather than trapping when conversion fails: Part 1 §2 says
+    /// never lose the user's text, and dropping one buffer with a logged
+    /// reason beats taking the process down mid-utterance.
+    private func converted(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let analyzerFormat else { return nil }
+        guard let converter else { return buffer }
+
+        let ratio = analyzerFormat.sampleRate / buffer.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1024
+        guard let out = AVAudioPCMBuffer(pcmFormat: analyzerFormat, frameCapacity: capacity) else {
+            return nil
+        }
+
+        var supplied = false
+        var error: NSError?
+        converter.convert(to: out, error: &error) { _, status in
+            if supplied {
+                status.pointee = .noDataNow
+                return nil
+            }
+            supplied = true
+            status.pointee = .haveData
+            return buffer
+        }
+
+        if let error {
+            Self.log.error("audio conversion failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+        return out.frameLength > 0 ? out : nil
     }
 
     // MARK: - Transcriber
@@ -127,7 +183,8 @@ actor AppleTranscriber: Transcriber {
     func drainAndFeed(from ring: AudioRing) -> Int {
         var moved = 0
         while let item = ring.read() {
-            inputContinuation?.yield(AnalyzerInput(buffer: item.buffer))
+            guard let ready = converted(item.buffer) else { continue }
+            inputContinuation?.yield(AnalyzerInput(buffer: ready))
             moved += 1
         }
         return moved
