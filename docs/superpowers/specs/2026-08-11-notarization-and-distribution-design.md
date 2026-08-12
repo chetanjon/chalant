@@ -236,8 +236,11 @@ mount, apply window styling via AppleScript, unmount
 hdiutil convert -format UDZO
 ```
 
-Window: 660x420, icons at 40% and 60% width on the vertical centre,
-128pt icon size, toolbar and sidebar and status bar off.
+Window: 660x420, icons at 25% and 75% width (x=165 and x=495) on the
+y=200 line, 128pt icon size, toolbar and status bar off. A quarter and
+three quarters rather than something tighter: at 128pt, icons placed at
+40% and 60% would sit 132pt apart and nearly touch, leaving the arrow
+nowhere to go. At 165 and 495 their inner edges are 202pt apart.
 
 Background: a `tiffutil -cathidpicheck` two-rep image (660x420 and
 1320x840) so it is sharp on Retina. Drawn in the landing page's own
