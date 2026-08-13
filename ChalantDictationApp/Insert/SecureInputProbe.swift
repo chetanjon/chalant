@@ -1,3 +1,4 @@
+import AppKit
 import Carbon.HIToolbox
 import Foundation
 
@@ -18,5 +19,17 @@ import Foundation
 enum SecureInputProbe {
     static var isActive: Bool {
         IsSecureEventInputEnabled()
+    }
+
+    /// Which app is holding secure input, when it can be worked out.
+    ///
+    /// Part 0 §0.9 wants the holder named: Tahoe has a stuck-Secure-Input
+    /// misattribution bug, and "some app has locked your keyboard" is useless
+    /// advice while "Terminal has locked your keyboard" is actionable.
+    static func holderName() -> String? {
+        // The secure input holder is not published directly. The frontmost app
+        // is right in the overwhelming case (a password field in the app you
+        // are looking at) and honest enough to name.
+        NSWorkspace.shared.frontmostApplication?.localizedName
     }
 }

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Synchronization
 import os
 
 /// Asks for permission to drive System Events, properly.
@@ -23,9 +24,18 @@ enum AutomationPermission {
         case failed(OSStatus)
     }
 
+    /// Cached once granted. The check costs an NSWorkspace query and a
+    /// synchronous AppleEvent round trip, and it runs on the insertion path
+    /// where Part 0 §0.5 makes every millisecond a measured number. A grant
+    /// cannot be revoked mid-session without the app being killed, so caching
+    /// the positive answer is safe; a negative one is always re-asked, because
+    /// the user may be in System Settings turning it on right now.
+    private static let grantedOnce = Mutex(false)
+
     /// Part 2 §5 wants permissions asked lazily and one at a time, so this is
     /// called on the first insertion rather than at launch.
     static func ensureSystemEvents(askUser: Bool = true) async -> Outcome {
+        if grantedOnce.withLock({ $0 }) { return .granted }
         // `AEDeterminePermissionToAutomateTarget` answers -600 (procNotFound)
         // when the target is not running, and it will not start it. System
         // Events is launched on demand and is usually asleep, so the very
@@ -34,7 +44,9 @@ enum AutomationPermission {
         if !isSystemEventsRunning {
             await launchSystemEvents()
         }
-        return determine(askUser: askUser)
+        let outcome = determine(askUser: askUser)
+        if case .granted = outcome { grantedOnce.withLock { $0 = true } }
+        return outcome
     }
 
     private static var isSystemEventsRunning: Bool {

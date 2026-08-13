@@ -15,7 +15,7 @@ final class DictationController {
 
     private let audio = AudioEngine()
     private let assets = SpeechAssets()
-    private let inserter = SystemEventsInserter()
+    private let inserter = InsertionChain()
     private let panel = ListeningPanel()
     private var meterTimer: Timer?
     private var transcriber: AppleTranscriber?
