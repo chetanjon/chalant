@@ -44,6 +44,10 @@ final class DictationController {
     /// Bring the engine up and resolve the language model. Called once at
     /// launch. Never throws outward: a failure here has to render as a state
     /// the menu bar can show, not a dead app.
+    /// Exposed so the debug-only insertion test hook can drive the same
+    /// ladder the dictation path uses.
+    var insertionChain: InsertionChain { inserter }
+
     func warmUp() async {
         assetState = await assets.ensure(locale: locale)
         onStateChange?()

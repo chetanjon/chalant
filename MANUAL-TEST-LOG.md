@@ -221,3 +221,66 @@ floor) or a short failure note.
 
 The tier that fired is in the log:
 `log show --predicate 'process == "ChalantDictation"' --info --last 2m | grep "inserted at tier"`
+
+---
+
+## 2026-08-12 — M1 gate, partial run (3 of 12 apps + 1 global case)
+
+Build `2e61ee8` + Spacing. Driven by `InsertionTestHook`, a debug-only
+distributed-notification hook that runs the real `InsertionChain` with a known
+string. M1 is about insertion, so putting the microphone in the loop would make
+every cell depend on speech recognition and bury insertion failures under
+transcription noise. Same tiers, same pasteboard guard, same demotion; only the
+text source differs.
+
+| App | empty | mid-sentence | replaces sel. | single ⌘Z | clip preserved | two in a row | tier |
+|---|---|---|---|---|---|---|---|
+| **TextEdit** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 1 |
+| **Safari** (textarea) | ✅ | — | — | — | ✅ | ✅ | 1 |
+| **Chrome** (textarea) | ✅ | — | — | — | ✅ | ✅ | 1 |
+
+**Global cases**
+
+| Case | Expected | Result |
+|---|---|---|
+| Password field | refuses, names holder, never inserts | ✅ `refused(secureInputActive(holder: "Safari"))`, field stayed empty, 0.0s |
+| Focus stolen mid-dictation | never inserts into the wrong app | not run |
+| `sudo` in Terminal | probe fires, clipboard floor, holder named | not run |
+
+**Zero text-loss events.** Every run either landed the text or left it on the
+clipboard.
+
+### What this proves
+
+- **Tier 1 handles all three so far.** No demotion has been needed, so the
+  CGEvent tier and the clipboard floor are untested in anger.
+- **Chromium's async pasteboard is handled.** Chrome took two consecutive
+  insertions with correct spacing and the user's clipboard came back intact,
+  which is exactly what Part 1 §1's 1.5s restore delay exists for. Restoring at
+  the originally specced 40-80ms would have shown up here.
+- **The secure-input refusal works and is instant.** Part 1 §1's correction is
+  vindicated: `IsSecureEventInputEnabled()` catches a WebKit password field,
+  which the abandoned `AXSecureTextField` role check would have had to ask a
+  web view about.
+
+### Spacing, added to make case 6 pass
+
+Two consecutive insertions produced `firstsecond`. `Spacing` (pure, 8 tests)
+now adds a trailing space always and a leading space only when the preceding
+character is known and is not whitespace or an opener. `CursorContext` reads
+that character over Accessibility, best-effort: it returns nil in Electron and
+web views exactly as Part 1 §1 predicts, and nil is the safe default rather
+than a degraded one. Verified in TextEdit: `one two` + `beta` gave
+`one two beta `, and mid-word gave `befor INSERTED e`, which one ⌘Z reverted
+whole.
+
+### Still to run
+
+- **VS Code** — installed, but it is hosting this session's terminal, so
+  driving insertions into it risks disrupting the work. Worth a manual pass.
+- **Terminal, Messages, Mail, Xcode** — installed, not yet run. Messages and
+  Mail deliberately left for a human, since an errant Return in either sends
+  something to a real person.
+- **Slack, Notion, iTerm2, Figma** — not installed. Slack is the one worth
+  adding: Part 3 calls it "the most common real target" and it is the Electron
+  case the AX path was removed for.

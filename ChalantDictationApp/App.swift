@@ -44,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             render(accessibilityMissing: true)
         }
 
+        InsertionTestHook.install(using: controller.insertionChain)
         Task { await controller.warmUp() }
     }
 

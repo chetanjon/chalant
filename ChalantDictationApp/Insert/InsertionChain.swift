@@ -49,12 +49,18 @@ actor InsertionChain: TextInserter {
         let profile = profiles[bundleID] ?? AppProfile(bundleID: bundleID)
         let plan = TierPolicy.plan(for: profile)
 
+        // Space it against what is already there. The context read is
+        // best-effort and returns nil in Electron and web views by design;
+        // `Spacing` treats nil as the safe default rather than a degraded one.
+        let preceding = await MainActor.run { CursorContext.characterBeforeCursor() }
+        let spaced = Spacing.pad(text, precededBy: preceding)
+
         // Preserve whatever the user had. Nil is fine and never blocks.
         let saved = await pasteboard.snapshot()
-        let placedAt = await pasteboard.place(text)
+        let placedAt = await pasteboard.place(spaced)
 
         for tier in plan {
-            let landed = await attempt(tier, text: text, placedAt: placedAt, bundleID: bundleID)
+            let landed = await attempt(tier, text: spaced, placedAt: placedAt, bundleID: bundleID)
             if landed {
                 record(success: tier, for: bundleID)
                 if let saved { Task { await pasteboard.restore(saved) } }
