@@ -173,3 +173,51 @@ service can break a different feature.
 Insertion is mid-sentence-naive: the text landed as
 `...reads the notchAcceptance test one.` with no leading space. That is case 2
 of the 12-app protocol and M1's job, not a regression.
+
+---
+
+## M1 GATE — the 12-app protocol
+
+**Accept when:** at least **10 of 12** apps pass at Tier 1 or 2, with **zero
+text-loss events** across the whole run. Part 3: *a single text-loss event in
+any cell fails the gate outright, regardless of how the other 75 look.*
+
+Four of the twelve are not installed on this machine: Slack, Notion, iTerm2 and
+Figma. Slack matters most of the four, being named "the most common real
+target". Installing at least Slack is worth it before calling this gate passed;
+the other three can be recorded as untested with the reason.
+
+Fill in the tier that fired (1 = System Events, 2 = CGEvent, 3 = clipboard
+floor) or a short failure note.
+
+| App | empty field | mid-sentence | replaces selection | single ⌘Z undo | clipboard preserved | two in a row |
+|---|---|---|---|---|---|---|
+| TextEdit |  |  |  |  |  |  |
+| Safari (textarea) |  |  |  |  |  |  |
+| Chrome (textarea) |  |  |  |  |  |  |
+| Slack *(not installed)* |  |  |  |  |  |  |
+| VS Code |  |  |  |  |  |  |
+| Notion *(not installed)* |  |  |  |  |  |  |
+| Terminal |  |  |  |  |  |  |
+| iTerm2 *(not installed)* |  |  |  |  |  |  |
+| Messages |  |  |  |  |  |  |
+| Mail |  |  |  |  |  |  |
+| Xcode |  |  |  |  |  |  |
+| Figma *(not installed)* |  |  |  |  |  |  |
+
+### The three global cases
+
+| Case | Expected | Result |
+|---|---|---|
+| Password field (1Password or a login form) | **refuses**, names the holder, never inserts | |
+| Focus stolen mid-dictation (fire a notification during a long utterance) | refuses or falls to clipboard, **never inserts into the wrong app** | |
+| `sudo` prompt in Terminal | secure-input probe fires, text lands on clipboard with the holder named | |
+
+### How to run one cell
+
+1. Put the cursor where the case describes
+2. Hold **left Option**, say a short sentence, release
+3. Check the text landed correctly, then press **⌘Z once** and confirm it all reverts
+
+The tier that fired is in the log:
+`log show --predicate 'process == "ChalantDictation"' --info --last 2m | grep "inserted at tier"`
