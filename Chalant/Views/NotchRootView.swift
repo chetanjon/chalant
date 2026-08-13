@@ -784,7 +784,12 @@ struct NotchRootView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, Theme.Space.xxl)
                 .frame(height: 34)
-            Text("RELEASE TO RUN")
+            // Said by the entrance, not hardcoded: a hold ends on the
+            // release, a tapped mic (the ask bar, the `.talk` key) ends
+            // on a second click anywhere on this surface. "RELEASE TO
+            // RUN" was told to both, and the half that never pressed
+            // anything had no instruction that was true.
+            Text(model.listeningFinishHint)
                 .font(Theme.Fonts.micro)
                 .tracking(1.2)
                 .foregroundStyle(Theme.textTertiary)

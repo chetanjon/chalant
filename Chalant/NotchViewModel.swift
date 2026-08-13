@@ -1391,6 +1391,27 @@ final class NotchViewModel: ObservableObject {
     /// only names the destination while `state == .listening`.
     @Published private(set) var voiceDestination: VoiceDestination = .chalant
 
+    /// How the live session was started. The two are finished in
+    /// opposite ways and the caption has to say which: a hold ends when
+    /// the finger lifts, a tap ends on a second tap. Telling somebody
+    /// who clicked a mic to "release to run" leaves them holding
+    /// nothing, watching their words pile up with no way to send them.
+    enum VoiceEntry { case held, tapped }
+
+    /// Set by whichever entrance started the session, like
+    /// `voiceDestination`, and read only while `state == .listening`.
+    @Published private(set) var voiceEntry: VoiceEntry = .held
+
+    /// What ends the live session, in the words the caption uses. The
+    /// whole listening surface is the tap target
+    /// (`NotchRootView.listeningContent`), so a tapped session is
+    /// finished by clicking anywhere on it, not by finding the mic
+    /// again: `ExpandedView` is unmounted while listening and the mic
+    /// is not on screen to be found.
+    var listeningFinishHint: String {
+        VoiceDoor.finishHint(held: voiceEntry == .held)
+    }
+
     /// Which session's compose card is open in the strip, if any. Lives
     /// here rather than as the strip's own view state: the composer's
     /// mic sends the whole island through `.listening`, which unmounts
@@ -1418,18 +1439,20 @@ final class NotchViewModel: ObservableObject {
     func beginListening(to destination: VoiceDestination = .chalant) {
         guard state == .collapsed else { return }
         voiceDestination = destination
+        voiceEntry = .held
         startListening()
     }
 
     /// Mic button in the expanded island: tap to talk, tap to run.
-    /// `to:` defaults to `.chalant`, so the persistent media-row mic,
-    /// the `.talk` hotkey and the collapsed long press all keep their
-    /// exact behaviour without being touched.
+    /// `to:` defaults to `.chalant`, so the ask bar's mic, the `.talk`
+    /// hotkey and the collapsed long press all keep their exact
+    /// behaviour without being touched.
     func toggleListening(to destination: VoiceDestination = .chalant) {
         if state == .listening {
             endListening()
         } else {
             voiceDestination = destination
+            voiceEntry = .tapped
             startListening()
         }
     }

@@ -36,7 +36,10 @@ struct WelcomeView: View {
                     title: "I live up here.",
                     lines: [
                         ("cursorarrow.motionlines", "Glide to the top of the screen and I open."),
-                        ("mic.fill", "Tap the mic and talk, or just type in the bar."),
+                        // Read off VoiceDoor, never written here: this
+                        // line spent 1.12.x telling every new user to
+                        // tap a mic the build had stopped drawing.
+                        ("mic.fill", VoiceDoor.welcomeLine),
                         ("bolt.fill", "The verbs run on this Mac, keyless and instant."),
                     ]
                 )

@@ -36,6 +36,26 @@ struct Switcher: View {
                 }
             }
             Spacer(minLength: 0)
+            // Voice's one visible door (VoiceDoor), and it is here for
+            // the reason the note below gives about the full-height
+            // button: this app has spent long enough hiding answers in
+            // gestures nobody goes looking for. Between 2026-08-02 and
+            // now it hid voice itself in one, and the first outside
+            // download reported the app as having no dictation at all.
+            //
+            // Not the media row, where H1 removed it from and where it
+            // never belonged. Not the ask bar either, which draws only
+            // on one tab: this row is required in every layout
+            // (`IslandElement.isRequired`), so the mic is on screen
+            // wherever the island opens. Always drawn, unlike the
+            // button below: a control appears only when it can act, and
+            // voice can always act.
+            HoverGlyphButton(
+                symbol: "mic.fill", label: "Speak, or hold the island",
+                scale: .m, tint: Theme.textTertiary
+            ) {
+                model.toggleListening()
+            }
             // The door into the full-height island, and only on the
             // destinations that have one. A visible button rather than
             // a second meaning loaded onto a tab you already tapped:
