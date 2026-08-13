@@ -32,6 +32,9 @@ enum InsertionTestHook {
             forName: notification, object: nil, queue: .main
         ) { note in
             let text = note.userInfo?["text"] as? String ?? "the quick brown fox"
+            // Seconds to wait between capturing the target and inserting, so
+            // the focus race in global case 2 can actually be staged.
+            let delay = Double(note.userInfo?["delay"] as? String ?? "0") ?? 0
             Task { @MainActor in
                 let front = NSWorkspace.shared.frontmostApplication
                 let target = InsertionTarget(
@@ -39,6 +42,10 @@ enum InsertionTestHook {
                     processID: front?.processIdentifier,
                     capturedAt: Date()
                 )
+                if delay > 0 {
+                    log.info("TESTHOOK holding target for \(delay, privacy: .public)s")
+                    try? await Task.sleep(for: .seconds(delay))
+                }
                 let started = Date()
                 let outcome = await chain.insert(text, into: target)
                 let elapsed = Date().timeIntervalSince(started)

@@ -344,3 +344,42 @@ key-down. **Worth hardening before this ships.**
 (`echo terminal-insert-test`). Harmless text in a browser field, cleared by the
 user, but recorded because a test that types into the wrong app is exactly the
 failure the protocol exists to catch.
+
+---
+
+## 2026-08-12 — global case 2 CLOSED: focus stolen mid-dictation
+
+The race observed earlier (an insertion aimed at Terminal landing in a browser)
+is fixed and the fix is proven by staging the race rather than waiting for it.
+
+`InsertionTestHook` grew a `delay`, so a target can be captured, focus stolen,
+and the insertion then allowed to proceed. Aimed at one app, switched to Safari
+mid-flight:
+
+```
+target moved from ai.perplexity.comet to com.apple.Safari
+outcome=refused(reason: targetChanged)
+```
+
+| Check | Result |
+|---|---|
+| Inserted into the wrong app | ❌ never |
+| Original target modified | ❌ unchanged (`GUARD2`) |
+| Words lost | ❌ survived on the clipboard |
+| Both apps named in the log | ✅ |
+| Normal insertion still works | ✅ `still works ` |
+
+**The fix:** `TargetGuard` is pure and tested (6 cases), and the chain now
+re-checks **immediately before every tier attempt** rather than once at key-up.
+The window it closes is not small: the modifier-clear wait alone runs up to
+500ms, and the permission checks, the Accessibility context read and all the
+pasteboard work happen after that.
+
+Unknown counts as a refusal. Nothing to compare against is not permission to
+paste anywhere, because the cost of a wrong guess is the user's words in
+someone else's window.
+
+**Incidental confirmation that the guard was needed:** while staging this, the
+target was captured as the Comet browser even though TextEdit had just been
+activated, because `NSWorkspace.frontmostApplication` had not caught up. The
+lag is real and reproducible, not a one-off.

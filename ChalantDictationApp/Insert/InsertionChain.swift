@@ -60,6 +60,27 @@ actor InsertionChain: TextInserter {
         let placedAt = await pasteboard.place(spaced)
 
         for tier in plan {
+            // Re-check IMMEDIATELY before each attempt, not once at key-up.
+            // Everything between capture and here is a window: the
+            // modifier-clear wait alone runs up to 500ms, and the permission
+            // checks, context read and pasteboard work all follow it. Global
+            // case 2 of the M1 protocol, and observed live on 2026-08-12 when
+            // an insertion aimed at Terminal landed in a browser.
+            switch currentVerdict(for: target) {
+            case .proceed:
+                break
+            case .changed(let from, let to):
+                Self.log.error(
+                    "target moved from \(from ?? "?", privacy: .public) to \(to ?? "?", privacy: .public); refusing"
+                )
+                // The words stay on the clipboard rather than being restored
+                // away: refusing must not also discard what the user said.
+                return .refused(reason: .targetChanged)
+            case .unknown:
+                Self.log.error("cannot identify the front app; refusing")
+                return .refused(reason: .targetChanged)
+            }
+
             let landed = await attempt(tier, text: spaced, placedAt: placedAt, bundleID: bundleID)
             if landed {
                 record(success: tier, for: bundleID)
@@ -75,6 +96,16 @@ actor InsertionChain: TextInserter {
         // told in one sentence what to do about it.
         Self.log.error("all tiers failed for \(bundleID, privacy: .public); text left on clipboard")
         return .leftOnClipboard(reason: "Press ⌘V to paste it.")
+    }
+
+    /// What the system reports right now, compared against where the user aimed.
+    private func currentVerdict(for target: InsertionTarget) -> TargetGuard.Verdict {
+        let front = NSWorkspace.shared.frontmostApplication
+        return TargetGuard.check(
+            target: target,
+            frontBundleID: front?.bundleIdentifier,
+            frontPID: front?.processIdentifier
+        )
     }
 
     // MARK: - Tiers
