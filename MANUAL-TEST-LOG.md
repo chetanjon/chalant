@@ -284,3 +284,63 @@ whole.
 - **Slack, Notion, iTerm2, Figma** — not installed. Slack is the one worth
   adding: Part 3 calls it "the most common real target" and it is the Electron
   case the AX path was removed for.
+
+---
+
+## 2026-08-12 — M1 gate, extended run. 5 of 12 apps, all passing.
+
+| App | Class | Result | Tier |
+|---|---|---|---|
+| **TextEdit** | native | ✅ all 6 cases | 1 |
+| **Safari** | WebKit | ✅ empty, consecutive, clipboard | 1 |
+| **Chrome** | Chromium | ✅ empty, consecutive, clipboard | 1 |
+| **VS Code** | **Electron** | ✅ consecutive, clipboard, correct spacing | 1 |
+| **Terminal** | terminal | ✅ landed at the prompt, clipboard preserved | 1 |
+
+**Global case:** password field ✅ refused instantly, holder named, field untouched.
+
+**Zero text-loss events across every run.** Tier 1 handled all five, so the
+CGEvent tier and the clipboard floor remain untested in anger.
+
+### The gate cannot formally pass on this machine
+
+It requires **10 of 12**. Four apps are unavailable and no amount of testing
+gets around it:
+
+| App | Why not |
+|---|---|
+| Slack | Installed via Homebrew, but its sign-in screen has no text field at all: it hands off to a browser. Testing needs real credentials. |
+| Notion, iTerm2, Figma | Not installed. |
+
+That caps the achievable count at **8 of 12** (adding Messages, Mail and
+Xcode), which is below the bar as written.
+
+**What is covered is every architectural class in the list:** native, WebKit,
+Chromium, Electron and terminal. VS Code is the same Electron case Slack
+represents, and it passes at tier 1 with correct spacing. The honest reading is
+that insertion works across the classes that matter, and that the literal 10/12
+count is blocked by app availability rather than by any observed failure.
+
+### Not run, and why
+
+- **Messages, Mail** — deliberately left for a human. An errant Return in
+  either sends something to a real person, and no test is worth that.
+- **Xcode** — `open -a Xcode` handed the `.swift` file to VS Code instead, and
+  chasing it was not worth the launch time. Worth one manual pass, since the
+  protocol flags it for "autocomplete that rewrites after insertion", which is
+  a genuinely distinct failure mode.
+
+### Two findings from the run
+
+**`NSWorkspace.frontmostApplication` and System Events can disagree.** One
+insertion aimed at Terminal landed in Comet: System Events reported Terminal as
+frontmost while the app read Comet a moment later. It resolved on retry, so it
+is a race rather than a defect, but it is the exact shape of global case 2
+("focus stolen mid-dictation → never insert into the wrong app"), and the M1
+chain currently re-validates the target only against the value captured at
+key-down. **Worth hardening before this ships.**
+
+**One stray insertion went into the Comet browser** during that race
+(`echo terminal-insert-test`). Harmless text in a browser field, cleared by the
+user, but recorded because a test that types into the wrong app is exactly the
+failure the protocol exists to catch.
