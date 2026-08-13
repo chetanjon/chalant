@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""Fails when Chalant's two landing pages stop saying the same thing.
+
+The page exists twice and nothing syncs it:
+
+  docs/index.html                          this repo, served at
+                                           chetanjon.github.io/chalant
+  public/chalant.html                      chetanjon/portfolio, served at
+                                           chetanjonnalagadda.com/chalant
+
+Most people who download Chalant arrive at the second one, and it is the
+copy nobody edits when the product changes. That is not hypothetical: the
+2026-08-12 audit corrected the app repo's page and never touched the
+portfolio's, which went on advertising "Pomodoro with brown noise" for ten
+days after focus sessions stopped starting noise on the founder's own
+instruction. A promise about a behaviour that had been deliberately
+removed, on the page doing the actual selling.
+
+`docs/index.html` is canonical. When this fails, the portfolio copy is
+what moves, unless the app repo is the one that is wrong.
+
+It compares PROSE, not markup. The two files differ on purpose: the
+portfolio copy points at absolute asset URLs on the github.io origin, and
+only the app repo's copy carries the script that rewrites the download
+link for that origin. Diffing the files would fail forever on differences
+that are correct. Diffing what a reader actually sees fails only when a
+sentence has drifted, which is the whole point.
+
+  scripts/check-landing-copy                  fetch the portfolio copy
+  scripts/check-landing-copy --against PATH   compare a local file instead
+
+Exit 0 they agree, 1 they have drifted, 2 the copy could not be read (a
+check that cannot check has not passed).
+"""
+
+import argparse
+import difflib
+import re
+import subprocess
+import sys
+from html.parser import HTMLParser
+from pathlib import Path
+
+
+class Unreadable(Exception):
+    """The copy could not be read at all, which is not the same as drift."""
+
+REPO = Path(__file__).resolve().parent.parent
+CANONICAL = REPO / "docs" / "index.html"
+
+# The live page, not the file in the portfolio repo. Two reasons, both
+# load-bearing: that repo is PRIVATE, so an unauthenticated fetch of its
+# raw file 404s and the check would need a token it should not need; and
+# what a visitor receives is the only version that can actually mislead
+# anyone. A correction committed but not deployed has not been made.
+PORTFOLIO_LIVE = "https://www.chetanjonnalagadda.com/chalant"
+
+# Meta text is copy too: it is what a search result and a shared link show,
+# and it drifts exactly like body text because nothing on screen displays it.
+META_KEYS = {"description", "og:title", "og:description", "twitter:description"}
+
+
+class Prose(HTMLParser):
+    """Every word a reader sees, in order, and nothing else."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.chunks: list[str] = []
+        self._skipping = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style"):
+            self._skipping += 1
+            return
+        if tag == "meta":
+            got = dict(attrs)
+            key = got.get("name") or got.get("property")
+            if key in META_KEYS and got.get("content"):
+                self.chunks.append(f"[{key}] {got['content']}")
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style") and self._skipping:
+            self._skipping -= 1
+
+    def handle_data(self, data):
+        if not self._skipping and data.strip():
+            self.chunks.append(data)
+
+
+def prose(html: str) -> list[str]:
+    parser = Prose()
+    parser.feed(html)
+    lines = []
+    for chunk in parser.chunks:
+        # One sentence per line, whitespace flattened: HTML wraps its
+        # source freely, so line breaks in the file mean nothing and
+        # would otherwise read as differences.
+        text = re.sub(r"\s+", " ", chunk).strip()
+        if text:
+            lines.append(text)
+    return lines
+
+
+def fetch(url: str) -> str:
+    """Through curl, not urllib.
+
+    A python.org framework build ships no CA bundle and fails every HTTPS
+    fetch with CERTIFICATE_VERIFY_FAILED, which is what this machine has.
+    curl uses the system trust store, is already assumed by every other
+    script here, and retries on its own.
+    """
+    done = subprocess.run(
+        ["curl", "-sSL", "--retry", "3", "--retry-delay", "2", "--max-time", "30", url],
+        capture_output=True,
+        text=True,
+    )
+    if done.returncode != 0 or not done.stdout.strip():
+        raise Unreadable(f"{url} ({done.stderr.strip() or 'empty response'})")
+    return done.stdout
+
+
+def main() -> int:
+    args = argparse.ArgumentParser(add_help=True)
+    args.add_argument("--against", help="local file to compare instead of fetching")
+    args.add_argument("--url", default=PORTFOLIO_LIVE)
+    options = args.parse_args()
+
+    if not CANONICAL.exists():
+        print(f"check-landing-copy: {CANONICAL} is missing", file=sys.stderr)
+        return 2
+
+    if options.against:
+        copy_path = Path(options.against)
+        if not copy_path.exists():
+            print(f"check-landing-copy: {copy_path} is missing", file=sys.stderr)
+            return 2
+        other_name = str(copy_path)
+        other_html = copy_path.read_text(encoding="utf-8")
+    else:
+        other_name = options.url
+        try:
+            other_html = fetch(options.url)
+        except Unreadable as why:
+            print(f"check-landing-copy: could not read {why}", file=sys.stderr)
+            return 2
+
+    canonical = prose(CANONICAL.read_text(encoding="utf-8"))
+    other = prose(other_html)
+
+    delta = list(
+        difflib.unified_diff(
+            canonical, other, fromfile="docs/index.html", tofile=other_name, lineterm=""
+        )
+    )
+    if not delta:
+        print(f"check-landing-copy: the two pages say the same thing ({len(canonical)} lines)")
+        return 0
+
+    print("check-landing-copy: the landing pages have drifted.")
+    print("docs/index.html is canonical; the portfolio copy is what moves.")
+    print()
+    for line in delta:
+        print(line)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

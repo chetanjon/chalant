@@ -22,3 +22,17 @@ jobs:
           -destination 'platform=macOS'
           CODE_SIGNING_ALLOWED=NO
           CODE_SIGN_IDENTITY=""
+
+  # Chalant's landing page exists twice, here and in the private portfolio
+  # repo, and most downloads come from the copy this repo cannot see. It
+  # is deliberate that a change to docs/index.html turns this job red
+  # until the portfolio is updated AND deployed: that red is the only
+  # thing standing between an edit here and a page elsewhere that quietly
+  # keeps making the old promise. Ubuntu on purpose, since it needs
+  # nothing but python3 and curl, and it must not wait on a Mac runner.
+  copy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The two landing pages still say the same thing
+        run: scripts/check-landing-copy
