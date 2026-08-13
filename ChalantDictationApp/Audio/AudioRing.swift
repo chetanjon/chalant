@@ -78,6 +78,27 @@ final class AudioRing: @unchecked Sendable {
 
     // MARK: - Producer (real-time thread, nothing may block here)
 
+    /// Read the loudest sample in a buffer WITHOUT keeping any of it.
+    ///
+    /// Called for every tap buffer, including the ones the closed gate throws
+    /// away, so the app knows whether its microphone is alive before anybody
+    /// presses the key. That is the whole point: on 2026-08-12 the app spent
+    /// an evening capturing digital silence from a lid-closed built-in mic and
+    /// could not know until a session had already been wasted, because peak
+    /// was only ever written while capturing.
+    ///
+    /// Same real-time rules as `write` (Part 1 §2): one pass, no allocation,
+    /// no locks, no logging, and nothing retained.
+    func observe(_ buffer: AVAudioPCMBuffer) {
+        guard let src = buffer.floatChannelData, buffer.format.channelCount > 0 else { return }
+        var peak: Float = 0
+        for i in 0..<Int(buffer.frameLength) {
+            let magnitude = abs(src[0][i])
+            if magnitude > peak { peak = magnitude }
+        }
+        peakMillionths.store(UInt64(min(peak, 1) * 1_000_000), ordering: .relaxed)
+    }
+
     /// Copy one tap buffer into the ring. Called from the audio thread only.
     func write(_ buffer: AVAudioPCMBuffer, hostTime: UInt64) {
         let w = writeIndex.load(ordering: .relaxed)

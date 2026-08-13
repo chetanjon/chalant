@@ -1,4 +1,5 @@
 import AVFoundation
+import ChalantDictationCore
 import Synchronization
 import os
 
@@ -42,9 +43,49 @@ actor AudioEngine {
 
     private(set) var isRunning = false
 
-    /// Start the engine and leave it running. Called once, early.
+    /// Which ear is live, and which ears have been proven deaf this launch.
+    ///
+    /// The founder's requirement is that dictation works "even when lid closed
+    /// or open or wired or not or wireless", and the reason it did not is that
+    /// this engine inherited the system default and never questioned it. With
+    /// the lid shut, that default delivers exactly 0.0 forever.
+    private(set) var currentDevice: InputChoice.Device?
+    private var silentUIDs: Set<String> = []
+    /// Which devices were attached last time we looked, so a notification
+    /// caused by our own restart can be told from somebody plugging in a
+    /// headset.
+    private var knownUIDs: Set<String> = []
+    /// When the live device last produced a sample above zero. Compared
+    /// against `InputChoice.isDead` to decide whether to move on.
+    private var lastSoundAt = Date()
+
+    /// Choose the best ear available and start on it. Preference decides the
+    /// order, evidence overrules it (`InputChoice`).
     func startWarm() throws {
+        try startWarm(avoiding: silentUIDs)
+    }
+
+    private func startWarm(avoiding silent: Set<String>) throws {
         guard !isRunning else { return }
+
+        let attached = AudioDevices.all()
+        // Recorded before the engine opens anything, so the private aggregate
+        // CoreAudio creates for us can never look like a device that arrived.
+        knownUIDs = Set(attached.map(\.device.uid))
+        let ordered = InputChoice.order(
+            attached.map(\.device), pinnedUID: nil, silent: silent)
+        // Bind before the tap is installed, or the tap belongs to whatever
+        // device the engine inherited.
+        if let choice = ordered.first,
+           let picked = attached.first(where: { $0.device.uid == choice.uid }),
+           let unit = engine.inputNode.audioUnit {
+            if AudioDevices.bind(unit, to: picked.id) {
+                currentDevice = picked.device
+            } else {
+                Self.log.error("could not bind to \(picked.device.name, privacy: .public)")
+                currentDevice = nil
+            }
+        }
 
         let input = engine.inputNode
         let inputFormat = input.outputFormat(forBus: 0)
@@ -64,6 +105,9 @@ actor AudioEngine {
         input.installTap(onBus: 0, bufferSize: 4800, format: inputFormat) { buffer, time in
             // ---- REAL-TIME THREAD. Part 1 §2 governs absolutely. ----
             // No await, no allocation, no locks, no logging, no concurrency.
+            // Health first, and unconditionally: a mic that is delivering
+            // nothing has to be knowable before a session is spent on it.
+            ring.observe(buffer)
             guard gate.isOpen else { return }
             ring.write(buffer, hostTime: time.hostTime)
             // ---------------------------------------------------------
@@ -72,7 +116,88 @@ actor AudioEngine {
         engine.prepare()
         try engine.start()
         isRunning = true
-        Self.log.info("warm engine running at \(inputFormat.sampleRate, privacy: .public) Hz")
+        lastSoundAt = Date()
+        Self.log.info(
+            """
+            warm engine running at \(inputFormat.sampleRate, privacy: .public) Hz \
+            on \(self.currentDevice?.name ?? "the system default", privacy: .public)
+            """
+        )
+    }
+
+    /// Move to the next ear when this one has stopped being a microphone.
+    ///
+    /// Polled from outside rather than timed in here, so the actor owns no
+    /// timer and the policy stays in one testable place (`InputChoice`).
+    /// Returns the device it moved to, or nil if nothing changed.
+    @discardableResult
+    func hopIfDeaf() -> InputChoice.Device? {
+        guard isRunning, !capturing.isOpen else { return nil }
+        if peak > 0 {
+            lastSoundAt = Date()
+            return nil
+        }
+        let silentFor = Date().timeIntervalSince(lastSoundAt)
+        guard InputChoice.isDead(peak: Float(peak), silentFor: silentFor) else { return nil }
+
+        // Nowhere to go is not a reason to keep re-deciding every second.
+        let attached = AudioDevices.all()
+        var candidates = silentUIDs
+        if let current = currentDevice { candidates.insert(current.uid) }
+        let ordered = InputChoice.order(
+            attached.map(\.device), pinnedUID: nil, silent: candidates)
+        guard let next = ordered.first, !candidates.contains(next.uid) else {
+            lastSoundAt = Date()
+            return nil
+        }
+
+        if let current = currentDevice {
+            Self.log.error(
+                """
+                \(current.name, privacy: .public) delivered nothing for \
+                \(Int(silentFor), privacy: .public)s; moving to \(next.name, privacy: .public)
+                """
+            )
+            silentUIDs.insert(current.uid)
+        }
+        stop()
+        try? startWarm(avoiding: silentUIDs)
+        return currentDevice
+    }
+
+    /// The device list changed under us: something was plugged in, unplugged,
+    /// or woke up. Without this the tap dies silently, which CLAUDE.md line
+    /// 1389 warns about and which was measured doing exactly that (0 buffers
+    /// fed after the default input changed beneath a running engine).
+    ///
+    /// Two things here are load-bearing, and both were learned by watching
+    /// this thrash:
+    ///
+    /// 1. **Only a real change counts.** Restarting the engine itself fires
+    ///    this notification, so acting on every one is an infinite loop:
+    ///    restart, notify, restart. Nothing happens unless the set of attached
+    ///    devices actually differs.
+    /// 2. **Only devices that just APPEARED get forgiven.** Clearing every
+    ///    silent verdict resurrected the dead built-in mic on every cycle. A
+    ///    device that has been present and silent all along stays written off;
+    ///    one that was just plugged in has earned a fresh hearing, because the
+    ///    reason it could not hear may have just been removed.
+    func devicesChanged() {
+        let attached = AudioDevices.all()
+        let present = Set(attached.map(\.device.uid))
+        guard present != knownUIDs else { return }
+
+        let appeared = present.subtracting(knownUIDs)
+        knownUIDs = present
+        silentUIDs.subtract(appeared)
+        silentUIDs.formIntersection(present)
+
+        // Still hearing fine on a device that is still attached: leave it be.
+        if let current = currentDevice, present.contains(current.uid), peak > 0, appeared.isEmpty {
+            return
+        }
+        stop()
+        try? startWarm(avoiding: silentUIDs)
     }
 
     /// Open the gate. Cheap by design: no engine start, so no spin-up latency

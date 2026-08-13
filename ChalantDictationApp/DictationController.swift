@@ -18,6 +18,9 @@ final class DictationController {
     private let inserter = InsertionChain()
     private let panel = ListeningPanel()
     private var meterTimer: Timer?
+    /// Polls the live microphone's health once a second, for the whole life of
+    /// the app, so a deaf ear is found before a session is spent on it.
+    private var healthTimer: Timer?
     private var transcriber: AppleTranscriber?
     private var pumpTask: Task<Void, Never>?
 
@@ -68,6 +71,49 @@ final class DictationController {
             Self.log.error("warm engine failed: \(error.localizedDescription, privacy: .public)")
             onStateChange?()
         }
+
+        watchInputDevices()
+    }
+
+    /// Keep the engine on an ear that can actually hear, for the whole life of
+    /// the app rather than only at launch.
+    ///
+    /// Two halves, because they answer different failures. The notification
+    /// covers a device arriving or leaving, which CLAUDE.md line 1389 warns
+    /// kills the tap silently, and which was measured doing exactly that: after
+    /// the default input changed under a running engine, the next session fed
+    /// **0 buffers**. The poll covers the quieter case that has no event at
+    /// all, a device that is attached and selected and simply produces
+    /// nothing, which is what a closed lid does to the built-in microphone.
+    private func watchInputDevices() {
+        NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.audio.devicesChanged()
+                if let ear = await self.audio.currentDevice {
+                    Self.log.info("input devices changed; now on \(ear.name, privacy: .public)")
+                }
+                self.onStateChange?()
+            }
+        }
+
+        healthTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if await self.audio.hopIfDeaf() != nil { self.onStateChange?() }
+            }
+        }
+        timer.tolerance = 0.25
+        healthTimer = timer
+    }
+
+    /// The name of the ear currently live, for the panel and the menu bar. A
+    /// wrong microphone must never be a mystery: that mystery cost an evening.
+    func liveInputName() async -> String? {
+        await audio.currentDevice?.name
     }
 
     // MARK: - The chain

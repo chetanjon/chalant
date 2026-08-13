@@ -461,3 +461,67 @@ accepted. The controller derives `isListening` from it, so there is one place
 the answer lives. The second deaf path is closed too: the `no ring handle`
 branch used to return with the app still listening, and now ends the session
 it cannot run.
+
+---
+
+## 2026-08-12 (late) — the microphone now has to prove it can hear
+
+**Requirement (founder):** "the mic should always work even when lid closed or
+open or wired or not or wireless etc etc."
+
+**What it was doing.** Lid closed, wired earphones plugged in. The built-in
+microphone was the system default and delivered **exactly 0.0** across 240,000
+frames while the Mac spoke aloud, measured by an independent tool with
+confirmed `authorized` mic access. The app faithfully captured 59 buffers of
+that nothing and showed "Listening…" throughout. The earphone mic was attached
+the whole time, reading **0.094** on room noise alone, and nothing ever tried
+it.
+
+**Second fault, caught live.** With the app running, changing the default
+input took it from `fed 59 buffers` to `fed 0 buffers`. The warm engine binds
+its tap at launch and never re-binds, exactly as CLAUDE.md line 1389 warns.
+
+**After the change, from the exact broken state** (default input forced back to
+the dead built-in, lid still closed), with no user action at all:
+
+```
+warm engine running at 48000.0 Hz on MacBook Air Microphone
+MacBook Air Microphone delivered nothing for 2s; moving to Microsoft Teams Audio
+warm engine running at 48000.0 Hz on Microsoft Teams Audio
+Microsoft Teams Audio delivered nothing for 2s; moving to External Microphone
+warm engine running at 48000.0 Hz on External Microphone
+```
+
+Then a spoken phrase, start to finish:
+
+```
+capturing
+fed 63 buffers
+utterance: 46 chars, finalize 0.073730s, insert 0.149434s,
+           outcome inserted(tier: systemEvents), ring overruns 0
+```
+
+TextEdit received: `Hello, this is a test of the dictation system.`
+
+| Check | Result |
+|---|---|
+| Recovers from a dead default input | ✅ 2 hops, ~5s, no user action |
+| Settles rather than thrashing | ✅ stops once an ear hears |
+| Words still land | ✅ Tier 1, 0.149s |
+| Latency regression | ❌ none (finalize 0.074s) |
+
+**Two bugs this test found in the first version of the fix**, both fixed before
+this entry was written:
+
+1. CoreAudio manufactures a private aggregate for the process holding the
+   default device (`CADefaultDeviceAggregate-<pid>-0`). Offered as a candidate,
+   the app hopped to its own reflection.
+2. Restarting the engine itself fires `AVAudioEngineConfigurationChange`, so
+   acting on every notification is an infinite loop, and clearing every silent
+   verdict on each one resurrected the dead built-in every cycle. Now only a
+   real change to the set of attached devices counts, and only devices that
+   just APPEARED are forgiven.
+
+**Not covered here:** wireless. "Cj Microphone" came and went during the
+session and was chosen once, but no Bluetooth headset was tested end to end.
+CLAUDE.md line 850 still wants 10 to 15 corpus recordings on AirPods.
