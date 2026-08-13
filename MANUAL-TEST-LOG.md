@@ -383,3 +383,81 @@ someone else's window.
 target was captured as the Comet browser even though TextEdit had just been
 activated, because `NSWorkspace.frontmostApplication` had not caught up. The
 lag is real and reproducible, not a one-off.
+
+---
+
+## 2026-08-12 — the hotkey could go permanently deaf, and never said so
+
+**Reported as:** "when i clicked opt the mic isnt working." Not a microphone
+fault. The app had been up since 17:23 and was wedged.
+
+**Measured on the wedged process, before any change.** Two synthetic left
+Option holds, fifteen seconds apart, against pid 61910:
+
+```
+flagsChanged leftOption down=true wasDown=false
+keyDown entered
+flagsChanged leftOption down=false wasDown=true
+keyUp entered, listening=true
+```
+
+Nothing else, either time. No `capturing`, no `fed N buffers`, no panel, no
+error. Which guard fired names the state exactly: `keyDown` returned at
+`guard !isListening` (a session was believed live) and `keyUp` returned at
+`guard isListening, let transcriber` (the transcriber was already gone). Both
+return without logging, so the app refused every key for three hours in total
+silence.
+
+**Relaunch fixed it**, which confirmed a stuck state rather than a broken mic:
+
+```
+keyDown entered
+capturing
+keyUp entered, listening=true
+fed 13 buffers
+nothing heard
+```
+
+**The race.** `keyDown` set `isListening` LAST, after the async setup
+(permission, format, prepare, begin). That gap measured **183ms** on this
+machine. A release landing inside it checked a flag still false, was dropped,
+and setup then went live with the key already up.
+
+**After the fix, same hardware, same synthetic keys.** A 60ms tap, which lands
+well inside the setup window:
+
+```
+keyDown entered
+keyUp entered, listening=false
+released while still starting; setup will stand down
+released while still starting; standing down without capturing
+```
+
+Then a normal 1.5s hold four seconds later, which is the assertion that
+matters, because this is what the old build could no longer do:
+
+```
+keyDown entered
+capturing
+keyUp entered, listening=true
+fed 15 buffers
+nothing heard
+```
+
+| Check | Result |
+|---|---|
+| Quick tap leaves the app listening | ❌ never (stands down) |
+| A later hold still captures | ✅ `fed 15 buffers` |
+| Refusals explain themselves | ✅ every `ignored` carries a reason |
+| Setup-to-capture latency | 94ms this run, no regression |
+| Words lost | ❌ nothing was captured to lose |
+
+`nothing heard` is correct in both runs: these were synthetic key events with
+nobody speaking. What they prove is the state machine, not the recogniser.
+
+**The fix:** `PushToTalk` is pure and tested (9 cases), including the one that
+would have caught this: after the race, the very next press must still be
+accepted. The controller derives `isListening` from it, so there is one place
+the answer lives. The second deaf path is closed too: the `no ring handle`
+branch used to return with the app still listening, and now ends the session
+it cannot run.

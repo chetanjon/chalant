@@ -23,7 +23,16 @@ final class DictationController {
 
     private(set) var assetState: SpeechAssetState = .checking
     private(set) var micPermission: MicPermission.Outcome = .pending
-    private(set) var isListening = false
+
+    /// The key's own state, which used to be a lone `isListening` flag set
+    /// after ~180ms of setup. A release landing inside that window was dropped
+    /// and the app went live behind the user, permanently deaf until relaunch.
+    /// `PushToTalk` holds the decision instead, and its tests hold the race.
+    private var key = PushToTalk()
+
+    /// Read by the menu bar (`App.swift`). Derived now, so there is exactly
+    /// one place the answer lives.
+    var isListening: Bool { key.state == .listening }
 
     /// M0 runs one locale. The en-IN versus en-US experiment that Part 2 §6
     /// calls the cheapest possible accuracy win belongs to M2, once the corpus
@@ -65,9 +74,23 @@ final class DictationController {
 
     func keyDown() async {
         Self.log.info("keyDown entered")
-        guard !isListening else { return }
+        switch key.press() {
+        case .begin:
+            break
+        case .ignored(let why):
+            // Never silent. A key that does nothing and explains nothing is
+            // half of the bug this state machine exists to end: the app
+            // refused every press for three hours and never said so once.
+            Self.log.error("key down refused: \(why, privacy: .public)")
+            return
+        case .capture, .abandon, .finish, .waitForSetup:
+            Self.log.error("key down: a press cannot mean any of those")
+            return
+        }
+
         guard assetState.isReady else {
             Self.log.error("ignoring key: assets are not ready")
+            key.setupFailed()
             return
         }
 
@@ -77,6 +100,7 @@ final class DictationController {
         micPermission = await MicPermission.ensure()
         guard micPermission == .granted else {
             Self.log.error("ignoring key: microphone not granted")
+            key.setupFailed()
             onStateChange?()
             return
         }
@@ -102,11 +126,33 @@ final class DictationController {
             try await transcriber.begin(locale: locale, bias: [])
         } catch {
             Self.log.error("could not begin transcription: \(error.localizedDescription, privacy: .public)")
+            key.setupFailed()
+            self.transcriber = nil
+            return
+        }
+
+        // Every line above this one was async, and the finger may have come up
+        // during any of them. This is the moment that used to go live
+        // regardless, with the key already released and nothing able to
+        // clear it.
+        switch key.ready() {
+        case .capture:
+            break
+        case .abandon:
+            Self.log.info("released while still starting; standing down without capturing")
+            await standDown(transcriber)
+            return
+        case .ignored(let why):
+            Self.log.error("setup finished but \(why, privacy: .public)")
+            await standDown(transcriber)
+            return
+        case .begin, .finish, .waitForSetup:
+            Self.log.error("ready: setup cannot mean any of those")
+            await standDown(transcriber)
             return
         }
 
         await audio.beginCapture()
-        isListening = true
         panel.show()
         startMeter()
         onStateChange?()
@@ -115,7 +161,11 @@ final class DictationController {
         // because its producer is a real-time thread that may not resume a
         // continuation (Part 1 §2).
         guard let ring = await audio.ringHandle() else {
+            // This used to return with the app still listening, which is the
+            // second way it could be left permanently deaf. Now the session
+            // it cannot run is the session it ends.
             Self.log.error("no ring handle; capture cannot be drained")
+            await abandonLiveSession(transcriber)
             return
         }
         Self.log.info("capturing")
@@ -132,8 +182,33 @@ final class DictationController {
 
     func keyUp() async {
         Self.log.info("keyUp entered, listening=\(self.isListening, privacy: .public)")
-        guard isListening, let transcriber else { return }
-        isListening = false
+        switch key.release() {
+        case .finish:
+            break
+        case .waitForSetup:
+            // The window that used to cost the session. The release is
+            // remembered rather than dropped, and `ready()` stands the setup
+            // down the moment it finishes.
+            Self.log.info("released while still starting; setup will stand down")
+            return
+        case .ignored(let why):
+            Self.log.error("key up refused: \(why, privacy: .public)")
+            return
+        case .begin, .capture, .abandon:
+            Self.log.error("key up: a release cannot mean any of those")
+            return
+        }
+
+        guard let transcriber else {
+            // The state machine makes this unreachable. If it ever happens
+            // anyway, it says so rather than leaving the app quietly deaf,
+            // which is precisely how the original bug hid.
+            Self.log.error("key up with a live session but no transcriber; session dropped")
+            stopMeter()
+            panel.hide()
+            onStateChange?()
+            return
+        }
 
         let releasedAt = Date()
         await audio.endCapture()
@@ -196,6 +271,34 @@ final class DictationController {
             """
         )
         onStateChange?()
+    }
+
+    /// Tear down a session that was prepared but never captured, because the
+    /// key came up during setup. Nothing was recorded, so there is nothing to
+    /// transcribe and nothing to insert: this only has to leave nothing
+    /// running. The key is already back at idle, so the next press works.
+    private func standDown(_ transcriber: AppleTranscriber) async {
+        do {
+            _ = try await transcriber.end()
+        } catch {
+            // Not swallowed (Part 1 §3): a transcriber that will not close is
+            // worth knowing about even when nobody is waiting on its text.
+            Self.log.error("stand-down finalize failed: \(error.localizedDescription, privacy: .public)")
+        }
+        self.transcriber = nil
+        onStateChange?()
+    }
+
+    /// End a session that went live and then could not run, closing the gate
+    /// and the panel the live path had already opened.
+    private func abandonLiveSession(_ transcriber: AppleTranscriber) async {
+        _ = key.release()
+        await audio.endCapture()
+        stopMeter()
+        panel.hide()
+        pumpTask?.cancel()
+        pumpTask = nil
+        await standDown(transcriber)
     }
 
     /// Drive the listening panel while the key is held.
