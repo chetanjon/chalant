@@ -16,6 +16,7 @@ struct GeneralSection: View {
     @AppStorage("openDelay") private var openDelay = 0.18
     @AppStorage("collapseDelay") private var collapseDelay = 0.05
     @AppStorage(VoiceController.pinnedUIDKey) private var voiceInputUID = ""
+    @AppStorage(Dictation.enabledKey) private var dictationOn = false
 
     @State private var launchAtLogin = false
     /// The mics on offer right now, refreshed each time this section
@@ -117,6 +118,34 @@ struct GeneralSection: View {
                     .accessibilityLabel("Microphone")
                 }
                 SettingNote("Automatic starts with the Mac's own mic and hops if it hears nothing.")
+            }
+
+            // A different job from the card above: that one turns speech into
+            // island commands, this turns speech into text wherever you were
+            // already typing. Its own card so the two are never confused.
+            SettingCard(title: "Dictation") {
+                if Dictation.isSupported {
+                    SettingToggle(label: "Hold to dictate", isOn: Binding(
+                        get: { dictationOn },
+                        set: { on in
+                            dictationOn = on
+                            // Act now rather than at next launch. Turning it on
+                            // is also what raises the Input Monitoring and
+                            // Accessibility asks, which is why it is off until
+                            // somebody chooses it.
+                            if on { Dictation.shared.start() } else { Dictation.shared.stop() }
+                        }))
+                    // Read off VoiceDoor, never written here, for the same
+                    // reason the tour's line is: the app must not describe a
+                    // gesture in one place and ship another.
+                    SettingNote(VoiceDoor.dictationLine(available: true) ?? "")
+                    SettingNote(
+                        "The first time you turn this on, macOS asks for Input Monitoring and "
+                        + "Accessibility. It needs both: one to notice the key, one to place the text."
+                    )
+                } else {
+                    SettingNote("Dictation needs macOS 26. The rest of Chalant does not.")
+                }
             }
 
             SettingCard(title: "Tour") {

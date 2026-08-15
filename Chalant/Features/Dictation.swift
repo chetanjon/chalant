@@ -17,6 +17,12 @@ import os
 final class Dictation {
     private static let log = Logger(subsystem: "com.cj.chalant", category: "dictation")
 
+    /// One instance, because the settings toggle and the app lifecycle both
+    /// need to reach the same event tap. Without this, turning the switch on
+    /// would only take effect after a relaunch, and a switch that appears to do
+    /// nothing is worse than no switch.
+    static let shared = Dictation()
+
     /// Whether this OS has the engine at all.
     static var isSupported: Bool {
         if #available(macOS 26, *) { return true }
