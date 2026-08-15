@@ -10,6 +10,14 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     from: 2.9.4
+  # Dictation's pure core, merged 2026-08-15 by git subtree so its 20 commits
+  # of history came along. The package boundary is kept on purpose: it lets
+  # Core stay Swift 6 `complete` while this app target stays 5.9 `targeted`,
+  # it preserves the rule that Core imports only Foundation, and it keeps its
+  # 48 swift-testing tests running untouched. Folding the files into
+  # Chalant/Features/ would mean porting all 48 to XCTest for nothing.
+  ChalantDictationCore:
+    path: Dictation
 targets:
   Chalant:
     type: application
@@ -45,6 +53,8 @@ targets:
         codeSign: true
         link: false
       - package: Sparkle
+      - package: ChalantDictationCore
+        product: ChalantDictationCore
     info:
       path: Chalant/Info.plist
       properties:
