@@ -25,15 +25,14 @@ targets:
     sources:
       - Chalant
       # Dictation's impure shell: audio capture, the Speech modules, the left
-      # Option event tap and the insertion ladder. App.swift was dropped in the
-      # merge (it carried @main and a second AppDelegate, both standalone-app
-      # furniture). Info.plist and the entitlements file stay on disk as the
-      # record of what the standalone bundle declared, but Chalant's own are
-      # what ship, so neither is compiled.
+      # Option event tap and the insertion ladder. The standalone app's own
+      # App.swift, Info.plist, entitlements and xcodegen spec are all deleted:
+      # a second buildable dictation app is how you get doubled text, and it
+      # happened on 2026-08-15 when the DerivedData build was caught pasting
+      # into the founder's terminal. Chalant's Info.plist and entitlements are
+      # a strict superset of what that bundle declared (verified before the
+      # delete), so nothing was lost with it.
       - path: Dictation/ChalantDictationApp
-        excludes:
-          - "Info.plist"
-          - "ChalantDictationApp.entitlements"
       # MediaRemote adapter (BSD 3-Clause, github.com/ungive/mediaremote-adapter):
       # perl loads the framework to stream any app's now-playing data.
       - path: Vendor/MediaRemoteAdapter/mediaremote-adapter.pl

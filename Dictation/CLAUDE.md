@@ -6,9 +6,21 @@
 
 ## WHERE THIS LIVES NOW (merged 2026-08-15)
 
-**This is no longer a separate repository.** It was merged into Chalant by
-`git subtree` on 2026-08-15, so its history came along and now lives in the moai repo
-under `Dictation/`. The old standalone repo at `~/projects/chalant-dictate` is retired.
+**This is no longer a separate repository, and there is no longer a second app.** It was
+merged into Chalant by `git subtree` on 2026-08-15, so its history came along and now lives
+in the moai repo under `Dictation/`. The old standalone repo at `~/projects/chalant-dictate`
+is retired.
+
+**The standalone bundle is deliberately unbuildable.** `project.yml`, `App.swift`,
+`Info.plist` and the entitlements file are all deleted, so `xcodegen` cannot produce a second
+`ChalantDictation.app`. That is not tidiness: on 2026-08-15 the old DerivedData build was
+caught still running and pasting its transcripts into the founder's terminal while a
+measurement was in progress. Two dictation apps listening at once is the doubled-text bug,
+and the only reliable fix is that the second one cannot exist. Chalant's own Info.plist and
+entitlements are a strict superset of what that bundle declared, verified before the delete.
+
+**If a stale `ChalantDictation` is still running on a machine, kill it and delete its
+DerivedData.** It has no login item, so it dies on reboot and does not come back.
 This file governs `Dictation/` only; the Chalant app's own conventions govern everything
 above it.
 
