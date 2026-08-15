@@ -15,9 +15,6 @@ import os
 /// system prompt, waits on the human rather than on an event timeout, and
 /// returns a status instead of an exception. The script's short timeout then
 /// only ever applies to a paste that is genuinely allowed.
-/// macOS 15+: the cached consent answer is held in a `Mutex`, which lives in
-/// the `Synchronization` module. Same reason as `AudioRing`.
-@available(macOS 15, *)
 enum AutomationPermission {
     private static let log = Logger(subsystem: "com.cj.chalant.dictation", category: "insert")
 

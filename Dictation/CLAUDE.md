@@ -15,8 +15,11 @@ above it.
 **The SETUP block that used to be here told an agent to create `~/projects/chalant-dictate`,
 copy this file there, and scaffold the package. All of that is done, and following it now
 would recreate the thing the merge just retired.** It also told you to STOP if macOS is
-below 26, which is no longer the right check: Core builds at **macOS 14** to match Chalant's
-public floor, and only `ASR/AppleTranscriber.swift` and `ASR/SpeechAssets.swift` need 26.
+below 26, which is no longer the right check. **Chalant's public floor is macOS 15** (raised
+from 14 on 2026-08-15 so the shared microphone layer could serve both features: the lock-free
+audio ring needs `Atomic` from `Synchronization`, which is 15+). Core itself still builds at
+14, and only `ASR/AppleTranscriber.swift`, `ASR/SpeechAssets.swift` and `DictationController`
+need 26.
 
 **Document precedence, settled 2026-08-15 after nine governing documents were found to
 contradict each other:**

@@ -9,7 +9,7 @@ import os
 /// using. Two doors, deliberately kept separate.
 ///
 /// This type exists to keep the availability dance in one file. Chalant ships a
-/// macOS 14 floor and `SpeechTranscriber` is macOS 26 with no backport, so the
+/// macOS 15 floor and `SpeechTranscriber` is macOS 26 with no backport, so the
 /// whole dictation stack lives behind `@available` and cannot be named from
 /// ordinary code. Everything below stores it as `AnyObject` and unwraps it
 /// inside one `#available` check.

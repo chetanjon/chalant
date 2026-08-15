@@ -11,10 +11,9 @@ import os
 /// bug dressed as an optimisation.
 ///
 /// Gated to macOS 26 because it owns `SpeechAssets` and `AppleTranscriber`, and
-/// `SpeechTranscriber` has no backport to Chalant's macOS 14 floor. The audio
-/// engine, the event tap and the whole insertion ladder below it compile
-/// against 14 and are deliberately left ungated, so the shared ear and the
-/// paste path stay usable by the command flow on older systems.
+/// `SpeechTranscriber` has no backport. Everything below it, the audio engine,
+/// the event tap and the insertion ladder, is ungated and reachable at Chalant's
+/// own macOS 15 floor, which is what lets the command flow share the same ear.
 @available(macOS 26, *)
 @MainActor
 final class DictationController {

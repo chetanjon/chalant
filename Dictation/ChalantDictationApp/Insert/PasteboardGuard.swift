@@ -41,10 +41,10 @@ actor PasteboardGuard {
         // Ask about policy before touching contents. §0.2: never read contents
         // just to check something.
         //
-        // `accessBehavior` arrived in macOS 15.4, and the merge dropped this
-        // code onto Chalant's macOS 14 floor. Below 15.4 the pasteboard privacy
-        // model does not exist at all, so there is no policy to ask about and
-        // no prompt to avoid: reading is unrestricted and preservation works.
+        // `accessBehavior` arrived in macOS 15.4 and Chalant's floor is 15.0,
+        // so this is still a real range. Below 15.4 the pasteboard privacy model
+        // does not exist at all, so there is no policy to ask about and no
+        // prompt to avoid: reading is unrestricted and preservation works.
         if #available(macOS 15.4, *) {
             if board.accessBehavior == .alwaysDeny {
                 if !warnedAboutPreservation {

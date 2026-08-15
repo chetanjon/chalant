@@ -18,8 +18,16 @@ One product should have one ear.
 
 ## What is settled
 
-1. **macOS floor: Chalant stays 14.0.** Dictation gates to 26. Not "raise
-   everything to 26". The README promises 14+ publicly (README.md:11, :99).
+1. **macOS floor: raised to 15.0 on 2026-08-15.** Dictation still gates to 26.
+   **This reverses the original decision and the reason is measured, not
+   preferential:** the shared microphone layer cannot serve a 14.0 floor.
+   `AudioRing` and `CaptureGate` are built on `Atomic`, and
+   `AutomationPermission` on `Mutex`, both from the `Synchronization` module,
+   which is macOS 15+. The only route to 14 is a lock inside the audio tap, and
+   Part 1 §2 forbids that absolutely. At 14.0 "one ear" would have meant one ear
+   on 15+ and two below it, which is the bug class the merge exists to end, so
+   the floor moved instead. Public copy in README.md:11, :99 and
+   docs/index.html moves with it.
 2. **Scope: one ear.** Device selection and the deaf-mic watchdog collapse into a
    single shared layer both features draw from.
 3. **Trigger: two doors, kept separate.** Hold left Option anywhere to dictate
@@ -33,7 +41,7 @@ are `@available(macOS 26, *)` with no backport.
 
 | | Chalant (moai) | ChalantDictation |
 |---|---|---|
-| Deployment target | **14.0** | **26.0** |
+| Deployment target | **15.0** (was 14.0) | **26.0** |
 | Swift / concurrency | 5.9, `targeted` | 6.0 (tools 6.2), `complete` |
 | Speech engine | `SFSpeechRecognizer`, cloud-permitted | `SpeechTranscriber`, on-device |
 | ARCHS | universal | arm64 |
@@ -71,7 +79,7 @@ not, and the ear is what broke twice.**
 
 - Turning the listening panel into the island. Moving the merge and the UI at
   once makes any failure ambiguous.
-- Moving commands onto `SpeechTranscriber`. Blocked by the 14.0 floor anyway.
+- Moving commands onto `SpeechTranscriber`. Blocked by the floor anyway: 15.0 is still far below 26.
 - The engine locale question (see below). It rides on the corpus, not the merge.
 
 ## Risks
@@ -121,3 +129,19 @@ correctly where `en-IN` returned mush, and matched `en-IN` on pure English.
 **Whether `mul-IN` becomes the default locale is a product decision that needs
 real-voice accuracy and warm latency numbers.** It changes one line at the
 transcriber, so it does not gate the merge.
+
+
+---
+
+## Release blocker recorded 2026-08-15
+
+**`scripts/check-landing-copy` fails on this branch and that is correct.** Raising
+the floor changed `docs/index.html` to "macos 15+", and the portfolio's second
+copy of that page (`chetanjon/portfolio`, `public/chalant.html:332`, served at
+chetanjonnalagadda.com/chalant, which is where most real downloads come from)
+still says "macos 14+".
+
+**It must not be changed before 1.13.0 actually ships.** Until then the current
+download really is macOS 14+, and moving the copy first would publish a false
+requirement on the page doing the selling. Both pages move together, in the
+release, or the check keeps failing for the right reason.

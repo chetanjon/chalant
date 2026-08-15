@@ -19,13 +19,6 @@ import Synchronization
 /// real rather than assumed: exactly one thread writes, exactly one reads, and
 /// the handoff is an acquire/release pair on the indices. Adding a lock to
 /// satisfy the checker would violate a hard invariant to satisfy a soft one.
-/// Gated to macOS 15 by the merge, and the reason is worth knowing: the
-/// lock-free ring is built on `Atomic` from the `Synchronization` module, which
-/// is macOS 15+. Chalant's floor is 14. The alternative would be a lock in the
-/// audio tap, and Part 1 §2 forbids that absolutely, so the floor rises rather
-/// than the invariant bending. See the merge notes: this is why "one ear" is
-/// one ear on macOS 15 and later, not on 14.
-@available(macOS 15, *)
 final class AudioRing: @unchecked Sendable {
     /// Slot count. Each slot holds `frameCapacity` frames, so at 48kHz with
     /// 4800-frame slots this is ~1.6s of cushion before the consumer must

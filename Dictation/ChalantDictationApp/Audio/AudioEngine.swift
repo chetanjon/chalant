@@ -9,8 +9,6 @@ import os
 /// the tap closure. Wrapping it in a final class gives the tap one object to
 /// hold by reference, which is also what keeps the read on the audio thread a
 /// single relaxed load with no bridging.
-/// macOS 15+: `Atomic` lives in the `Synchronization` module. See AudioRing.
-@available(macOS 15, *)
 final class CaptureGate: @unchecked Sendable {
     private let flag = Atomic<Bool>(false)
     var isOpen: Bool { flag.load(ordering: .relaxed) }
@@ -32,9 +30,6 @@ final class CaptureGate: @unchecked Sendable {
 /// session are discarded and never written anywhere, and the privacy page has
 /// to say so plainly. Getting caught not mentioning it is the story; saying it
 /// first is a non-issue.
-/// macOS 15+, inherited from `AudioRing` and `CaptureGate`. Everything else
-/// here would compile at 14; the atomics are the whole reason it cannot.
-@available(macOS 15, *)
 actor AudioEngine {
     private static let log = Logger(subsystem: "com.cj.chalant.dictation", category: "audio")
 

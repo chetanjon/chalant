@@ -8,7 +8,7 @@ The name: chalant is nonchalant without the non. French chaloir meant to care; n
 
 ## Download
 
-[**Download Chalant.dmg**](https://github.com/chetanjon/chalant/releases/latest/download/Chalant.dmg), always the newest build. Apple Silicon, macOS 14+, free. (Release notes live on the [releases page](https://github.com/chetanjon/chalant/releases/latest).) Or through Homebrew:
+[**Download Chalant.dmg**](https://github.com/chetanjon/chalant/releases/latest/download/Chalant.dmg), always the newest build. Apple Silicon, macOS 15+, free. (Release notes live on the [releases page](https://github.com/chetanjon/chalant/releases/latest).) Or through Homebrew:
 
 ```bash
 brew install --cask chetanjon/chalant/chalant
@@ -96,7 +96,7 @@ macOS will ask once each for: Microphone + Speech Recognition (first hold-to-tal
 
 ## Run it (on your Mac)
 
-Needs macOS 14+ and Xcode installed.
+Needs macOS 15+ and Xcode installed.
 
 ```bash
 brew install xcodegen

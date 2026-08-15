@@ -22,8 +22,6 @@ import os
 /// release build has no observer at all, so nothing outside can ask a shipped
 /// Chalant to type into the user's apps.
 @MainActor
-/// macOS 15+, inherited from `InsertionChain`. Debug builds only.
-@available(macOS 15, *)
 enum InsertionTestHook {
     private static let log = Logger(subsystem: "com.cj.chalant.dictation", category: "insert")
     static let notification = Notification.Name("com.cj.chalant.dictation.testInsert")
