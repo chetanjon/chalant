@@ -616,3 +616,44 @@ hardened runtime.
 **Not covered:** a human holding the key rather than a synthetic event, a real
 notarized+stapled artifact, AirPods, and the 12-app M1 grid, which this run did
 not attempt. Only TextEdit and VS Code were targeted.
+
+### Insertion grid, same day, merged Release binary
+
+Re-run because the grid that passed before ran against the standalone
+development-signed Debug bundle. The insertion code is byte-identical after the
+merge, but the binary, the signing identity and the hardened runtime are not.
+
+Driven synthetically: left Option held via `CGEvent` `flagsChanged`, speech from
+`say`, target focused by `activate` only. Browsers used a local page with an
+`autofocus` textarea so no synthetic click was needed to place the caret.
+
+| App | Bundle | Class | Tier | finalize | insert |
+|---|---|---|---|---|---|
+| TextEdit | `com.apple.TextEdit` | native | **1** | 0.084s | 0.092s |
+| Safari | `com.apple.Safari` | WebKit | **1** | 0.148s | 0.387s |
+| Chrome | `com.google.Chrome` | Chromium, async pasteboard | **1** | 0.157s | 0.045s |
+| VS Code | `com.microsoft.VSCode` | Electron | **1** | 0.047s | 0.092s |
+| Cursor | `com.todesktop.230313mzl4w4u92` | Electron | **1** | 0.171s | 0.052s |
+
+**Five for five at Tier 1. Zero text-loss events. `ring overruns 0` on every
+run.** Chrome matters most of these: it is the async-pasteboard case the 1.5s
+restore delay exists for, and it inserted in 45ms.
+
+**The M1 gate is NOT passed by this run and is not claimed to be.** It wants 10
+of 12 apps, and this covers 5. What it does establish is that every
+*architectural class* in the grid passes with the merged binary.
+
+**Deliberately not attempted, with reasons rather than omissions:**
+
+| App | Why not |
+|---|---|
+| Messages, Mail | An errant Return sends to a real person |
+| Xcode | Insertion would modify a real project; its autocomplete-rewrites-after-insert case remains untested |
+| Terminal | Text would be left at a live shell prompt with no authorized way to clear it from here. The `sudo` secure-input case is the valuable one and needs a human |
+| Slack | Installed but not attempted |
+| Notion, iTerm2, Figma | Not installed on this machine |
+
+Also unverified: read-back of what landed. `osascript` here is not authorized to
+send Apple Events into Safari, so the evidence for these cells is the insertion
+log rather than the text. TextEdit was read back directly and did contain the
+dictated sentence.
