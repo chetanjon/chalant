@@ -24,6 +24,16 @@ targets:
     platform: macOS
     sources:
       - Chalant
+      # Dictation's impure shell: audio capture, the Speech modules, the left
+      # Option event tap and the insertion ladder. App.swift was dropped in the
+      # merge (it carried @main and a second AppDelegate, both standalone-app
+      # furniture). Info.plist and the entitlements file stay on disk as the
+      # record of what the standalone bundle declared, but Chalant's own are
+      # what ship, so neither is compiled.
+      - path: Dictation/ChalantDictationApp
+        excludes:
+          - "Info.plist"
+          - "ChalantDictationApp.entitlements"
       # MediaRemote adapter (BSD 3-Clause, github.com/ungive/mediaremote-adapter):
       # perl loads the framework to stream any app's now-playing data.
       - path: Vendor/MediaRemoteAdapter/mediaremote-adapter.pl

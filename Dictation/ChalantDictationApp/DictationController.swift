@@ -9,6 +9,13 @@ import os
 /// Part 2 §4: this is a sequential async chain rather than a task group,
 /// because stage ordering is semantic. Parallelising it would be a correctness
 /// bug dressed as an optimisation.
+///
+/// Gated to macOS 26 because it owns `SpeechAssets` and `AppleTranscriber`, and
+/// `SpeechTranscriber` has no backport to Chalant's macOS 14 floor. The audio
+/// engine, the event tap and the whole insertion ladder below it compile
+/// against 14 and are deliberately left ungated, so the shared ear and the
+/// paste path stay usable by the command flow on older systems.
+@available(macOS 26, *)
 @MainActor
 final class DictationController {
     private static let log = Logger(subsystem: "com.cj.chalant.dictation", category: "session")

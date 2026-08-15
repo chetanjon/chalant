@@ -13,6 +13,10 @@ import os
 /// user's text, so the floor is always reachable and always leaves the words
 /// somewhere recoverable. Part 0 §0.3: "event sent" is not "text landed", so
 /// no tier reports success it has not verified.
+/// macOS 15+, inherited from `AutomationPermission`'s `Mutex`. The ladder
+/// itself, its tier policy and its demotion logic are all pure and live in
+/// Core at the macOS 14 floor; only this shell carries the gate.
+@available(macOS 15, *)
 actor InsertionChain: TextInserter {
     private static let log = Logger(subsystem: "com.cj.chalant.dictation", category: "insert")
 

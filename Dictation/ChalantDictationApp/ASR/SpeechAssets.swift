@@ -31,6 +31,12 @@ enum SpeechAssetState: Sendable, Equatable {
 ///
 /// M0's acceptance criterion depends on this: per §0.6 the milestone accepts
 /// only if "not installed yet" is handled without a crash or a hang.
+///
+/// Gated to macOS 26 by the merge: Chalant ships a macOS 14 floor and promises
+/// it publicly, while `SpeechTranscriber` and `AssetInventory` have no backport.
+/// `SpeechAssetState` above stays ungated on purpose, so callers below 26 can
+/// still describe why dictation is unavailable.
+@available(macOS 26, *)
 actor SpeechAssets {
     private static let log = Logger(subsystem: "com.cj.chalant.dictation", category: "assets")
 

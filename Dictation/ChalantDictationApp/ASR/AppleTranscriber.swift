@@ -14,6 +14,11 @@ import os
 /// smoke test that runs immediately after M0. M0 uses `SpeechTranscriber`
 /// because M0 applies no bias, so the difference cannot bite yet, and the seam
 /// makes the swap cheap when the experiment answers.
+/// Gated to macOS 26 by the merge. `SpeechAnalyzer`, `SpeechTranscriber` and
+/// `AnalyzerInput` have no backport, and Chalant's floor is macOS 14. The
+/// `Transcriber` protocol it conforms to lives in Core and stays ungated, so a
+/// future engine could serve older systems through the same seam.
+@available(macOS 26, *)
 actor AppleTranscriber: Transcriber {
     private static let log = Logger(subsystem: "com.cj.chalant.dictation", category: "asr")
 
