@@ -81,15 +81,21 @@ targets:
         NSHighResolutionCapable: true
         CFBundleIconFile: AppIcon
         CFBundleDisplayName: Chalant
-        NSAppleEventsUsageDescription: Chalant controls your music players and sends the Messages you dictate, nothing more.
+        # "nothing more" was true until 2026-08-15 and is not any more:
+        # dictation asks System Events to paste into whatever app you are in,
+        # which is a far larger capability than controlling a music player.
+        # Leaving the old sentence would have shipped a false bound in the one
+        # dialog where a user decides whether to trust the app, which is the
+        # same failure the 2026-08-12 audit caught in the weather copy.
+        NSAppleEventsUsageDescription: "Chalant asks System Events to paste your dictated text into the app you were using. It also controls your music players and sends the Messages you dictate."
         NSContactsUsageDescription: Chalant looks up the person you name so a message reaches the right number.
         # Dictation is macOS's own, and macOS sends it to Apple when the
         # local speech model is not ready (VoiceController sets
         # requiresOnDeviceRecognition false on purpose, for reliability).
         # These two strings are the one place a user actually reads, so
         # they say what really happens rather than what we would prefer.
-        NSMicrophoneUsageDescription: "Hold the notch to talk. macOS turns your speech into text on this Mac when its local model is ready, and through Apple's dictation service when it is not."
-        NSSpeechRecognitionUsageDescription: "Turns your words into actions. The transcription is macOS dictation, which runs on this Mac when its local model is ready and through Apple's service when it is not. The answer itself never leaves."
+        NSMicrophoneUsageDescription: "Hold the notch to talk to Chalant, or hold left Option to dictate into whatever you are typing in. Dictation is transcribed entirely on this Mac. Island commands use macOS dictation, which goes to Apple's service when the local model is not ready."
+        NSSpeechRecognitionUsageDescription: "Turns your words into text at your cursor, and into actions on the island. Dictation runs entirely on this Mac. Island commands use macOS dictation, which runs here when its local model is ready and through Apple's service when it is not. The answer itself never leaves."
         NSRemindersFullAccessUsageDescription: Chalant creates the reminders you set.
         NSCalendarsFullAccessUsageDescription: Chalant adds events and reads today's agenda.
         # Both spellings on purpose: macOS reads the classic key, but
