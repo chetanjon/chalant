@@ -1,0 +1,50 @@
+# xcodegen, matching Chalant's own tooling so the project file stays generated
+# rather than hand-edited. `xcodegen` then `xcodebuild -scheme ChalantDictation`.
+name: ChalantDictation
+options:
+  bundleIdPrefix: com.cj
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+
+packages:
+  ChalantDictationCore:
+    path: .
+
+targets:
+  ChalantDictation:
+    type: application
+    platform: macOS
+    sources:
+      - path: ChalantDictationApp
+    dependencies:
+      - package: ChalantDictationCore
+        product: ChalantDictationCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cj.chalant.dictation
+        # Without a team, Xcode ad-hoc signs and SILENTLY DROPS the
+        # entitlements file, leaving only get-task-allow. That is the same
+        # failure class that left Chalant's calendar broken for nine releases:
+        # a missing entitlement reads as a code bug, never as a signing one.
+        # NOT xcodegen's `entitlements:` key: that GENERATES the file from
+        # `properties:` and silently writes an empty dict over a hand-written
+        # one. Chalant uses this plain setting for the same reason.
+        # Same trap as the entitlements below, and it bit twice: xcodegen's
+        # `info:` key GENERATES an Info.plist from `properties:` and wipes a
+        # hand-written one. Without NSMicrophoneUsageDescription macOS simply
+        # never prompts, and the app records silence forever with no error.
+        INFOPLIST_FILE: ChalantDictationApp/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ChalantDictationApp/ChalantDictationApp.entitlements
+        DEVELOPMENT_TEAM: WV59PZX4A3
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "Apple Development"
+        MARKETING_VERSION: "0.0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        # Part 2 §1: Apple Silicon only. No Intel fallback that could route
+        # audio off-device.
+        ARCHS: arm64
+        ENABLE_HARDENED_RUNTIME: YES
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        GENERATE_INFOPLIST_FILE: NO

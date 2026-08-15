@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Part 2 §5. Hardened runtime on, and NO sandbox entitlement, ever:
+	     Part 2 §1 locks sandbox off permanently because AppleScript to
+	     System Events and Accessibility both require it. The Mac App Store
+	     is out of scope forever. Do not add one "for safety".
+
+	     This file is hand-written and referenced by CODE_SIGN_ENTITLEMENTS.
+	     Do NOT move it under xcodegen's `entitlements:` key: that generates
+	     the file and will overwrite this with an empty dict. -->
+
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+</dict>
+</plist>
