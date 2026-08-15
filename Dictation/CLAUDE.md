@@ -1,34 +1,44 @@
 # Chalant Dictation — complete build package
 
-**If you are Claude Code reading this: follow SETUP below before anything else.**
+**SETUP IS DONE. Do not run it. It has been replaced by the section below.**
 
 ---
 
-## SETUP (agent instructions — run first)
+## WHERE THIS LIVES NOW (merged 2026-08-15)
 
-This file may be sitting in ~/Downloads or another temporary location. Fix that first:
+**This is no longer a separate repository.** It was merged into Chalant by
+`git subtree` on 2026-08-15, so its history came along and now lives in the moai repo
+under `Dictation/`. The old standalone repo at `~/projects/chalant-dictate` is retired.
+This file governs `Dictation/` only; the Chalant app's own conventions govern everything
+above it.
 
-1. Create the project directory if it does not exist: `~/projects/chalant-dictate`
-2. Copy this file there as exactly `CLAUDE.md` (rename in the copy).
-3. `cd` into that directory. All work happens there — never in Downloads.
-4. Verify the environment and STOP if either check fails, reporting what you found:
-   - `sw_vers` → must be macOS 26 or later
-   - `uname -m` → must be `arm64`
-5. Extract Appendix A verbatim to `corpus-kit/score.py` and Appendix B verbatim to
-   `corpus-kit/record.sh`, then `chmod +x corpus-kit/record.sh`.
-6. Self-check: `python3 corpus-kit/score.py --help` exits 0 and `bash -n corpus-kit/record.sh`
-   is silent. If either fails, the extraction broke — re-extract, do not hand-fix.
-7. Scaffold per Part 2 §2: SPM package `ChalantDictationCore` with the protocol seams from §3,
-   plus a thin `ChalantDictationApp` Xcode target with the Info.plist keys and entitlements
-   from §5. Create empty `MANUAL-TEST-LOG.md`, `EVAL-LOG.md`, `THIRD-PARTY.md`.
-8. Do NOT implement any milestone. Stop when `swift build` and `swift test` pass on an empty
-   test suite. Then report: (a) the environment check results, (b) what you created,
-   (c) every decision you had to make that this document did not cover.
+**The SETUP block that used to be here told an agent to create `~/projects/chalant-dictate`,
+copy this file there, and scaffold the package. All of that is done, and following it now
+would recreate the thing the merge just retired.** It also told you to STOP if macOS is
+below 26, which is no longer the right check: Core builds at **macOS 14** to match Chalant's
+public floor, and only `ASR/AppleTranscriber.swift` and `ASR/SpeechAssets.swift` need 26.
 
-After setup, the user tells you when to start M0 (Part 3). Parts 0–3 are your standing
-contract for every session in this repo. Parts 5–9 are research reference — consult when a
-specific decision touches them; safe to delete after M2 to reclaim context. **Part 0 is
-never deleted** — it carries corrections that override everything else.
+**Document precedence, settled 2026-08-15 after nine governing documents were found to
+contradict each other:**
+
+1. **Measurement on this machine** beats every document. See `verification/PHASE0_SDK_TRUTH.md`.
+2. **Part 0 below**, on platform facts. It is measured and reconciled from three passes.
+3. **`CJ_Dictation_Intelligence_Build_Spec.md`**, on intelligence architecture and the
+   production hardening in its §27 to §36, which have no equivalent here.
+4. **Part 1 below**, the agent contract, which applies always.
+5. The research reports as evidence, never as instructions.
+
+**The full ledger of contradictions and their resolutions is `verification/DOCUMENT_CONFLICTS.md`.
+Read it before trusting any single document, including this one.** Three examples of why:
+the CJ spec builds punctuation on `.audioTimeRange`, which is measured here as unable to
+detect a pause at all (32 of 32 inter-word gaps are exactly zero); Part 0 §0.6 says
+`SpeechDetector` cannot compose with a transcriber, which was true on an earlier point
+release and is fixed in SDK 26.5; and Part 0 §0.1's `contextualStrings` finding still holds
+but the API is a dictionary keyed by tag, not the flat array every document shows.
+
+Parts 0 to 3 are the standing contract. Parts 5 to 9 are research reference, safe to delete
+after M2. **Part 0 is never deleted** — it carries corrections that override everything
+below it.
 
 ---
 
