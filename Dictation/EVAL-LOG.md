@@ -64,3 +64,70 @@ the decision would have gone the wrong way on a filter bug.
 Any code consuming this module must keep the last volatile span. Assets are
 also per-module: `SpeechTranscriber` being installed says nothing about
 `DictationTranscriber`.
+
+## 2026-08-15 — first baseline, on the founder's voice
+
+**60 of the 150 recorded.** Sets C (semantic torture, 30, locked) and D
+(code-switched Telugu/Hindi-English, 30, six sentences said three times each).
+Sets A, B and E are not recorded: they must be spontaneous and the app cannot
+yet keep its own audio.
+
+Corpus lives at `~/Desktop/chalant-corpus`. Built-in MacBook Air microphone,
+lid open, normal room, nothing else listening.
+
+### The numbers
+
+| locale | English (torture, locked) | code-switched (dev) |
+|---|---|---|
+| **`en_US`** | **20.00** | 102.34 |
+| `en_IN` | 22.67 | 103.12 |
+| `mul_IN` | 42.67 | **46.88** |
+
+Corrections per 100 words. **`en_US` is 2.1x better on English; `mul_IN` is 2.2x
+better on code-switching. Neither wins both**, so "make `mul-IN` the default"
+is not supportable as stated. It is a routing decision, or it waits for ITN.
+
+Latency from the same day's manual test, not from this corpus: finalize
+0.043-0.207s, insert 0.007-0.092s warm, roughly **0.05-0.23s key-release to
+visible**. Part 0 §0.5's 1.45s/2.2s does not reproduce.
+
+### Where the English errors actually are
+
+```
+number        25  (56% of all errors)
+other         18  (40%)
+proper_noun    2  (4%)
+```
+
+**More than half of what is left in English is numbers**, and the failures are
+specific rather than diffuse:
+
+| said | wanted | got |
+|---|---|---|
+| nine thirty to ten fifteen | `9:30 to 10:15` | `93, 932, 1015` |
+| nine ninety nine ... ninety nine | `$9.99 ... $99` | `999 ... 99` |
+| forty attendees, not fourteen | `40 attendees, not 14` | `4 tea attendees, not 14` |
+| three fifteen, not three fifty | `3:15, not 3:50` | `315, not 350` |
+
+**Times and currency are the worst classes.** Apple normalises bare quantities
+well ("fifteen" to "15") and falls apart on structured ones. That is M3's
+target, and it is worth roughly half the English error rate.
+
+Also caught by the locked set, and it is the whole product thesis in one line:
+`jonnalagadda8800@gmail.com` came back as `Junalagadda 8800@gmail.com`. **The
+founder's own surname**, in the set that gates the fidelity claim.
+
+And the semantic torture set did its job on its first run: `Email Sarah about
+it, not Sara` came back as `not Sarah`. A meaning-changing name collapse, which
+is exactly the failure class the set exists to catch.
+
+### What this baseline is NOT
+
+- **Not the full corpus.** 60 of 150, and the two sets that are missing (rare
+  terms, ordinary prose) are the ones that would move the proper-noun number.
+- **Not clean of harness effects.** 14 of 60 still do not start on the first
+  word. A first pass lost the opening word of **48 of 60** because the recorder
+  started capture after the audible cue finished; fixed by capturing first, and
+  the old takes are kept as `audio-C-v1` / `audio-D-v1`.
+- **Slightly pessimistic on labels.** `$1,200` was scored against `$1200`, which
+  is a convention argument rather than an error.
