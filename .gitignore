@@ -3,3 +3,4 @@
 *.xcodeproj/
 DerivedData/
 corpus/audio/
+verification/metaprobe
