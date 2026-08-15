@@ -525,3 +525,94 @@ this entry was written:
 **Not covered here:** wireless. "Cj Microphone" came and went during the
 session and was chosen once, but no Bluetooth headset was tested end to end.
 CLAUDE.md line 850 still wants 10 to 15 corpus recordings on AirPods.
+
+---
+
+## 2026-08-15 — the merge, on the Release build
+
+**The question this answers:** the merge design listed "the event tap under a
+notarized hardened-runtime Release build" as an unverified risk that could turn
+1.13.0 into a different release. Every earlier test in this file ran against a
+development-signed Debug bundle. This one did not.
+
+**Test article:** `Chalant.app`, Release configuration, `Developer ID
+Application: Chetan Jonnalagadda (WV59PZX4A3)`, `flags=0x10000(runtime)`, same
+bundle ID as the shipping app. Unnotarized, which changes Gatekeeper's launch
+policy and nothing about runtime capability. Installed Chalant 1.12.4 and the
+standalone `ChalantDictation` both quit first.
+
+**Result: the tap works there.** Full chain, driven by a synthetic left Option
+hold (keycode 58, `flagsChanged`, flag `0x20`, posted to `.cghidEventTap`) with
+speech from `say`:
+
+```
+flagsChanged leftOption down=true wasDown=false
+keyDown entered → capturing
+flagsChanged leftOption down=false wasDown=true
+keyUp entered, listening=true → fed 49 buffers
+inserted at tier 1 into com.apple.TextEdit
+```
+
+Said "hello world this is a test of chalant dictation", TextEdit received
+"How long world is this a test of challenge dictation?". The mishearings are a
+speaker playing into a microphone, and `chalant` → `challenge` is exactly the
+rare-term failure M4 and M5 exist to fix.
+
+| Check | Result |
+|---|---|
+| Event tap installs under hardened runtime | ✅ |
+| Event tap RECEIVES keys there | ✅ |
+| Speech assets resolve | ✅ `en_US: available` |
+| Insertion Tier 1 (System Events) lands | ✅ `com.apple.TextEdit` |
+| Never-lose-text invariant | ✅ see below |
+| Ring overruns | ✅ 0, every run |
+
+**The invariant was tested for real, by accident, and it held.** The first
+utterance ran before Accessibility was granted. Every tier failed and the
+outcome was `leftOnClipboard(reason: "Press ⌘V to paste it.")` rather than
+silent loss.
+
+**What the test found, and it is the reason to run tests on real hardware:**
+
+| utterance | finalize | insert |
+|---|---|---|
+| 1st (no Accessibility yet) | 0.150s | 0.145s → clipboard floor |
+| **2nd, first real insert** | 0.137s | **3.644s** |
+| 3rd | 0.134s | 0.007s |
+| 4th | 0.043s | 0.044s |
+
+The first insertion of a session cost **3.6 seconds** and every one after it
+cost single-digit to low-double-digit milliseconds. It is not the paste: macOS
+keeps System Events asleep and the first insertion pays to start it, while the
+user watches their words not appear. Fixed by waking System Events in
+`warmUp()` (`AutomationPermission.warm()`, which asks for nothing and so does
+not violate Part 2 §5's ban on prompting at launch).
+
+**Re-measured after the fix, first insert of a cold launch, System Events
+killed beforehand:**
+
+```
+utterance: 71 chars, finalize 0.083528s, insert 0.091947s,
+           outcome inserted(tier: systemEvents), ring overruns 0
+```
+
+**3.644s → 0.092s.** Warm end to end is roughly 0.05 to 0.18s, which does not
+reproduce Part 0 §0.5's 1.45s-with-preheat or 2.2s-cold figures even under the
+hardened runtime.
+
+**Two other facts worth carrying:**
+
+- **Synthetic left Option events DO reach the tap on this Mac**, contrary to the
+  macOS 26.5 report that CGEvents are silently dropped. They arrive only once
+  Input Monitoring is granted; before that the tap installs, logs "event tap
+  installed", and receives nothing but `tapDisabled` events, which are delivered
+  regardless of the mask. **"Installed" is not "hearing."**
+- **`tccd` logs `Failed to match existing code requirement for subject
+  com.cj.chalant and service kTCCServiceMicrophone`.** That is the XCTest host,
+  not the app: `ChalantTests` runs Chalant as its host signed *Apple
+  Development* while the shipping app is *Developer ID*, so the requirements
+  cannot match. Microphone-dependent XCTests can never get real mic access here.
+
+**Not covered:** a human holding the key rather than a synthetic event, a real
+notarized+stapled artifact, AirPods, and the 12-app M1 grid, which this run did
+not attempt. Only TextEdit and VS Code were targeted.

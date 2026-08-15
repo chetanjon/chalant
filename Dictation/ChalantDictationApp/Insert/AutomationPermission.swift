@@ -32,6 +32,23 @@ enum AutomationPermission {
     /// the user may be in System Settings turning it on right now.
     private static let grantedOnce = Mutex(false)
 
+    /// Wake System Events, and ask for nothing.
+    ///
+    /// **Measured 2026-08-15 on the Release build:** the first insertion of a
+    /// session took **3.644s** while the next two took 0.007s and 0.044s. The
+    /// cost is not the paste. macOS keeps System Events asleep, and the first
+    /// insertion pays to start it while the user watches their words not
+    /// appear. One three-second hang costs more trust than a slow median ever
+    /// does, so that wait moves off the path the user feels.
+    ///
+    /// Deliberately does NOT call `ensureSystemEvents`: that can raise the
+    /// Automation prompt, and Part 2 §5 forbids asking for anything at launch.
+    /// Waking a faceless helper asks nothing and shows nothing.
+    static func warm() async {
+        guard !isSystemEventsRunning else { return }
+        await launchSystemEvents()
+    }
+
     /// Part 2 §5 wants permissions asked lazily and one at a time, so this is
     /// called on the first insertion rather than at launch.
     static func ensureSystemEvents(askUser: Bool = true) async -> Outcome {

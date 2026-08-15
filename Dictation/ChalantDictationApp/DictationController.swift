@@ -78,6 +78,13 @@ final class DictationController {
             onStateChange?()
         }
 
+        // The insertion path has a cold start too, and it is the biggest one
+        // in the whole chain: 3.644s on the first insert against 0.007s on the
+        // second, measured on the Release build. Warming the ear and the model
+        // while leaving that in place would have left the very first dictation
+        // the slowest thing the user ever sees.
+        await AutomationPermission.warm()
+
         watchInputDevices()
     }
 
