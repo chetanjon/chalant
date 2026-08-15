@@ -24,11 +24,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let updater = SPUStandardUpdaterController(
         startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil
     )
+    /// Hold left Option to dictate. Off until the user asks for it, because
+    /// starting it is what raises the Input Monitoring and Accessibility
+    /// prompts, and nobody updating Chalant asked to be interrupted by two.
+    /// Built at launch rather than stored inline: it is main-actor isolated
+    /// and a stored initializer here runs nonisolated.
+    private var dictation: Dictation?
 
     func applicationWillTerminate(_ notification: Notification) {
         // Stop the media bridge stream so no perl child outlives us.
         notchController?.viewModel.music.shutdown()
         notchController?.viewModel.activityServer.stop()
+        // A live event tap outliving the process would be a key nothing
+        // answers, which is how the standalone build wedged.
+        dictation?.stop()
         // And no recording of the last thing said.
         VoiceController.sweepRecordings()
     }
@@ -76,6 +85,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if UserDefaults.standard.bool(forKey: "showInDock") {
             NSApp.setActivationPolicy(.regular)
         }
+
+        // Hold-to-dictate, if this machine can and the user has said yes.
+        // Silent and free when either is false, so a macOS 14 install or
+        // somebody who has never opened the switch pays nothing for it.
+        let dictation = Dictation()
+        dictation.start()
+        self.dictation = dictation
 
         // The island itself
         let controller = NotchWindowController()
