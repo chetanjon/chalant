@@ -17,6 +17,7 @@ struct GeneralSection: View {
     @AppStorage("collapseDelay") private var collapseDelay = 0.05
     @AppStorage(VoiceController.pinnedUIDKey) private var voiceInputUID = ""
     @AppStorage(Dictation.enabledKey) private var dictationOn = false
+    @AppStorage(CorpusCapture.enabledKey) private var captureCorpus = false
 
     @State private var launchAtLogin = false
     /// The mics on offer right now, refreshed each time this section
@@ -142,6 +143,17 @@ struct GeneralSection: View {
                     SettingNote(
                         "The first time you turn this on, macOS asks for Input Monitoring and "
                         + "Accessibility. It needs both: one to notice the key, one to place the text."
+                    )
+                    SettingDivider()
+                    // Everywhere else this app goes out of its way NOT to keep
+                    // what you said. This does the opposite, so it gets a
+                    // switch you can see rather than a hidden default.
+                    SettingToggle(label: "Keep recordings to improve accuracy", isOn: $captureCorpus)
+                    SettingNote(
+                        "Off. Turn it on and Chalant saves the audio and text of everything you "
+                        + "dictate to a folder on your Desktop, so the accuracy can be measured "
+                        + "against your real voice. Nothing is uploaded. Turn it off and it stops; "
+                        + "delete the folder and it is gone."
                     )
                 } else {
                     SettingNote("Dictation needs macOS 26. The rest of Chalant does not.")

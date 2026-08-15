@@ -29,6 +29,9 @@ final class DictationController {
     private var healthTimer: Timer?
     private var transcriber: AppleTranscriber?
     private var pumpTask: Task<Void, Never>?
+    /// Turns a real day of dictating into the spontaneous half of the corpus.
+    /// Off unless explicitly switched on; see `CorpusCapture`.
+    private let corpus = CorpusCapture()
 
     private(set) var assetState: SpeechAssetState = .checking
     private(set) var micPermission: MicPermission.Outcome = .pending
@@ -181,6 +184,12 @@ final class DictationController {
         // Part 0 §0.5: preheat, measured at ~1.45s finalized versus ~2.2s cold.
         await transcriber.prepare(locale: locale, format: format)
 
+        // Part 4 wants the corpus recorded while doing real work rather than
+        // read from a script, and this is the only place that audio exists.
+        if let url = await corpus.begin(bundleID: target?.bundleID) {
+            await transcriber.setCapture(to: url)
+        }
+
         do {
             try await transcriber.begin(locale: locale, bias: [])
         } catch {
@@ -284,6 +293,10 @@ final class DictationController {
         pumpTask = nil
         onStateChange?()
 
+        // Close the corpus file before the transcript is asked for, so the
+        // samples are on disk by the time the row naming them is written.
+        await transcriber.endCapture()
+
         let transcript: Transcript
         do {
             transcript = try await transcriber.end()
@@ -300,6 +313,9 @@ final class DictationController {
 
         let text = transcript.rawText
         guard !text.isEmpty else {
+            // Silence is not a corpus entry. Keeping it would pad the set with
+            // rows nobody can label.
+            await corpus.discard()
             Self.log.info("nothing heard")
             return
         }
@@ -329,6 +345,15 @@ final class DictationController {
             ring overruns \(overruns, privacy: .public)
             """
         )
+
+        // The corpus row goes out last, once the outcome is known, so a
+        // captured utterance carries the same numbers the log line does.
+        await corpus.finish(
+            output: text,
+            fedBuffers: fedBuffers,
+            finalize: timings.finalization,
+            insert: timings.insertion)
+
         onStateChange?()
     }
 

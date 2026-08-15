@@ -35,6 +35,17 @@ actor AppleTranscriber: Transcriber {
 
     private var eventStream: AsyncStream<TranscriptEvent>?
 
+    /// Optional corpus capture. Writes the RAW microphone buffers, before the
+    /// conversion into the analyzer's format, so a captured utterance can be
+    /// replayed through any engine or locale later rather than only this one.
+    ///
+    /// Created lazily on the first buffer because that is the first moment the
+    /// microphone's real format is known. Safe here and nowhere else: this
+    /// actor drains the ring, so the file write is off the real-time audio
+    /// thread that Part 1 §2 forbids doing any work on.
+    private var captureURL: URL?
+    private var captureFile: AVAudioFile?
+
     nonisolated let id = UUID()
 
     /// Warm the analyzer before the user speaks.
@@ -185,10 +196,31 @@ actor AppleTranscriber: Transcriber {
     ///
     /// Returns how many buffers moved, so the caller can tell a silent engine
     /// from an idle one.
+    /// Tee this utterance's audio to `url`. Nil turns capture off again.
+    func setCapture(to url: URL?) {
+        captureFile = nil
+        captureURL = url
+    }
+
+    /// Close the capture file so the samples are on disk before anyone reads it.
+    func endCapture() {
+        captureFile = nil
+        captureURL = nil
+    }
+
     @discardableResult
     func drainAndFeed(from ring: AudioRing) -> Int {
         var moved = 0
         while let item = ring.read() {
+            if let url = captureURL {
+                if captureFile == nil {
+                    captureFile = try? AVAudioFile(
+                        forWriting: url, settings: item.buffer.format.settings)
+                }
+                // Best effort by design: losing a corpus buffer must never cost
+                // the user their words, so this never throws outward.
+                try? captureFile?.write(from: item.buffer)
+            }
             guard let ready = converted(item.buffer) else { continue }
             inputContinuation?.yield(AnalyzerInput(buffer: ready))
             moved += 1
