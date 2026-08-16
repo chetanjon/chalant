@@ -1,0 +1,730 @@
+[
+  {
+    "runs" : [
+      {
+        "end" : 5.4664375,
+        "start" : 0,
+        "text" : "Sh"
+      }
+    ],
+    "alternatives" : [
+      "Sh"
+    ],
+    "alternativeCount" : 1,
+    "text" : "Sh",
+    "rangeEnd" : 5.4664375,
+    "isFinal" : false,
+    "rangeStart" : 0
+  },
+  {
+    "runs" : [
+      {
+        "text" : "Ship",
+        "start" : 0,
+        "end" : 5.4664375
+      }
+    ],
+    "alternatives" : [
+      "Ship"
+    ],
+    "alternativeCount" : 1,
+    "text" : "Ship",
+    "rangeEnd" : 5.4664375,
+    "isFinal" : false,
+    "rangeStart" : 0
+  },
+  {
+    "alternatives" : [
+      "Ship chall"
+    ],
+    "runs" : [
+      {
+        "text" : "Ship chall",
+        "start" : 0,
+        "end" : 5.4664375
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship chall",
+    "alternativeCount" : 1,
+    "rangeEnd" : 5.4664375
+  },
+  {
+    "alternatives" : [
+      "Ship challenge"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge"
+      }
+    ],
+    "rangeStart" : 0,
+    "text" : "Ship challenge",
+    "isFinal" : false,
+    "alternativeCount" : 1,
+    "rangeEnd" : 5.4664375
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the K"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the K"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the K",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kiz"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kiz"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kiz",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu group"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu group"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu group",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today."
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today."
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today.",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today,"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today,"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today,",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell A"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell A"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell A",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell Aram"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell Aram"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell Aram",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell Aram that"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell Aram that f"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that f"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that f",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell Aram that fri"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that fri"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that fri",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell Aram that friction"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell Aram that friction l"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction l"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction l",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in G"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in G"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in G",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Gang"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Gang"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Gang",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Ganga"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Ganga"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Ganga",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Ganga 3"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Ganga 3"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Ganga 3",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Ganga 3 are"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Ganga 3 are"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Ganga 3 are",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Ganga 3 are ready"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Ganga 3 are ready"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Ganga 3 are ready",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Ganga 3 are ready."
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "end" : 5.4664375,
+        "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Ganga 3 are ready."
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : false,
+    "text" : "Ship challenge to the Kizu groupoup today, then tell Aram that friction lends in Ganga 3 are ready.",
+    "rangeEnd" : 5.4664375,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      "Ship challenge to the Kizu"
+    ],
+    "runs" : [
+      {
+        "start" : 0,
+        "confidence" : 0.966,
+        "end" : 0.36,
+        "text" : "Ship"
+      },
+      {
+        "start" : 0.36,
+        "confidence" : 0.778,
+        "end" : 0.72,
+        "text" : " challenge"
+      },
+      {
+        "start" : 0.72,
+        "confidence" : 0.997,
+        "end" : 0.9,
+        "text" : " to"
+      },
+      {
+        "start" : 0.9,
+        "confidence" : 0.995,
+        "end" : 1.02,
+        "text" : " the"
+      },
+      {
+        "start" : 1.02,
+        "confidence" : 0.946,
+        "end" : 1.44,
+        "text" : " Kizu"
+      }
+    ],
+    "rangeStart" : 0,
+    "isFinal" : true,
+    "text" : "Ship challenge to the Kizu",
+    "rangeEnd" : 1.44,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      " group today,",
+      " Group today,",
+      " group today."
+    ],
+    "runs" : [
+      {
+        "start" : 1.44,
+        "confidence" : 0.666,
+        "end" : 1.68,
+        "text" : " group"
+      },
+      {
+        "start" : 1.68,
+        "confidence" : 0.64,
+        "end" : 2.16,
+        "text" : " today,"
+      }
+    ],
+    "rangeStart" : 1.44,
+    "isFinal" : true,
+    "text" : " group today,",
+    "rangeEnd" : 2.16,
+    "alternativeCount" : 3
+  },
+  {
+    "alternatives" : [
+      " then",
+      " Then"
+    ],
+    "runs" : [
+      {
+        "start" : 2.16,
+        "confidence" : 0.546,
+        "end" : 2.46,
+        "text" : " then"
+      }
+    ],
+    "rangeStart" : 2.16,
+    "isFinal" : true,
+    "text" : " then",
+    "rangeEnd" : 2.46,
+    "alternativeCount" : 2
+  },
+  {
+    "alternatives" : [
+      " tell Autram that friction lends"
+    ],
+    "runs" : [
+      {
+        "start" : 2.46,
+        "confidence" : 0.998,
+        "end" : 2.7,
+        "text" : " tell"
+      },
+      {
+        "start" : 2.7,
+        "confidence" : 0.704,
+        "end" : 3.18,
+        "text" : " Autram"
+      },
+      {
+        "start" : 3.18,
+        "confidence" : 0.993,
+        "end" : 3.36,
+        "text" : " that"
+      },
+      {
+        "start" : 3.36,
+        "confidence" : 0.827,
+        "end" : 3.78,
+        "text" : " friction"
+      },
+      {
+        "start" : 3.78,
+        "confidence" : 0.9,
+        "end" : 4.08,
+        "text" : " lends"
+      }
+    ],
+    "rangeStart" : 2.46,
+    "isFinal" : true,
+    "text" : " tell Autram that friction lends",
+    "rangeEnd" : 4.08,
+    "alternativeCount" : 1
+  },
+  {
+    "alternatives" : [
+      " in",
+      " on"
+    ],
+    "runs" : [
+      {
+        "start" : 4.08,
+        "confidence" : 0.658,
+        "end" : 4.26,
+        "text" : " in"
+      }
+    ],
+    "rangeStart" : 4.08,
+    "isFinal" : true,
+    "text" : " in",
+    "rangeEnd" : 4.26,
+    "alternativeCount" : 2
+  },
+  {
+    "alternatives" : [
+      " Ganga 3 are ready."
+    ],
+    "runs" : [
+      {
+        "start" : 4.26,
+        "confidence" : 0.801,
+        "end" : 4.62,
+        "text" : " Ganga"
+      },
+      {
+        "start" : 4.62,
+        "confidence" : 0.956,
+        "end" : 4.8,
+        "text" : " 3"
+      },
+      {
+        "start" : 4.8,
+        "confidence" : 0.99,
+        "end" : 5.04,
+        "text" : " are"
+      },
+      {
+        "start" : 5.04,
+        "confidence" : 0.948,
+        "end" : 5.34,
+        "text" : " ready."
+      }
+    ],
+    "rangeStart" : 4.26,
+    "isFinal" : true,
+    "text" : " Ganga 3 are ready.",
+    "rangeEnd" : 5.4,
+    "alternativeCount" : 1
+  }
+]

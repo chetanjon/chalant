@@ -1,4 +1,5 @@
 import AudioToolbox
+import ChalantDictationCore
 import CoreAudio
 import Foundation
 
@@ -47,6 +48,20 @@ enum SystemVolume {
         /// The built-in codec's line-in jack: exactly the dead ear
         /// this round routes around, so it always queues last.
         var isJack: Bool { isBuiltIn && !isBuiltInMic }
+
+        /// The same device as the pure Core type, so the ordering can be
+        /// decided in one tested place shared with dictation rather than
+        /// written out again here. `isSystemDefault` is passed in because
+        /// it is a property of the system, not of the device.
+        func asInputChoice(isSystemDefault: Bool) -> InputChoice.Device {
+            InputChoice.Device(
+                uid: uid,
+                name: name,
+                isBuiltInMic: isBuiltInMic,
+                isJack: isJack,
+                isSystemDefault: isSystemDefault
+            )
+        }
     }
 
     /// Every device currently offering input streams. The lid-closed

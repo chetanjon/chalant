@@ -30,6 +30,12 @@ enum VoiceDoor: CaseIterable {
     case holdTheIsland
     /// The global `.talk` key, which ships bound to nothing.
     case talkHotkey
+    /// Hold left Option anywhere and speak, and the words land in whatever
+    /// app you were already typing in. Added by the dictation merge, and it
+    /// is a different job from every door above: those turn speech into
+    /// island commands, this one turns speech into text at your cursor.
+    /// Present only on macOS 26, because `SpeechTranscriber` has no backport.
+    case dictationHold
 
     /// A control you can see and click, as against knowledge somebody
     /// had to give you. A build with none of these has no voice at all
@@ -38,7 +44,7 @@ enum VoiceDoor: CaseIterable {
     var isVisibleControl: Bool {
         switch self {
         case .switcherMic, .sessionCardMic: return true
-        case .holdTheIsland, .talkHotkey: return false
+        case .holdTheIsland, .talkHotkey, .dictationHold: return false
         }
     }
 
@@ -50,19 +56,40 @@ enum VoiceDoor: CaseIterable {
 
     /// The doors this install actually has. `hotkeyBound` comes from
     /// `HotKeyCenter.combo(for: .talk)`, which is nil on a fresh install:
-    /// nothing anywhere registers a default binding.
-    static func shipped(hotkeyBound: Bool) -> Set<VoiceDoor> {
+    /// nothing anywhere registers a default binding. `dictationAvailable`
+    /// comes from the OS version, because `SpeechTranscriber` is macOS 26
+    /// only; it deliberately has no default value, so a new caller has to
+    /// say which build it is asking about rather than silently getting the
+    /// answer for a machine that cannot dictate.
+    static func shipped(hotkeyBound: Bool, dictationAvailable: Bool) -> Set<VoiceDoor> {
         var doors: Set<VoiceDoor> = [.holdTheIsland]
         if switcherDrawsMic { doors.insert(.switcherMic) }
         if FeatureFlags.sessionsVisible { doors.insert(.sessionCardMic) }
         if hotkeyBound { doors.insert(.talkHotkey) }
+        if dictationAvailable { doors.insert(.dictationHold) }
         return doors
     }
 
     /// True when somebody who has just installed can find voice without
     /// being told a gesture first.
-    static func hasVisibleControl(hotkeyBound: Bool) -> Bool {
-        shipped(hotkeyBound: hotkeyBound).contains { $0.isVisibleControl }
+    ///
+    /// Dictation cannot rescue this and is not asked to: it is a hold with
+    /// nothing drawn, which is the same shape as the gesture that left
+    /// 1.12.3 looking mic-less. It is counted as a door, never as an answer
+    /// to "can a new user see how to start".
+    static func hasVisibleControl(hotkeyBound: Bool, dictationAvailable: Bool) -> Bool {
+        shipped(hotkeyBound: hotkeyBound, dictationAvailable: dictationAvailable)
+            .contains { $0.isVisibleControl }
+    }
+
+    /// What a user must be told before hold-to-dictate exists for them, or
+    /// nil when this build cannot dictate at all.
+    ///
+    /// The 1.12.3 lesson applies with full force here: a hold that nothing
+    /// on screen mentions is not a door a person can find. If dictation
+    /// ships, some surface has to say this sentence.
+    static func dictationLine(available: Bool) -> String? {
+        available ? "Hold left Option anywhere and talk. Your words land where you were typing." : nil
     }
 
     /// What ends a live session, in the words the listening caption
@@ -77,8 +104,11 @@ enum VoiceDoor: CaseIterable {
     /// What the welcome tour may say about starting voice. A new install
     /// has no hotkey, so the promise is judged against that install and
     /// no other. The tour must never name a control the build withholds.
+    /// Judged with `dictationAvailable: false` on purpose. The tour is about
+    /// finding voice with your eyes, and dictation adds no visible control,
+    /// so letting it into this answer could only ever mask a missing mic.
     static var welcomeLine: String {
-        hasVisibleControl(hotkeyBound: false)
+        hasVisibleControl(hotkeyBound: false, dictationAvailable: false)
             ? "Tap the mic and talk, or just type in the bar."
             : "Hold the island and talk, or just type in the bar."
     }

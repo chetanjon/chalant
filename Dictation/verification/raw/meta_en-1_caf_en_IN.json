@@ -1,0 +1,399 @@
+[
+  {
+    "rangeStart" : 0,
+    "rangeEnd" : 8,
+    "runs" : [
+      {
+        "text" : "E",
+        "end" : 8,
+        "start" : 0
+      }
+    ],
+    "text" : "E",
+    "alternativeCount" : 1,
+    "alternatives" : [
+      "E"
+    ],
+    "isFinal" : false
+  },
+  {
+    "isFinal" : false,
+    "rangeEnd" : 8,
+    "text" : "E other",
+    "alternativeCount" : 1,
+    "runs" : [
+      {
+        "text" : "E other",
+        "end" : 8,
+        "start" : 0
+      }
+    ],
+    "alternatives" : [
+      "E other"
+    ],
+    "rangeStart" : 0
+  },
+  {
+    "rangeEnd" : 8,
+    "text" : "E other like",
+    "rangeStart" : 0,
+    "alternativeCount" : 1,
+    "runs" : [
+      {
+        "text" : "E other like",
+        "end" : 8,
+        "start" : 0
+      }
+    ],
+    "isFinal" : false,
+    "alternatives" : [
+      "E other like"
+    ]
+  },
+  {
+    "isFinal" : false,
+    "alternatives" : [
+      "E other like I"
+    ],
+    "rangeEnd" : 8,
+    "rangeStart" : 0,
+    "text" : "E other like I",
+    "alternativeCount" : 1,
+    "runs" : [
+      {
+        "text" : "E other like I",
+        "end" : 8,
+        "start" : 0
+      }
+    ]
+  },
+  {
+    "isFinal" : false,
+    "alternatives" : [
+      "E other like I Ask"
+    ],
+    "rangeEnd" : 8,
+    "rangeStart" : 0,
+    "text" : "E other like I Ask",
+    "alternativeCount" : 1,
+    "runs" : [
+      {
+        "text" : "E other like I Ask",
+        "end" : 8,
+        "start" : 0
+      }
+    ]
+  },
+  {
+    "isFinal" : false,
+    "alternatives" : [
+      "E other like I Ask Che"
+    ],
+    "rangeEnd" : 8,
+    "rangeStart" : 0,
+    "text" : "E other like I Ask Che",
+    "alternativeCount" : 1,
+    "runs" : [
+      {
+        "text" : "E other like I Ask Che",
+        "end" : 8,
+        "start" : 0
+      }
+    ]
+  },
+  {
+    "isFinal" : false,
+    "alternatives" : [
+      "E other like I Ask Chet"
+    ],
+    "rangeEnd" : 8,
+    "rangeStart" : 0,
+    "text" : "E other like I Ask Chet",
+    "alternativeCount" : 1,
+    "runs" : [
+      {
+        "text" : "E other like I Ask Chet",
+        "end" : 8,
+        "start" : 0
+      }
+    ]
+  },
+  {
+    "isFinal" : false,
+    "alternatives" : [
+      "E other like I Ask Chetan"
+    ],
+    "rangeEnd" : 8,
+    "rangeStart" : 0,
+    "text" : "E other like I Ask Chetan",
+    "alternativeCount" : 1,
+    "runs" : [
+      {
+        "text" : "E other like I Ask Chetan",
+        "end" : 8,
+        "start" : 0
+      }
+    ]
+  },
+  {
+    "isFinal" : false,
+    "alternatives" : [
+      "E other like I Ask Chetan to"
+    ],
+    "rangeEnd" : 8,
+    "rangeStart" : 0,
+    "text" : "E other like I Ask Chetan to",
+    "alternativeCount" : 1,
+    "runs" : [
+      {
+        "text" : "E other like I Ask Chetan to",
+        "end" : 8,
+        "start" : 0
+      }
+    ]
+  },
+  {
+    "isFinal" : false,
+    "alternatives" : [
+      "E other like I Ask Chetan to review"
+    ],
+    "rangeEnd" : 8,
+    "rangeStart" : 0,
+    "text" : "E other like I Ask Chetan to review",
+    "alternativeCount" : 1,
+    "runs" : [
+      {
+        "text" : "E other like I Ask Chetan to review",
+        "end" : 8,
+        "start" : 0
+      }
+    ]
+  },
+  {
+    "isFinal" : false,
+    "alternatives" : [
+      "E other like I Ask Chetan to review the"
+    ],
+    "rangeEnd" : 8,
+    "rangeStart" : 0,
+    "text" : "E other like I Ask Chetan to review the",
+    "alternativeCount" : 1,
+    "runs" : [
+      {
+        "text" : "E other like I Ask Chetan to review the",
+        "end" : 8,
+        "start" : 0
+      }
+    ]
+  },
+  {
+    "isFinal" : false,
+    "alternatives" : [
+      "E other like I Ask Chetan to review the Sh"
+    ],
+    "rangeEnd" : 8,
+    "rangeStart" : 0,
+    "text" : "E other like I Ask Chetan to review the Sh",
+    "alternativeCount" : 1,
+    "runs" : [
+      {
+        "text" : "E other like I Ask Chetan to review the Sh",
+        "end" : 8,
+        "start" : 0
+      }
+    ]
+  },
+  {
+    "isFinal" : false,
+    "alternatives" : [
+      "E other like I Ask Chetan to review the Shal"
+    ],
+    "rangeEnd" : 8,
+    "rangeStart" : 0,
+    "text" : "E other like I Ask Chetan to review the Shal",
+    "alternativeCount" : 1,
+    "runs" : [
+      {
+        "text" : "E other like I Ask Chetan to review the Shal",
+        "end" : 8,
+        "start" : 0
+      }
+    ]
+  },
+  {
+    "isFinal" : false,
+    "alternatives" : [
+      "E other like I Ask Chetan to review the Shalant"
+    ],
+    "rangeEnd" : 8,
+    "rangeStart" : 0,
+    "text" : "E other like I Ask Chetan to review the Shalant",
+    "alternativeCount" : 1,
+    "runs" : [
+      {
+        "text" : "E other like I Ask Chetan to review the Shalant",
+        "end" : 8,
+        "start" : 0
+      }
+    ]
+  },
+  {
+    "isFinal" : false,
+    "alternatives" : [
+      "E other like I Ask Chetan to review the Shalant."
+    ],
+    "rangeEnd" : 8,
+    "rangeStart" : 0,
+    "text" : "E other like I Ask Chetan to review the Shalant.",
+    "alternativeCount" : 1,
+    "runs" : [
+      {
+        "text" : "E other like I Ask Chetan to review the Shalant.",
+        "end" : 8,
+        "start" : 0
+      }
+    ]
+  },
+  {
+    "isFinal" : true,
+    "alternatives" : [
+      "Each other expand the amount. Like, but I am a real manager. Ask Chetan to review the"
+    ],
+    "rangeEnd" : 7.5,
+    "rangeStart" : 0.72,
+    "text" : "Each other expand the amount. Like, but I am a real manager. Ask Chetan to review the",
+    "alternativeCount" : 1,
+    "runs" : [
+      {
+        "text" : "Each",
+        "end" : 1.14,
+        "start" : 0.72,
+        "confidence" : 0.311
+      },
+      {
+        "text" : " other",
+        "end" : 1.32,
+        "start" : 1.14,
+        "confidence" : 0.272
+      },
+      {
+        "text" : " expand",
+        "end" : 1.8,
+        "start" : 1.32,
+        "confidence" : 0.013
+      },
+      {
+        "text" : " the",
+        "end" : 2.04,
+        "start" : 1.8,
+        "confidence" : 0.074
+      },
+      {
+        "text" : " amount.",
+        "end" : 2.4,
+        "start" : 2.04,
+        "confidence" : 0.263
+      },
+      {
+        "text" : " Like,",
+        "end" : 2.76,
+        "start" : 2.4,
+        "confidence" : 0.256
+      },
+      {
+        "text" : " but",
+        "end" : 2.88,
+        "start" : 2.76,
+        "confidence" : 0.3
+      },
+      {
+        "text" : " I",
+        "end" : 3.18,
+        "start" : 2.88,
+        "confidence" : 0.459
+      },
+      {
+        "text" : " am",
+        "end" : 3.42,
+        "start" : 3.18,
+        "confidence" : 0.129
+      },
+      {
+        "text" : " a",
+        "end" : 3.9,
+        "start" : 3.42,
+        "confidence" : 0.023
+      },
+      {
+        "text" : " real",
+        "end" : 3.96,
+        "start" : 3.9,
+        "confidence" : 0.066
+      },
+      {
+        "text" : " manager.",
+        "end" : 4.62,
+        "start" : 3.96,
+        "confidence" : 0.011
+      },
+      {
+        "text" : " Ask",
+        "end" : 6.18,
+        "start" : 4.62,
+        "confidence" : 0.42
+      },
+      {
+        "text" : " Chetan",
+        "end" : 6.84,
+        "start" : 6.18,
+        "confidence" : 0.925
+      },
+      {
+        "text" : " to",
+        "end" : 7.02,
+        "start" : 6.84,
+        "confidence" : 0.995
+      },
+      {
+        "text" : " review",
+        "end" : 7.2,
+        "start" : 7.02,
+        "confidence" : 0.99
+      },
+      {
+        "text" : " the",
+        "end" : 7.5,
+        "start" : 7.2,
+        "confidence" : 0.964
+      }
+    ]
+  },
+  {
+    "isFinal" : true,
+    "alternatives" : [
+      " Shalan rule.",
+      " Shalan Rule.",
+      " Shalan.",
+      " Chalan.",
+      " Shalan rule?"
+    ],
+    "rangeEnd" : 8,
+    "rangeStart" : 7.5,
+    "text" : " Shalan rule.",
+    "alternativeCount" : 5,
+    "runs" : [
+      {
+        "text" : " Shalan",
+        "start" : 7.5,
+        "confidence" : 0.481,
+        "end" : 7.98
+      },
+      {
+        "text" : " rule.",
+        "start" : 7.98,
+        "confidence" : 0.411,
+        "end" : 8
+      }
+    ]
+  }
+]

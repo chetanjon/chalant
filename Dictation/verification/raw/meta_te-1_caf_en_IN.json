@@ -1,0 +1,401 @@
+[
+  {
+    "rangeEnd" : 8,
+    "alternatives" : [
+      "N"
+    ],
+    "text" : "N",
+    "alternativeCount" : 1,
+    "rangeStart" : 0,
+    "runs" : [
+      {
+        "end" : 8,
+        "start" : 0,
+        "text" : "N"
+      }
+    ],
+    "isFinal" : false
+  },
+  {
+    "rangeEnd" : 8,
+    "isFinal" : false,
+    "alternativeCount" : 1,
+    "rangeStart" : 0,
+    "text" : "Nen",
+    "alternatives" : [
+      "Nen"
+    ],
+    "runs" : [
+      {
+        "text" : "Nen",
+        "end" : 8,
+        "start" : 0
+      }
+    ]
+  },
+  {
+    "alternativeCount" : 1,
+    "alternatives" : [
+      "Nenu"
+    ],
+    "rangeStart" : 0,
+    "runs" : [
+      {
+        "end" : 8,
+        "text" : "Nenu",
+        "start" : 0
+      }
+    ],
+    "rangeEnd" : 8,
+    "text" : "Nenu",
+    "isFinal" : false
+  },
+  {
+    "rangeEnd" : 8,
+    "alternativeCount" : 1,
+    "isFinal" : false,
+    "runs" : [
+      {
+        "end" : 8,
+        "text" : "Nenu Mi",
+        "start" : 0
+      }
+    ],
+    "rangeStart" : 0,
+    "text" : "Nenu Mi",
+    "alternatives" : [
+      "Nenu Mi"
+    ]
+  },
+  {
+    "rangeEnd" : 8,
+    "alternativeCount" : 1,
+    "isFinal" : false,
+    "runs" : [
+      {
+        "end" : 8,
+        "text" : "Nenu Mi D",
+        "start" : 0
+      }
+    ],
+    "rangeStart" : 0,
+    "text" : "Nenu Mi D",
+    "alternatives" : [
+      "Nenu Mi D"
+    ]
+  },
+  {
+    "rangeEnd" : 8,
+    "alternativeCount" : 1,
+    "isFinal" : false,
+    "runs" : [
+      {
+        "end" : 8,
+        "text" : "Nenu Mi Dink",
+        "start" : 0
+      }
+    ],
+    "rangeStart" : 0,
+    "text" : "Nenu Mi Dink",
+    "alternatives" : [
+      "Nenu Mi Dink"
+    ]
+  },
+  {
+    "rangeEnd" : 8,
+    "alternativeCount" : 1,
+    "isFinal" : false,
+    "runs" : [
+      {
+        "end" : 8,
+        "text" : "Nenu Mi Dinki",
+        "start" : 0
+      }
+    ],
+    "rangeStart" : 0,
+    "text" : "Nenu Mi Dinki",
+    "alternatives" : [
+      "Nenu Mi Dinki"
+    ]
+  },
+  {
+    "rangeEnd" : 8,
+    "alternativeCount" : 1,
+    "isFinal" : false,
+    "runs" : [
+      {
+        "end" : 8,
+        "text" : "Nenu Mi Dinki ",
+        "start" : 0
+      }
+    ],
+    "rangeStart" : 0,
+    "text" : "Nenu Mi Dinki ",
+    "alternatives" : [
+      "Nenu Mi Dinki "
+    ]
+  },
+  {
+    "rangeEnd" : 8,
+    "alternativeCount" : 1,
+    "isFinal" : false,
+    "runs" : [
+      {
+        "end" : 8,
+        "text" : "Nenu Mi Dinki elt",
+        "start" : 0
+      }
+    ],
+    "rangeStart" : 0,
+    "text" : "Nenu Mi Dinki elt",
+    "alternatives" : [
+      "Nenu Mi Dinki elt"
+    ]
+  },
+  {
+    "rangeEnd" : 8,
+    "alternativeCount" : 1,
+    "isFinal" : false,
+    "runs" : [
+      {
+        "end" : 8,
+        "text" : "Nenu Mi Dinki eltun",
+        "start" : 0
+      }
+    ],
+    "rangeStart" : 0,
+    "text" : "Nenu Mi Dinki eltun",
+    "alternatives" : [
+      "Nenu Mi Dinki eltun"
+    ]
+  },
+  {
+    "rangeEnd" : 8,
+    "alternativeCount" : 1,
+    "isFinal" : false,
+    "runs" : [
+      {
+        "end" : 8,
+        "text" : "Nenu Mi Dinki eltunanu",
+        "start" : 0
+      }
+    ],
+    "rangeStart" : 0,
+    "text" : "Nenu Mi Dinki eltunanu",
+    "alternatives" : [
+      "Nenu Mi Dinki eltunanu"
+    ]
+  },
+  {
+    "rangeEnd" : 8,
+    "alternativeCount" : 1,
+    "isFinal" : false,
+    "runs" : [
+      {
+        "end" : 8,
+        "text" : "Nenu Mi Dinki eltunanu Nu",
+        "start" : 0
+      }
+    ],
+    "rangeStart" : 0,
+    "text" : "Nenu Mi Dinki eltunanu Nu",
+    "alternatives" : [
+      "Nenu Mi Dinki eltunanu Nu"
+    ]
+  },
+  {
+    "rangeEnd" : 8,
+    "alternativeCount" : 1,
+    "isFinal" : false,
+    "runs" : [
+      {
+        "end" : 8,
+        "text" : "Nenu Mi Dinki eltunanu Nuv",
+        "start" : 0
+      }
+    ],
+    "rangeStart" : 0,
+    "text" : "Nenu Mi Dinki eltunanu Nuv",
+    "alternatives" : [
+      "Nenu Mi Dinki eltunanu Nuv"
+    ]
+  },
+  {
+    "rangeEnd" : 8,
+    "alternativeCount" : 1,
+    "isFinal" : false,
+    "runs" : [
+      {
+        "end" : 8,
+        "text" : "Nenu Mi Dinki eltunanu Nuvu",
+        "start" : 0
+      }
+    ],
+    "rangeStart" : 0,
+    "text" : "Nenu Mi Dinki eltunanu Nuvu",
+    "alternatives" : [
+      "Nenu Mi Dinki eltunanu Nuvu"
+    ]
+  },
+  {
+    "rangeEnd" : 8,
+    "alternativeCount" : 1,
+    "isFinal" : false,
+    "runs" : [
+      {
+        "end" : 8,
+        "text" : "Nenu Mi Dinki eltunanu Nuvu report",
+        "start" : 0
+      }
+    ],
+    "rangeStart" : 0,
+    "text" : "Nenu Mi Dinki eltunanu Nuvu report",
+    "alternatives" : [
+      "Nenu Mi Dinki eltunanu Nuvu report"
+    ]
+  },
+  {
+    "rangeEnd" : 8,
+    "alternativeCount" : 1,
+    "isFinal" : false,
+    "runs" : [
+      {
+        "end" : 8,
+        "text" : "Nenu Mi Dinki eltunanu Nuvu report pump",
+        "start" : 0
+      }
+    ],
+    "rangeStart" : 0,
+    "text" : "Nenu Mi Dinki eltunanu Nuvu report pump",
+    "alternatives" : [
+      "Nenu Mi Dinki eltunanu Nuvu report pump"
+    ]
+  },
+  {
+    "rangeEnd" : 8,
+    "alternativeCount" : 1,
+    "isFinal" : false,
+    "runs" : [
+      {
+        "end" : 8,
+        "text" : "Nenu Mi Dinki eltunanu Nuvu report pumpinch",
+        "start" : 0
+      }
+    ],
+    "rangeStart" : 0,
+    "text" : "Nenu Mi Dinki eltunanu Nuvu report pumpinch",
+    "alternatives" : [
+      "Nenu Mi Dinki eltunanu Nuvu report pumpinch"
+    ]
+  },
+  {
+    "rangeEnd" : 8,
+    "alternativeCount" : 1,
+    "isFinal" : false,
+    "runs" : [
+      {
+        "end" : 8,
+        "text" : "Nenu Mi Dinki eltunanu Nuvu report pumpinchava",
+        "start" : 0
+      }
+    ],
+    "rangeStart" : 0,
+    "text" : "Nenu Mi Dinki eltunanu Nuvu report pumpinchava",
+    "alternatives" : [
+      "Nenu Mi Dinki eltunanu Nuvu report pumpinchava"
+    ]
+  },
+  {
+    "rangeEnd" : 3.06,
+    "alternativeCount" : 1,
+    "isFinal" : true,
+    "runs" : [
+      {
+        "end" : 2.22,
+        "confidence" : 0.727,
+        "text" : "Nenu,",
+        "start" : 1.2
+      },
+      {
+        "end" : 2.58,
+        "confidence" : 0.104,
+        "text" : " Me,",
+        "start" : 2.22
+      },
+      {
+        "end" : 3.06,
+        "confidence" : 0.545,
+        "text" : " Dinki,",
+        "start" : 2.58
+      }
+    ],
+    "rangeStart" : 1.2,
+    "text" : "Nenu, Me, Dinki,",
+    "alternatives" : [
+      "Nenu, Me, Dinki,"
+    ]
+  },
+  {
+    "rangeEnd" : 4.08,
+    "alternativeCount" : 2,
+    "isFinal" : true,
+    "runs" : [
+      {
+        "end" : 4.08,
+        "confidence" : 0.408,
+        "text" : " Veltunanu,",
+        "start" : 3.06
+      }
+    ],
+    "rangeStart" : 3.06,
+    "text" : " Veltunanu,",
+    "alternatives" : [
+      " Veltunanu,",
+      " Veltunano,"
+    ]
+  },
+  {
+    "rangeEnd" : 4.98,
+    "alternativeCount" : 1,
+    "isFinal" : true,
+    "runs" : [
+      {
+        "end" : 4.62,
+        "confidence" : 0.51,
+        "text" : " Nuvvu,",
+        "start" : 4.08
+      },
+      {
+        "end" : 4.98,
+        "confidence" : 0.512,
+        "text" : " report,",
+        "start" : 4.62
+      }
+    ],
+    "rangeStart" : 4.08,
+    "text" : " Nuvvu, report,",
+    "alternatives" : [
+      " Nuvvu, report,"
+    ]
+  },
+  {
+    "rangeEnd" : 8,
+    "alternativeCount" : 3,
+    "isFinal" : true,
+    "runs" : [
+      {
+        "end" : 5.82,
+        "confidence" : 0.373,
+        "text" : " Pampinchava.",
+        "start" : 4.98
+      }
+    ],
+    "rangeStart" : 4.98,
+    "text" : " Pampinchava.",
+    "alternatives" : [
+      " Pampinchava.",
+      " pampinchava.",
+      " pump, Pinchava."
+    ]
+  }
+]

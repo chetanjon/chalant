@@ -25,7 +25,7 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Chalant controls your music players and sends the Messages you dictate, nothing more.</string>
+	<string>Chalant asks System Events to paste your dictated text into the app you were using. It also controls your music players and sends the Messages you dictate.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Chalant adds events and reads today's agenda.</string>
 	<key>NSContactsUsageDescription</key>
@@ -37,11 +37,11 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Chalant reads your approximate location to show the weather beside your day.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Hold the notch to talk. macOS turns your speech into text on this Mac when its local model is ready, and through Apple's dictation service when it is not.</string>
+	<string>Hold the notch to talk to Chalant, or hold left Option to dictate into whatever you are typing in. Dictation is transcribed entirely on this Mac. Island commands use macOS dictation, which goes to Apple's service when the local model is not ready.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Chalant creates the reminders you set.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Turns your words into actions. The transcription is macOS dictation, which runs on this Mac when its local model is ready and through Apple's service when it is not. The answer itself never leaves.</string>
+	<string>Turns your words into text at your cursor, and into actions on the island. Dictation runs entirely on this Mac. Island commands use macOS dictation, which runs here when its local model is ready and through Apple's service when it is not. The answer itself never leaves.</string>
 	<key>SUEnableAutomaticChecks</key>
 	<false/>
 	<key>SUFeedURL</key>

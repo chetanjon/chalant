@@ -1,5 +1,6 @@
 import AudioToolbox
 import AVFoundation
+import ChalantDictationCore
 import os
 import Speech
 import SwiftUI
@@ -40,14 +41,28 @@ final class VoiceController: NSObject, ObservableObject {
     /// Settings key holding the UID of a user-pinned microphone.
     /// Empty means automatic.
     static let pinnedUIDKey = "voiceInputUID"
-    /// The session's ear queue. Element zero is the proactive choice
-    /// (pinned, then the Mac's own mic, then the default, then the
-    /// rest); the silence watchdog and the error rescue hop down it.
+    /// The session's ear queue, ordered by `InputChoice` in Core and
+    /// shared with dictation. The silence watchdog and the error rescue
+    /// hop down it.
     private var candidates: [SystemVolume.InputDevice] = []
     private var candidateIndex = 0
     /// Hard cap on mid-session hops so a quiet room cannot thrash.
     private var deviceSwitches = 0
+    /// Inputs this process has caught delivering exact silence.
+    ///
+    /// The memory is what the old code lacked. A per-session watchdog
+    /// hops away from a dead ear and then starts the next session on
+    /// the same dead ear, so a lid-closed built-in mic costs the user
+    /// the first 1.6 seconds of every single utterance. `InputChoice`
+    /// sends anything in here to the back of the queue, including a
+    /// device the user pinned, because a device proven to deliver
+    /// nothing cannot be the answer to "why can't it hear me".
+    private var silentUIDs: Set<String> = []
     private var watchdogWork: DispatchWorkItem?
+    /// How long a live session waits before calling an ear dead. Named
+    /// once because the deadline and the verdict must agree; they were
+    /// two separate numbers and could drift.
+    static let watchdogDelay: TimeInterval = 1.6
     /// What the session did about devices, for diagnostics.
     private(set) var deviceNote = "none"
 
@@ -250,39 +265,35 @@ final class VoiceController: NSObject, ObservableObject {
 
     /// Choose the ear before listening starts. Round 35 waited for
     /// the recognizer to fail before rescuing, which lost whatever
-    /// was said first; now the pinned mic, then the Mac's own, then
-    /// the default lead the queue from word one.
+    /// was said first; the queue is decided from word one instead.
+    ///
+    /// **The ordering now lives in `InputChoice` (Core), shared with
+    /// dictation.** It used to be written out here, and that was the
+    /// merge's whole argument: the same dead-microphone bug was fixed
+    /// twice in one night because this ordering and dictation's were
+    /// two different pieces of code with two different thresholds, and
+    /// only one of them got the good fix. One product, one ear.
     private func startSession() {
         let devices = SystemVolume.inputDevices()
-        var ordered: [SystemVolume.InputDevice] = []
-        func add(_ device: SystemVolume.InputDevice?) {
-            guard let device,
-                  !ordered.contains(where: { $0.id == device.id }) else { return }
-            ordered.append(device)
-        }
+        let defaultID = SystemVolume.defaultInputDevice()
         let pinnedUID = UserDefaults.standard.string(forKey: Self.pinnedUIDKey) ?? ""
-        if !pinnedUID.isEmpty {
-            add(devices.first { $0.uid == pinnedUID })
+
+        let ordered = InputChoice.order(
+            devices.map { $0.asInputChoice(isSystemDefault: $0.id == defaultID) },
+            pinnedUID: pinnedUID.isEmpty ? nil : pinnedUID,
+            silent: silentUIDs
+        )
+        // Back to the platform type, preserving the chosen order.
+        candidates = ordered.compactMap { choice in
+            devices.first { $0.uid == choice.uid }
         }
-        // Earphones in the ear outrank the Mac's own mic: when the
-        // system default is a real external input (AirPods, a boAt
-        // headset, USB), it is the ear of intent. Only the dead jack
-        // never leads; it trails the whole queue.
-        if let defaultID = SystemVolume.defaultInputDevice(),
-           let systemDefault = devices.first(where: { $0.id == defaultID }),
-           !systemDefault.isJack {
-            add(systemDefault)
-        }
-        add(devices.first { $0.isBuiltInMic })
-        devices.filter { !$0.isJack }.forEach { add($0) }
-        devices.forEach { add($0) }
-        candidates = ordered
+
         candidateIndex = 0
         deviceSwitches = 0
-        let pinned = !pinnedUID.isEmpty && ordered.first?.uid == pinnedUID
-        deviceNote = "started on \(ordered.first?.name ?? "the system default")"
+        let pinned = !pinnedUID.isEmpty && candidates.first?.uid == pinnedUID
+        deviceNote = "started on \(candidates.first?.name ?? "the system default")"
             + (pinned ? ", pinned" : "")
-        startCapture(pinDeviceID: ordered.first?.id)
+        startCapture(pinDeviceID: candidates.first?.id)
     }
 
     /// If the first 1.6 seconds are absolute silence, the ear is
@@ -298,12 +309,25 @@ final class VoiceController: NSObject, ObservableObject {
         }
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            guard self.peakLevel < 0.004, self.transcript.isEmpty,
+            guard self.transcript.isEmpty,
                   self.failure == nil, self.finishCompletion == nil else { return }
+            // The verdict is `InputChoice`'s, shared with dictation, so
+            // the two features cannot drift apart on what "dead" means.
+            // It is stricter than the 0.004 this used to use: exactly
+            // zero, because a live mic in a quiet room still reads about
+            // 0.01 of floor tone while a dead jack reads 0.00 exactly,
+            // and hopping away from a working ear because nobody spoke
+            // would be its own bug.
+            guard InputChoice.isDead(
+                peak: Float(self.peakLevel), silentFor: Self.watchdogDelay,
+                threshold: Self.watchdogDelay
+            ) else { return }
+            // Remember it, so the next session does not start here again.
+            if let uid = self.currentCandidate?.uid { self.silentUIDs.insert(uid) }
             self.advanceToNextCandidate(reason: "heard nothing")
         }
         watchdogWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.watchdogDelay, execute: work)
     }
 
     /// Move the session to the next untried input. False when the
