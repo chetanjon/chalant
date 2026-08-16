@@ -1,0 +1,131 @@
+#!/bin/bash
+# S1 acceptance test: does the app TELL you when it cannot hear the key?
+#
+# The failure this checks for is silent by nature. Without Input Monitoring,
+# CGEvent.tapCreate succeeds, logs success, and receives nothing forever. So the
+# test is not "does dictation work" but "does the app say when it doesn't".
+#
+# Run it, follow the three parts, then write the result in VERIFY_LOG.md.
+
+set -e
+cd "$(dirname "$0")/.." || exit 1
+
+APP="build/s1/Build/Products/Release/Chalant.app"
+BUNDLE="com.cj.chalant"
+
+if [ ! -d "$APP" ]; then
+  echo "The S1 build is missing. Ask Claude to build it."
+  exit 1
+fi
+
+echo
+echo "=================================================="
+echo "  S1 — DOES IT TELL YOU WHEN IT CANNOT HEAR?"
+echo "=================================================="
+echo
+echo "  This uses a TEST BUILD. Your installed Chalant is untouched"
+echo "  and comes back at the end."
+echo
+echo "  ⚠  This resets your Input Monitoring permission. You will"
+echo "     grant it again during part 2. That is the test."
+echo
+
+read -r -p "  Press Return to start, or Ctrl-C to back out. "
+
+# Two Chalants means two event taps and doubled text.
+osascript -e 'quit app "Chalant"' 2>/dev/null || true
+sleep 2
+
+# Dictation must be ON or every part of this is vacuous.
+defaults write "$BUNDLE" dictationEnabled -bool true
+
+echo
+echo "--------------------------------------------------"
+echo "  PART 1 — it must SAY it cannot hear"
+echo "--------------------------------------------------"
+tccutil reset ListenEvent "$BUNDLE" >/dev/null 2>&1 || true
+echo "  Input Monitoring reset."
+open "$APP"
+sleep 4
+cat <<'INSTRUCTIONS'
+
+  In the Chalant that just opened:
+      Settings  ->  General  ->  Dictation
+
+  LOOK FOR a notice saying it cannot see the key, with a button
+  to open System Settings.
+
+      A notice appears           -> PASS
+      Nothing appears at all     -> FAIL  (this is the whole item)
+
+  Click the button. Note whether it opens the INPUT MONITORING pane
+  or somewhere else. The anchor is unverified and may be wrong.
+
+INSTRUCTIONS
+read -r -p "  Press Return when you have looked. "
+
+echo
+echo "--------------------------------------------------"
+echo "  PART 2 — granted, it works"
+echo "--------------------------------------------------"
+cat <<'INSTRUCTIONS'
+
+  In System Settings, Privacy & Security, Input Monitoring:
+  switch Chalant ON. Then come back here.
+
+INSTRUCTIONS
+read -r -p "  Press Return once you have granted it. "
+
+osascript -e 'quit app "Chalant"' 2>/dev/null || true
+sleep 2
+open "$APP"
+sleep 4
+cat <<'INSTRUCTIONS'
+
+  Click into TextEdit. Hold LEFT OPTION, say a sentence, let go.
+
+      Text appears                        -> PASS
+      Settings no longer shows the notice -> PASS
+
+INSTRUCTIONS
+read -r -p "  Press Return when you have checked both. "
+
+echo
+echo "--------------------------------------------------"
+echo "  PART 3 — it must NOTICE the grant being taken away"
+echo "--------------------------------------------------"
+cat <<'INSTRUCTIONS'
+
+  Leave Chalant RUNNING. In System Settings, Privacy & Security,
+  Input Monitoring: switch Chalant OFF.
+
+  Type a few characters anywhere. Then open Chalant's
+  Settings -> General -> Dictation again.
+
+      A notice appears within 10s  -> PASS
+      Nothing appears              -> FAIL
+
+INSTRUCTIONS
+read -r -p "  Press Return when you have looked. "
+
+echo
+echo "--------------------------------------------------"
+echo "  PUTTING THINGS BACK"
+echo "--------------------------------------------------"
+osascript -e 'quit app "Chalant"' 2>/dev/null || true
+sleep 2
+open -a /Applications/Chalant.app 2>/dev/null || true
+
+cat <<'INSTRUCTIONS'
+
+  Your installed Chalant is back.
+
+  ⚠  Input Monitoring is probably still OFF from part 3. Turn it
+     back ON in System Settings or your normal dictation will not
+     work.
+
+  Now write the result in VERIFY_LOG.md under "S1", including
+  which pane the button actually opened.
+
+INSTRUCTIONS
+echo "Done. Tell Claude what happened."
