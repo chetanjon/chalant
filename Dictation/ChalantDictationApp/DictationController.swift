@@ -328,7 +328,12 @@ final class DictationController {
         // before, 18.22 after, with exactly three utterances changed and no
         // other output touched.
         let raw = transcript.rawText
-        let text = Disfluency.collapsingRepetitions(Guardrail.trimmingPunctuationRun(raw))
+        // Three stages, in order, all pure and all in Core: refuse what is not
+        // text, collapse what was said twice by accident, then remove the words
+        // nobody meant to say.
+        let text = Fillers.removing(
+            Disfluency.collapsingRepetitions(
+                Guardrail.trimmingPunctuationRun(raw)))
         if text != raw {
             Self.log.error(
                 "guardrail trimmed \(raw.count - text.count, privacy: .public) chars of punctuation run")

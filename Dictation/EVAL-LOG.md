@@ -175,3 +175,63 @@ learned confusion pair, not a formatting rule.
 | `Sara` collapsed to `Sarah` | 1 | M4 with both names present |
 | comma rendered as a full stop | 1 | M3 punctuation, needs VAD |
 | hallucinated `"Eating,"` on the onset | 1 | §0.18 confidence gate |
+
+### 2026-08-15 — filler removal, measured on real speech rather than the script
+
+The scripted sets cannot test this. Read sentences have no fillers, which is
+the trap Part 4 names, so the evidence is the 418 words the founder actually
+dictated through the app today.
+
+**19 fillers in 418 words**: `uh` 6, `um` 1, `you know` 5, `I mean` 1,
+`like,` 6.
+
+**And the data settled a rule that guessing would have got wrong.** Three of
+four uses of `like` were real words:
+
+```
+something like a name           real, keep
+like post hog or 11 labs        real, means "such as", keep
+Like, you know, use some...     filler
+we are doing like, uh, ...      filler
+```
+
+So `like` is a filler only when a comma follows it, or when the next word is
+noise. Removing it by word identity would have broken two sentences in four.
+
+**Before and after, on a real utterance:**
+
+```
+before:  Like uh, the completely local one, right? ... Like, you know, use some
+         3rd party, like, you know, storing database, like post hog or 11 labs.
+         There is so much. we can do on our own to make it the better one.
+
+after :  The completely local one, right? ... Use some 3rd party, storing
+         database, like post hog or 11 labs.
+         There is so much. We can do on our own to make it the better one.
+```
+
+10 of 28 captured utterances changed.
+
+**Locked English torture set: 18.22 before, 18.22 after.** Unchanged, and that
+is the result to want: scripted speech contains no fillers, so the pass has
+nothing to do there. It acts on real speech and leaves clean text byte for byte.
+
+**Two bugs the real speech found that the tests did not**, both fixed before
+this entry:
+
+1. Sentence starts were judged against the start of the *text*, not the
+   sentence. Removing "Like," mid-paragraph left `you know,` unremoved and a
+   lowercase word sitting after a full stop.
+2. A first attempt moved a dropped token's comma onto the previous word, which
+   turned "we are doing like, the local one" into "we are doing, the local
+   one". The filler's comma belongs to the filler and leaves with it.
+
+**Still not fixed, and visible in the same paragraph:**
+
+- `Wispr Flow, Superwhisper` came back as `Whisper Fluence Super Whisper`, and
+  `PostHog`/`ElevenLabs` as `post hog`/`11 labs`. Vocabulary, M4 and M5.
+- `I don't, I do use` is a self-repair and both halves survive. M3's repair
+  detector, not built.
+- `look at, look at, look at` is left alone on purpose: punctuation between
+  repeats is treated as a boundary the speaker made, and this one reads as
+  deliberate emphasis.
