@@ -33,7 +33,17 @@ final class CaptureGate: @unchecked Sendable {
 actor AudioEngine {
     private static let log = Logger(subsystem: "com.cj.chalant.dictation", category: "audio")
 
-    private let engine = AVAudioEngine()
+    /// **Recreated on every warm start, never reused across one.** An
+    /// `AVAudioEngine` binds its `inputNode` to the hardware configuration that
+    /// existed when the node was first touched. When a microphone is plugged in
+    /// or pulled out, `AVAudioEngineConfigurationChange` fires; stopping and
+    /// restarting the SAME engine leaves the input node tied to the old
+    /// configuration, so the tap installs, reports success, and the render
+    /// callback pulls nothing. Measured live 2026-08-16: a device change landed
+    /// mid-session and every hold after it fed 0 buffers until relaunch, exactly
+    /// the 0-buffer death CLAUDE.md line 1389 warns about. A fresh engine per
+    /// warm start is the fix: `startWarm` assigns a new one before it binds.
+    private var engine = AVAudioEngine()
     private var ring: AudioRing?
     private var format: AVAudioFormat?
 
@@ -67,6 +77,12 @@ actor AudioEngine {
 
     private func startWarm(avoiding silent: Set<String>) throws {
         guard !isRunning else { return }
+
+        // A brand-new engine, tied to the hardware as it is right now. The old
+        // one may have been bound to a device that is gone, or to a
+        // configuration a plug/unplug just invalidated; reusing it is what fed
+        // 0 buffers after a device change. See the note on `engine`.
+        engine = AVAudioEngine()
 
         let attached = AudioDevices.all()
         // Recorded before the engine opens anything, so the private aggregate
