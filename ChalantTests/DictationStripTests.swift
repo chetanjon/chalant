@@ -38,4 +38,33 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(DictationStripLevel.clamp(0.4), 0.4, accuracy: 0.0001)
         XCTAssertEqual(DictationStripLevel.rim(3.0).radius, 24, accuracy: 0.001)
     }
+
+    // MARK: - Which display (spec, "Which display")
+
+    private let a: CGDirectDisplayID = 1, b: CGDirectDisplayID = 2, c: CGDirectDisplayID = 3
+
+    func testTheTargetAppsDisplayWinsOverEverything() {
+        let picked = DictationDisplay.resolve(
+            target: a, pointerOn: b, main: c, any: c, isOff: { _ in false })
+        XCTAssertEqual(picked, a)
+    }
+
+    func testFallsBackToThePointerThenMainThenAny() {
+        XCTAssertEqual(DictationDisplay.resolve(target: nil, pointerOn: b, main: c, any: a, isOff: { _ in false }), b)
+        XCTAssertEqual(DictationDisplay.resolve(target: nil, pointerOn: nil, main: c, any: a, isOff: { _ in false }), c)
+        XCTAssertEqual(DictationDisplay.resolve(target: nil, pointerOn: nil, main: nil, any: a, isOff: { _ in false }), a)
+        XCTAssertNil(DictationDisplay.resolve(target: nil, pointerOn: nil, main: nil, any: nil, isOff: { _ in false }))
+    }
+
+    /// A screen the user has set to "Off" gets no island, so the strip must
+    /// go to the next fallback rather than nowhere.
+    func testSkipsADisplayWhoseIslandIsOff() {
+        let picked = DictationDisplay.resolve(
+            target: a, pointerOn: b, main: c, any: c, isOff: { $0 == a })
+        XCTAssertEqual(picked, b)
+    }
+
+    func testEveryDisplayOffMeansNowhere() {
+        XCTAssertNil(DictationDisplay.resolve(target: a, pointerOn: b, main: c, any: c, isOff: { _ in true }))
+    }
 }
