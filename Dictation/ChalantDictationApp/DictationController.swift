@@ -341,8 +341,17 @@ final class DictationController {
         // `versal` → `Vercel`, `Kisu` → `Kizu`). It does nothing at all until
         // the vocabulary is non-empty, which today means until someone sets it
         // by hand or M5's learner fills it.
-        let resolved = TermMatcher.resolving(
-            tokens: transcript.tokens, terms: Vocabulary.terms())
+        // Spans first, while every token is still present. A name the engine
+        // broke in half needs all its pieces, and joining can only shorten the
+        // sequence the single-word pass then walks.
+        //
+        // It is a separate pass because the evidence is different: a split name
+        // is made of CONFIDENTLY heard real words (`friction` and `lens` both
+        // came back at 0.98), so the single-word gate, which fires only on
+        // uncertainty, can never see it.
+        let vocabulary = Vocabulary.terms()
+        let whole = TermMatcher.joiningSpans(tokens: transcript.tokens, terms: vocabulary)
+        let resolved = TermMatcher.resolving(tokens: whole, terms: vocabulary)
 
         // Three stages, in order, all pure and all in Core: refuse what is not
         // text, collapse what was said twice by accident, then remove the words

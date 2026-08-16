@@ -548,3 +548,84 @@ for.
   own corrections, and no model at all of a cold start.
 - **8 wins and 0 losses on 90 utterances is still small n**, and the sets remain
   one speaker, one room, file input rather than the microphone.
+
+## 2026-08-15 — MULTI-TOKEN SPANS. **M4's ACCEPTANCE BAR IS MET: PROPER-NOUN ERRORS DOWN 39% AND 41%.**
+
+The entry above named split names as the highest-value remaining work and the
+evidence for it. This is that work.
+
+| set | raw | single-word only | **with spans** |
+|---|---|---|---|
+| **propernoun dev** | 40.37 | 37.27 | **27.33** |
+| **propernoun holdout** | 32.93 | 31.71 | **17.07** |
+| English torture (locked) | 20.00 | 18.22 | **18.22** |
+| code-switch dev | 102.34 | 102.34 | **95.31** |
+| code-switch holdout | 75.41 | 72.13 | **72.13** |
+
+**Proper-noun errors: dev 23 → 14 (−39%), holdout 17 → 10 (−41%), code-switch
+dev 5 → 1.** M4 asks for at least 30% with no loss of precision. **Both halves
+now pass**, on a holdout set that no threshold was tuned against.
+
+Overall corrections fall 32% on propernoun dev and 48% on holdout. **The locked
+English set does not move at all**, which is the right result: it contains
+almost no vocabulary, so a vocabulary pass should be invisible there.
+
+16 utterances joined, including:
+
+```
+friction lens        -> FrictionLens      app cast      -> appcast
+speech analyzer      -> SpeechAnalyzer    core ML       -> CoreML
+SF speech recognizer -> SFSpeechRecognizer  super whisper -> Superwhisper
+text injector        -> TextInjector      Fluid, audio  -> FluidAudio
+```
+
+### Why this had to be a separate pass, measured
+
+**A split name is made of CONFIDENTLY heard words.** `friction` 0.98, `lens`
+0.98, `analyzer` 0.94, `Speech` 0.92, `injector` 0.91. The engine hears every
+word correctly and gets only the boundary wrong. The single-word gate fires only
+on uncertainty, so it can never see this, and a confidence gate on spans would
+mean the pass never fires at all. The evidence comes from the match instead: a
+run of words sounding like one of the user's own terms, to near-exactness
+(0.95), at comparable length.
+
+### THE STOPWORD GUARD, AND THE FAILURE THAT FORCED IT
+
+**The first version shipped without it and the corpus found two failures within
+minutes. All 14 unit tests passed while it was broken.**
+
+```
+"I can't make it on Thursday."       ->  "I can't make Aidan Thursday."
+"Ship Chalan to the Kizu group."     ->  "Ship Chalant the Kizu group."
+```
+
+The second is the worse one: **the name came out RIGHT and the sentence lost a
+word.** That is the Part 1 §2 violation rather than a wrong guess.
+
+**Neither is reachable by any threshold.** `it on` and `Aidan` reduce to the
+SAME phonetic key and sit 20% apart in length, so similarity and length both see
+a perfect match. Only the fact that `it` and `on` are function words separates
+them.
+
+**Part 5 §3 named this mechanism before it was needed** (`stopwordSpanSimilarity
+0.85`, *"protects `and` from becoming `Andre`"*) and it was not used. A hard
+refusal rather than a raised bar, because at identical phonetic keys there is no
+bar left to raise. Known limitation, stated rather than discovered later: a term
+genuinely containing a function word ("Bank of America") cannot be joined. No
+term in use does.
+
+**The general lesson, and it is the second time today: the corpus catches what
+the unit tests cannot, because the tests only contain the failures already
+imagined.** Both bad joins were of a shape nobody thought to write a test for.
+
+### Still open
+
+- **The reverse split is not handled.** `Whisperflow` for `Wispr Flow` is one
+  token that should be two. This pass only joins.
+- **Confidently wrong single words remain**, and they are now the largest group:
+  `Chalan` for `Chalant` at 0.87, `Journalagada`, `Aiden` for `Aidan`, `Villow`
+  for `Willow`. No confidence threshold reaches them; this is CTC rescoring's
+  territory.
+- **The term list still contains the answers**, so this measures the layer given
+  a correct vocabulary. M5 learning it from the user's own corrections is what
+  makes that a fair model of the shipped product.

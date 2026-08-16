@@ -66,7 +66,11 @@ struct Out: Codable {
 /// alignment back to the engine's own scoring survives. Substitution is one
 /// word for one word, so running it first cannot disturb the stages behind it.
 func pipeline(_ tokens: [Token], terms: [String]) -> String {
-    let resolved = TermMatcher.resolving(tokens: tokens, terms: terms)
+    // Spans first, while every token is still present: joining a name the
+    // engine split needs all its pieces, and it can only ever shorten the
+    // sequence the single-word pass then walks.
+    let whole = TermMatcher.joiningSpans(tokens: tokens, terms: terms)
+    let resolved = TermMatcher.resolving(tokens: whole, terms: terms)
     let raw = resolved.map(\.text).joined(separator: " ")
     return Fillers.removing(Disfluency.collapsingRepetitions(Guardrail.trimmingPunctuationRun(raw)))
 }

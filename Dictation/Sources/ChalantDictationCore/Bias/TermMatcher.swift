@@ -282,6 +282,131 @@ public enum TermMatcher {
         }
     }
 
+    /// Function words that may never be part of a joined span.
+    ///
+    /// **Part 5 §3 named this before it was needed** (`stopwordSpanSimilarity
+    /// 0.85`, *"protects `and` from becoming `Andre`"*) and the first version
+    /// of the span pass shipped without it. The corpus found two failures
+    /// within minutes, and neither is reachable by any threshold:
+    ///
+    /// - `"I can't make it on Thursday"` → `"make Aidan Thursday"`. `it on` and
+    ///   `Aidan` reduce to the SAME phonetic key and sit 20% apart in length,
+    ///   so similarity and length both see a perfect match.
+    /// - `"Ship Chalan to the Kizu group"` → `"Ship Chalant the Kizu group"`.
+    ///   The name came out right and the sentence lost a word, which is the
+    ///   Part 1 §2 violation rather than merely a wrong guess.
+    ///
+    /// A hard refusal rather than a raised bar, because at identical phonetic
+    /// keys there is no bar left to raise. **Known limitation, stated rather
+    /// than discovered later: a term that genuinely contains a function word
+    /// ("Bank of America") cannot be joined by this pass.** No term in use does.
+    private static let stopwords: Set<String> = [
+        "a", "an", "and", "are", "as", "at", "be", "but", "by", "do", "for",
+        "from", "had", "has", "have", "he", "her", "his", "i", "if", "in", "is",
+        "it", "its", "me", "my", "no", "not", "of", "on", "or", "our", "out",
+        "she", "so", "than", "that", "the", "them", "then", "there", "they",
+        "this", "to", "up", "us", "was", "we", "were", "what", "when", "which",
+        "who", "will", "with", "you", "your",
+    ]
+
+    /// How near-exact a run of words must sound to a term before it is joined
+    /// into one.
+    ///
+    /// **Higher than the single-word bar, and it can afford to be.** A whole
+    /// run of words matching a term by sound is a much stronger coincidence
+    /// than one short word doing so, so near-exactness is cheap here and buys
+    /// the safety that the confidence gate provides elsewhere.
+    public static let spanSimilarityFloor = 0.95
+
+    /// The longest run of words this will try to join. Three reaches
+    /// `SF speech recognizer`; beyond that the false-positive surface grows
+    /// faster than the vocabulary does.
+    public static let maximumSpan = 3
+
+    /// Put a name back together after the engine broke it into separate words.
+    ///
+    /// **This cannot reuse the single-word gate, and the measurement says why.**
+    /// That gate fires only when the engine was UNSURE. A split name is the
+    /// opposite: on the propernoun corpus `friction` and `lens` both came back
+    /// at **0.98**, `Speech` at 0.92, `analyzer` at 0.94, `injector` at 0.91.
+    /// The engine heard every word correctly and got only the boundary wrong,
+    /// so there is no uncertainty to detect and a confidence gate would mean
+    /// this never fires at all.
+    ///
+    /// The evidence therefore comes from the match: a run of words sounding
+    /// like one of YOUR terms, to near-exactness, at comparable length.
+    ///
+    /// **This is the one pass allowed to reduce the word count.** It only ever
+    /// joins, and Part 1 §2 is about never losing the user's text: two words
+    /// becoming the one word they were always meant to be loses nothing. It
+    /// runs ahead of the single-word pass, while every token is still present.
+    public static func joiningSpans(
+        tokens: [Token], terms: [String], similarityFloor: Double = spanSimilarityFloor
+    ) -> [Token] {
+        guard !terms.isEmpty, tokens.count > 1 else { return tokens }
+
+        var out: [Token] = []
+        var i = 0
+        while i < tokens.count {
+            var matched = false
+
+            // Longest first, so `SF speech recognizer` is never eaten by a
+            // shorter span sitting inside it.
+            for width in stride(from: min(maximumSpan, tokens.count - i), through: 2, by: -1) {
+                let span = Array(tokens[i..<(i + width)])
+                let cores = span.map { split($0.text).1 }
+                guard cores.allSatisfy({ !$0.isEmpty }) else { continue }
+                // **The guard Part 5 §3 already named and the first version of
+                // this omitted.** Both of the false positives the corpus found
+                // are function words being swept into a name, and neither the
+                // similarity floor nor the length guard can see them: `it on`
+                // and `Aidan` reduce to the SAME phonetic key.
+                guard !cores.contains(where: { stopwords.contains($0.lowercased()) }) else {
+                    continue
+                }
+                let run = cores.joined()
+
+                var best: (term: String, score: Double)?
+                for term in terms {
+                    let bare = term.filter { $0.isLetter || $0.isNumber }
+                    let score = PhoneticKey.similarity(run, bare)
+                    guard score >= similarityFloor, withinLength(run, bare) else { continue }
+                    if score > (best?.score ?? 0) { best = (term, score) }
+                }
+                guard let best else { continue }
+
+                // The speaker's punctuation belongs to the speaker: whatever
+                // led the run and whatever closed it stay where they were.
+                let prefix = split(span[0].text).0
+                let suffix = split(span[width - 1].text).2
+
+                // The MINIMUM, and this differs from `TokenAssembly` on
+                // purpose. There the pieces were always one word split by
+                // attribute runs, so the higher reading was the honest one.
+                // Here they are genuinely separate words, and a span is only as
+                // certain as its least certain part.
+                let confidences = span.compactMap(\.confidence)
+                let starts = span.compactMap { $0.range?.lowerBound }
+                let ends = span.compactMap { $0.range?.upperBound }
+
+                out.append(
+                    Token(
+                        text: prefix + best.term + suffix,
+                        confidence: confidences.count == span.count ? confidences.min() : nil,
+                        range: starts.min().flatMap { low in ends.max().map { low...$0 } }))
+                i += width
+                matched = true
+                break
+            }
+
+            if !matched {
+                out.append(tokens[i])
+                i += 1
+            }
+        }
+        return out
+    }
+
     /// Peel punctuation off both ends, leaving the word itself in the middle.
     private static func split(_ text: String) -> (String, String, String) {
         let isWord: (Character) -> Bool = { $0.isLetter || $0.isNumber || $0 == "'" }
