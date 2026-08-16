@@ -1,166 +1,222 @@
-# Phase 0: SDK ground truth
+# S0 — SDK ground truth
 
-Measured 2026-08-15 against the installed SDK and this hardware. Where this file
-disagrees with any research document, **this file wins** and the document is wrong.
+Run 2026-08-16 against the installed SDK and at runtime on the target machine.
+Regenerated from scratch for the Stage 1 directive; supersedes the 2026-08-15
+version of this file.
 
-```
-macOS            27.0 (26A5378n)
-Xcode            26.6 (17F113)
-SDK              MacOSX26.5.sdk        <-- note: SDK is 26.5, OS is 27.0
-Swift            6.3.3
-Hardware         MacBook Air, Mac15,12, Apple M3, 8 cores, 16 GB
-Interface dump   verification/sdk_speech_interface.txt (682 lines, arm64e-apple-macos)
-                 verification/sdk_foundationmodels_interface.txt (1501 lines)
-Raw results      verification/raw/meta_*.json
-Probe            verification/metaprobe.swift
-```
-
-The SDK is a minor version behind the OS. Runtime behaviour can exceed what the SDK
-header describes: `mul-IN` is available at runtime on macOS 27 while this SDK is 26.5.
+**Rule applied throughout: the installed SDK and the runtime are the source of
+truth. Where either contradicts the directive or an existing document, the
+contradiction is recorded rather than smoothed over.**
 
 ---
 
-## 1. Symbol table
+## Environment
 
-| Symbol | Status | Real signature / note |
+| | |
+|---|---|
+| macOS | **27.0** (26A5378n) |
+| Xcode | 26.6 (17F113) |
+| SDK | **MacOSX26.5** |
+| Hardware | MacBook Air, Mac15,12, **Apple M3**, 8 cores, **16 GB** |
+
+**The SDK is a minor version BEHIND the OS.** Runtime capability can therefore
+exceed what the interface implies, and an "absent from the dump" verdict is not
+the same as "unavailable at runtime". This is not hypothetical: the multilingual
+locales below are richer than the headers alone would suggest.
+
+Full interface: `verification/sdk_speech_interface.txt` (683 lines, from
+`Speech.swiftmodule/arm64e-apple-macos.swiftinterface`).
+
+---
+
+## Symbol table
+
+### Permissions
+
+All four CoreGraphics symbols are **PRESENT**, in
+`CoreGraphics.framework/Headers/CGRemoteOperation.h`, all `macos(10.15)`, none
+deprecated:
+
+| Symbol | Signature |
+|---|---|
+| `CGPreflightListenEventAccess` | `bool CGPreflightListenEventAccess(void)` |
+| `CGRequestListenEventAccess` | `bool CGRequestListenEventAccess(void)` |
+| `CGPreflightPostEventAccess` | `bool CGPreflightPostEventAccess(void)` |
+| `CGRequestPostEventAccess` | `bool CGRequestPostEventAccess(void)` |
+
+**S1 is implementable exactly as written.** None of these are currently called
+anywhere in the repository.
+
+`IsSecureEventInputEnabled` — **PRESENT**, exported from
+`Carbon.framework/Frameworks/HIToolbox`. Already used successfully at
+`Dictation/ChalantDictationApp/Insert/SecureInputProbe.swift:21`.
+
+**`AXManualAccessibility`** — as the directive anticipated, this is a magic
+attribute string and not an SDK symbol. It does not appear in any header and its
+absence means nothing. Noted rather than reported absent.
+
+### Locale
+
+| Symbol | Status |
+|---|---|
+| `SpeechTranscriber.supportedLocales` | PRESENT, `static var ... { get async }` |
+| `SpeechTranscriber.installedLocales` | PRESENT, `static var ... { get async }` |
+| `SpeechTranscriber.supportedLocale(equivalentTo:)` | PRESENT, `static func ... async -> Locale?` |
+
+### Assets
+
+| Symbol | Status | Signature |
 |---|---|---|
-| `SpeechAnalyzer` | PRESENT | **An `actor`.** `modules` is actor-isolated; `await` it. |
-| `SpeechTranscriber` | PRESENT | `: SpeechModule, LocaleDependentSpeechModule` |
-| `DictationTranscriber` | PRESENT | `: SpeechModule, LocaleDependentSpeechModule` |
-| `SpeechDetector` | PRESENT | `final class SpeechDetector : Speech.SpeechModule` — **it does conform.** |
-| `SpeechModule` | PRESENT | `protocol SpeechModule : AnyObject, Sendable` |
-| `AnalysisContext` | PRESENT | `final class AnalysisContext : Sendable` |
-| `contextualStrings` | PRESENT | **`[ContextualStringsTag: [String]]`, a dictionary, not `[String]`.** Only tag defined: `.general`. |
-| `setContext(_:)` | PRESENT | `func setContext(_ newContext: AnalysisContext) async throws` |
-| `ContextTag` | **ABSENT** | The type is `AnalysisContext.ContextualStringsTag`. |
-| `transcriptionConfidence` | PRESENT | `ResultAttributeOption.transcriptionConfidence`; attribute `AttributeScopes.SpeechAttributes.ConfidenceAttribute`, `Value = Double` |
-| `audioTimeRange` | PRESENT | `ResultAttributeOption.audioTimeRange`; attribute `TimeRangeAttribute`, `Value = CMTimeRange` |
-| `alternativeTranscriptions` | PRESENT | `ReportingOption.alternativeTranscriptions` |
-| `fastResults` | PRESENT | **`ReportingOption.fastResults` — in no research document.** |
-| `etiquetteReplacements` | PRESENT | The only `TranscriptionOption`. **This is the profanity-masking knob the research listed as NOTHING FOUND.** |
-| `isFinal` | PRESENT | On `SpeechModuleResult`, not on `SpeechTranscriber.Result` directly. |
-| `AssetInventory` | PRESENT | `status(forModules:)`, `assetInstallationRequest(supporting:)` |
-| `maximumReservedLocales` | PRESENT | **Measured value: 5** |
-| `reservedLocales` | PRESENT | Measured: `[]` |
-| `reserve(locale:)` | PRESENT | Returned `false` for `mul_IN` and did not block use |
-| `allocatedLocales` | **ABSENT** | Architecture must not assume it |
-| `deallocate(locale:)` | **ABSENT** | `release(reservedLocale:)` exists instead |
-| `bestAvailableAudioFormat` | PRESENT | Two overloads, one taking a `naturalFormat` |
-| `SFSpeechLanguageModel` / `SFCustomLanguageModelData` | PRESENT | `macOS 14+`, the legacy custom-LM path |
+| `AssetInventory.maximumReservedLocales` | PRESENT | `static var Int` (sync) |
+| `AssetInventory.reservedLocales` | PRESENT | `static var [Locale] { get async }` |
+| `AssetInventory.reserve(locale:)` | PRESENT | `static func async throws -> Bool` |
+| `AssetInventory.release(reservedLocale:)` | PRESENT | `static func async -> Bool` |
+| `AssetInventory.status(forModules:)` | PRESENT | `static func async -> Status` |
+| `AssetInventory.assetInstallationRequest(supporting:)` | PRESENT | `static func async throws -> AssetInstallationRequest?` |
+| **`AssetInventory.allocatedLocales`** | **ABSENT** | 0 occurrences |
+| **`AssetInventory.deallocate(locale:)`** | **ABSENT** | 0 occurrences |
 
-### The three enums, in full
+`AssetInventory.Status` cases: `unsupported`, `supported`, `downloading`,
+`installed`. It is `Comparable`.
 
-```
-TranscriptionOption   = { etiquetteReplacements }
-ReportingOption       = { volatileResults, alternativeTranscriptions, fastResults }
-ResultAttributeOption = { audioTimeRange, transcriptionConfidence }
-```
+**The directive lists `allocatedLocales` and `deallocate(locale:)`. Neither
+exists.** The reserve/release pair is the whole API. Any S3 wording built on
+allocate/deallocate needs rewriting to reserve/release.
 
-### `SpeechTranscriber.Result`
+### Lifecycle and teardown — this is what S2 turns on
 
-```swift
-let range: CMTimeRange
-let resultsFinalizationTime: CMTime
-var text: AttributedString
-let alternatives: [AttributedString]   // INCLUDES the primary at index 0
-var isFinal: Bool                      // via SpeechModuleResult
-```
+**`SpeechAnalyzer` carries the entire teardown surface:**
+
+| Method | Note |
+|---|---|
+| `cancelAndFinishNow() async` | **the abandon path S2 needs** |
+| `finalizeAndFinishThroughEndOfInput() async throws` | what the app uses today |
+| `finalizeAndFinish(through:) async throws` | |
+| `finish(after:) async throws` | |
+| `finalize(through:) async throws` | |
+| `cancelAnalysis(before:)` | sync |
+| `setModules(_:) async throws` | reuse across sessions is possible |
+
+**`SpeechTranscriber` has NO teardown method whatsoever.** No `finish`, no
+`cancel`, no `invalidate`. Only `@objc deinit`. Its lifetime is ARC's problem
+and the analyzer's.
+
+**Verdict: S2 is implementable as written, and better than written.**
+`cancelAndFinishNow()` is a real, cheap abandon path. `setModules(_:)` means a
+single long-lived analyzer is possible, which would sidestep the recognizer-cap
+failure entirely rather than managing it.
 
 ---
 
-## 2. Presets, measured
+## Runtime truth
 
-| Preset | reporting | attributes |
-|---|---|---|
-| `transcription` | none | none |
-| `transcriptionWithAlternatives` | alternativeTranscriptions | none |
-| `timeIndexedTranscriptionWithAlternatives` | alternativeTranscriptions | audioTimeRange |
-| **`progressiveTranscription`** ← what the app ships | fastResults, volatileResults | **none** |
-| `timeIndexedProgressiveTranscription` | fastResults, volatileResults | audioTimeRange |
+A throwaway CLI (not an app target) printed the live lists.
 
-**Consequence: `AppleTranscriber.swift:42` requests no attributes and no alternatives.
-The app currently discards confidence, timings and the N-best list entirely.** No preset
-combines volatile results with alternatives *and* confidence, so the explicit
-`init(locale:transcriptionOptions:reportingOptions:attributeOptions:)` is required.
+### en_IN is PRESENT and ALREADY INSTALLED
 
----
+**45 supported locales, 24 installed.** `en_IN` appears in both.
 
-## 3. V2 — is `transcriptionConfidence` populated?
+Installed: `bn_IN en_AU en_CA en_GB en_IE en_IN en_NZ en_SG en_US en_ZA gu_IN
+hi_IN kn_IN ks_IN mai_IN ml_IN mr_IN ne_IN or_IN pa_IN ta_IN te_IN ur_IN mul_IN`
 
-**Answer: YES, and the contract is crisp.** Directive outcome 3.
+Supported but not installed: the German, Spanish, French, Italian, Japanese,
+Korean, Portuguese and Chinese sets.
 
-| File | final runs with confidence | volatile runs with confidence | range | distinct |
-|---|---|---|---|---|
-| `te-1.caf` (founder, Telugu-English) | **7/7** | 0/18 | 0.104 – 0.727 | 7 |
-| `en-1.caf` (founder, English) | **19/19** | 0/15 | 0.011 – 0.995 | 19 |
-| `names.aiff` (synthesized) | **18/18** | 0/32 | 0.546 – 0.998 | 18 |
+**S3's core assumption holds.** The differentiator is one line away, as the
+directive suspected, and the asset is already on this machine.
 
-**Confidence is present on every finalized run and never on a volatile one.** Values vary
-widely and are all distinct, so it is neither absent nor degenerate. Since insertion fires
-on finalized results only, confidence is available exactly where the product needs it.
+`maximumReservedLocales` = **5**. `reservedLocales` = **`[]`** — the app has
+never successfully reserved anything, or reservations do not persist.
 
-**Not yet answered:** whether it *means* anything. The directive requires AUC against
-ground-truth per-word error before confidence may drive routing, with a 0.70 bar. **That
-needs the corpus.** Until then confidence is a signal, not a probability, per spec §31.1.
+### The equality trap is REAL, and measured
 
----
-
-## 4. V3 — alternatives granularity and volume
-
-**Answer: per whole result, never per token, and thin.**
-
-`alternatives[0]` is always the primary, so a count of 1 means **zero** real alternatives.
-
-| File | real alternatives per final result | finals with any |
-|---|---|---|
-| `te-1.caf` | 0, 1, 0, 2 | 2 of 4 |
-| `en-1.caf` | 0, 4 | 1 of 2 |
-| `names.aiff` | 0, 2, 1, 0, 1, 0 | 2 of 6 |
-
-**Most finalized results carry no alternative at all.** Post-ASR rescue depends on the
-correct answer already being in the N-best list, and usually there is no list.
-
-**But the one useful case is exactly the target case.** For `en-1`, primary `" Shalan rule."`
-against truth "Chalant", the alternatives were:
-
-```
-" Shalan rule."   " Shalan Rule."   " Shalan."   " Chalan."   " Shalan rule?"
-```
-
-`"Chalan"` is nearer the truth than the primary. So the list is thin but occasionally
-carries a rare-term rescue.
-
-**Architectural consequence:** the secondary engine moves from optional toward necessary.
-Spec §12.1 treats Parakeet as adaptive verification; on this evidence, N-best rescue alone
-cannot carry rare-term correction. Quantify on the corpus before committing.
-
----
-
-## 5. Timing — the pause question
-
-**`.audioTimeRange` is present on 100% of runs, including volatile ones, and is useless
-for detecting pauses.**
-
-| File | runs with a time range | inter-word gaps | gaps that are EXACTLY zero |
+| Constructed | `== ` in supportedLocales | identifier match | `supportedLocale(equivalentTo:)` |
 |---|---|---|---|
-| `te-1.caf` | 25/25 | 3 | **3 (100%)** |
-| `en-1.caf` | 34/34 | 17 | **17 (100%)** |
-| `names.aiff` | 50/50 | 12 | **12 (100%)** |
+| `Locale("en_IN")` underscore | **true** | true | `en_IN` |
+| `Locale("en-IN")` **hyphen** | **false** | **false** | `en_IN` |
+| `Locale("en_US")` underscore | true | true | `en_US` |
+| `Locale("en-US")` **hyphen** | **false** | **false** | `en_US` |
 
-**32 of 32 inter-word gaps are exactly zero.** Word A's end equals word B's start in every
-single case, including across audible silence. The ranges describe segment alignment, not
-speech timing.
+The framework's own identifiers use **underscores**. A hyphenated `Locale` is
+not equal to them and does not match by identifier either. Both resolve
+correctly through `supportedLocale(equivalentTo:)`.
 
-This confirms `CLAUDE.md` §0.4 on this hardware and **refutes CJ spec §3.4 and §9.2**,
-which build the punctuation differentiator on this attribute. Pause features must come
-from VAD over the audio we already own.
-
-One research claim is now stale in our favour: volatile results were reported to *lack*
-timing attributes. Here they carry them 100% of the time. They still lack confidence.
+**This already implicates shipping code.** `DictationController.swift:55`
+declares `Locale(identifier: "en-US")` — hyphenated, and therefore not equal to
+the framework's `en_US`. It works only because both consumers route through
+`supportedLocale(equivalentTo:)` first
+(`AppleTranscriber.swift:58`, `SpeechAssets.swift:55`). The directive's rule is
+already satisfied, by exactly one call on each path, with no test holding it
+there.
 
 ---
 
-## 6. Contradictions with the research documents
+## ⚠ The unresolved contradiction S0 exists to catch
 
-See `DOCUMENT_CONFLICTS.md`. Rows resolved by this pass: 1 (confirmed), 2 (refuted, the
-SDK bug is fixed), 3 (unchanged), 4 (refuted by runtime measurement).
+**`AssetInventory.status(forModules:)` returned `.supported` for EVERY locale
+tested — including `en_US`, which the app uses successfully every day, and
+`de_DE`, which is definitively not installed.** Both presets, same result:
+
+```
+en_US  installedLocales=true   status=supported
+en_IN  installedLocales=true   status=supported
+mul_IN installedLocales=true   status=supported
+de_DE  installedLocales=false  status=supported
+```
+
+`.installed` is a real case in the enum and was never returned.
+
+**Why this matters more than it looks.** `SpeechAssets.ensure`
+(`SpeechAssets.swift:63-76`) switches on exactly this value, and only
+`.installed` produces `.available`. `SpeechAssetState.isReady` is true **only**
+for `.available` (`:24-27`), and `DictationController.swift:153` refuses every
+key press when the state is not ready.
+
+If the app saw what this CLI saw, dictation would refuse every hold. **It does
+not — dictation demonstrably worked on this machine tonight**, with 72 captured
+utterances on disk.
+
+**Most likely explanation, with evidence but NOT confirmed in both contexts:**
+the status API reports `.supported` to a process lacking Speech Recognition
+authorization. The CLI measured `SFSpeechRecognizer.authorizationStatus() == 0`
+(`notDetermined`); the app requests that authorization at launch
+(`Chalant/Features/PermissionPrimer.swift:14`).
+
+**Consequence for Stage 1, and it is the reason to stop here:**
+
+1. **Do not design S3 on this CLI's `status` readings.** They are not
+   transferable to the app's context. `installedLocales` matched expectations
+   and looks trustworthy; `status(forModules:)` does not.
+2. The directive tells S3 to "check `installedLocales`; if supported but not
+   installed, run the asset installation request". Given the above, **that is
+   the right signal and `status` is the wrong one** — which inverts what
+   `SpeechAssets` currently does.
+3. **Unverified either way:** whether the app's own asset gate ever reaches
+   `.available` through the `.installed` branch, or whether dictation works for
+   some other reason. Settling it needs one `log stream --level debug` while
+   dictation restarts, since the line is `log.info` and `log show` does not
+   persist those.
+
+---
+
+## Corrections to the directive, from the SDK
+
+1. **`allocatedLocales` and `deallocate(locale:)` do not exist.** Use
+   `reservedLocales` and `release(reservedLocale:)`.
+2. **`SpeechTranscriber` has no teardown surface.** S2's teardown work belongs
+   entirely to `SpeechAnalyzer`.
+3. **S2 has a better option than the one implied.** `setModules(_:)` allows one
+   long-lived analyzer reused across holds, which would avoid the
+   recognizer-cap failure rather than managing it. Worth deciding before S2 is
+   written, because it changes the shape of the fix.
+4. **`maximumReservedLocales` is a synchronous property**, not async, unlike its
+   neighbours. Reading it at runtime as the directive requires is trivial.
+
+## What S0 did NOT establish
+
+- Whether the recognizer cap ("Maximum number of recognizers reached")
+  reproduces here. It is a reported failure, not a measured one, and S2's
+  100-hold test is what settles it.
+- Whether `CGPreflightListenEventAccess` returns false in the current TCC state.
+  Not called anywhere yet.
+- Anything about insertion, AX readability, or latency. Out of S0's scope.
