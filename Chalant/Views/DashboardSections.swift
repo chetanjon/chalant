@@ -26,6 +26,11 @@ struct GeneralSection: View {
     // On, per the 2026-08-14 decision. Costs ~1s per utterance; see `Cleanup`.
     @AppStorage(Cleanup.enabledKey) private var cleanup = true
 
+    /// Re-read on appear rather than on a timer. The question is "the user is
+    /// doing things, is the tap seeing them", and a timer would answer it while
+    /// the machine sits idle and report nonsense.
+    @State private var hearing: Dictation.Hearing = .unproven
+
     @State private var launchAtLogin = false
     /// The mics on offer right now, refreshed each time this section
     /// appears; (name, uid) pairs for the Microphone picker.
@@ -151,6 +156,11 @@ struct GeneralSection: View {
                         "The first time you turn this on, macOS asks for Input Monitoring and "
                         + "Accessibility. It needs both: one to notice the key, one to place the text."
                     )
+                    // The app could previously be permanently deaf while every
+                    // log said the hotkey installed fine. The only symptom was
+                    // that holding the key did nothing, which reads as a broken
+                    // app rather than a missing switch.
+                    if dictationOn { DictationHearingNotice(hearing: hearing) }
                     SettingDivider()
                     // A switch because this is not simply better: it trades
                     // roughly a second for a tidier sentence, and that is a
@@ -208,6 +218,11 @@ struct GeneralSection: View {
             }
         }
         .onAppear {
+            // Opening Settings IS the interaction the check needs: the user is
+            // frontmost, clicking things, and the tap has had every chance to
+            // see a modifier. Re-preflights too, so a permission revoked while
+            // running is caught here rather than never.
+            hearing = Dictation.shared.checkHearing()
             launchAtLogin = SMAppService.mainApp.status == .enabled
             var devices = SystemVolume.inputDevices()
                 .filter { !$0.uid.isEmpty }

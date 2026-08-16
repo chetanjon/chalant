@@ -27,6 +27,24 @@ final class EventTapMonitor: @unchecked Sendable {
     private var runLoopSource: CFRunLoopSource?
     private var isDown = false
 
+    /// Has this tap ever received a single `.flagsChanged`?
+    ///
+    /// **The only honest proof the tap can hear.** `tapCreate` succeeding says
+    /// nothing: without Input Monitoring it returns a valid tap that receives
+    /// events for the rest of the process. This is the difference between
+    /// "installed" and "hearing", and nothing before now distinguished them.
+    ///
+    /// Deliberately counts ANY `.flagsChanged`, not only left Option: shift,
+    /// command and control all produce them, so an ordinary second of typing is
+    /// enough to prove the tap is alive. Waiting for the dictation key itself
+    /// would mean the check only passes once the user has already succeeded at
+    /// the thing being checked.
+    ///
+    /// Written from the tap's real-time callback and read from the main actor,
+    /// which is why the type is `@unchecked Sendable` and this is a plain
+    /// `Bool` set exactly once, never cleared.
+    private(set) var hasHeardAnything = false
+
     /// Called on the main actor when the key goes down and comes back up.
     private let onChange: @MainActor @Sendable (Bool) -> Void
 
@@ -103,6 +121,12 @@ final class EventTapMonitor: @unchecked Sendable {
             return Unmanaged.passUnretained(event)
 
         case .flagsChanged:
+            // Before the keycode filter, deliberately: any modifier at all
+            // proves the tap is receiving. Filtering first would mean the
+            // liveness signal only appears once the user has already used the
+            // dictation key successfully.
+            hasHeardAnything = true
+
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
             guard keyCode == Self.optionKeyCode else { break }
 
