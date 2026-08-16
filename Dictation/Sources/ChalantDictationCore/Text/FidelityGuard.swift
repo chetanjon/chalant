@@ -179,6 +179,15 @@ public enum FidelityGuard {
         return nil
     }
 
+    /// English capitalises the first person everywhere, so `I` and its
+    /// contractions look exactly like proper nouns mid-sentence.
+    ///
+    /// **Measured on 42 real spontaneous utterances:** the guard rejected a
+    /// perfectly good cleanup with "a name went missing: Im", because `I'm`
+    /// bares to `Im`, which is capitalised and not opening the sentence. A
+    /// rewrite is entitled to turn "I'm not sure" into "I am not sure".
+    private static let firstPerson: Set<String> = ["i", "im", "ive", "ill", "id"]
+
     private static func names(in text: String) -> Set<String> {
         var found: Set<String> = []
         var opensSentence = true
@@ -187,6 +196,7 @@ public enum FidelityGuard {
             defer { opensSentence = word.hasSuffix(".") || word.hasSuffix("?") || word.hasSuffix("!") }
             guard !core.isEmpty, !opensSentence else { continue }
             guard let first = core.first, first.isUppercase else { continue }
+            guard !firstPerson.contains(core.lowercased()) else { continue }
             found.insert(core)
         }
         return found

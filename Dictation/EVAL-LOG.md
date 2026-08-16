@@ -709,3 +709,73 @@ cleaned path**, and the honest claim remains consistency rather than a number.
   `"It is Chatan's projects."`, a destroyed file path. Code and paths are a
   known-hostile case for a cleanup model and M6's code mode is where that
   belongs.
+
+### 2026-08-16 — the same pass on 42 REAL SPONTANEOUS utterances, which is the test that matters
+
+The run above used set C, which is SCRIPTED and has nothing to clean, so 13 of
+20 outputs came back identical and it proved only that the model does not
+corrupt. This is the founder's own captured dictation, fillers and false starts
+included, taken from `captured.jsonl` where `output` is already the
+deterministic pipeline's text.
+
+| | scripted (set C) | **real spontaneous** |
+|---|---|---|
+| rejected by the guard | 1/20 | **2/42** |
+| model refusals | 0/20 | **0/42** |
+| warm p50 | 0.54s | **0.99s** |
+| warm p95 | 0.95s | **2.10s** |
+| worst | 1.10s | **3.70s** |
+
+**Latency is roughly double what the scripted set suggested**, because real
+utterances are longer. ~1s median and 2.1s at p95 is the honest number for the
+cleaned path, against 0.05-0.23s for everything else combined.
+
+### How much does it actually clean? Modestly.
+
+- **20 of 42 outputs are IDENTICAL to the input.** The model does nothing to
+  half of real speech.
+- **Fillers: 11 utterances contained one before, 6 after.** It removes roughly
+  half of what it should, which is the job it exists for.
+
+The best example, and it is genuinely beyond what the deterministic stages can
+do:
+
+```
+in : Look at this, look at, look at, look at what I talked till now in this
+     sentence. Like, it's...
+out: Look at this. Look at what I talked about until now in this sentence. It
+     is not there yet.
+```
+
+`Disfluency` deliberately leaves that triple alone, because punctuation between
+repeats reads as emphasis a speaker chose. The model can tell it was not.
+
+And one that shows the cost of letting it reword freely:
+
+```
+"We got to be perfect."  ->  "We must be perfect."
+```
+
+No fidelity violation, so nothing catches it, and it is the speaker's voice
+being changed rather than cleaned. There is no guard for register.
+
+### A third guard bug, again found only by running it
+
+**It rejected a good cleanup with "a name went missing: Im".** English
+capitalises the first person everywhere, so `I'm` bares to `Im`, which is
+capitalised and not opening the sentence. A rewrite is entitled to turn "I'm not
+sure" into "I am not sure". Fixed.
+
+**That is three guard bugs now, and every one of them was found by running the
+real model rather than by reasoning about the guard.** Two of the three made it
+reject CORRECT output, which is the failure mode that does not look like a bug:
+it looks like the feature not working.
+
+### The decision this leaves, and it is the founder's
+
+Cleanup costs ~1s, does nothing to half of real speech, and removes about half
+the fillers in the rest. Confidence is calibrated (AUC 0.796) and could route
+only the risky utterances through it, keeping the fast path fast.
+
+**That deviates from "clean every utterance", which the founder settled twice on
+2026-08-14, so it is not a decision to take quietly.**
