@@ -23,7 +23,8 @@ enum DictationStripLevel {
 
     /// The pool of light gathering at the base of the strip.
     static func pool(_ level: CGFloat) -> Double {
-        Double(clamp(level)) * 0.22
+        let l = clamp(level)
+        return Double(l) * 0.22
     }
 
     /// The one dot at the centre. Diameter and its own glow radius.

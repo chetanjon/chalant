@@ -32,26 +32,31 @@ enum DictationDisplay {
     ///
     /// `CGWindowListCopyWindowInfo` with `.optionOnScreenOnly` lists windows
     /// front to back, so the first one belonging to the pid with real bounds
-    /// is the one the user is looking at. Bounds are in global top-left
-    /// coordinates; `NSScreen.frame` is bottom-left, so the match converts.
+    /// is the one the user is looking at. Compares against `CGDisplayBounds` in
+    /// the window list's own coordinate space (origin at top-left of primary
+    /// screen), no AppKit flip by hand.
     static func displayShowing(pid: pid_t) -> CGDirectDisplayID? {
         guard
             let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
                 as? [[String: Any]]
         else { return nil }
 
-        let totalHeight = NSScreen.screens.map { $0.frame.maxY }.max() ?? 0
+        // Every attached display's bounds, in the same top-left global space
+        // the window list reports in. Compare there; never flip by hand.
+        let displays: [(id: CGDirectDisplayID, bounds: CGRect)] = NSScreen.screens.compactMap { screen in
+            guard let id = screen.displayID else { return nil }
+            return (id, CGDisplayBounds(id))
+        }
+
         for window in list {
             guard (window[kCGWindowOwnerPID as String] as? pid_t) == pid,
-                  let bounds = window[kCGWindowBounds as String] as? [String: CGFloat],
-                  let x = bounds["X"], let y = bounds["Y"],
-                  let w = bounds["Width"], let h = bounds["Height"],
-                  w > 1, h > 1
+                  let dict = window[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: dict as CFDictionary),
+                  bounds.width > 1, bounds.height > 1
             else { continue }
-            // Centre of the window, flipped into NSScreen space.
-            let point = NSPoint(x: x + w / 2, y: totalHeight - (y + h / 2))
-            if let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) {
-                return screen.displayID
+            let centre = CGPoint(x: bounds.midX, y: bounds.midY)
+            if let hit = displays.first(where: { $0.bounds.contains(centre) }) {
+                return hit.id
             }
         }
         return nil
