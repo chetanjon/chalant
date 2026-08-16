@@ -10,11 +10,15 @@ public struct InsertionTarget: Sendable, Hashable {
     public let processID: pid_t?
     /// Captured at key-down so key-up can detect that focus moved.
     public let capturedAt: Date
+    /// The frontmost app's display name at key-down. Read where the strip is
+    /// shown, so the surface can say who it is listening for.
+    public let appName: String?
 
-    public init(bundleID: String?, processID: pid_t?, capturedAt: Date) {
+    public init(bundleID: String?, processID: pid_t?, capturedAt: Date, appName: String? = nil) {
         self.bundleID = bundleID
         self.processID = processID
         self.capturedAt = capturedAt
+        self.appName = appName
     }
 }
 

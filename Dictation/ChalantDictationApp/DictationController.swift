@@ -22,7 +22,14 @@ final class DictationController {
     private let audio = AudioEngine()
     private let assets = SpeechAssets()
     private let inserter = InsertionChain()
-    private let panel = ListeningPanel()
+    /// Whatever shows that dictation is listening. Chalant hands in its
+    /// island; the panel this used to own is gone.
+    private let surface: any DictationSurface
+
+    init(surface: any DictationSurface) {
+        self.surface = surface
+    }
+
     private var meterTimer: Timer?
     /// Polls the live microphone's health once a second, for the whole life of
     /// the app, so a deaf ear is found before a session is spent on it.
@@ -187,8 +194,12 @@ final class DictationController {
         target = InsertionTarget(
             bundleID: front?.bundleIdentifier,
             processID: front?.processIdentifier,
-            capturedAt: Date()
+            capturedAt: Date(),
+            appName: front?.localizedName
         )
+        // Where the strip opens: the display showing the app being dictated
+        // into. Resolved here, at key-down, because that is when we know it.
+        let targetDisplay = front.flatMap { installedDictationDisplayLookup?.displayShowing(pid: $0.processIdentifier) }
 
         let transcriber = AppleTranscriber()
         self.transcriber = transcriber
@@ -234,7 +245,7 @@ final class DictationController {
         }
 
         await audio.beginCapture()
-        panel.show()
+        surface.show(into: target?.appName ?? target?.bundleID ?? "", mic: await audio.currentDevice?.name, on: targetDisplay)
         startMeter()
         onStateChange?()
 
@@ -286,7 +297,7 @@ final class DictationController {
             // which is precisely how the original bug hid.
             Self.log.error("key up with a live session but no transcriber; session dropped")
             stopMeter()
-            panel.hide()
+            surface.hide()
             onStateChange?()
             return
         }
@@ -294,7 +305,7 @@ final class DictationController {
         let releasedAt = Date()
         await audio.endCapture()
         stopMeter()
-        panel.hide()
+        surface.hide()
 
         // Drain whatever is left before finalizing, so the tail of the
         // utterance is not cut off. Part 1 §2: never lose the user's text.
@@ -482,26 +493,26 @@ final class DictationController {
     }
 
     /// End a session that went live and then could not run, closing the gate
-    /// and the panel the live path had already opened.
+    /// and the surface the live path had already opened.
     private func abandonLiveSession(_ transcriber: AppleTranscriber) async {
         _ = key.release()
         await audio.endCapture()
         stopMeter()
-        panel.hide()
+        surface.hide()
         pumpTask?.cancel()
         pumpTask = nil
         await standDown(transcriber)
     }
 
-    /// Drive the listening panel while the key is held.
+    /// Drive the surface while the key is held.
     private func startMeter() {
         meterTimer?.invalidate()
         let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, let transcriber = self.transcriber else { return }
+                guard let self, self.transcriber != nil else { return }
                 let level = await self.audio.peak
-                let text = await transcriber.liveText
-                self.panel.update(level: level, text: text)
+                let mic = await self.audio.currentDevice?.name
+                self.surface.update(level: CGFloat(level), mic: mic)
             }
         }
         timer.tolerance = 0.01
