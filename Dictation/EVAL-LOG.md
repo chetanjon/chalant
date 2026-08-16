@@ -235,3 +235,100 @@ this entry:
 - `look at, look at, look at` is left alone on purpose: punctuation between
   repeats is treated as a boundary the speaker made, and this one reads as
   deliberate emphasis.
+
+## 2026-08-15 — THE §0.1 DECIDING EXPERIMENT, RUN AT LAST ON THE FOUNDER'S OWN VOICE. **PATH B WINS AND THE QUESTION IS CLOSED.**
+
+Part 0 §0.1 forked the whole vocabulary design on which module to use, and said
+the decision belongs to the real corpus because §0.12 shows engine rankings
+INVERT on accented speech. Until today the only evidence was ONE synthesized
+file (2026-08-12, top of this log). This is 60 real utterances, six
+configurations each, 360 analyzer runs, via `tools/signalprobe` compiled against
+the shipping `TokenAssembly` so the numbers cannot drift from what ships.
+
+Corrections per 100 words. **Bold is the best in each column.**
+
+| configuration | English torture (locked) | code-switch dev | code-switch holdout |
+|---|---|---|---|
+| `SpeechTranscriber` @ en_US | **20.00** | 102.34 | 75.41 |
+| `SpeechTranscriber` @ en_US + bias | **20.00** | 102.34 | 75.41 |
+| `SpeechTranscriber` @ mul_IN | 42.67 | **46.88** | **29.51** |
+| `SpeechTranscriber` @ mul_IN + bias | 42.67 | **46.88** | **29.51** |
+| `DictationTranscriber` @ en_US | 31.56 | 73.44 | 68.85 |
+| `DictationTranscriber` @ en_US + bias | 30.22 | 62.50 | 57.38 |
+
+### The four findings, in the order they matter
+
+**1. `contextualStrings` does NOTHING on `SpeechTranscriber`. Confirmed at three
+locales, on 60 real utterances, to the last decimal.** Biased and unbiased are
+not close, they are byte-identical: 0 of 60 utterances differ at en_US, 0 of 60
+at mul_IN. The 2026-08-12 synthetic result held completely. **Do not re-open
+this.**
+
+**2. Biasing DOES work on `DictationTranscriber`, and the effect is large and
+replicated.** dev 73.44 → 62.50, holdout 68.85 → 57.38. The error classes say
+where it comes from and it is exactly the founder's demand: **proper-noun errors
+on dev fall 7 → 1, and on holdout 5 → 0. Number errors fall 41 → 9 on dev and
+13 → 1 on holdout.** A control run (the same configuration twice) differs on 1
+utterance of 60, so a 15-17% move is far outside the module's own variance.
+
+**3. And it loses anyway, for two reasons that are not close.** It is beaten on
+English 30.22 to 20.00, **winning 2 of 30 utterances head to head**, and the
+penalty is not punctuation as first guessed but ordinary words misheard
+(`other` 39 vs 18). More decisive: **`DictationTranscriber` has no `mul_IN`
+locale at all** (`supportedLocale(equivalentTo:)` returns nil), so the module
+that can use a vocabulary cannot do code-switching, and the module that does
+code-switching ignores vocabulary. There is no configuration where it is the
+best answer.
+
+**4. Confidence cannot route between the two engines, measured.** Picking the
+reading whose mean confidence is higher scores **47.66 on dev, WORSE than simply
+always using mul_IN at 46.88**, and exactly equal to the floor on holdout. It
+recovers 0.9 of the 4.9 points available on English. Two models' confidence
+scales are not comparable, and this kills the obvious hybrid before it is built.
+A perfect oracle would score 15.11 on English against a 20.00 floor, so the
+prize for routing is real (13-24%) but there is currently no signal that reaches
+it.
+
+### Verdict: Path B. `SpeechTranscriber` stays, and the vocabulary layer is post-ASR.
+
+The term store, `TermMatcher` and alias learning are built on top of the engine's
+own confidence rather than on native biasing, because native biasing is
+unavailable on the only module that can serve both English and code-switched
+speech. This is the route the signal layer above makes possible; before
+confidence existed it could not have been taken.
+
+**Locale stays a routing decision, unchanged and still unsolved:** en_US is 2.1x
+better on English, mul_IN 2.2x better on code-switching, and no cheap signal yet
+picks between them.
+
+### A platform fact that is in none of the nine documents
+
+**`DictationTranscriber` re-emits finalized results for a span it has already
+finalized, keyed by an IDENTICAL start time.** Measured on C01: two finals,
+`[1.11…5.52]` 45 chars and `[1.11…8.90]` 46 chars, the second a corrected
+re-reading of the first. Anything that concatenates finals doubles the text, and
+the first version of this probe did exactly that and scored every dictation
+configuration at roughly double its true error count. `SpeechTranscriber` does
+not do this: its five finals cover five distinct, non-overlapping spans and
+genuinely append.
+
+**This is Part 1 §3's banned duplication pattern wearing a different hat, and
+`TranscriptAssembler` would fall into it.** It does `finalized.append(contentsOf:)`
+and `TranscriptEvent.finalized` carries no span, so it could not de-duplicate
+even if it wanted to. Correct for `SpeechTranscriber`, and a bug the moment
+anything else is plugged into that seam. Reconcile by audio span, never by text.
+
+Also measured: `DictationTranscriber` is not quite deterministic (1 of 60
+utterances differs between identical runs); `SpeechTranscriber` is (0 of 60, at
+both locales).
+
+### What this experiment is NOT
+
+- **The term list contains the answers.** `terms.txt` holds the names the corpus
+  was built around, so the biasing result is an upper bound on a list that is
+  already correct. That is a fair model of the shipped system only if the terms
+  come from the user's own corrections, which is precisely what M5 is for. It is
+  not a fair model of a cold start.
+- 60 utterances, one speaker, one room, file input rather than the microphone.
+- Sets A, B and E are still unrecorded, and they are the ones that would move
+  the proper-noun number on English, where it is currently only 2 errors of 45.
