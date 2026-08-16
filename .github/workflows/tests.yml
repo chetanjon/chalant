@@ -7,7 +7,17 @@ on:
 
 jobs:
   unit:
-    runs-on: macos-15
+    # macOS 26, and it is not the Swift version that forces it even though that
+    # is what the error says. `Package.swift` asks for tools 6.2 and the
+    # macos-15 runner has 6.1, but fixing only that would fail one step later:
+    # dictation imports `FoundationModels` and `Speech.SpeechAnalyzer`, and
+    # neither symbol exists in the macOS 15 SDK. `@available(macOS 26)` gates
+    # when code RUNS, never whether it compiles.
+    #
+    # This job has been red on every commit since the dictation merge and
+    # nobody noticed, which means the suite has not run in CI at all since
+    # then. Every green number reported in that window came from one laptop.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Install xcodegen
