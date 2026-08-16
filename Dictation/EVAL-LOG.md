@@ -779,3 +779,40 @@ only the risky utterances through it, keeping the fast path fast.
 
 **That deviates from "clean every utterance", which the founder settled twice on
 2026-08-14, so it is not a decision to take quietly.**
+
+### 2026-08-16 — CAN CONFIDENCE DECIDE WHICH UTTERANCES ARE WORTH CLEANING? NO. THE FOUNDER'S "CLEAN EVERYTHING" STANDS.
+
+Cleanup costs ~1s and does nothing to half of real speech, so the obvious
+proposal was to route only risky utterances through the model and keep the fast
+path fast. Confidence is calibrated for spotting WRONG WORDS (AUC 0.796), so it
+looked like the signal for it. **It is not, and this closes the question rather
+than leaving it open.**
+
+Measured on the same 42 captured utterances, cross-referencing per-utterance
+mean confidence against whether the model changed the text at all:
+
+| | count | mean confidence |
+|---|---|---|
+| model changed it | 22 | 0.841 |
+| model left it alone | 20 | 0.870 |
+
+**A separation of 0.029, and AUC 0.602 against a coin flip's 0.50.**
+
+| route below | utterances cleaned | of which useful | useful ones missed | avg latency |
+|---|---|---|---|---|
+| 0.85 | 12 | 7 | 15 | 0.27s |
+| 0.90 | 27 | 16 | 6 | 0.75s |
+| 0.95 | 35 | 22 | 0 | 1.06s |
+| clean everything | 42 | 22 | 0 | 1.19s |
+
+**To catch every useful cleanup you must route 35 of 42 and save 0.13s.** There
+is no threshold that buys meaningful speed without throwing away cleanups.
+
+**Why it fails, and it is obvious in hindsight:** confidence measures whether
+the engine HEARD correctly. Cleanup fixes what the speaker SAID: fillers, false
+starts, rambling. A perfectly-heard "you know, like, we are just, you know..."
+scores high confidence and needs the most cleaning. **The two are unrelated by
+construction, and a good AUC on one question says nothing about the other.**
+
+**Consequence: the 2026-08-14 decision to clean every utterance is unchallenged
+and now measured.** The alternative was proposed, tested and lost.
