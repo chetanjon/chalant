@@ -215,6 +215,43 @@ struct FidelityGuardTests {
         #expect(ok("he had had enough", "He had had enough."))
     }
 
+    /// **The bug this guard shipped with, caught by the founder on 1.14.0.**
+    ///
+    /// The first version flagged any word pair appearing more often in the
+    /// output than the input, with no test of how far apart. That is ordinary
+    /// English the moment a paragraph is long enough, so a 700-character
+    /// dictation about a friend was rejected for containing "he will" twice,
+    /// and the user got the raw messy text instead of a good cleanup.
+    ///
+    /// **Short utterances have no room to repeat, so every test I wrote passed
+    /// and only real use found it.** A stutter is ADJACENT; natural repetition
+    /// is spread out.
+    @Test("ordinary repetition across a long paragraph is not a stutter")
+    func allowsDistantRepetition() {
+        let raw = """
+            So my friend called me and he said he will come over later, and then \
+            we talked for a while about the party and the people there, and after \
+            all of that he said he will call me again in the morning.
+            """
+        let cleaned = """
+            My friend called me and said he will come over later. We talked for a \
+            while about the party and the people there, and after all of that he \
+            said he will call me again in the morning.
+            """
+        #expect(ok(raw, cleaned))
+    }
+
+    @Test("the three real stutters are still caught after the distance rule")
+    func stillCatchesAdjacentStutters() {
+        #expect(!ok(
+            "Move the stand-up from 93, 932, 1015.",
+            "Move the stand- Move the stand-up from 93, 932, 1015."))
+        #expect(!ok(
+            "Delete the staging database. Never the production one.",
+            "Delete the staging database. Never the production one. Never the production one."))
+        #expect(!ok("The ABI key ends in 472.", "The ABI key ends in 4723 ends in 472."))
+    }
+
     @Test("throwing the text away is a violation")
     func catchesEmptyOutput() {
         #expect(!ok("Ship Chalant on Monday.", ""))
