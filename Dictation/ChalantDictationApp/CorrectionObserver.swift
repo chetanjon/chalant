@@ -25,23 +25,24 @@ actor CorrectionObserver {
 
     static let shared = CorrectionObserver()
 
-    /// **OFF until the pairs can be seen and deleted in the app.**
+    /// **On, and the precondition for that is `LearnedTermsList`, not this
+    /// file.**
     ///
-    /// Part 0 §0.15 is explicit that every learned pair must be inspectable and
-    /// reversible in UI, and that screen does not exist yet. A feature that
-    /// silently learns from someone who cannot see what it learned, or undo it,
-    /// is the exact trust failure that requirement was written to prevent, and
-    /// a wrong pair would then rewrite one of their words on every future
-    /// utterance with no way out.
+    /// Part 0 §0.15 requires every learned pair to be inspectable and
+    /// reversible in UI. That is not a nicety to add afterwards: a wrong pair
+    /// rewrites one of the user's words on every future utterance, so without a
+    /// way to see it and delete it the feature is a permanent bug nobody can
+    /// reach. This shipped off until that screen existed, and the day it landed
+    /// is the day the default changed.
     ///
-    /// The pairs live in readable JSON at `LearnedTerms.file`, which is enough
-    /// for the founder to dogfood it deliberately. It is not enough to turn on
-    /// for anyone else. **Building the settings list is what unblocks the
-    /// default, not more evidence that the classifier works.**
+    /// Still a visible switch rather than a silent default, which is the same
+    /// exception `CorpusCapture` claims: everything else in this app goes out
+    /// of its way not to keep what you said, and anything that watches you type
+    /// says so out loud.
     static let enabledKey = "dictationLearnCorrections"
 
     static func isEnabled(in defaults: UserDefaults = .standard) -> Bool {
-        defaults.bool(forKey: enabledKey)
+        defaults.object(forKey: enabledKey) as? Bool ?? true
     }
 
     static func setEnabled(_ on: Bool, in defaults: UserDefaults = .standard) {

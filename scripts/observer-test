@@ -1,0 +1,110 @@
+#!/bin/bash
+# Does the correction observer work in the apps you actually dictate into?
+#
+# M5 rests on one unproven assumption: that Chalant can read the text field it
+# just wrote to. Part 1 §1 established that Electron and web apps often report
+# NO focused element at all, which is why the insertion path never depends on
+# accessibility. If that also holds for reading, the learner is correct and
+# useless, and no corpus can tell us: it needs a human typing.
+#
+# Run it, follow what it says, then tell Claude it is finished.
+
+set -e
+cd "$(dirname "$0")/.." || exit 1
+
+APP="build/observer-test/Build/Products/Release/Chalant.app"
+LOG="/tmp/chalant-observer-test.log"
+
+if [ ! -d "$APP" ]; then
+  echo "The test build is missing. Ask Claude to build it."
+  exit 1
+fi
+
+echo
+echo "=================================================="
+echo "  DOES CHALANT SEE YOUR CORRECTIONS?"
+echo "=================================================="
+echo
+echo "This uses a TEST BUILD, not the Chalant you just released."
+echo "Your installed 1.13.0 is untouched and comes back at the end."
+echo
+
+# Two Chalants means two event taps and doubled text. Quit the installed one.
+osascript -e 'quit app "Chalant"' 2>/dev/null || true
+sleep 2
+
+defaults write com.cj.chalant dictationEnabled -bool true
+defaults write com.cj.chalant dictationLearnCorrections -bool true
+
+# Stream to a file rather than the terminal, so the founder's screen stays
+# readable and the evidence survives. `log` is shadowed by a shell function in
+# this user's zsh, hence the absolute path.
+/usr/bin/log stream --level debug \
+  --predicate 'subsystem == "com.cj.chalant.dictation"' > "$LOG" 2>&1 &
+LOGGER=$!
+trap 'kill $LOGGER 2>/dev/null' EXIT
+
+open "$APP"
+sleep 4
+
+cat <<'INSTRUCTIONS'
+
+  WHAT TO DO
+  ----------
+  For each app below: click into a text box, hold LEFT OPTION, say
+
+      "send this to Aidan today"
+
+  let go, and WAIT ABOUT 20 SECONDS without switching away.
+  The waiting is the test. You do not have to correct anything yet.
+
+  Do it in as many of these as you have open:
+
+      TextEdit          (the control: if this fails, nothing works)
+      Chrome or Safari  (a text box on any page)
+      Slack             (the message box, do NOT press Return)
+      VS Code or Cursor (a scratch file)
+      Notion            (any page)
+
+  THEN, in TextEdit only, do it once more and this time change the
+  word "Aidan" by hand to "Aiden" before the 20 seconds are up.
+  Then do that whole thing a second time.
+
+  Two corrections is the threshold: Chalant should then know the word.
+
+INSTRUCTIONS
+
+echo "  Press Return when you have finished all of it."
+read -r _
+
+kill $LOGGER 2>/dev/null || true
+sleep 1
+
+echo
+echo "=================================================="
+echo "  WHAT IT SAW"
+echo "=================================================="
+grep -E "correction observer|learned a correction" "$LOG" || echo "  (nothing at all, which is itself the answer)"
+echo
+echo "Full log: $LOG"
+echo
+echo "Putting things back..."
+osascript -e 'quit app "Chalant"' 2>/dev/null || true
+sleep 2
+
+# Learning goes back off. §0.15: nothing learns silently until the user can see
+# and delete what it learned, and that screen does not exist yet.
+defaults write com.cj.chalant dictationLearnCorrections -bool false
+
+INSTALLED=$(defaults read /Applications/Chalant.app/Contents/Info.plist CFBundleShortVersionString 2>/dev/null || echo "none")
+open -a /Applications/Chalant.app 2>/dev/null || true
+
+echo
+if [ "$INSTALLED" != "1.13.0" ]; then
+  echo "  ⚠  The Chalant in /Applications is $INSTALLED, not 1.13.0."
+  echo "     You shipped 1.13.0 but never took your own update, so the Mac"
+  echo "     you look at does not have dictation on it at all."
+  echo "     Chalant menu, Check for Updates. This has bitten you before."
+  echo
+fi
+echo "Done. Tell Claude it is finished."

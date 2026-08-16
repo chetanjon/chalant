@@ -18,6 +18,11 @@ struct GeneralSection: View {
     @AppStorage(VoiceController.pinnedUIDKey) private var voiceInputUID = ""
     @AppStorage(Dictation.enabledKey) private var dictationOn = false
     @AppStorage(CorpusCapture.enabledKey) private var captureCorpus = false
+    // On, now that `LearnedTermsList` exists to show what it learned and undo
+    // it. Until this screen was built the default was off, because §0.15's
+    // "inspectable and reversible" is a precondition for learning silently,
+    // not a nicety to add afterwards.
+    @AppStorage(CorrectionObserver.enabledKey) private var learnCorrections = true
 
     @State private var launchAtLogin = false
     /// The mics on offer right now, refreshed each time this section
@@ -144,6 +149,23 @@ struct GeneralSection: View {
                         "The first time you turn this on, macOS asks for Input Monitoring and "
                         + "Accessibility. It needs both: one to notice the key, one to place the text."
                     )
+                    SettingDivider()
+                    // Law 6 says defaults over switches, and this is the same
+                    // exception the recordings toggle below claims: it watches
+                    // what you type after Chalant writes for you, so it says so
+                    // out loud rather than doing it quietly.
+                    SettingToggle(label: "Learn my names", isOn: $learnCorrections)
+                    SettingNote(
+                        "When you fix a word Chalant got wrong, it notices. Fix the same one "
+                        + "twice and it stops getting it wrong. Only the pair of words is kept, "
+                        + "never the sentence, and everything it learns is listed below."
+                    )
+                    // Part 0 §0.15: a learned pair the user cannot see or
+                    // delete would rewrite one of their words on every future
+                    // utterance with no way out. This list is what makes the
+                    // switch above safe to leave on.
+                    LearnedTermsList()
+
                     SettingDivider()
                     // Everywhere else this app goes out of its way NOT to keep
                     // what you said. This does the opposite, so it gets a
