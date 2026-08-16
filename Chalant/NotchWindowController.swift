@@ -606,8 +606,11 @@ final class NotchWindowController {
         hosting.onTargeted = { [weak face] targeted in
             face?.isDropTargeted = targeted
         }
+        // Either live microphone refuses the drag: the drop ends in
+        // `receiveDrop`, which expands, and an expansion over a dictation hold
+        // strands the room ducked (`NotchViewModel.micIsLive`).
         hosting.acceptsDrop = { [weak viewModel] in
-            viewModel?.state != .listening
+            viewModel?.micIsLive != true
         }
         hosting.onDragEntered = { [weak self, weak face] in
             guard let self, let face, self.viewModel.state == .collapsed else { return }
@@ -747,6 +750,9 @@ final class NotchWindowController {
         case .listening:
             // Voice sessions are press-driven; hover keeps its hands off.
             break
+        case .dictating:
+            // Dictation is press-driven too; hover keeps its hands off.
+            break
         }
     }
 
@@ -881,8 +887,10 @@ final class NotchWindowController {
         let hosting = DropHostingView(rootView: card)
         hosting.frame = NSRect(origin: .zero, size: size)
         hosting.enableDrops()
+        // Same rule as the island's own mouth: neither microphone may be
+        // interrupted by a drop that ends in an expansion (`micIsLive`).
         hosting.acceptsDrop = { [weak viewModel] in
-            viewModel?.state != .listening
+            viewModel?.micIsLive != true
         }
         hosting.onDrop = { [weak self] items in
             self?.hideDropDock()
@@ -1012,6 +1020,9 @@ final class NotchWindowController {
                 }
         case .listening:
             // A voice session is not an open to re-check.
+            expandedSizeResync = nil
+        case .dictating:
+            // Dictating is not an open to re-check either.
             expandedSizeResync = nil
         }
     }

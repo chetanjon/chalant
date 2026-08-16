@@ -29,6 +29,11 @@ final class NotchViewModel: ObservableObject {
     enum IslandState {
         case collapsed
         case listening
+        /// Hold-to-dictate is live. A SIBLING of `.listening`, never a reuse:
+        /// `.listening` runs `voice.begin()`, which starts VoiceController's
+        /// own recognizer, and two engines listening at once is the
+        /// doubled-text failure the dictation merge exists to end.
+        case dictating
         case expanded
     }
 
@@ -96,6 +101,17 @@ final class NotchViewModel: ObservableObject {
             if state == .collapsed { expandedDisplayID = nil }
         }
     }
+
+    /// A microphone owns the island right now: a voice-command session, or a
+    /// hold-to-dictate strip.
+    ///
+    /// Every guard that exists to stop something expanding over a live capture
+    /// has to ask this rather than naming `.listening` alone. `.dictating`
+    /// strands worse than `.listening` does: `endDictating()` guards on the
+    /// state, so an expansion landing mid-hold makes the key-up a no-op,
+    /// `restoreTheRoom()` never runs, and the music stays paused with nothing
+    /// left that would ever start it again.
+    var micIsLive: Bool { state == .listening || state == .dictating }
 
     /// Which display's island is open, when one is.
     ///
@@ -792,7 +808,9 @@ final class NotchViewModel: ObservableObject {
                 // never over an island already busy with something. A turn
                 // ending is worth showing, and it is not worth taking the
                 // screen away from whatever is already being typed into.
-                guard self.state != .listening else { return }
+                // Both mics, not just the voice one: expanding over a
+                // dictation hold leaves the room ducked forever (`micIsLive`).
+                guard !self.micIsLive else { return }
                 guard self.state != .expanded || !self.isMidInteraction else { return }
                 // takeKey: false, and this is the whole difference between a
                 // notification and an interruption. The default takes
@@ -820,7 +838,9 @@ final class NotchViewModel: ObservableObject {
                 // above is enough to point at without taking over their
                 // screen mid-task. Everything else, including an island
                 // that is merely open and idle, gets opened straight to it.
-                guard self.state != .listening else { return }
+                // A dictation hold counts as a live capture here too, and
+                // for a worse reason: see `micIsLive`.
+                guard !self.micIsLive else { return }
                 if self.state == .expanded, self.isMidInteraction { return }
                 // takeKey: false for the same reason the finished-turn path
                 // uses it: an island nobody asked to open must not take the
@@ -1448,6 +1468,16 @@ final class NotchViewModel: ObservableObject {
     /// hotkey and the collapsed long press all keep their exact
     /// behaviour without being touched.
     func toggleListening(to destination: VoiceDestination = .chalant) {
+        // A dictation hold already owns the ear. Anything not `.listening`
+        // used to mean "start", which sent a hold straight into
+        // `startListening()` and `voice.begin()`: two recognizers at once,
+        // the doubled-text failure the sibling state exists to prevent.
+        // Refused out loud, because a mic that does nothing and says nothing
+        // is the other half of that same bug.
+        if state == .dictating {
+            Self.log.notice("talk refused: a dictation hold has the microphone")
+            return
+        }
         if state == .listening {
             endListening()
         } else {
@@ -1455,6 +1485,66 @@ final class NotchViewModel: ObservableObject {
             voiceEntry = .tapped
             startListening()
         }
+    }
+
+    // MARK: - Dictating
+
+    /// What the strip shows beside the level: where the words are going and
+    /// which ear is live.
+    struct DictationInfo: Equatable {
+        var appName: String
+        var micName: String?
+    }
+
+    /// The voice, 0...1, driven by DictationController's meter timer.
+    @Published var dictationLevel: CGFloat = 0
+    @Published var dictationInfo: DictationInfo?
+
+    /// Open the strip. Owns a display like an expansion does, ducks the room
+    /// like listening does, and touches nothing on `voice`.
+    func beginDictating(into appName: String, mic: String?, on display: CGDirectDisplayID?) {
+        // A live voice session is the one thing the strip may not take over:
+        // two recognizers at once is the failure this state exists to prevent.
+        // An expansion, though, is fair game. Refusing it reproduced the exact
+        // complaint the strip was built for: an agent finishes, the island
+        // opens by itself, the founder holds Option and sees nothing at all.
+        guard state != .listening else { return }
+        // Same handling as `startListening()`: a display already holding the
+        // island keeps it unless dictation resolved one of its own, which it
+        // usually does, because the strip belongs on the screen showing the
+        // app being dictated into.
+        if let display {
+            expandedDisplayID = display
+        } else if expandedDisplayID == nil {
+            expandedDisplayID = defaultOwnerDisplay()
+        }
+        dictationInfo = DictationInfo(appName: appName, micName: mic)
+        dictationLevel = 0
+        quietTheRoom()
+        state = .dictating
+    }
+
+    func updateDictating(level: CGFloat, mic: String?) {
+        guard state == .dictating else { return }
+        dictationLevel = level
+        if let mic, mic != dictationInfo?.micName {
+            // The ear can hop mid-hold; the strip must say so in place.
+            dictationInfo?.micName = mic
+        }
+    }
+
+    func endDictating() {
+        guard state == .dictating else { return }
+        restoreTheRoom()
+        dictationLevel = 0
+        dictationInfo = nil
+        // The strip can now be entered from an open island, and the island it
+        // closes into is a collapsed one. Left true, the music controller
+        // would keep polling AppleScript once a second for a surface nobody
+        // can see, because `collapse()` only ever runs from `.expanded`.
+        music.expandedVisible = false
+        state = .collapsed
+        expandedDisplayID = nil
     }
 
     /// The one door into a listening session, because the invariant
@@ -1700,7 +1790,9 @@ final class NotchViewModel: ObservableObject {
     /// tab waits for the next open.
     func receiveDrop(_ items: [DroppedItem], quietly: Bool = false) {
         // The hosting view already refuses drags mid-voice; belt and braces.
-        guard state != .listening else { return }
+        // Mid-dictation too: this path ends in `expand()`, which over a hold
+        // would leave the room ducked with nothing to restore it (`micIsLive`).
+        guard !micIsLive else { return }
         // `dragExpanded` itself now lives on `IslandFace` (2026-08-02);
         // the window controller clears it at the same `onDrop` call that
         // reaches here, right beside where it is set.

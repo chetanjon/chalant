@@ -85,15 +85,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.setActivationPolicy(.regular)
         }
 
-        // Hold-to-dictate, if this machine can and the user has said yes.
-        // Silent and free when either is false, so a macOS 14 install or
-        // somebody who has never opened the switch pays nothing for it.
-        Dictation.shared.start()
-
         // The island itself
         let controller = NotchWindowController()
         controller.show()
         notchController = controller
+
+        // Dictation lights up the island rather than drawing its own panel,
+        // so it needs the island to exist before it can start. The surface
+        // also answers "which display is this pid on" for the strip.
+        //
+        // Hold-to-dictate, if this machine can and the user has said yes.
+        // Silent and free when either is false, so a macOS 14 install or
+        // somebody who has never opened the switch pays nothing for it.
+        let surface = IslandDictationSurface(
+            model: controller.viewModel,
+            displays: controller.viewModel.displays
+        )
+        Dictation.shared.surface = surface
+        IslandDictationSurface.shared = surface
+        Dictation.shared.start()
+
         controller.viewModel.installUpdate = { [weak self] in
             self?.updater.checkForUpdates(nil)
         }
@@ -115,10 +126,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // capturing and the room still ducked, stranding the
                 // session — the shortcut is not a way to interrupt one.
                 case .listening: break
+                // A dictation hold is in progress; same reasoning, the
+                // shortcut is not a way to interrupt one either.
+                case .dictating: break
                 }
             },
             .talk: { [weak controller] in
-                controller?.viewModel.toggleListening()
+                guard let model = controller?.viewModel else { return }
+                switch model.state {
+                case .collapsed, .expanded, .listening:
+                    model.toggleListening()
+                // A dictation hold owns the microphone. Starting a voice
+                // session over it would run a second recognizer beside the
+                // one already capturing, and the shortcut is no more a way to
+                // interrupt a hold than `.toggleIsland` above is.
+                case .dictating: break
+                }
             },
             .openSettings: { [weak self] in
                 self?.showDashboard(section: nil)

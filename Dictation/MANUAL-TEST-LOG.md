@@ -657,3 +657,20 @@ Also unverified: read-back of what landed. `osascript` here is not authorized to
 send Apple Events into Safari, so the evidence for these cells is the insertion
 log rather than the text. TextEdit was read back directly and did contain the
 dictated sentence.
+
+---
+
+## 2026-08-16 — the dictation strip (spec: 2026-08-16-dictation-strip-design.md)
+
+Status: BUILT, NOT YET SEEN BY A HUMAN. `scripts/preview-strip`.
+
+What a pass looks like, per the spec:
+- [ ] hold with the target app on the external display: strip on THAT display
+- [ ] hold with the target app on the Mac's screen: strip THERE, not the monitor
+- [ ] rim, pool and dot visibly follow the voice; quiet room = faint, speech = lit
+- [ ] mic covered: strip opens and stays dark (this is the pass condition)
+- [ ] a 0.7s hold still visibly opens and closes
+- [ ] music playing: ducks on hold, restores on release
+- [ ] no words appear in the strip at any point
+
+Result (founder, dated):

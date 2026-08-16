@@ -22,7 +22,14 @@ final class DictationController {
     private let audio = AudioEngine()
     private let assets = SpeechAssets()
     private let inserter = InsertionChain()
-    private let panel = ListeningPanel()
+    /// Whatever shows that dictation is listening. Chalant hands in its
+    /// island; the panel this used to own is gone.
+    private let surface: any DictationSurface
+
+    init(surface: any DictationSurface) {
+        self.surface = surface
+    }
+
     private var meterTimer: Timer?
     /// Polls the live microphone's health once a second, for the whole life of
     /// the app, so a deaf ear is found before a session is spent on it.
@@ -187,8 +194,12 @@ final class DictationController {
         target = InsertionTarget(
             bundleID: front?.bundleIdentifier,
             processID: front?.processIdentifier,
-            capturedAt: Date()
+            capturedAt: Date(),
+            appName: front?.localizedName
         )
+        // Where the strip opens: the display showing the app being dictated
+        // into. Resolved here, at key-down, because that is when we know it.
+        let targetDisplay = front.flatMap { installedDictationDisplayLookup?.displayShowing(pid: $0.processIdentifier) }
 
         let transcriber = AppleTranscriber()
         self.transcriber = transcriber
@@ -234,7 +245,25 @@ final class DictationController {
         }
 
         await audio.beginCapture()
-        panel.show()
+        let ear = await audio.currentDevice?.name
+
+        // `ready()` is not the last word: `beginCapture` and the device name
+        // are both awaits, and a release landing inside them runs the whole of
+        // `keyUp` before this line resumes. That `keyUp` hides a surface that
+        // was never shown, and then this one opens a strip with no key held
+        // and nothing left to close it, wedging the island in `.dictating`.
+        // Same answer as `.abandon` above: the session the key has already
+        // ended is not a session to go live for. The teardown belongs to the
+        // `keyUp` that took the release, which holds this transcriber and is
+        // finalizing it; standing it down a second time here would race that
+        // finalize and could cost the user the words they just spoke.
+        guard key.state == .listening else {
+            Self.log.info("released while going live; no strip, keyUp owns the stand-down")
+            surface.hide()
+            return
+        }
+
+        surface.show(into: target?.appName ?? target?.bundleID ?? "", mic: ear, on: targetDisplay)
         startMeter()
         onStateChange?()
 
@@ -286,7 +315,7 @@ final class DictationController {
             // which is precisely how the original bug hid.
             Self.log.error("key up with a live session but no transcriber; session dropped")
             stopMeter()
-            panel.hide()
+            surface.hide()
             onStateChange?()
             return
         }
@@ -294,7 +323,7 @@ final class DictationController {
         let releasedAt = Date()
         await audio.endCapture()
         stopMeter()
-        panel.hide()
+        surface.hide()
 
         // Drain whatever is left before finalizing, so the tail of the
         // utterance is not cut off. Part 1 §2: never lose the user's text.
@@ -482,26 +511,33 @@ final class DictationController {
     }
 
     /// End a session that went live and then could not run, closing the gate
-    /// and the panel the live path had already opened.
+    /// and the surface the live path had already opened.
     private func abandonLiveSession(_ transcriber: AppleTranscriber) async {
         _ = key.release()
         await audio.endCapture()
         stopMeter()
-        panel.hide()
+        surface.hide()
         pumpTask?.cancel()
         pumpTask = nil
         await standDown(transcriber)
     }
 
-    /// Drive the listening panel while the key is held.
+    /// Drive the surface while the key is held.
     private func startMeter() {
         meterTimer?.invalidate()
         let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, let transcriber = self.transcriber else { return }
+                guard let self, self.transcriber != nil else { return }
+                // `AudioRing.peak` holds the last buffer's loudest sample, not
+                // the loudest since this timer last looked, so a 30Hz poll over
+                // ~100Hz of buffers samples some peaks away. Left as is on
+                // purpose: the surface smooths it, and widening the ring's API
+                // means touching a real-time producer (Part 1 §2) for a
+                // cosmetic gain. The scaling this number needs is applied by
+                // the surface, which can see the strip's formulas.
                 let level = await self.audio.peak
-                let text = await transcriber.liveText
-                self.panel.update(level: level, text: text)
+                let mic = await self.audio.currentDevice?.name
+                self.surface.update(level: CGFloat(level), mic: mic)
             }
         }
         timer.tolerance = 0.01

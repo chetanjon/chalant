@@ -186,6 +186,19 @@ struct NotchRootView: View {
     // the live device caption underneath.
     private static let listeningSize = CGSize(width: 380, height: 192)
 
+    /// The dictation strip: this display's configured island width, 68pt tall.
+    /// Low on purpose; the founder chose the slim strip over the full
+    /// listening surface (2026-08-16), and 68 is the least that fits one row of
+    /// `Fonts.micro` with the notch clearance above it.
+    ///
+    /// `face.expandedWidth` is the user's own dial for this screen, which is
+    /// what the spec asks for. `model.expandedSize` is the last width any
+    /// island happened to measure, so on a second display, or before anything
+    /// has opened this session, it is somebody else's number.
+    private var dictatingSize: CGSize {
+        CGSize(width: face.expandedWidth, height: 68)
+    }
+
     /// How far a resting pill clears the top of its screen. Small on
     /// purpose: enough that it reads as floating rather than wedged
     /// into the corner, not so much that it stops belonging to the
@@ -217,6 +230,7 @@ struct NotchRootView: View {
         switch face.state {
         case .collapsed: return collapsedSize
         case .listening: return Self.listeningSize
+        case .dictating: return dictatingSize
         case .expanded: return model.expandedSize
         }
     }
@@ -436,6 +450,25 @@ struct NotchRootView: View {
                             .strokeBorder(accent.opacity(0.8), lineWidth: 1.5)
                             .opacity(face.isDropTargeted ? 1 : 0)
                     )
+                    // The strip IS the meter. Rim glow and base pool both come
+                    // from one number through the pinned formulas; there are no
+                    // bars. Zero everywhere except while dictating, so the
+                    // resting island is untouched.
+                    .shadow(
+                        color: accent.opacity(face.state == .dictating ? DictationStripLevel.rim(model.dictationLevel).opacity : 0),
+                        radius: face.state == .dictating ? DictationStripLevel.rim(model.dictationLevel).radius : 0
+                    )
+                    .overlay(
+                        islandShape.fill(
+                            RadialGradient(
+                                colors: [accent.opacity(DictationStripLevel.pool(model.dictationLevel)), .clear],
+                                center: .bottom, startRadius: 0, endRadius: dictatingSize.width * 0.6
+                            )
+                        )
+                        .opacity(face.state == .dictating ? 1 : 0)
+                        .allowsHitTesting(false)
+                    )
+                    .animation(.easeOut(duration: 0.1), value: model.dictationLevel)
                     .shadow(
                         color: Color.black.opacity(face.state == .collapsed ? 0 : 0.45),
                         radius: 14, y: 7
@@ -528,6 +561,12 @@ struct NotchRootView: View {
             if face.state == .listening {
                 listeningContent
                     .frame(width: Self.listeningSize.width, height: Self.listeningSize.height)
+                    .transition(contentTransition(insertionDelay: 0.09))
+            }
+
+            if face.state == .dictating {
+                dictatingContent
+                    .frame(width: dictatingSize.width, height: dictatingSize.height)
                     .transition(contentTransition(insertionDelay: 0.09))
             }
 
@@ -814,6 +853,42 @@ struct NotchRootView: View {
             .padding(.top, face.contentTopReserve + Theme.Space.notchClearance)
             .padding(.trailing, Theme.Space.m)
         }
+    }
+
+    /// The dictation strip's one row: where the words are going, one dot
+    /// that is the accent, which ear is live. Nothing else. No words while
+    /// talking, no finish hint (letting go is the instruction), no second
+    /// symbol. Law 3, one symbol per meaning; law 5, a control appears only
+    /// when it can do something.
+    private var dictatingContent: some View {
+        let dot = DictationStripLevel.dot(model.dictationLevel)
+        // The dot is centred on the STRIP, not between the two labels. Sat
+        // inside the HStack it took the midpoint of whatever gap the labels
+        // left, which drifts with a long app name and lurches right whenever
+        // there is no microphone name to balance it. An overlay on the same
+        // frame puts it where the eye expects it, whatever the labels say.
+        return HStack {
+            Text(model.dictationInfo?.appName ?? "")
+                .font(Theme.Fonts.micro)
+                .foregroundStyle(Theme.textGhost)
+                .lineLimit(1)
+            Spacer(minLength: Theme.Space.l)
+            Text(model.dictationInfo?.micName ?? "")
+                .font(Theme.Fonts.micro)
+                .foregroundStyle(Theme.textGhost.opacity(0.8))
+                .lineLimit(1)
+        }
+        .overlay(alignment: .center) {
+            Circle()
+                .fill(accent)
+                .frame(width: dot.diameter, height: dot.diameter)
+                .shadow(color: accent.opacity(0.35 + Double(DictationStripLevel.clamp(model.dictationLevel)) * 0.5), radius: dot.glow)
+                .animation(.easeOut(duration: 0.1), value: model.dictationLevel)
+        }
+        .padding(.horizontal, Theme.Space.xxl)
+        .padding(.top, face.contentTopReserve + Theme.Space.notchClearance)
+        .padding(.bottom, Theme.Space.m)
+        .frame(maxHeight: .infinity, alignment: .bottom)
     }
 
     /// "listening" with a slow shimmer while ambient motion is on.
