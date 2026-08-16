@@ -32,6 +32,9 @@ final class DictationController {
     /// Turns a real day of dictating into the spontaneous half of the corpus.
     /// Off unless explicitly switched on; see `CorpusCapture`.
     private let corpus = CorpusCapture()
+    /// The on-device cleanup pass. Returns the input untouched on every failure
+    /// path, so the worst case is the text that would have shipped anyway.
+    private let polisher = FoundationModelsPolisher()
 
     private(set) var assetState: SpeechAssetState = .checking
     private(set) var micPermission: MicPermission.Outcome = .pending
@@ -87,6 +90,16 @@ final class DictationController {
         // while leaving that in place would have left the very first dictation
         // the slowest thing the user ever sees.
         await AutomationPermission.warm()
+
+        // The cleanup model has the same shape of cliff: 2.4s cold against a
+        // 0.99s warm median, measured 2026-08-16. Part 0 §0.5 specced this
+        // prewarm onto the shift gesture, which stopped being the trigger on
+        // 2026-08-14 when cleanup became the default path, so it would never
+        // have fired and the whole 1.4s would have landed on whichever sentence
+        // the user happened to dictate first.
+        if Cleanup.isEnabled() {
+            await polisher.warmUp()
+        }
 
         watchInputDevices()
     }
@@ -366,13 +379,36 @@ final class DictationController {
         // Three stages, in order, all pure and all in Core: refuse what is not
         // text, collapse what was said twice by accident, then remove the words
         // nobody meant to say.
-        let text = Fillers.removing(
+        let deterministic = Fillers.removing(
             Disfluency.collapsingRepetitions(
                 Guardrail.trimmingPunctuationRun(
                     resolved.map(\.text).joined(separator: " "))))
-        if text != raw {
+        if deterministic != raw {
             Self.log.error(
-                "guardrail trimmed \(raw.count - text.count, privacy: .public) chars of punctuation run")
+                "guardrail trimmed \(raw.count - deterministic.count, privacy: .public) chars of punctuation run")
+        }
+
+        // The model pass, on EVERY utterance, which is the founder's decision of
+        // 2026-08-14 taken twice. The obvious alternative was to route only
+        // risky utterances through it using confidence; that was measured on
+        // 2026-08-16 and LOST (AUC 0.602, a coin flip), because confidence
+        // measures whether the engine HEARD right and cleanup fixes what the
+        // speaker SAID. A perfectly-heard "you know, like, we are just" scores
+        // high and needs the most cleaning.
+        //
+        // It costs ~1s at p50 and returns the input untouched on every failure,
+        // so the worst case is the text that would have shipped anyway, slower.
+        // **A switch, against law 6's "defaults over switches", for the same
+        // reason `CorpusCapture` gets one: this is not a feature that is simply
+        // better.** It trades roughly a second of the user's time for a tidier
+        // sentence, and that is a trade a person is entitled to decline. It
+        // defaults ON because that is the settled decision.
+        var text = deterministic
+        if Cleanup.isEnabled() {
+            let polishStart = Date()
+            text = (try? await polisher.polish(deterministic, profile: AppProfile(bundleID: target?.bundleID ?? "")))
+                ?? deterministic
+            timings.polish = Date().timeIntervalSince(polishStart)
         }
         guard !text.isEmpty else {
             // Silence is not a corpus entry. Keeping it would pad the set with

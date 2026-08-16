@@ -134,6 +134,17 @@ struct FidelityGuardTests {
         #expect(ok("Tell Sarah that Sarah is late.", "Tell Sarah she is late."))
     }
 
+    /// **Caught on 42 real spontaneous utterances, not by thinking about it.**
+    /// English capitalises the first person everywhere, so `I'm` bares to `Im`,
+    /// which is capitalised and not opening the sentence, and the guard threw
+    /// away a good cleanup with "a name went missing: Im". A rewrite is
+    /// entitled to turn "I'm not sure" into "I am not sure".
+    @Test("the first person is not a proper noun")
+    func ignoresFirstPerson() {
+        #expect(ok("well I'm not sure about that", "Well, I am not sure about that."))
+        #expect(ok("I've told them and I'll do it", "I have told them and I will do it."))
+    }
+
     @Test("the first word of a sentence is not treated as a name")
     func ignoresSentenceCase() {
         // "Send" is only capitalised because it opens the sentence; a rewrite

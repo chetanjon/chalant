@@ -23,6 +23,8 @@ struct GeneralSection: View {
     // "inspectable and reversible" is a precondition for learning silently,
     // not a nicety to add afterwards.
     @AppStorage(CorrectionObserver.enabledKey) private var learnCorrections = true
+    // On, per the 2026-08-14 decision. Costs ~1s per utterance; see `Cleanup`.
+    @AppStorage(Cleanup.enabledKey) private var cleanup = true
 
     @State private var launchAtLogin = false
     /// The mics on offer right now, refreshed each time this section
@@ -149,6 +151,18 @@ struct GeneralSection: View {
                         "The first time you turn this on, macOS asks for Input Monitoring and "
                         + "Accessibility. It needs both: one to notice the key, one to place the text."
                     )
+                    SettingDivider()
+                    // A switch because this is not simply better: it trades
+                    // roughly a second for a tidier sentence, and that is a
+                    // trade someone is entitled to decline.
+                    SettingToggle(label: "Tidy what I said", isOn: $cleanup)
+                    SettingNote(
+                        "Removes the ums and false starts and fixes punctuation, on this Mac. "
+                        + "It adds about a second before your words appear. Names, numbers and "
+                        + "every \"not\" are checked afterwards, and anything it changed that it "
+                        + "should not have is thrown away."
+                    )
+
                     SettingDivider()
                     // Law 6 says defaults over switches, and this is the same
                     // exception the recordings toggle below claims: it watches

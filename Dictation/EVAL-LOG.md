@@ -709,3 +709,110 @@ cleaned path**, and the honest claim remains consistency rather than a number.
   `"It is Chatan's projects."`, a destroyed file path. Code and paths are a
   known-hostile case for a cleanup model and M6's code mode is where that
   belongs.
+
+### 2026-08-16 — the same pass on 42 REAL SPONTANEOUS utterances, which is the test that matters
+
+The run above used set C, which is SCRIPTED and has nothing to clean, so 13 of
+20 outputs came back identical and it proved only that the model does not
+corrupt. This is the founder's own captured dictation, fillers and false starts
+included, taken from `captured.jsonl` where `output` is already the
+deterministic pipeline's text.
+
+| | scripted (set C) | **real spontaneous** |
+|---|---|---|
+| rejected by the guard | 1/20 | **2/42** |
+| model refusals | 0/20 | **0/42** |
+| warm p50 | 0.54s | **0.99s** |
+| warm p95 | 0.95s | **2.10s** |
+| worst | 1.10s | **3.70s** |
+
+**Latency is roughly double what the scripted set suggested**, because real
+utterances are longer. ~1s median and 2.1s at p95 is the honest number for the
+cleaned path, against 0.05-0.23s for everything else combined.
+
+### How much does it actually clean? Modestly.
+
+- **20 of 42 outputs are IDENTICAL to the input.** The model does nothing to
+  half of real speech.
+- **Fillers: 11 utterances contained one before, 6 after.** It removes roughly
+  half of what it should, which is the job it exists for.
+
+The best example, and it is genuinely beyond what the deterministic stages can
+do:
+
+```
+in : Look at this, look at, look at, look at what I talked till now in this
+     sentence. Like, it's...
+out: Look at this. Look at what I talked about until now in this sentence. It
+     is not there yet.
+```
+
+`Disfluency` deliberately leaves that triple alone, because punctuation between
+repeats reads as emphasis a speaker chose. The model can tell it was not.
+
+And one that shows the cost of letting it reword freely:
+
+```
+"We got to be perfect."  ->  "We must be perfect."
+```
+
+No fidelity violation, so nothing catches it, and it is the speaker's voice
+being changed rather than cleaned. There is no guard for register.
+
+### A third guard bug, again found only by running it
+
+**It rejected a good cleanup with "a name went missing: Im".** English
+capitalises the first person everywhere, so `I'm` bares to `Im`, which is
+capitalised and not opening the sentence. A rewrite is entitled to turn "I'm not
+sure" into "I am not sure". Fixed.
+
+**That is three guard bugs now, and every one of them was found by running the
+real model rather than by reasoning about the guard.** Two of the three made it
+reject CORRECT output, which is the failure mode that does not look like a bug:
+it looks like the feature not working.
+
+### The decision this leaves, and it is the founder's
+
+Cleanup costs ~1s, does nothing to half of real speech, and removes about half
+the fillers in the rest. Confidence is calibrated (AUC 0.796) and could route
+only the risky utterances through it, keeping the fast path fast.
+
+**That deviates from "clean every utterance", which the founder settled twice on
+2026-08-14, so it is not a decision to take quietly.**
+
+### 2026-08-16 — CAN CONFIDENCE DECIDE WHICH UTTERANCES ARE WORTH CLEANING? NO. THE FOUNDER'S "CLEAN EVERYTHING" STANDS.
+
+Cleanup costs ~1s and does nothing to half of real speech, so the obvious
+proposal was to route only risky utterances through the model and keep the fast
+path fast. Confidence is calibrated for spotting WRONG WORDS (AUC 0.796), so it
+looked like the signal for it. **It is not, and this closes the question rather
+than leaving it open.**
+
+Measured on the same 42 captured utterances, cross-referencing per-utterance
+mean confidence against whether the model changed the text at all:
+
+| | count | mean confidence |
+|---|---|---|
+| model changed it | 22 | 0.841 |
+| model left it alone | 20 | 0.870 |
+
+**A separation of 0.029, and AUC 0.602 against a coin flip's 0.50.**
+
+| route below | utterances cleaned | of which useful | useful ones missed | avg latency |
+|---|---|---|---|---|
+| 0.85 | 12 | 7 | 15 | 0.27s |
+| 0.90 | 27 | 16 | 6 | 0.75s |
+| 0.95 | 35 | 22 | 0 | 1.06s |
+| clean everything | 42 | 22 | 0 | 1.19s |
+
+**To catch every useful cleanup you must route 35 of 42 and save 0.13s.** There
+is no threshold that buys meaningful speed without throwing away cleanups.
+
+**Why it fails, and it is obvious in hindsight:** confidence measures whether
+the engine HEARD correctly. Cleanup fixes what the speaker SAID: fillers, false
+starts, rambling. A perfectly-heard "you know, like, we are just, you know..."
+scores high confidence and needs the most cleaning. **The two are unrelated by
+construction, and a good AUC on one question says nothing about the other.**
+
+**Consequence: the 2026-08-14 decision to clean every utterance is unchallenged
+and now measured.** The alternative was proposed, tested and lost.
