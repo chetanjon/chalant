@@ -349,8 +349,18 @@ final class DictationController {
         // is made of CONFIDENTLY heard real words (`friction` and `lens` both
         // came back at 0.98), so the single-word gate, which fires only on
         // uncertainty, can never see it.
-        let vocabulary = Vocabulary.terms()
-        let whole = TermMatcher.joiningSpans(tokens: transcript.tokens, terms: vocabulary)
+        // Aliases FIRST, and they are the only stage that ignores confidence.
+        // A pair the user typed themselves, twice, over a word Chalant had just
+        // put in their document is not a guess needing acoustic verification.
+        // It also has to ignore confidence to work at all: proper-noun errors
+        // are confident errors, and `Chalan` for `Chalant` measured 0.87.
+        let learned = await LearnedTerms.shared.aliases()
+        let corrected = TermMatcher.applyingAliases(tokens: transcript.tokens, aliases: learned)
+
+        // Then the phonetic passes, over the hand-kept list plus everything
+        // learned. Spans before single words, while every token is present.
+        let vocabulary = Vocabulary.terms() + (await LearnedTerms.shared.terms())
+        let whole = TermMatcher.joiningSpans(tokens: corrected, terms: vocabulary)
         let resolved = TermMatcher.resolving(tokens: whole, terms: vocabulary)
 
         // Three stages, in order, all pure and all in Core: refuse what is not
@@ -385,6 +395,16 @@ final class DictationController {
         let insertStart = Date()
         let outcome = await inserter.insert(text, into: target)
         timings.insertion = Date().timeIntervalSince(insertStart)
+
+        // Now watch what they do to it. Only when the text actually landed in
+        // the document: text left on the clipboard was never inserted, so
+        // anything the focused field says next has nothing to do with us and
+        // diffing against it would invent corrections out of the user's own
+        // typing. Fire and forget, so nothing here is on the path they feel.
+        if case .inserted = outcome {
+            await CorrectionObserver.shared.watch(
+                inserted: text, in: target.bundleID)
+        }
 
         // Lengths and durations only. Part 1 §2: transcripts never enter logs.
         let overruns = await audio.overrunCount

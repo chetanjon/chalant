@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import ChalantDictationCore
@@ -284,6 +285,43 @@ struct CorrectionTests {
         }
         let out = TermMatcher.resolving(tokens: tokens, terms: vocabulary)
         #expect(out.map(\.text).joined(separator: " ") == ordinary)
+    }
+
+    // MARK: - Surviving a quit
+
+    /// The ledger is the only thing in Chalant a user can BUILD by using it.
+    /// Losing it on quit would not be a bug, it would be the feature failing to
+    /// exist, so the wire format gets its own test rather than trusting a
+    /// synthesised conformance.
+    @Test("everything learned survives a save and a reload")
+    func roundTrips() throws {
+        var ledger = Correction.Ledger()
+        let kept = Correction.Pair(heard: "Chalan", meant: "Chalant")
+        let deleted = Correction.Pair(heard: "review", meant: "Ravi")
+        ledger.record(kept, at: .init(day: 3))
+        ledger.record(kept, at: .init(day: 7))
+        ledger.forget(deleted)
+
+        let data = try JSONEncoder().encode(ledger)
+        let reloaded = try JSONDecoder().decode(Correction.Ledger.self, from: data)
+
+        #expect(reloaded == ledger)
+        #expect(reloaded.trusted(at: .init(day: 7)) == ["Chalant"])
+        #expect(reloaded.aliases(at: .init(day: 7)) == ["chalan": "Chalant"])
+
+        // The deletion has to survive too, or every restart resurrects the
+        // pair the user threw away.
+        var after = reloaded
+        after.record(deleted, at: .init(day: 8))
+        after.record(deleted, at: .init(day: 9))
+        #expect(after.trusted(at: .init(day: 9)) == ["Chalant"])
+    }
+
+    @Test("an empty ledger round-trips as empty rather than as a failure")
+    func roundTripsEmpty() throws {
+        let data = try JSONEncoder().encode(Correction.Ledger())
+        let reloaded = try JSONDecoder().decode(Correction.Ledger.self, from: data)
+        #expect(reloaded == Correction.Ledger())
     }
 
     /// Part 0 §0.15 requires every learned pair to be inspectable and

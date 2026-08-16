@@ -159,10 +159,59 @@ public enum Correction {
     /// A value type on purpose: Part 2 §4 keeps Core stateless and `Sendable`,
     /// so persistence is the shell's problem and this stays testable without a
     /// database.
-    public struct Ledger: Sendable, Equatable {
+    ///
+    /// **`Codable` deliberately, over Part 2 §1's GRDB.** That decision was
+    /// taken for `utterances`, which is append-only telemetry that grows without
+    /// bound. This is a few hundred pairs read once at launch and written when
+    /// one changes, and adding a dependency for it would need an
+    /// `ARCHITECTURE.md` entry justifying a database to hold a dictionary.
+    /// Revisit when the term store grows past what fits comfortably in memory.
+    public struct Ledger: Sendable, Equatable, Codable {
         private struct Record: Sendable, Equatable {
             var sightings: Int
             var lastSeen: Day
+        }
+
+        /// A dictionary keyed by a struct cannot be JSON, so the wire form is a
+        /// list. Written out explicitly rather than left to a synthesised
+        /// conformance, because the file outlives the type and a silent shape
+        /// change would lose everything the user taught it.
+        private struct Entry: Codable {
+            var heard: String
+            var meant: String
+            var sightings: Int
+            var lastSeen: Int
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case entries
+            case forgotten
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let entries = try container.decodeIfPresent([Entry].self, forKey: .entries) ?? []
+            for entry in entries {
+                records[Pair(heard: entry.heard, meant: entry.meant)] =
+                    Record(sightings: entry.sightings, lastSeen: Day(day: entry.lastSeen))
+            }
+            let gone = try container.decodeIfPresent([Entry].self, forKey: .forgotten) ?? []
+            forgotten = Set(gone.map { Pair(heard: $0.heard, meant: $0.meant) })
+        }
+
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(
+                records.map {
+                    Entry(
+                        heard: $0.key.heard, meant: $0.key.meant,
+                        sightings: $0.value.sightings, lastSeen: $0.value.lastSeen.day)
+                }.sorted { $0.heard < $1.heard },
+                forKey: .entries)
+            try container.encode(
+                forgotten.map { Entry(heard: $0.heard, meant: $0.meant, sightings: 0, lastSeen: 0) }
+                    .sorted { $0.heard < $1.heard },
+                forKey: .forgotten)
         }
 
         private var records: [Pair: Record] = [:]
