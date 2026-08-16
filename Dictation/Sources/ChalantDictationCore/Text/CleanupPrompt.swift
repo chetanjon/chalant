@@ -102,4 +102,84 @@ public enum CleanupPrompt {
         approximateTokens(instructions) + approximateTokens(framing(transcript))
             < transcriptTokenBudget
     }
+
+    // MARK: - Chunking
+
+    /// Roughly how many words the model is handed at once.
+    ///
+    /// **This is not a context-window limit. It is a reliability limit, and it
+    /// was measured rather than chosen.** On the founder's own 703-character
+    /// dictation (2026-08-16), cleaning the whole thing in one call went 3
+    /// clean out of 5, with one run dropping a negation, one inventing a
+    /// fragment, and one "clean" run silently rewriting "I" as "he" throughout.
+    /// Chunked at ~40 words: 11 runs across three chunk sizes and none of
+    /// those, ever. The small on-device model did not get better; the pieces
+    /// got small enough for it.
+    ///
+    /// 40 rather than 25 because 25 measured no cleaner and costs more model
+    /// calls; rather than 70 because 40 is where the paragraph above became
+    /// reliable and there is no evidence yet that longer holds.
+    public static let chunkTargetWords = 40
+
+    /// Split a transcript into pieces the model can be trusted with.
+    ///
+    /// Splits fall on sentence ends only, so no piece hands the model half a
+    /// thought. A sentence end is `.`, `?` or `!` followed by whitespace, which
+    /// keeps `$9.99` and `3.15` whole. A run-on with no punctuation at all is
+    /// split at word boundaries rather than refused, because shipping raw text
+    /// is the floor and not the goal. Rejoined with single spaces, the pieces
+    /// are the input word for word.
+    public static func chunks(_ transcript: String, targetWords: Int = chunkTargetWords) -> [String] {
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        let sentences = sentencesOf(trimmed)
+        var out: [String] = []
+        var current: [String] = []
+        var currentWords = 0
+
+        for sentence in sentences {
+            let words = sentence.split(whereSeparator: \.isWhitespace).count
+            if !current.isEmpty && currentWords + words > targetWords {
+                out.append(current.joined(separator: " "))
+                current = []
+                currentWords = 0
+            }
+            current.append(sentence)
+            currentWords += words
+        }
+        if !current.isEmpty { out.append(current.joined(separator: " ")) }
+
+        // A single "sentence" far over target is a run-on with no punctuation.
+        // Split it at word boundaries so it is still handed over in pieces.
+        return out.flatMap { piece -> [String] in
+            let words = piece.split(whereSeparator: \.isWhitespace).map(String.init)
+            guard words.count > targetWords * 2 else { return [piece] }
+            return stride(from: 0, to: words.count, by: targetWords).map {
+                words[$0..<min($0 + targetWords, words.count)].joined(separator: " ")
+            }
+        }
+    }
+
+    /// Sentences, each keeping its own terminator. A terminator counts only
+    /// when whitespace follows it, so a decimal point inside a number does not
+    /// end a sentence.
+    private static func sentencesOf(_ text: String) -> [String] {
+        var sentences: [String] = []
+        var current = ""
+        let chars = Array(text)
+        for (index, ch) in chars.enumerated() {
+            current.append(ch)
+            let ends = ch == "." || ch == "?" || ch == "!"
+            let followedByGap = index + 1 == chars.count || chars[index + 1].isWhitespace
+            if ends && followedByGap {
+                let piece = current.trimmingCharacters(in: .whitespaces)
+                if !piece.isEmpty { sentences.append(piece) }
+                current = ""
+            }
+        }
+        let tail = current.trimmingCharacters(in: .whitespaces)
+        if !tail.isEmpty { sentences.append(tail) }
+        return sentences
+    }
 }
