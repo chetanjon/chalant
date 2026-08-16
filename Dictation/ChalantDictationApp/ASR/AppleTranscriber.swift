@@ -1,5 +1,6 @@
 import AVFoundation
 import ChalantDictationCore
+import CoreMedia
 import Foundation
 import Speech
 import os
@@ -56,7 +57,21 @@ actor AppleTranscriber: Transcriber {
     func prepare(locale: Locale, format micFormat: AVAudioFormat?) async {
         guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else { return }
         canonicalLocale = supported
-        let module = SpeechTranscriber(locale: supported, preset: .progressiveTranscription)
+        // **Not a preset, and the reason is measured.** Phase 0 read the
+        // presets' real contents: `.progressiveTranscription` is
+        // `reporting: [fastResults, volatileResults]`, `attributes: []`. No
+        // attributes at all, so the shipping app had no confidence, no timings
+        // and no alternatives, and no preset combines volatile with both. The
+        // explicit initialiser is the only way to ask for all three.
+        //
+        // `.fastResults` is kept deliberately: it is what the old preset used,
+        // and the 0.149s finalization measured on 2026-08-15 was measured with
+        // it. Dropping it would be an unmeasured change to a launch claim.
+        let module = SpeechTranscriber(
+            locale: supported,
+            transcriptionOptions: [],
+            reportingOptions: [.volatileResults, .alternativeTranscriptions, .fastResults],
+            attributeOptions: [.audioTimeRange, .transcriptionConfidence])
         let analyzer = SpeechAnalyzer(modules: [module])
         self.transcriber = module
         self.analyzer = analyzer
@@ -240,10 +255,22 @@ actor AppleTranscriber: Transcriber {
     }
 
     /// Part 1 §2: transcripts never enter logs, so nothing here is logged.
+    ///
+    /// This function used to be `String(text.characters).split(separator: " ")`,
+    /// which threw away every attribute the engine had attached. The decision
+    /// of how runs become words is pure and lives in `TokenAssembly` with its
+    /// own tests; all that happens here is the translation out of the SDK's
+    /// types, so that Core keeps importing only Foundation.
     private static func tokens(from text: AttributedString) -> [Token] {
-        String(text.characters)
-            .split(separator: " ")
-            .map { Token(text: String($0)) }
+        TokenAssembly.tokens(
+            from: text.runs.map { run in
+                let range = run[AttributeScopes.SpeechAttributes.TimeRangeAttribute.self]
+                return TokenAssembly.Run(
+                    text: String(text[run.range].characters),
+                    confidence: run[AttributeScopes.SpeechAttributes.ConfidenceAttribute.self],
+                    start: range.map { CMTimeGetSeconds($0.start) },
+                    end: range.map { CMTimeGetSeconds($0.end) })
+            })
     }
 }
 
