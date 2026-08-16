@@ -311,7 +311,19 @@ final class DictationController {
         // claim is made anywhere until it has been read off real hardware.
         timings.finalization = Date().timeIntervalSince(releasedAt)
 
-        let text = transcript.rawText
+        // Part 0 §0.18: a post-ASR guardrail, regardless of engine. Observed
+        // 2026-08-15 on a Telugu utterance against an en-US engine: seven mush
+        // words followed by forty-one bare commas, mean confidence 0.253 where
+        // ordinary English runs 0.5 to 0.99. The words are wrong because the
+        // locale is wrong, which is a different problem; the comma run is not
+        // text at all. Trimming it cannot lose a word because there are none in
+        // it, so Part 1 §2 is untouched.
+        let raw = transcript.rawText
+        let text = Guardrail.trimmingPunctuationRun(raw)
+        if text != raw {
+            Self.log.error(
+                "guardrail trimmed \(raw.count - text.count, privacy: .public) chars of punctuation run")
+        }
         guard !text.isEmpty else {
             // Silence is not a corpus entry. Keeping it would pad the set with
             // rows nobody can label.
