@@ -1,0 +1,105 @@
+#!/bin/bash
+# Look at the learned-terms list before it ships.
+#
+# The founder reviews by screenshot and every accepted design decision on this
+# app came from pixels rather than a description. This view has only ever been
+# read against the design laws, never seen, so it gets looked at before it goes
+# out.
+#
+# Seeds a few realistic pairs, because the list correctly shows NOTHING when
+# nothing has been learned (law 5: a control appears only when it can do
+# something), so a fresh install has nothing to judge. The seed is removed at
+# the end.
+
+set -e
+cd "$(dirname "$0")/.." || exit 1
+
+APP="build/preview/Build/Products/Release/Chalant.app"
+STORE="$HOME/Library/Application Support/Chalant/learned-terms.json"
+
+if [ ! -d "$APP" ]; then
+  echo "The preview build is missing. Ask Claude to build it."
+  exit 1
+fi
+
+echo
+echo "=================================================="
+echo "  LOOK AT THE LEARNED-TERMS LIST"
+echo "=================================================="
+echo
+
+# Never overwrite something real. There should be nothing here yet, but a
+# backup costs nothing and losing a user's learned vocabulary is unrecoverable.
+if [ -f "$STORE" ]; then
+  cp "$STORE" "$STORE.before-preview"
+  echo "  (your existing learned terms were backed up)"
+fi
+
+mkdir -p "$(dirname "$STORE")"
+# Sightings are two or more so they read as trusted, and the pairs are the real
+# mis-hearings the corpus produced tonight rather than invented ones.
+DAY=$(( $(date +%s) / 86400 ))
+cat > "$STORE" <<JSON
+{
+  "entries": [
+    {"heard": "Chalan",     "meant": "Chalant",      "sightings": 4, "lastSeen": $DAY},
+    {"heard": "Athram",     "meant": "Aatram",       "sightings": 2, "lastSeen": $DAY},
+    {"heard": "Jonalagata", "meant": "Jonnalagadda", "sightings": 3, "lastSeen": $DAY},
+    {"heard": "versal",     "meant": "Vercel",       "sightings": 2, "lastSeen": $DAY}
+  ],
+  "forgotten": []
+}
+JSON
+
+# Two Chalants means two event taps and doubled text.
+osascript -e 'quit app "Chalant"' 2>/dev/null || true
+sleep 2
+open "$APP"
+sleep 3
+
+cat <<'INSTRUCTIONS'
+
+  WHERE TO LOOK
+  -------------
+  Open Chalant's dashboard, go to SETTINGS, then GENERAL,
+  and scroll to the DICTATION card.
+
+  Under "Learn my names" you should see four rows:
+
+      Chalan      ->  Chalant           4   x
+      Athram      ->  Aatram            2   x
+      Jonalagata  ->  Jonnalagadda      3   x
+      versal      ->  Vercel            2   x
+
+  The wrong word dim, the right one white, the count in mono,
+  and an x that lights up when you point at it.
+
+  Things worth judging:
+    - does it look like the rest of Settings, or bolted on
+    - are four rows calm or noisy
+    - is the x findable without being loud
+    - does the arrow read, or is it clutter
+
+  Click an x and the row should go and stay gone.
+
+INSTRUCTIONS
+
+echo "  Press Return when you have seen it."
+read -r _
+
+osascript -e 'quit app "Chalant"' 2>/dev/null || true
+sleep 2
+
+# Put the store back exactly as it was. The seeded pairs are mine, not theirs,
+# and leaving them would mean Chalant "knew" words it was never taught.
+if [ -f "$STORE.before-preview" ]; then
+  mv "$STORE.before-preview" "$STORE"
+  echo "  your real learned terms are back"
+else
+  rm -f "$STORE"
+  echo "  seeded pairs removed; the store is empty again, as it was"
+fi
+
+open -a /Applications/Chalant.app 2>/dev/null || true
+echo
+echo "Done. Tell Claude what you thought."
