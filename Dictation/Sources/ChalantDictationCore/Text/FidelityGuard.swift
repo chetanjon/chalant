@@ -78,11 +78,44 @@ public enum FidelityGuard {
     /// this guard's business rather than `Disfluency`'s: that stage collapses
     /// repetitions a HUMAN made, and it runs before the model ever sees the
     /// text.
+    /// How close two identical word pairs must be to count as a stutter.
+    ///
+    /// **The first version had no distance test and that was the bug.** It
+    /// flagged any pair appearing more often in the output than the input,
+    /// which is ordinary English the moment a paragraph is long enough:
+    /// "he will" twice in 700 characters about a friend is not a stutter, it is
+    /// a person talking. Short utterances have no room to repeat, so the fault
+    /// only appeared on long ones, which is exactly where cleanup matters most.
+    ///
+    /// Measured against the three real stutters this check exists for, the two
+    /// halves sit 3 and 4 tokens apart:
+    ///
+    /// ```
+    /// Move the stand- Move the stand-up from...     "move the"  @0 and @3
+    /// ...Never the production one. Never the ...    "never the" @0 and @4
+    /// The ABI key ends in 4723 ends in 472.         "ends in"   @3 and @6
+    /// ```
+    private static let stutterWindow = 6
+
     private static func didNotStutter(_ raw: String, _ cleaned: String) -> String? {
+        let tokens = words(in: cleaned).map { bare($0).lowercased() }.filter { !$0.isEmpty }
+        guard tokens.count > 2 else { return nil }
+
+        // Where each pair occurs, so closeness can be judged rather than only
+        // counted.
+        var positions: [String: [Int]] = [:]
+        for index in 0..<(tokens.count - 1) {
+            positions[tokens[index] + " " + tokens[index + 1], default: []].append(index)
+        }
+
         let before = bigrams(raw)
-        let after = bigrams(cleaned)
-        for (pair, count) in after where count >= 2 && count > (before[pair] ?? 0) {
-            return "the model repeated itself: \(pair)"
+        for (pair, where_) in positions where where_.count >= 2 {
+            // A repetition the speaker made is not the model's stutter, and
+            // `Disfluency` has already had its say on those.
+            guard where_.count > (before[pair] ?? 0) else { continue }
+            for index in 1..<where_.count where where_[index] - where_[index - 1] <= stutterWindow {
+                return "the model repeated itself: \(pair)"
+            }
         }
         return nil
     }
