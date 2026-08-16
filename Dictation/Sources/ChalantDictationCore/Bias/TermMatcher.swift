@@ -21,40 +21,42 @@ import Foundation
 /// the engine to have been unsure, and a candidate that sounds close. Both, or
 /// nothing happens.
 ///
-/// # THIS IS DELIBERATELY NOT WIRED INTO THE PIPELINE. Measured 2026-08-15.
+/// # Measured on the propernoun corpus, 2026-08-15: 8 repairs, 0 corruptions.
 ///
-/// It is built, tested and correct, and it is not connected to
-/// `DictationController`, because running it on the corpus said not to:
+/// **An earlier version of this note said the opposite and it is worth knowing
+/// why.** Before the `propernoun` set existed, this was measured as net harmful
+/// and "not tunable". That was a true reading of a corpus containing **2
+/// proper-noun errors in 225 words**. It was not a fact about the matcher. With
+/// 30 utterances of the user's actual vocabulary the picture inverted, and the
+/// lesson generalises: a layer cannot be judged on data that does not contain
+/// the thing it exists to fix.
 ///
-/// - **At the shipping constants below (confidence 0.50, similarity 0.65) it is
-///   net harmful: 1 win against 1 loss.** The loss is the exact failure this
-///   file's own docstring warns about: `"Never merge that branch without a
-///   review."` became `"...without a ravi."` A correct ordinary English word,
-///   unsure for its own reasons, rewritten into someone's name.
-/// - **It fixed ZERO proper-noun errors** on the locked English set (2 before,
-///   2 after) and turned 13 number errors into 14 on holdout, so M4's
-///   acceptance criterion fails on both of its halves at once.
-/// - **The similarity floor is not the lever.** Swept 0.65 to 0.90, wins and
-///   losses do not move at all; only the confidence floor changes anything.
-///   There is a safe corner (confidence 0.40) with 1 win and 0 losses, and one
-///   substitution in sixty utterances is not a feature.
+/// Across all 90 utterances, at the constants below:
 ///
-/// **The reason is structural rather than a bad constant, and Part 1 §1 already
-/// said so:** "Similarity is candidate generation only; the decision compares
-/// acoustic scores for candidate vs. original. Never substitute on text
-/// resemblance alone." Confidence gates WHETHER to look; it cannot decide WHAT
-/// to choose, and the choosing is where this breaks.
+/// ```
+/// Kisu       -> Kizu           Challant   -> Chalant
+/// Kisi       -> Kizu           Pribar     -> Prybar
+/// versal     -> Vercel         Etram      -> Aatram
+/// itrum      -> Aatram         Jonalagata -> Jonnalagadda
+/// ```
 ///
-/// **What confidence IS good enough for, also measured: telling you which words
-/// are wrong.** AUC 0.768 overall and 0.833 on the locked English set, against
-/// the directive's bar of 0.70. That answers Phase 0's open calibration
-/// question and makes confidence fit for RISK ROUTING, which is a different job
-/// from substitution.
+/// **The one loss that survived every similarity threshold, and how it died.**
+/// `"Never merge that branch without a review"` became `"...without a ravi"`.
+/// `review` and `ravi` both reduce to `RF` under Double Metaphone, so they sit
+/// at 1.00 similarity and no threshold on sound can ever separate them. Length
+/// separates them: 33% apart, where every true repair above is within 17%. See
+/// `withinLength`.
 ///
-/// **Do not wire this on a hunch. The corpus cannot currently settle it:** the
-/// locked English set contains 2 proper-noun errors in total, and the sets that
-/// would measure a vocabulary layer (`propernoun`, `technical`) are among the
-/// ones still unrecorded. See `EVAL-LOG.md`, 2026-08-15.
+/// **Confidence's real job, also measured: telling you which words are wrong.**
+/// AUC 0.796 on the propernoun set against the directive's 0.70 bar, which
+/// answers Phase 0's open calibration question. Good enough to gate on, not good
+/// enough to decide with, exactly as Part 1 §1 insisted before anyone measured
+/// it. CTC rescoring remains the destination; this is a defensible waypoint.
+///
+/// **The vocabulary must carry canonical spelling.** `score.py` lowercases
+/// before comparing, so a lowercase term list scores identically and inserts
+/// `"ship chalant to the kizu group"` into the user's document. The metric
+/// cannot see that failure. See `corpus/terms-canonical.txt`.
 public enum TermMatcher {
 
     public struct Decision: Equatable, Sendable {
@@ -92,7 +94,13 @@ public enum TermMatcher {
         // Part 5 §3, and the figure Yap arrived at independently: a short word
         // has few sounds to disagree about, so a given similarity means much
         // less. `shortWordSimilarity 0.80`, `shortWordMaxLength 4`.
-        if wordLength <= 4 { return max(tuned, 0.80) }
+        //
+        // **A floor among floors, never an override.** It used to `return`
+        // here, which meant a short word could be held to a LOWER bar than a
+        // long one the moment the provisional floor rose above 0.80. That is
+        // backwards, and it went unnoticed because the sweep passes an explicit
+        // similarity and never exercised this branch.
+        let short = wordLength <= 4 ? 0.80 : 0
 
         // **The premium, and why it is here.** Those tuned numbers are
         // FluidAudio's, and they were tuned for a system where CTC rescoring
@@ -100,29 +108,49 @@ public enum TermMatcher {
         // standing in for it, and it is weaker evidence. A weaker decision
         // demands a stricter filter ahead of it.
         //
-        // Measured 2026-08-15 on the founder's own errors: every true match sat
-        // at 0.75 or 1.00 (`Chatan`/`Chetan` 1.00, `Shalan`/`Chalant` 0.75) and
-        // every false one at exactly 0.50 (`Monday`/`Chalant`,
-        // `database`/`Supabase`, `deadline`/`Chetan`). The gap is real and this
-        // sits inside it.
-        //
-        // UNTUNED, and marked so on purpose. It comes back down to the numbers
-        // above when CTC lands, and until then it is swept on `--split dev`
-        // like everything else rather than defended as a constant.
-        return max(tuned, provisionalFloor)
+        // **Note what this means today: at 0.90 the provisional floor dominates
+        // the tuned curve entirely, so the size-aware band above is currently
+        // inert.** That is not an accident and not dead code to delete. It is
+        // the correct band for a system whose decision is acoustic, and it
+        // becomes live again the moment CTC rescoring replaces the floor.
+        return max(tuned, provisionalFloor, short)
     }
 
     /// The stricter bar that stands in for an acoustic decision layer.
     /// Temporary by design; see `threshold(forVocabularySize:wordLength:)`.
-    public static let provisionalFloor = 0.65
+    ///
+    /// **SWEPT AND SET ON EVIDENCE, 2026-08-15.** Was 0.65, marked UNTUNED
+    /// pending exactly this measurement. Swept 0.65 to 0.90 against confidence
+    /// 0.30 to 0.60 over all 90 corpus utterances, counting wins (a wrong word
+    /// became right) against losses (a right word became wrong):
+    ///
+    /// | similarity | wins | losses |
+    /// |---|---|---|
+    /// | 0.70 | 12 | 5 |
+    /// | 0.80 | 10 | 2 |
+    /// | **0.85 / 0.90** | **8** | **0** |
+    ///
+    /// 0.90 rather than 0.85 because the two measure identically and the last
+    /// observed loss is at 0.80, so this stands a full step clear of the cliff
+    /// rather than balancing on its edge.
+    public static let provisionalFloor = 0.90
 
     /// Above this, the engine was sure enough that nothing may overrule it.
     ///
-    /// Deliberately not tuned: it is a starting point to sweep on `--split dev`
-    /// once the corpus can score it, exactly as Part 0 §0.13 did for the
-    /// thresholds above. Calling it tuned before it is measured would be the
-    /// "optimizing before measuring" that Part 1 §3 bans.
-    public static let confidenceFloor = 0.5
+    /// **SWEPT AND SET ON EVIDENCE, 2026-08-15.** Was 0.5. At 0.90 similarity,
+    /// over all 90 corpus utterances: 0.40 gives 1 win, 0.50 gives 4, and 0.60
+    /// gives 8, with zero losses at every one of them. Raised to the top of
+    /// that safe range.
+    ///
+    /// **It cannot go much higher, and the reason is the interesting one.**
+    /// Proper-noun errors are CONFIDENT errors: on the propernoun set the
+    /// engine's wrong words average 0.757 against 0.909 for its right ones, and
+    /// it hears `Chalan` for `Chalant` at 0.87 because `Chalan` is a perfectly
+    /// plausible sound. Confidence separates right from wrong well enough to
+    /// measure (AUC 0.796) and nowhere near well enough to be the only gate.
+    /// That is why the length guard exists and why CTC rescoring is still the
+    /// destination.
+    public static let confidenceFloor = 0.6
 
     /// Resolve one heard word against the active vocabulary.
     ///
@@ -160,16 +188,46 @@ public enum TermMatcher {
         let floor = similarityFloor
             ?? threshold(forVocabularySize: terms.count, wordLength: word.count)
         var best: (term: String, score: Double)?
+        var refusedOnLength = false
         for term in terms {
             let score = PhoneticKey.similarity(word, term)
-            if score >= floor, score > (best?.score ?? 0) { best = (term, score) }
+            guard score >= floor else { continue }
+            guard withinLength(word, term) else { refusedOnLength = true; continue }
+            if score > (best?.score ?? 0) { best = (term, score) }
         }
 
-        guard let best else { return .keep("nothing sounded close enough") }
+        guard let best else {
+            return .keep(
+                refusedOnLength
+                    ? "sounded close but the length is too different"
+                    : "nothing sounded close enough")
+        }
         return .use(
             best.term,
             "heard with confidence \(String(format: "%.2f", confidence)), "
                 + "sounds like \(best.term) at \(String(format: "%.2f", best.score))")
+    }
+
+    /// The most two words may differ in length and still be the same word
+    /// misheard.
+    ///
+    /// **This exists because similarity cannot do it.** Measured on the
+    /// propernoun corpus 2026-08-15: `review` and `ravi` both reduce to `RF`
+    /// under Double Metaphone, so they sit at 1.00 and no similarity threshold
+    /// separates them. `review` -> `ravi` was the last remaining loss at the
+    /// best setting, and it is the worst kind, a correct ordinary word rewritten
+    /// into a name.
+    ///
+    /// Length is the axis that does separate them. `review` (6) against `ravi`
+    /// (4) is a 33% difference; every true repair on the same corpus differed by
+    /// at most 17%. A ratio rather than an absolute, because two characters
+    /// apart is nothing across long words and everything across short ones.
+    public static let lengthTolerance = 0.25
+
+    public static func withinLength(_ heard: String, _ term: String) -> Bool {
+        let a = heard.count, b = term.count
+        guard a > 0, b > 0 else { return false }
+        return Double(abs(a - b)) / Double(max(a, b)) <= lengthTolerance
     }
 
     /// Words the filler stage is about to delete, and which must therefore

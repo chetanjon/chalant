@@ -24,10 +24,27 @@ struct TermMatcherTests {
         #expect(d.replacement == "Chetan")
     }
 
-    @Test("the product name is recovered from what was actually heard")
-    func fixesTheProductName() {
+    /// **This case USED to pass and now deliberately does not, and the reason
+    /// is the whole trade the 2026-08-15 sweep bought.**
+    ///
+    /// `Shalan` sits at 0.75 similarity to `Chalant`, and the similarity floor
+    /// moved from 0.65 to 0.90 because that is where losses reached zero across
+    /// all 90 corpus utterances. At 0.75 the matcher scored 12 wins against 5
+    /// losses; at 0.90, 8 wins against 0. Five words the user got right, being
+    /// silently rewritten, is not worth four extra repairs.
+    ///
+    /// **So this records a known miss, not a bug.** `Challant` -> `Chalant`
+    /// still works, because the engine's usual error on this word is much
+    /// closer than `Shalan`. If CTC rescoring lands and the floor comes down,
+    /// this is the case to check first.
+    @Test("a distant mishearing is now refused, and that is the trade")
+    func distantMishearingsAreRefused() {
+        let d = TermMatcher.resolve(heard: "Shalan", confidence: 0.18, terms: Self.vocabulary)
+        #expect(d.replacement == nil)
+
+        // The one that actually shows up in the corpus still lands.
         #expect(
-            TermMatcher.resolve(heard: "Shalan", confidence: 0.18, terms: Self.vocabulary)
+            TermMatcher.resolve(heard: "Challant", confidence: 0.56, terms: Self.vocabulary)
                 .replacement == "Chalant")
     }
 
@@ -101,10 +118,19 @@ struct TermMatcherTests {
 
     /// Part 5 §3: a short word has few sounds to disagree about, so the same
     /// similarity means much less. `shortWordMaxLength 4`, `shortWordSimilarity 0.80`.
-    @Test("short words face a higher bar")
+    ///
+    /// **The rule is a floor among floors, never an override, and it used to be
+    /// an override.** It returned 0.80 outright for short words, which meant
+    /// that the moment the provisional floor rose above 0.80 a short word was
+    /// held to a LOWER bar than a long one. Exactly backwards, and invisible to
+    /// the threshold sweep, which passes an explicit similarity and never
+    /// reaches this branch.
+    @Test("a short word is never held to a lower bar than a long one")
     func shortWordsAreHarder() {
-        #expect(TermMatcher.threshold(forVocabularySize: 5, wordLength: 3) == 0.80)
-        #expect(TermMatcher.threshold(forVocabularySize: 5, wordLength: 9) < 0.80)
+        let short = TermMatcher.threshold(forVocabularySize: 5, wordLength: 3)
+        let long = TermMatcher.threshold(forVocabularySize: 5, wordLength: 9)
+        #expect(short >= long)
+        #expect(short >= 0.80)
     }
 
     /// Every decision explains itself, including the refusals. A matcher that

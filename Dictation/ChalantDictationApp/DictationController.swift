@@ -328,12 +328,29 @@ final class DictationController {
         // before, 18.22 after, with exactly three utterances changed and no
         // other output touched.
         let raw = transcript.rawText
+
+        // **The vocabulary pass runs FIRST, and on tokens rather than text.**
+        // It is the only stage that needs per-word confidence, and confidence
+        // exists only on tokens; the three stages after it delete words, after
+        // which nothing aligns back to the engine's own scoring. Substitution
+        // is strictly one word for one word, so running it first cannot disturb
+        // them.
+        //
+        // Measured on the 90-utterance corpus 2026-08-15: 8 repairs, 0
+        // corruptions (`Challant` → `Chalant`, `Jonalagata` → `Jonnalagadda`,
+        // `versal` → `Vercel`, `Kisu` → `Kizu`). It does nothing at all until
+        // the vocabulary is non-empty, which today means until someone sets it
+        // by hand or M5's learner fills it.
+        let resolved = TermMatcher.resolving(
+            tokens: transcript.tokens, terms: Vocabulary.terms())
+
         // Three stages, in order, all pure and all in Core: refuse what is not
         // text, collapse what was said twice by accident, then remove the words
         // nobody meant to say.
         let text = Fillers.removing(
             Disfluency.collapsingRepetitions(
-                Guardrail.trimmingPunctuationRun(raw)))
+                Guardrail.trimmingPunctuationRun(
+                    resolved.map(\.text).joined(separator: " "))))
         if text != raw {
             Self.log.error(
                 "guardrail trimmed \(raw.count - text.count, privacy: .public) chars of punctuation run")

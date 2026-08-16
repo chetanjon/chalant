@@ -117,6 +117,50 @@ struct TermMatcherPassTests {
         #expect(TermMatcher.resolving(tokens: [], terms: Self.terms).isEmpty)
     }
 
+    // MARK: - The length guard
+
+    /// **The case that forced this, measured on the propernoun corpus
+    /// 2026-08-15.** `review` and `ravi` both reduce to `RF` under Double
+    /// Metaphone, so they sit at 1.00 similarity and NO similarity threshold
+    /// can separate them. It was the only loss left at the best setting, and it
+    /// is the worst kind: a correct ordinary word rewritten into a name.
+    ///
+    /// Length is the axis that does separate them. `review` is 6 letters and
+    /// `ravi` is 4, a 33% difference, while every true repair on the same
+    /// corpus differed by at most 17%: `Challant`/`chalant`, `versal`/`vercel`,
+    /// `Etram`/`aatram`, `Jonalagata`/`jonnalagadda`, `Kisu`/`kizu`.
+    @Test("a term too different in length is refused however identical it sounds")
+    func lengthGuard() {
+        let decision = TermMatcher.resolve(heard: "review", confidence: 0.47, terms: ["Ravi"])
+        #expect(decision.replacement == nil)
+        #expect(decision.reason.contains("length"))
+    }
+
+    @Test("the real repairs all sit inside the length guard")
+    func lengthGuardKeepsTheWins() {
+        let cases = [
+            ("Challant", "Chalant"), ("versal", "Vercel"), ("Etram", "Aatram"),
+            ("itrum", "Aatram"), ("Jonalagata", "Jonnalagadda"), ("Kisu", "Kizu"),
+            ("Pribar", "Prybar"),
+        ]
+        for (heard, term) in cases {
+            let decision = TermMatcher.resolve(
+                heard: heard, confidence: 0.5, terms: [term], confidenceFloor: 0.6)
+            #expect(decision.replacement == term, "\(heard) should still reach \(term)")
+        }
+    }
+
+    /// The guard is a ratio rather than an absolute, or it would be meaningless
+    /// at both ends: two characters apart is nothing across long words and
+    /// everything across short ones.
+    @Test("the guard scales with the length of the words")
+    func guardIsProportional() {
+        // 2 apart on short words is a third of them, and refused.
+        #expect(TermMatcher.withinLength("abcd", "abcdef") == false)
+        // 2 apart on long words is a small fraction, and allowed.
+        #expect(TermMatcher.withinLength("abcdefghijkl", "abcdefghij") == true)
+    }
+
     /// Part 1 §2. A vocabulary pass may change what a word says; it may never
     /// change how many words there are.
     @Test("the word count is identical before and after, always")

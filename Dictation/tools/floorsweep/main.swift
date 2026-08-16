@@ -61,6 +61,29 @@ struct Tally {
     var neutral = 0     // wrong before, wrong after: no worse, no better
 }
 
+// With two extra arguments, print every substitution at that one setting
+// instead of the grid. A count says whether to ship; only the words themselves
+// say whether the count is trustworthy.
+if args.count > 4, let similarity = Double(args[3]), let confidence = Double(args[4]) {
+    print("similarity \(similarity), confidence \(confidence)\n")
+    for row in rows {
+        let truth = wanted(row)
+        let tokens = row.detail.map { Token(text: $0.t, confidence: $0.c) }
+        let after = TermMatcher.resolving(
+            tokens: tokens, terms: terms,
+            confidenceFloor: confidence, similarityFloor: similarity)
+        for (before, now) in zip(tokens, after) where before.text != now.text {
+            let wasRight = truth.contains(bare(before.text))
+            let isRight = truth.contains(bare(now.text))
+            let mark = !wasRight && isRight ? "WIN " : (wasRight && !isRight ? "LOSS" : "----")
+            let conf = before.confidence.map { String(format: "%.2f", $0) } ?? "nil"
+            print("\(mark)  \(row.id.padding(toLength: 10, withPad: " ", startingAt: 0)) "
+                + "\(before.text) -> \(now.text)   (confidence \(conf))")
+        }
+    }
+    exit(0)
+}
+
 print("similarity  confidence     wins   losses  neutral   verdict")
 print(String(repeating: "-", count: 66))
 
