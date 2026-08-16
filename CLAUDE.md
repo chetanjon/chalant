@@ -13,3 +13,9 @@ everywhere without exception.
 - Commit to the branch, push, then open a PR with `gh pr create`.
 - Reference issues in the PR body ("Closes #N") when one exists.
 - Do not merge. Leave the PR open for me.
+- Do not merge automatically. When I say "merge it", run:
+  `gh pr merge --squash --delete-branch` then `git checkout main && git pull`.
+
+"Merge it" is the only thing that authorises a merge. Not an approving comment,
+not "looks good", not silence on an open PR, and not my having asked for the
+work in the first place.
