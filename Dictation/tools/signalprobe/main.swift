@@ -33,6 +33,11 @@ struct Row: Codable {
     let verbatim: String?
 }
 
+struct TokenDetail: Codable {
+    let t: String
+    let c: Double?
+}
+
 struct Out: Codable {
     let id: String
     let context: String
@@ -42,12 +47,28 @@ struct Out: Codable {
     let config: String
     let biased: Bool
     let output: String
+    /// The same utterance after the FULL shipping text pipeline, so the
+    /// vocabulary layer's effect is measured against the code that runs, not
+    /// against a description of it.
+    let piped: String
     let tokens: Int
     let withConfidence: Int
     let meanConfidence: Double?
     let minConfidence: Double?
     let alternatives: Int
     let seconds: Double
+    let detail: [TokenDetail]
+}
+
+/// The shipping order, and the reason for it. `TermMatcher` runs FIRST because
+/// it is the only stage that needs per-word confidence, and confidence exists
+/// only on tokens; the three deterministic stages delete words, after which no
+/// alignment back to the engine's own scoring survives. Substitution is one
+/// word for one word, so running it first cannot disturb the stages behind it.
+func pipeline(_ tokens: [Token], terms: [String]) -> String {
+    let resolved = TermMatcher.resolving(tokens: tokens, terms: terms)
+    let raw = resolved.map(\.text).joined(separator: " ")
+    return Fillers.removing(Disfluency.collapsingRepetitions(Guardrail.trimmingPunctuationRun(raw)))
 }
 
 let args = CommandLine.arguments
@@ -287,7 +308,7 @@ var done = 0
 // simply not deterministic. Repeating one configuration unchanged is the only
 // way to tell an effect from noise, and without it every difference below would
 // be read as bias.
-let configs: [(label: String, speech: Bool, biased: Bool)] = [
+var configs: [(label: String, speech: Bool, biased: Bool)] = [
     ("speech", true, false),
     ("speech-biased", true, true),
     ("speech-control", true, false),
@@ -295,6 +316,13 @@ let configs: [(label: String, speech: Bool, biased: Bool)] = [
     ("dictation-biased", false, true),
     ("dictation-control", false, false),
 ]
+
+// Optional 5th argument: a comma-separated subset, so a re-run that only needs
+// one configuration does not pay for all six.
+if args.count > 5 {
+    let wanted = Set(args[5].split(separator: ",").map(String.init))
+    configs = configs.filter { wanted.contains($0.label) }
+}
 
 for row in rows {
     let audio = corpusDir.appendingPathComponent(row.audio)
@@ -310,13 +338,15 @@ for row in rows {
                 config: config.label,
                 biased: config.biased,
                 output: reading.text,
+                piped: pipeline(reading.tokens, terms: terms),
                 tokens: reading.tokens.count,
                 withConfidence: confidences.count,
                 meanConfidence: confidences.isEmpty
                     ? nil : confidences.reduce(0, +) / Double(confidences.count),
                 minConfidence: confidences.min(),
                 alternatives: reading.alternatives,
-                seconds: reading.seconds)
+                seconds: reading.seconds,
+                detail: reading.tokens.map { TokenDetail(t: $0.text, c: $0.confidence) })
             if let data = try? encoder.encode(out), let line = String(data: data, encoding: .utf8) {
                 print(line)
                 fflush(stdout)

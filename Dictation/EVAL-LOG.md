@@ -332,3 +332,106 @@ both locales).
 - 60 utterances, one speaker, one room, file input rather than the microphone.
 - Sets A, B and E are still unrecorded, and they are the ones that would move
   the proper-noun number on English, where it is currently only 2 errors of 45.
+
+## 2026-08-15 — CONFIDENCE IS CALIBRATED (Phase 0's open question, answered) AND THE VOCABULARY LAYER STILL MUST NOT SHIP
+
+Phase 0 established that `transcriptionConfidence` is present on 100% of
+finalized runs and varies from 0.011 to 0.998, then said the honest thing:
+*"present and varying is not meaningful; the directive's bar is AUC > 0.70
+against per-word error, which needs the corpus."* The corpus now exists and the
+tokens now carry confidence, so it is answered. `tools/calibration.py`.
+
+### 1. Confidence clears the bar as an error DETECTOR
+
+AUC is the probability that a randomly chosen wrong word was less confident than
+a randomly chosen right one. 0.50 is a coin flip.
+
+| split | words | wrong | AUC | mean confidence, wrong vs right |
+|---|---|---|---|---|
+| English torture (locked) | 202 | 49 | **0.833** | 0.756 vs 0.933 |
+| code-switch holdout | 56 | 23 | 0.749 | 0.491 vs 0.697 |
+| code-switch dev | 136 | 69 | 0.631 | 0.554 vs 0.678 |
+| **all** | **394** | **141** | **0.768** | **0.614 vs 0.835** |
+
+**0.768 overall and 0.833 on English, against a bar of 0.70.** Confidence is a
+real signal about which words are wrong, and it is strongest exactly where the
+product is strongest. It is fit for **risk routing**: deciding which utterances
+deserve an expensive second pass. Note it degrades on code-switched speech,
+which is also where the engine is worst, so it is least trustworthy precisely
+where it would be most useful.
+
+### 2. And it is NOT sufficient to decide a substitution. The vocabulary layer is net harmful as gated.
+
+Ran the full shipping pipeline (`TermMatcher` on tokens, then `Guardrail`,
+`Disfluency`, `Fillers`) over the corpus, scored against raw:
+
+| split | raw | full pipeline |
+|---|---|---|
+| English torture | 20.00 | 18.67 |
+| code-switch dev | 102.34 | 102.34 |
+| code-switch holdout | 75.41 | 73.77 |
+
+**Every point of that gain is the disfluency stage that already shipped.** The
+vocabulary layer's own contribution, isolated:
+
+- **proper-noun errors on the locked English set: 2 before, 2 after. It fixed
+  none.**
+- **number errors on holdout: 13 before, 14 after. It added one.**
+- Five substitutions in 60 utterances: **1 right (`Kisu` → `Kizu`), 4 wrong.**
+
+The worst of the four is the one this whole design exists to prevent:
+
+```
+Never merge that branch without a review.   →   ...without a ravi.
+```
+
+A correct, ordinary English word, unsure for its own reasons, rewritten into a
+name. `PhoneticKey`'s own tests assert it collides on ordinary English; this is
+that collision reaching the user's document.
+
+**M4's acceptance criterion is explicit that this is the failure that matters:**
+*"propernoun corrections per 100 words drops at least 30% versus baseline, and
+precision does not fall, no new errors introduced on utterances that were
+previously correct."* Both halves fail.
+
+### 3. It is not a tuning problem. Swept, and the similarity floor does nothing.
+
+`tools/floorsweep` re-applies the matcher to the stored tokens, so the whole
+grid costs no transcription. Similarity 0.65 to 0.90 x confidence 0.30 to 0.60:
+
+| confidence floor | wins | losses | verdict |
+|---|---|---|---|
+| 0.30 | 0 | 0 | does nothing |
+| 0.40 | 1 | 0 | safe, and fires once in 60 utterances |
+| **0.50 (shipping)** | **1** | **1** | **net harmful** |
+| 0.60 | 2 | 1 | net positive, still lossy |
+
+**Wins and losses are IDENTICAL across the entire similarity range**; only the
+neutral count moves. The similarity floor is not the lever, which means the
+provisional 0.65 was never the thing holding this together.
+
+**The structural reason was written down before any of this was measured, in
+Part 1 §1:** *"Similarity is candidate generation only; the decision compares
+acoustic scores for candidate vs. original. Never substitute on text resemblance
+alone."* Confidence gates whether to look. It cannot decide what to choose, and
+the choosing is where this breaks. CTC rescoring is not pedantry.
+
+### Verdict: `TermMatcher` stays built, tested and UNWIRED, and the reason is in its docstring
+
+Wiring it today would also be theatre: there is no term store, so the active
+vocabulary is empty and the pass is a no-op by construction. The danger is the
+opposite one, that a future store silently switches on a layer already measured
+as net harmful.
+
+### THE REAL BLOCKER, AND IT IS NOT CODE
+
+**This corpus cannot settle the vocabulary layer, because it barely contains
+vocabulary errors.** The locked English set has 2 proper-noun errors in 225
+words. A sweep decided by 1 win and 1 loss is not a sweep, it is noise with a
+table around it, and no threshold should be tuned on it.
+
+**The unblocking action is recording the `propernoun` and `technical` sets, and
+only the founder can do it.** Those are the sets Part 4 says are where
+differentiation gets measured, and they are among sets A, B and E which are
+still at zero. Until they exist, M4 and M5 are being designed against 2 data
+points.
