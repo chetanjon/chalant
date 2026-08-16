@@ -32,4 +32,23 @@ enum DictationStripLevel {
         let l = clamp(level)
         return (diameter: 6 + l * 6, glow: 4 + l * 14)
     }
+
+    /// The raw microphone peak, turned into the 0...1 the three formulas above
+    /// are drawn for.
+    ///
+    /// `AudioRing.peak` is a linear max |sample| over one buffer, and a
+    /// built-in mic rarely passes 0.3 while somebody is talking normally. Fed
+    /// in unscaled, the rim barely lifts off its resting 0.10 and the strip
+    /// fails the one job it has: showing that the ear is alive. 3.2 is the
+    /// headroom the deleted `ListeningPanel` applied to this same signal, for
+    /// this same reason, and it puts an ordinary speaking voice near the top of
+    /// the range. (The voice-command surface's `min(1, rms * 18)` is a
+    /// different number because it scales RMS, not peak.)
+    ///
+    /// Fourth of the four, and here rather than at the call site because it is
+    /// the fourth thing nobody may retune alone: move this and all three of
+    /// them move with it.
+    static func normalize(peak: CGFloat) -> CGFloat {
+        clamp(peak * 3.2)
+    }
 }

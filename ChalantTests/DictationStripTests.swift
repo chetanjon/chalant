@@ -40,6 +40,18 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(DictationStripLevel.rim(3.0).radius, 24, accuracy: 0.001)
     }
 
+    /// The headroom, without which the strip barely moves during speech: a
+    /// built-in mic's raw peak rarely passes 0.3, and 0.3 has to look like a
+    /// voice, not like silence.
+    func testNormalizeGivesABuiltInMicItsHeadroom() {
+        XCTAssertEqual(DictationStripLevel.normalize(peak: 0), 0, accuracy: 0.0001)
+        XCTAssertEqual(DictationStripLevel.normalize(peak: 0.3), 0.96, accuracy: 0.0001)
+        XCTAssertEqual(DictationStripLevel.normalize(peak: 1.0), 1, accuracy: 0.0001)
+        // A broken mic can report a negative sample; the strip shows silence,
+        // never a rim that lights up from below zero.
+        XCTAssertEqual(DictationStripLevel.normalize(peak: -0.2), 0, accuracy: 0.0001)
+    }
+
     // MARK: - Which display (spec, "Which display")
 
     private let a: CGDirectDisplayID = 1, b: CGDirectDisplayID = 2, c: CGDirectDisplayID = 3
@@ -75,5 +87,110 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(NotchViewModel.state(.dictating, expandedOn: a, face: a), .dictating)
         XCTAssertEqual(NotchViewModel.state(.dictating, expandedOn: a, face: b), .collapsed)
         XCTAssertEqual(NotchViewModel.state(.dictating, expandedOn: nil, face: a), .collapsed)
+    }
+
+    // MARK: - The hold, on a real view model
+
+    func testBeginDictatingFromCollapsedOpensTheStripOnItsDisplay() {
+        let model = NotchViewModel()
+        model.beginDictating(into: "TextEdit", mic: "MacBook Pro Microphone", on: a)
+        XCTAssertEqual(model.state, .dictating)
+        XCTAssertEqual(model.expandedDisplayID, a)
+        XCTAssertEqual(model.dictationInfo?.appName, "TextEdit")
+        XCTAssertEqual(model.dictationInfo?.micName, "MacBook Pro Microphone")
+        XCTAssertEqual(model.dictationLevel, 0)
+    }
+
+    func testEndDictatingPutsEverythingBack() {
+        let model = NotchViewModel()
+        model.beginDictating(into: "TextEdit", mic: nil, on: a)
+        model.updateDictating(level: 0.7, mic: "AirPods")
+        XCTAssertEqual(model.dictationLevel, 0.7, accuracy: 0.0001)
+        XCTAssertEqual(model.dictationInfo?.micName, "AirPods")
+
+        model.endDictating()
+        XCTAssertEqual(model.state, .collapsed)
+        XCTAssertNil(model.dictationInfo)
+        XCTAssertEqual(model.dictationLevel, 0)
+        XCTAssertNil(model.expandedDisplayID)
+    }
+
+    /// The meter timer can fire once more after the key came up. Nothing it
+    /// says may reopen anything.
+    func testUpdateDictatingIsANoOpOutsideTheHold() {
+        let model = NotchViewModel()
+        model.updateDictating(level: 0.9, mic: "AirPods")
+        XCTAssertEqual(model.dictationLevel, 0)
+        XCTAssertNil(model.dictationInfo)
+        XCTAssertEqual(model.state, .collapsed)
+    }
+
+    /// I1: refusing an island that was already open reproduced the complaint
+    /// the strip exists to answer. An agent finishes, the island opens by
+    /// itself, the founder holds the key and used to see nothing at all.
+    func testBeginDictatingTakesOverAnOpenIsland() {
+        let model = NotchViewModel()
+        model.state = .expanded
+        model.beginDictating(into: "Slack", mic: nil, on: a)
+        XCTAssertEqual(model.state, .dictating)
+        XCTAssertEqual(model.expandedDisplayID, a)
+        XCTAssertEqual(model.dictationInfo?.appName, "Slack")
+    }
+
+    /// The one state it must still refuse: a live voice session owns the ear,
+    /// and taking it over would leave `VoiceController` recognizing behind a
+    /// strip that says dictation.
+    func testBeginDictatingRefusesOverALiveVoiceSession() {
+        let model = NotchViewModel()
+        model.state = .listening
+        model.beginDictating(into: "Slack", mic: nil, on: a)
+        XCTAssertEqual(model.state, .listening)
+        XCTAssertNil(model.dictationInfo)
+    }
+
+    /// C3: the mic button and the `.talk` shortcut both land here, and
+    /// "anything that is not listening means start" used to send a live hold
+    /// into `voice.begin()`. Two recognizers at once is the doubled-text
+    /// failure the sibling state exists to prevent.
+    func testTalkIsRefusedWhileAHoldIsLive() {
+        let model = NotchViewModel()
+        model.beginDictating(into: "TextEdit", mic: nil, on: a)
+        model.toggleListening()
+        XCTAssertEqual(model.state, .dictating)
+        XCTAssertNotNil(model.dictationInfo)
+    }
+
+    func testALiveMicIsEitherKind() {
+        let model = NotchViewModel()
+        XCTAssertFalse(model.micIsLive)
+        model.state = .listening
+        XCTAssertTrue(model.micIsLive)
+        model.state = .dictating
+        XCTAssertTrue(model.micIsLive)
+        model.state = .expanded
+        XCTAssertFalse(model.micIsLive)
+    }
+
+    /// C2, the one that matters. Every site that could expand over a hold now
+    /// refuses, because an expansion mid-hold makes the key-up a no-op:
+    /// `endDictating` guards on the state, so `restoreTheRoom()` never runs
+    /// and the music stays paused with nothing left to start it again.
+    ///
+    /// A drop is the one of those sites reachable without the window
+    /// controller. It writes a clip only if the guard has regressed, which is
+    /// also the case where this test fails.
+    func testADropMidHoldCannotExpandOverTheStrip() {
+        let model = NotchViewModel()
+        model.beginDictating(into: "TextEdit", mic: nil, on: a)
+        model.receiveDrop([.text("dictation strip guard probe")])
+        XCTAssertEqual(model.state, .dictating)
+
+        // And the key-up still finds a hold to end, which is the whole point:
+        // the room goes back the way it came.
+        model.endDictating()
+        XCTAssertEqual(model.state, .collapsed)
+        XCTAssertNil(model.dictationInfo)
+        XCTAssertEqual(model.dictationLevel, 0)
+        XCTAssertNil(model.expandedDisplayID)
     }
 }

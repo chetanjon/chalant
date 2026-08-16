@@ -36,7 +36,11 @@ final class IslandDictationSurface: DictationSurface, DictationDisplayLookup {
     }
 
     func update(level: CGFloat, mic: String?) {
-        model?.updateDictating(level: level, mic: mic)
+        // What arrives is the raw peak off the audio ring, and it is scaled
+        // here rather than at the meter because `Dictation/` cannot see the
+        // formulas: they live in `DictationStripLevel`, beside the three they
+        // have to stay in step with. Unscaled, the strip hardly moves.
+        model?.updateDictating(level: DictationStripLevel.normalize(peak: level), mic: mic)
     }
 
     func hide() {

@@ -245,7 +245,25 @@ final class DictationController {
         }
 
         await audio.beginCapture()
-        surface.show(into: target?.appName ?? target?.bundleID ?? "", mic: await audio.currentDevice?.name, on: targetDisplay)
+        let ear = await audio.currentDevice?.name
+
+        // `ready()` is not the last word: `beginCapture` and the device name
+        // are both awaits, and a release landing inside them runs the whole of
+        // `keyUp` before this line resumes. That `keyUp` hides a surface that
+        // was never shown, and then this one opens a strip with no key held
+        // and nothing left to close it, wedging the island in `.dictating`.
+        // Same answer as `.abandon` above: the session the key has already
+        // ended is not a session to go live for. The teardown belongs to the
+        // `keyUp` that took the release, which holds this transcriber and is
+        // finalizing it; standing it down a second time here would race that
+        // finalize and could cost the user the words they just spoke.
+        guard key.state == .listening else {
+            Self.log.info("released while going live; no strip, keyUp owns the stand-down")
+            surface.hide()
+            return
+        }
+
+        surface.show(into: target?.appName ?? target?.bundleID ?? "", mic: ear, on: targetDisplay)
         startMeter()
         onStateChange?()
 
@@ -510,6 +528,13 @@ final class DictationController {
         let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.transcriber != nil else { return }
+                // `AudioRing.peak` holds the last buffer's loudest sample, not
+                // the loudest since this timer last looked, so a 30Hz poll over
+                // ~100Hz of buffers samples some peaks away. Left as is on
+                // purpose: the surface smooths it, and widening the ring's API
+                // means touching a real-time producer (Part 1 §2) for a
+                // cosmetic gain. The scaling this number needs is applied by
+                // the surface, which can see the strip's formulas.
                 let level = await self.audio.peak
                 let mic = await self.audio.currentDevice?.name
                 self.surface.update(level: CGFloat(level), mic: mic)

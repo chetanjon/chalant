@@ -132,7 +132,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             },
             .talk: { [weak controller] in
-                controller?.viewModel.toggleListening()
+                guard let model = controller?.viewModel else { return }
+                switch model.state {
+                case .collapsed, .expanded, .listening:
+                    model.toggleListening()
+                // A dictation hold owns the microphone. Starting a voice
+                // session over it would run a second recognizer beside the
+                // one already capturing, and the shortcut is no more a way to
+                // interrupt a hold than `.toggleIsland` above is.
+                case .dictating: break
+                }
             },
             .openSettings: { [weak self] in
                 self?.showDashboard(section: nil)

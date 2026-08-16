@@ -186,12 +186,17 @@ struct NotchRootView: View {
     // the live device caption underneath.
     private static let listeningSize = CGSize(width: 380, height: 192)
 
-    /// The dictation strip: the configured island width, 68pt tall. Low on
-    /// purpose; the founder chose the slim strip over the full listening
-    /// surface (2026-08-16), and 68 is the least that fits one row of
+    /// The dictation strip: this display's configured island width, 68pt tall.
+    /// Low on purpose; the founder chose the slim strip over the full
+    /// listening surface (2026-08-16), and 68 is the least that fits one row of
     /// `Fonts.micro` with the notch clearance above it.
+    ///
+    /// `face.expandedWidth` is the user's own dial for this screen, which is
+    /// what the spec asks for. `model.expandedSize` is the last width any
+    /// island happened to measure, so on a second display, or before anything
+    /// has opened this session, it is somebody else's number.
     private var dictatingSize: CGSize {
-        CGSize(width: model.expandedSize.width, height: 68)
+        CGSize(width: face.expandedWidth, height: 68)
     }
 
     /// How far a resting pill clears the top of its screen. Small on
@@ -857,22 +862,28 @@ struct NotchRootView: View {
     /// when it can do something.
     private var dictatingContent: some View {
         let dot = DictationStripLevel.dot(model.dictationLevel)
+        // The dot is centred on the STRIP, not between the two labels. Sat
+        // inside the HStack it took the midpoint of whatever gap the labels
+        // left, which drifts with a long app name and lurches right whenever
+        // there is no microphone name to balance it. An overlay on the same
+        // frame puts it where the eye expects it, whatever the labels say.
         return HStack {
             Text(model.dictationInfo?.appName ?? "")
                 .font(Theme.Fonts.micro)
                 .foregroundStyle(Theme.textGhost)
                 .lineLimit(1)
             Spacer(minLength: Theme.Space.l)
+            Text(model.dictationInfo?.micName ?? "")
+                .font(Theme.Fonts.micro)
+                .foregroundStyle(Theme.textGhost.opacity(0.8))
+                .lineLimit(1)
+        }
+        .overlay(alignment: .center) {
             Circle()
                 .fill(accent)
                 .frame(width: dot.diameter, height: dot.diameter)
                 .shadow(color: accent.opacity(0.35 + Double(DictationStripLevel.clamp(model.dictationLevel)) * 0.5), radius: dot.glow)
                 .animation(.easeOut(duration: 0.1), value: model.dictationLevel)
-            Spacer(minLength: Theme.Space.l)
-            Text(model.dictationInfo?.micName ?? "")
-                .font(Theme.Fonts.micro)
-                .foregroundStyle(Theme.textGhost.opacity(0.8))
-                .lineLimit(1)
         }
         .padding(.horizontal, Theme.Space.xxl)
         .padding(.top, face.contentTopReserve + Theme.Space.notchClearance)
