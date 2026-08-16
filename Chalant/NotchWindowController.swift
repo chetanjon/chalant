@@ -747,6 +747,9 @@ final class NotchWindowController {
         case .listening:
             // Voice sessions are press-driven; hover keeps its hands off.
             break
+        case .dictating:
+            // Dictation is press-driven too; hover keeps its hands off.
+            break
         }
     }
 
@@ -1012,6 +1015,9 @@ final class NotchWindowController {
                 }
         case .listening:
             // A voice session is not an open to re-check.
+            expandedSizeResync = nil
+        case .dictating:
+            // Dictating is not an open to re-check either.
             expandedSizeResync = nil
         }
     }

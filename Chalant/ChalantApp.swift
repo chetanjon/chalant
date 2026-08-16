@@ -115,6 +115,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // capturing and the room still ducked, stranding the
                 // session — the shortcut is not a way to interrupt one.
                 case .listening: break
+                // A dictation hold is in progress; same reasoning, the
+                // shortcut is not a way to interrupt one either.
+                case .dictating: break
                 }
             },
             .talk: { [weak controller] in

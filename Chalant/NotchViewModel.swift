@@ -29,6 +29,11 @@ final class NotchViewModel: ObservableObject {
     enum IslandState {
         case collapsed
         case listening
+        /// Hold-to-dictate is live. A SIBLING of `.listening`, never a reuse:
+        /// `.listening` runs `voice.begin()`, which starts VoiceController's
+        /// own recognizer, and two engines listening at once is the
+        /// doubled-text failure the dictation merge exists to end.
+        case dictating
         case expanded
     }
 
@@ -1455,6 +1460,48 @@ final class NotchViewModel: ObservableObject {
             voiceEntry = .tapped
             startListening()
         }
+    }
+
+    // MARK: - Dictating
+
+    /// What the strip shows beside the level: where the words are going and
+    /// which ear is live.
+    struct DictationInfo: Equatable {
+        var appName: String
+        var micName: String?
+    }
+
+    /// The voice, 0...1, driven by DictationController's meter timer.
+    @Published var dictationLevel: CGFloat = 0
+    @Published var dictationInfo: DictationInfo?
+
+    /// Open the strip. Owns a display like an expansion does, ducks the room
+    /// like listening does, and touches nothing on `voice`.
+    func beginDictating(into appName: String, mic: String?, on display: CGDirectDisplayID?) {
+        guard state == .collapsed else { return }
+        expandedDisplayID = display ?? defaultOwnerDisplay()
+        dictationInfo = DictationInfo(appName: appName, micName: mic)
+        dictationLevel = 0
+        quietTheRoom()
+        state = .dictating
+    }
+
+    func updateDictating(level: CGFloat, mic: String?) {
+        guard state == .dictating else { return }
+        dictationLevel = level
+        if let mic, mic != dictationInfo?.micName {
+            // The ear can hop mid-hold; the strip must say so in place.
+            dictationInfo?.micName = mic
+        }
+    }
+
+    func endDictating() {
+        guard state == .dictating else { return }
+        restoreTheRoom()
+        dictationLevel = 0
+        dictationInfo = nil
+        state = .collapsed
+        expandedDisplayID = nil
     }
 
     /// The one door into a listening session, because the invariant

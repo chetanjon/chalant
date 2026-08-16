@@ -1,6 +1,7 @@
 import XCTest
 @testable import Chalant
 
+@MainActor
 final class DictationStripTests: XCTestCase {
 
     // MARK: - Level formulas (spec, "Motion")
@@ -66,5 +67,13 @@ final class DictationStripTests: XCTestCase {
 
     func testEveryDisplayOffMeansNowhere() {
         XCTAssertNil(DictationDisplay.resolve(target: a, pointerOn: b, main: c, any: c, isOff: { _ in true }))
+    }
+
+    // MARK: - .dictating is an owned expansion, like .listening
+
+    func testDictatingRendersOnlyOnItsOwnerDisplay() {
+        XCTAssertEqual(NotchViewModel.state(.dictating, expandedOn: a, face: a), .dictating)
+        XCTAssertEqual(NotchViewModel.state(.dictating, expandedOn: a, face: b), .collapsed)
+        XCTAssertEqual(NotchViewModel.state(.dictating, expandedOn: nil, face: a), .collapsed)
     }
 }

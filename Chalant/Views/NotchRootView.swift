@@ -186,6 +186,9 @@ struct NotchRootView: View {
     // the live device caption underneath.
     private static let listeningSize = CGSize(width: 380, height: 192)
 
+    // 520 is the default expandedWidth; Task 4 reads the per-display value.
+    private static let dictatingSize = CGSize(width: 520, height: 68)
+
     /// How far a resting pill clears the top of its screen. Small on
     /// purpose: enough that it reads as floating rather than wedged
     /// into the corner, not so much that it stops belonging to the
@@ -217,6 +220,7 @@ struct NotchRootView: View {
         switch face.state {
         case .collapsed: return collapsedSize
         case .listening: return Self.listeningSize
+        case .dictating: return Self.dictatingSize
         case .expanded: return model.expandedSize
         }
     }
