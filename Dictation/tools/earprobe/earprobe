@@ -1,0 +1,70 @@
+#!/bin/bash
+# earprobe: prove the warm engine survives what the hardware does to it,
+# without a human at the jack.
+#
+#   Dictation/tools/earprobe/earprobe rate    [logdir]   sample-rate change on the live device
+#   Dictation/tools/earprobe/earprobe device  [logdir]   an input device appears, then disappears
+#
+# Each run streams the app's log (info level is NOT persisted by `log show`,
+# so it has to be streamed live), drives a 2s synthetic left-Option hold
+# before and after each change, and prints the audio-path lines. Pass = every
+# hold feeds >0 buffers, or a stalled hold is followed by
+# `delivered no buffers ... restarting the engine` and the next hold feeds >0.
+#
+# What each scenario reproduces:
+#   rate    the 0-buffer wedge measured 2026-08-16 on 1.15.0: change the
+#           built-in mic's nominal rate under the running engine and every
+#           hold feeds 0 buffers, with no notification to act on. Restoring
+#           the rate heals the tap. TapPulse exists because of this.
+#   device  a CoreAudio aggregate wrapping the built-in mic is created and
+#           made default input, then destroyed: the device SET changes the
+#           way a plug/unplug changes it. Note: on the 1.15.0 code this did
+#           NOT wedge, so it is a regression check, not a reproduction.
+#
+# Side effects, all undone before exit: default input device, the built-in
+# mic's nominal rate, a scratch TextEdit document (which absorbs anything a
+# hold happens to insert). Requires Accessibility for the terminal (to post
+# the synthetic key) and Chalant running.
+set -u
+HERE=$(cd "$(dirname "$0")" && pwd)
+SCENARIO=${1:-rate}
+OUT=${2:-/tmp/earprobe}
+mkdir -p "$OUT"
+BIN="$OUT/bin"; mkdir -p "$BIN"
+for t in audiodev optionhold; do
+  [ "$BIN/$t" -nt "$HERE/$t.swift" ] || swiftc -O -o "$BIN/$t" "$HERE/$t.swift" 2>&1 | grep -v warning
+done
+LOG="$OUT/$SCENARIO-$(date '+%H%M%S').log"
+: > "$LOG"
+/usr/bin/log stream --level debug --style compact \
+  --predicate 'subsystem BEGINSWITH "com.cj.chalant"' >> "$LOG" 2>&1 &
+STREAM=$!
+sleep 3
+mark() { echo "===== $(date '+%H:%M:%S') $* =====" >> "$LOG"; echo "== $*"; }
+hold() {
+  osascript -e 'tell application "TextEdit" to activate' >/dev/null 2>&1
+  sleep 0.6; mark "HOLD $1"; "$BIN/optionhold" 2.0; sleep 4
+}
+MIC=BuiltInMicrophoneDevice
+osascript -e 'tell application "TextEdit"' -e 'activate' -e 'make new document' -e 'end tell' >/dev/null 2>&1
+sleep 1
+mark "BASELINE"; hold baseline
+case "$SCENARIO" in
+  rate)
+    mark "RATE 48000 -> 44100"; "$BIN/audiodev" rate $MIC 44100; sleep 3
+    hold after-44100
+    mark "RATE 44100 -> 48000"; "$BIN/audiodev" rate $MIC 48000; sleep 3
+    hold after-48000 ;;
+  device)
+    mark "DEVICE APPEARS"; "$BIN/audiodev" add $MIC; sleep 3
+    hold after-appear
+    mark "DEVICE DISAPPEARS"; "$BIN/audiodev" remove $MIC; sleep 3
+    hold after-disappear ;;
+  *) echo "usage: earprobe rate|device [logdir]"; kill $STREAM; exit 2 ;;
+esac
+sleep 2; kill $STREAM 2>/dev/null; mark "DONE"
+"$BIN/audiodev" list
+echo
+grep -E '=====|keyDown entered|fed [0-9]+ buffers|nothing heard|utterance:|devices changed|warm engine|delivered no|could not bind' "$LOG" \
+  | sed -E 's/^[0-9-]+ //' | cut -c1-160
+echo; echo "full log: $LOG"

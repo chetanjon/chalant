@@ -674,3 +674,67 @@ What a pass looks like, per the spec:
 - [ ] no words appear in the strip at any point
 
 Result (founder, dated):
+
+---
+
+## 2026-08-16 — the warm engine wedges on a device change, and now heals itself
+
+Branch `fix/audio-engine-survives-device-change`. Release builds, Developer ID,
+installed at `/Applications/Chalant.app`. macOS 27.0, arm64. Driven by
+`Dictation/tools/earprobe/earprobe`, which streams the log and posts a 2s
+synthetic left-Option hold before and after each change (`log show` does not
+keep info-level lines, so every number below was read live).
+
+### What the founder hit (12:48, from their own use, before this branch)
+
+`fed 28 buffers` → wired earphones plugged/unplugged → `fed 0 buffers` on
+every hold until relaunch. Root cause fixed one commit back on this branch
+(`6b7b458`): the ONE `AVAudioEngine` reused across a device change. That
+change alone was HALF-verified: four clean holds (30/38/66/39 buffers) but no
+device change ever landed in the log.
+
+### Reproducing a 0-buffer wedge without hardware
+
+`earprobe device` (a CoreAudio aggregate wrapping the built-in mic appears and
+is made default input, then is destroyed) did NOT wedge the released 1.15.0:
+`fed 19` before, `fed 19` after appear, `fed 19` after disappear, with the
+engine restarting on the same instance in between. So the plug/unplug SET
+change is not, by itself, the wedge on this Mac. Regression check only.
+
+`earprobe rate` (the built-in mic's nominal sample rate changed under the
+running engine, 48000 → 44100, the trigger Apple documents for a
+configuration change) wedged BOTH builds identically:
+
+| build | before | after 48000→44100 | after 44100→48000 |
+|---|---|---|---|
+| released 1.15.0 (`build/export`) | fed 19 | **fed 0** | fed 19 |
+| fresh-engine fix `6b7b458` | fed 19 | **fed 0** | fed 19 |
+
+No `input devices changed` line in either: no `AVAudioEngineConfigurationChange`
+reached the app. Nothing restarted the engine. `peak` sat frozen above zero,
+so `hopIfDeaf` called the mic alive. Restoring the rate healed the tap in
+place. That is a wedge every safeguard in the file was blind to.
+
+### After `TapPulse` (this commit's build)
+
+| step | log |
+|---|---|
+| baseline hold | `fed 18` / `fed 20` (two runs) |
+| rate 48000→44100, +2s | `tap on MacBook Air Microphone delivered no buffers for 2s; restarting the engine` then `warm engine running` |
+| hold while still at 44100 | `fed 0` (the fresh engine still reports 48000 Hz; a fresh PROCESS reports 48000 Hz too, so this is CoreAudio's view, not ours) |
+| every ~3s while inconsistent | restart, restart, restart |
+| rate 44100→48000 | next restart takes, no more firings |
+| hold | **`fed 19`**, no relaunch |
+| `earprobe device` on this build | fed 19 / 20 / 19, unchanged |
+| 75s idle | **0** watchdog firings |
+
+Verdict: the fresh-engine fix is necessary and this makes it sufficient for
+any wedge that shows up as a dead tap, whatever the cause and whether or not
+a notification arrives. The engine retries every ~3s until the hardware is
+consistent, then dictation resumes by itself.
+
+Still unproven, honestly: that the founder's exact jack event goes through
+this path rather than a third one. What is proven is that no dead-tap state
+survives more than ~2s any more. The founder's next plug/unplug in ordinary
+use is the remaining evidence; the pass is a `delivered no buffers ...
+restarting` line (or none at all) followed by `fed [1-9]`.
