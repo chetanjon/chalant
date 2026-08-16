@@ -69,6 +69,26 @@ struct FidelityGuardTests {
         #expect(!ok("The meeting moved to 3:15.", "The meeting moved to 3:50."))
     }
 
+    /// **Caught by running the real model, not by thinking about it.** It turned
+    /// `$1200` into `$1,200`, which is the same amount better written, and the
+    /// first version of this guard called that a missing number and threw away a
+    /// perfectly good cleanup. A guard that fires on correct output does not
+    /// look like a bug, it looks like the feature not working.
+    @Test("a thousands separator is not a different number")
+    func allowsThousandsSeparators() {
+        #expect(ok("The other invoice was $1200.", "The other invoice was $1,200."))
+        #expect(ok("It came to 1,200 exactly", "It came to 1200 exactly."))
+    }
+
+    /// A decimal point and a colon are not separators, they are part of the
+    /// value, so stripping them would make 3:15 and 315 the same number and
+    /// blind the guard to the error class the corpus says is worst.
+    @Test("times and decimals are still compared exactly")
+    func stillCatchesTimesAndDecimals() {
+        #expect(!ok("at 3:15", "at 315"))
+        #expect(!ok("it was $9.99", "it was $999"))
+    }
+
     // MARK: - Negations, which are where a fluent rewrite becomes dangerous
 
     /// The worst case in the whole product. A model that tidies "do not deploy
@@ -154,6 +174,34 @@ struct FidelityGuardTests {
     @Test("conversational framing around the answer is still not a cleanup")
     func catchesFraming() {
         #expect(!ok("ship the build tonight", "Sure! Here is your cleaned transcript."))
+    }
+
+    // MARK: - The model repeating itself
+
+    /// **Every one of these got through the first version of the guard**, which
+    /// is why they are here verbatim from the 2026-08-16 model run. Same
+    /// numbers, same negations, same names, same content overlap, and visibly
+    /// broken text on its way to the user's document.
+    @Test("the model stuttering is a violation")
+    func catchesModelStutter() {
+        #expect(!ok(
+            "Move the stand-up from 93, 932, 1015.",
+            "Move the stand- Move the stand-up from 93, 932, 1015."))
+        #expect(!ok(
+            "Delete the staging database. Never the production one.",
+            "Delete the staging database. Never the production one. Never the production one."))
+        #expect(!ok(
+            "The ABI key ends in 472.",
+            "The ABI key ends in 4723 ends in 472."))
+    }
+
+    /// The speaker's own repetition is not the model's stutter. `Disfluency`
+    /// handles the human kind and runs before the model ever sees the text, so
+    /// a repetition present in the input must survive here.
+    @Test("a repetition the speaker made is not the model's fault")
+    func allowsSpeakerRepetition() {
+        #expect(ok("look at, look at, look at this", "Look at, look at, look at this."))
+        #expect(ok("he had had enough", "He had had enough."))
     }
 
     @Test("throwing the text away is a violation")

@@ -629,3 +629,83 @@ imagined.** Both bad joins were of a shape nobody thought to write a test for.
 - **The term list still contains the answers**, so this measures the layer given
   a correct vocabulary. M5 learning it from the user's own corrections is what
   makes that a fair model of the shipped product.
+
+## 2026-08-16 — M7's LATENCY AND FIDELITY GATE, MEASURED. THE PROMPT FRAMING IS WORTH 6 OF 7 FAILURES.
+
+Part 0 §0.5 made the latency budget an empirical gate rather than a spec
+constant, and the 2026-08-14 reversal made this pass the DEFAULT path for every
+utterance. So it gets measured before it gets built. `tools/cleanupprobe`, 20
+utterances of real deterministic pipeline output, Apple's on-device model.
+
+**The model is available on this machine.** Everything below assumes that and it
+is the first thing that would have stopped M7 dead.
+
+### Three output modes, and the framing decides everything
+
+| mode | rejected by `FidelityGuard` | warm p50 | p95 | worst |
+|---|---|---|---|---|
+| `@Generable` single field (Part 2 §8's) | 6/20 | 0.80s | 1.28s | 2.07s |
+| plain string | 7/20 | 0.54s | 1.73s | 2.99s |
+| **transcript delimited as DATA** | **1/20** | **0.54s** | **0.95s** | **1.10s** |
+
+**The schema was not the problem and that had to be checked before blaming the
+model.** Plain string scored WORSE than the structured output, so the
+`@Generable` field is not what was mangling the text.
+
+**The framing was the problem.** Handing the transcript over as the prompt made
+the model read ordinary dictation as instructions to itself:
+
+```
+"Cancel the subscription today."            -> "I cannot process requests to cancel subscriptions."
+"Drop the users table on the local copy."   -> "I cannot perform that action. I am a foundation model..."
+"Move the stand-up from 93, 932, 1015."     -> "I cannot move objects. However, I can help edit..."
+```
+
+**Part 2 §8's injection preamble did not prevent this, and it is not the failure
+that preamble was written for.** That defends against a user trying to hijack
+the model. This is the opposite and far more ordinary: people dictate imperatives
+constantly, and a helpful assistant declines to cancel their subscription.
+
+Putting the transcript between markers, labelled as data with the task stated
+around it, removed every refusal. **A rule the model may follow, replaced by a
+structure it cannot misread.**
+
+### Latency: the launch claim's problem is real but survivable
+
+**0.54s median, 0.95s p95, 1.10s worst, on top of the 0.05-0.23s the whole rest
+of the pipeline costs.** So cleanup is roughly 4x everything else combined, and
+Part 8 §1's p50 120ms / p95 250ms budget is gone whatever else happens.
+
+For comparison the competitors clean in the cloud, so this is not obviously
+worse than a network round trip. But **"faster" cannot be claimed on the
+cleaned path**, and the honest claim remains consistency rather than a number.
+
+### The guard earned its keep and had two bugs of its own
+
+**Both were found by running the real model, neither by thinking about it.**
+
+1. **It rejected `$1200` -> `$1,200`** as a missing number. That is the same
+   amount better written, and the guard was throwing away a good cleanup. **A
+   guard that fires on CORRECT output does not look like a bug, it looks like
+   the feature not working.** Fixed by stripping thousands separators, while
+   leaving `.` and `:` alone so `3:15` and `315` stay different.
+2. **It missed the model stuttering.** `"Move the stand-up from 93, 932, 1015"`
+   came back as `"Move the stand- Move the stand-up from 93, 932, 1015"`, with
+   identical numbers, negations, names and content overlap, so every check
+   passed. Now caught by comparing bigram counts: a pair of words appearing more
+   often in the output than the input is the model repeating itself, which is
+   this guard's business precisely because `Disfluency` handles the HUMAN kind
+   and runs before the model ever sees the text.
+
+### What this run does NOT establish
+
+- **It does not show the model cleans well.** 13 of 20 outputs are IDENTICAL to
+  the input, which is correct: set C is SCRIPTED speech with no fillers and
+  nothing to tidy. The real test is the 44 captured spontaneous utterances, and
+  it has not been run.
+- The four genuine improvements seen (a comma before "not", quotation marks
+  around reported speech) are encouraging and are four examples.
+- One real corruption survives at 1/20: `"It's/user/Chatan/projects."` became
+  `"It is Chatan's projects."`, a destroyed file path. Code and paths are a
+  known-hostile case for a cleanup model and M6's code mode is where that
+  belongs.

@@ -57,9 +57,44 @@ public enum FidelityGuard {
         if let reason = numbersSurvived(rawTrimmed, cleanTrimmed) { return .violated(reason) }
         if let reason = negationsSurvived(rawTrimmed, cleanTrimmed) { return .violated(reason) }
         if let reason = namesSurvived(rawTrimmed, cleanTrimmed) { return .violated(reason) }
+        if let reason = didNotStutter(rawTrimmed, cleanTrimmed) { return .violated(reason) }
         if let reason = stillTheSameMessage(rawTrimmed, cleanTrimmed) { return .violated(reason) }
 
         return .ok
+    }
+
+    // MARK: - Stutters the model made
+
+    /// Catch the model repeating itself.
+    ///
+    /// **This check exists because the first version of the guard let one
+    /// through.** Measured against the real model: *"Move the stand-up from 93,
+    /// 932, 1015"* came back as *"Move the stand- Move the stand-up from 93,
+    /// 932, 1015"*. Same numbers, same negations, same names, same content, so
+    /// every other check passed and visibly broken text would have gone into
+    /// the user's document.
+    ///
+    /// It is the model's own stutter, not the speaker's, which is what makes it
+    /// this guard's business rather than `Disfluency`'s: that stage collapses
+    /// repetitions a HUMAN made, and it runs before the model ever sees the
+    /// text.
+    private static func didNotStutter(_ raw: String, _ cleaned: String) -> String? {
+        let before = bigrams(raw)
+        let after = bigrams(cleaned)
+        for (pair, count) in after where count >= 2 && count > (before[pair] ?? 0) {
+            return "the model repeated itself: \(pair)"
+        }
+        return nil
+    }
+
+    private static func bigrams(_ text: String) -> [String: Int] {
+        let tokens = words(in: text).map { bare($0).lowercased() }.filter { !$0.isEmpty }
+        guard tokens.count > 1 else { return [:] }
+        var counts: [String: Int] = [:]
+        for index in 0..<(tokens.count - 1) {
+            counts[tokens[index] + " " + tokens[index + 1], default: 0] += 1
+        }
+        return counts
     }
 
     // MARK: - Numbers
@@ -82,11 +117,21 @@ public enum FidelityGuard {
     /// Digits only. Number WORDS are left alone deliberately: the engine
     /// normalises most of them before this ever runs, and treating "one" as a
     /// number would trip on "one of the things I wanted".
+    ///
+    /// **Thousands separators are stripped, and the first version did not do
+    /// this.** Measured against the real model: `$1200` came back as `$1,200`,
+    /// which is the same amount better written, and the guard called it a
+    /// missing number and threw away a good cleanup. A guard that fires on
+    /// correct output costs the feature quietly, so this normalises before
+    /// comparing rather than after arguing.
     private static func numbers(in text: String) -> Set<String> {
         Set(
             text.split(whereSeparator: { !$0.isNumber && $0 != "." && $0 != ":" && $0 != "," })
                 .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ".:,")) }
-                .filter { !$0.isEmpty && $0.contains(where: \.isNumber) })
+                .filter { !$0.isEmpty && $0.contains(where: \.isNumber) }
+                // 1,200 and 1200 are one number. 3:15 and 3.15 are not, so only
+                // the comma goes.
+                .map { $0.replacingOccurrences(of: ",", with: "") })
     }
 
     // MARK: - Negations
