@@ -816,3 +816,50 @@ construction, and a good AUC on one question says nothing about the other.**
 
 **Consequence: the 2026-08-14 decision to clean every utterance is unchallenged
 and now measured.** The alternative was proposed, tested and lost.
+
+## 2026-08-16 — CHUNKING FIXES THE LONG-INPUT FAILURES. THE MODEL DID NOT GET BETTER; THE PIECES GOT SMALL ENOUGH.
+
+The founder's own 703-character dictation (the friend in San Francisco), on
+1.14.0, was rejected by the guard for a false positive and shipped raw. Fixed in
+1.14.1, but the whole-paragraph cleanup underneath was still unreliable:
+
+| | runs | clean | dropped negation | invented fragment | speaker rewritten as "he" |
+|---|---|---|---|---|---|
+| **whole paragraph** | 5 | 3 | 1 | 1 | **1, silently, in a "clean" run** |
+| **chunked ~40 words** (shipping code) | 5 | **5** | 0 | 0 | **0** |
+| chunked ~25 words | 3 | 3 | 0 | 0 | 0 |
+| chunked ~70 words | 3 | 3 | 0 | 0 | 0 |
+
+**11 chunked runs across three sizes: not one meaning error.** The on-device
+model is reliable on ~40 words and not on ~140. Splitting at sentence ends puts
+it where it works.
+
+Cost: 4.4-5.2s chunked against ~4.0s whole, on this paragraph. Four model calls
+instead of one, on a session prewarmed once. Roughly the same wait for a result
+that can be trusted.
+
+**Chunk size barely matters between 25 and 70. Shipping 40:** 25 measured no
+cleaner and costs more calls; 70 has no evidence yet that it holds on longer
+paragraphs. `CleanupPrompt.chunkTargetWords` is a reliability limit, not a
+window limit, and the comment says so.
+
+**Per-chunk guard, per-chunk fallback.** A rejected chunk now ships raw ON ITS
+OWN. Before this, one rejected phrase anywhere threw away the whole cleanup,
+which is exactly what the founder saw on 1.14.0.
+
+### The wobble that survives, stated plainly
+
+One clause flips between runs at every chunk size:
+
+```
+"he is waiting for the call"     (runs 2, 3)
+"I am waiting for his call"      (run 1)
+"he is waiting for your call"    (runs 4, 5)
+```
+
+The source was *"he said, I'll call you in half an hour and I'm waiting for
+his call"*, which is genuinely ambiguous reported speech. Not a chunking
+problem, and not the whole-paragraph failure of rewriting the speaker in the
+third person throughout. Every run keeps *"I will just go back to sleep"*.
+There is still no guard for pronoun identity; this is the size of what it would
+be catching.

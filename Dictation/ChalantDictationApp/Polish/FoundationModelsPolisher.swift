@@ -48,44 +48,60 @@ actor FoundationModelsPolisher: Polisher {
 
         guard case .available = SystemLanguageModel.default.availability else { return text }
 
-        // Part 0 §0.7: the window throws rather than truncating, so refusing to
-        // start is better than a failure mid-utterance. Chunking on sentence
-        // boundaries is the refinement; shipping the user's text is the floor.
-        guard CleanupPrompt.fitsInOnePass(trimmed) else {
-            Self.log.info("too long to clean in one pass, shipping as dictated")
-            return text
-        }
-
         let session = session ?? LanguageModelSession(instructions: CleanupPrompt.instructions)
         self.session = session
 
+        // A few sentences at a time, and the reason is reliability rather than
+        // the context window. Measured on the founder's own long paragraph
+        // (2026-08-16): whole, the model dropped a negation, invented a
+        // fragment, or rewrote "I" as "he" in 2 to 3 of 5 runs. In ~40-word
+        // pieces, 11 runs and none of those. Same model; small enough pieces.
+        //
+        // Every chunk stands alone. A chunk the guard rejects ships raw ON ITS
+        // OWN, so one bad piece costs a sentence rather than the paragraph.
+        // Before this, one rejected phrase anywhere threw away the whole
+        // cleanup, which is what the founder saw on 1.14.0.
+        let pieces = CleanupPrompt.chunks(trimmed)
         let started = ContinuousClock.now
-        let reply: String
-        do {
-            reply = try await withTimeout(Self.timeout) {
-                try await session.respond(to: CleanupPrompt.framing(trimmed)).content
+        var out: [String] = []
+        var rejected = 0
+
+        for piece in pieces {
+            let reply: String
+            do {
+                reply = try await withTimeout(Self.timeout) {
+                    try await session.respond(to: CleanupPrompt.framing(piece)).content
+                }
+            } catch {
+                // Includes guardrail refusals, which Part 0 §0.7 makes an
+                // ordinary outcome. This piece ships as dictated; the rest of
+                // the paragraph still gets its chance.
+                Self.log.error("cleanup failed on a chunk, shipping that chunk as dictated")
+                out.append(piece)
+                continue
             }
-        } catch {
-            // Includes guardrail refusals, which Part 0 §0.7 makes an ordinary
-            // outcome rather than an error to surface.
-            Self.log.error("cleanup failed, shipping as dictated")
-            return text
+
+            let cleaned = CleanupPrompt.unwrap(reply)
+
+            // Lengths and reasons, never content. Part 1 §2: transcripts never
+            // enter logs, and this path exists precisely when the model got the
+            // content wrong.
+            if case .violated(let reason) = FidelityGuard.check(raw: piece, cleaned: cleaned) {
+                Self.log.error("cleanup rejected a chunk: \(reason, privacy: .public)")
+                out.append(piece)
+                rejected += 1
+                continue
+            }
+            out.append(cleaned)
         }
 
-        let cleaned = CleanupPrompt.unwrap(reply)
         let elapsed = started.duration(to: .now)
-
-        // Lengths and reasons, never content. Part 1 §2: transcripts never
-        // enter logs, and this path exists precisely when the model got the
-        // content wrong.
-        if case .violated(let reason) = FidelityGuard.check(raw: trimmed, cleaned: cleaned) {
-            Self.log.error("cleanup rejected: \(reason, privacy: .public)")
-            return text
-        }
-
         Self.log.info(
-            "cleaned \(trimmed.count, privacy: .public) chars in \(elapsed.seconds, privacy: .public)s")
-        return cleaned
+            """
+            cleaned \(trimmed.count, privacy: .public) chars in \(pieces.count, privacy: .public) \
+            chunk(s), \(rejected, privacy: .public) shipped raw, \(elapsed.seconds, privacy: .public)s
+            """)
+        return out.joined(separator: " ")
     }
 
     /// A timeout that actually abandons the work.
