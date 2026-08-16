@@ -60,3 +60,13 @@ produced seven words and forty-one commas; that gets trimmed now.
 Stutters get collapsed. "The the deadline" becomes "The deadline". Only
 exact repetitions, and never where the repetition is real: "he had had
 enough" survives, and so does any repeated number.
+
+The noises nobody means to say are removed. "Uh" and "um" always. "You
+know" and "I mean" only where you paused on both sides of them, which
+is how you can tell an aside from a question: "Do you know, Sarah?"
+keeps its words.
+
+"Like" is the careful one. It goes when a comma follows it and stays
+otherwise, because three times out of four it is doing real work in the
+sentence. "Something like a name" is not a filler, and neither is "like
+PostHog or ElevenLabs".
