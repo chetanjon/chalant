@@ -1,0 +1,27 @@
+#!/bin/bash
+# See the dictation strip. Quits the installed Chalant (two taps = doubled
+# text), launches the Release test build, and puts the real one back after.
+set -e
+cd "$(dirname "$0")/.." || exit 1
+APP="build/strip/Build/Products/Release/Chalant.app"
+[ -d "$APP" ] || { echo "no strip build; ask Claude"; exit 1; }
+osascript -e 'quit app "Chalant"' 2>/dev/null || true; sleep 2
+defaults write com.cj.chalant dictationEnabled -bool true
+open "$APP"; sleep 4
+cat <<'EOF'
+
+  Click into any text field. Hold LEFT OPTION and talk.
+
+  The island should grow into a low strip ON THE SCREEN WITH THAT APP,
+  and its rim should light up with your voice. One dot in the middle.
+  App name on the left, mic on the right. Let go: it closes.
+
+  Then: cover the mic with your thumb and hold again. The strip should
+  open and STAY DARK. That is the pass, not a failure.
+
+  Press Return when done.
+EOF
+read -r _
+osascript -e 'quit app "Chalant"' 2>/dev/null || true; sleep 2
+open -a /Applications/Chalant.app 2>/dev/null || true
+echo "Your real Chalant is back. Tell Claude what you saw."
