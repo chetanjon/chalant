@@ -131,3 +131,47 @@ is exactly the failure class the set exists to catch.
   the old takes are kept as `audio-C-v1` / `audio-D-v1`.
 - **Slightly pessimistic on labels.** `$1,200` was scored against `$1200`, which
   is a convention argument rather than an error.
+
+### 2026-08-15 later — first deterministic pass, measured
+
+`Guardrail.trimmingPunctuationRun` then `Disfluency.collapsingRepetitions`,
+both pure and in Core, wired ahead of insertion.
+
+**English torture set, `en_US`: 20.00 → 18.22 corrections per 100 words.**
+45 errors to 41. Three utterances changed and nothing else in the set moved:
+
+```
+The the ABI key ends in 472.                   →  The ABI key ...
+Reply to reply to Aidan and do not copy ...    →  Reply to Aidan ...
+The the deadline is the 21st, not the 12th.    →  The deadline ...
+```
+
+Measured by compiling the actual Core sources into a CLI and re-running the
+frozen manifest through them, so the number cannot drift from what ships.
+
+**An earlier claim here was wrong and is withdrawn.** The first read of this
+baseline said number formatting was cheaply fixable by deterministic rules and
+worth roughly half the English error rate. It is not:
+
+- When the engine turns "nine thirty" into `93`, the information is already
+  gone. No text rule recovers `9:30` from `93`.
+- Converting `315` to `3:15` is actively dangerous: `153` in "the build number
+  is 153" must never become `1:53`. That is precisely what the fidelity guard
+  exists to prevent.
+- `"nine ninety nine"` arrived as `999`. `$9.99` is not recoverable from it.
+
+So the deterministic bucket is **3 of 15 remaining failures, not 6**. The number
+errors are a recognition problem and belong to the bias and learning layers
+(M4/M5), not to M3's rules. `"4 tea attendees"` for "forty attendees" is a
+learned confusion pair, not a formatting rule.
+
+### What is left in English, after this pass
+
+| class | cases | where it belongs |
+|---|---|---|
+| the founder's own names (`Chatan`, `Junalagadda`) and `TextInjector.swift` | 3 | M4 term store, M5 learning |
+| numbers genuinely misheard (`93, 932, 1015`; `4 tea`) | 2 | M4 bias, M5 learning |
+| misheard words (build/bill, timeout/timer) | 2 | M4 context bias |
+| `Sara` collapsed to `Sarah` | 1 | M4 with both names present |
+| comma rendered as a full stop | 1 | M3 punctuation, needs VAD |
+| hallucinated `"Eating,"` on the onset | 1 | §0.18 confidence gate |
