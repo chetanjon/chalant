@@ -1,0 +1,252 @@
+import Foundation
+
+/// Learning the user's vocabulary by watching what they fix.
+///
+/// **This is the moat, and Part 0 §0.15 says nobody has published a solution
+/// to the problem at the heart of it:** separating "the engine was wrong" edits
+/// from "I changed my mind" edits. The nearest transferable idea is token-delta
+/// classification, and the disfluency literature warns the revision class is
+/// intrinsically hard (BERT F1 43-66%, Romana et al., Interspeech 2022).
+///
+/// **The one signal that separates them is SOUND.** `Chalan` becoming
+/// `Chalant` is a correction: they sound alike, so the engine plausibly
+/// misheard. `Tuesday` becoming `Wednesday` is a revision: nobody mishears one
+/// as the other, so the speaker simply changed their mind. Everything here is
+/// built on that single distinction, and everything else is a refusal.
+///
+/// **It would rather learn nothing than learn a lie**, because a learned lie is
+/// not one bad utterance, it is every future utterance containing that word.
+/// Hence: one changed word only, sounding close, comparable in length, no
+/// numbers, no function words, and seen twice before it may act.
+///
+/// Every competitor makes the user type these by hand. Each hand-typed alias is
+/// a mistake they already suffered, noticed, diagnosed, and then went into
+/// settings to record. Same data structure, entirely different product.
+public enum Correction {
+
+    /// What the engine wrote, and what the user replaced it with.
+    public struct Pair: Sendable, Hashable {
+        public let heard: String
+        public let meant: String
+
+        public init(heard: String, meant: String) {
+            self.heard = heard
+            self.meant = meant
+        }
+    }
+
+    /// Whole days since an arbitrary epoch.
+    ///
+    /// Part 2 §3 exists for exactly this: recency decay must be deterministic
+    /// in tests, so Core never calls `Date()` and the caller supplies the day.
+    public struct Day: Sendable, Hashable, Comparable {
+        public let day: Int
+        public init(day: Int) { self.day = day }
+        public static func < (a: Day, b: Day) -> Bool { a.day < b.day }
+    }
+
+    /// How alike two words must sound before an edit counts as a mishearing
+    /// rather than a change of mind.
+    ///
+    /// Looser than `TermMatcher.provisionalFloor` on purpose: there the machine
+    /// is deciding to overwrite a word on its own, here the user has already
+    /// typed the answer, so the evidence is far stronger and the bar can be
+    /// lower without the risk being higher.
+    public static let soundFloor = 0.75
+
+    /// A pair must be seen this many times before it may change anything. One
+    /// sighting can be a typo, a slip, or an edit made for reasons that have
+    /// nothing to do with what was said.
+    public static let sightingsBeforeTrust = 2
+
+    /// Part 3 M5. A term from a project that ended stops competing for the 100
+    /// active slots §0.13 allows.
+    public static let trustLifetimeInDays = 90
+
+    // MARK: - Reading one edit
+
+    /// Compare what was inserted against what the field says now.
+    ///
+    /// The field holds the user's whole document, so the inserted span has to
+    /// be found inside it first. Words are compared bare, so punctuation the
+    /// user never touched is not mistaken for an edit, but CASE-SENSITIVELY,
+    /// because `posthog` becoming `PostHog` is exactly the kind of fix worth
+    /// learning.
+    public static func learning(inserted: String, nowReads field: String) -> Pair? {
+        let ours = words(inserted)
+        let theirs = words(field)
+        guard !ours.isEmpty, theirs.count >= ours.count else { return nil }
+
+        // Slide our span across their document and take the closest fit. A
+        // correction leaves exactly one word different; anything else is the
+        // user writing, not fixing.
+        var best: (differences: Int, index: Int)?
+        for start in 0...(theirs.count - ours.count) {
+            var differences = 0
+            var only = 0
+            for offset in 0..<ours.count where ours[offset] != theirs[start + offset] {
+                differences += 1
+                only = offset
+                if differences > 1 { break }
+            }
+            if differences < (best?.differences ?? Int.max) {
+                best = (differences, only)
+            }
+            if differences == 0 { return nil }  // untouched: nothing to learn
+        }
+
+        guard let best, best.differences == 1 else { return nil }
+
+        // Recover the pair from the window that produced the single difference.
+        for start in 0...(theirs.count - ours.count) {
+            var differences = 0
+            var index = 0
+            for offset in 0..<ours.count where ours[offset] != theirs[start + offset] {
+                differences += 1
+                index = offset
+                if differences > 1 { break }
+            }
+            guard differences == 1 else { continue }
+            return pair(heard: ours[index], meant: theirs[start + index])
+        }
+        return nil
+    }
+
+    /// The guards, in the order they are cheapest to check.
+    private static func pair(heard: String, meant: String) -> Pair? {
+        guard !heard.isEmpty, !meant.isEmpty, heard != meant else { return nil }
+
+        // A changed number belongs to the fidelity guard, never here. A learned
+        // pair that rewrites digits is the most dangerous thing this subsystem
+        // could produce.
+        guard !heard.contains(where: \.isNumber), !meant.contains(where: \.isNumber) else {
+            return nil
+        }
+
+        // Function words in either direction. "on" becoming "in" is the user
+        // writing; learning it would corrupt every sentence after.
+        guard !TermMatcher.stopwords.contains(heard.lowercased()),
+            !TermMatcher.stopwords.contains(meant.lowercased())
+        else { return nil }
+
+        // Today's lesson, applied here too: `review` and `ravi` are
+        // phonetically IDENTICAL, so sound alone would accept that swap and
+        // teach Chalant to rewrite a common English word into a name forever.
+        guard TermMatcher.withinLength(heard, meant) else { return nil }
+
+        // The distinction the whole type rests on. A pure change of casing
+        // sails through, which is correct: it sounds identical because it IS
+        // the same word, spelled the way the user wants it spelled.
+        guard PhoneticKey.similarity(heard, meant) >= soundFloor else { return nil }
+
+        return Pair(heard: heard, meant: meant)
+    }
+
+    /// Words, stripped of the punctuation around them but not of their case.
+    private static func words(_ text: String) -> [String] {
+        text.split(whereSeparator: \.isWhitespace)
+            .map { token in
+                String(token.drop(while: { !$0.isLetter && !$0.isNumber })
+                    .reversed().drop(while: { !$0.isLetter && !$0.isNumber }).reversed())
+            }
+            .filter { !$0.isEmpty }
+    }
+
+    // MARK: - Remembering across edits
+
+    /// What has been seen, how often, and how recently.
+    ///
+    /// A value type on purpose: Part 2 §4 keeps Core stateless and `Sendable`,
+    /// so persistence is the shell's problem and this stays testable without a
+    /// database.
+    public struct Ledger: Sendable, Equatable {
+        private struct Record: Sendable, Equatable {
+            var sightings: Int
+            var lastSeen: Day
+        }
+
+        private var records: [Pair: Record] = [:]
+
+        /// **Pairs the user deleted, remembered forever.** Part 0 §0.15
+        /// requires every learned pair to be inspectable and reversible, and a
+        /// deletion that quietly undoes itself the next time the user makes the
+        /// same edit is not reversible, it is a nag. Deleting is a decision,
+        /// so it outranks any amount of later evidence.
+        private var forgotten: Set<Pair> = []
+
+        public init() {}
+
+        public mutating func record(_ pair: Pair, at day: Day) {
+            guard !forgotten.contains(pair) else { return }
+            let existing = records[pair]
+            records[pair] = Record(sightings: (existing?.sightings ?? 0) + 1, lastSeen: day)
+        }
+
+        public mutating func forget(_ pair: Pair) {
+            records[pair] = nil
+            forgotten.insert(pair)
+        }
+
+        /// Everything seen enough times, recently enough, capped.
+        ///
+        /// §0.13 is a locked constant rather than an API limit: biasing gains
+        /// peak near 100 terms and degrade beyond, with a documented case of
+        /// overall WER going 2.42 to 5.99 when a list grew 100 to 500. The
+        /// ledger may REMEMBER more than this; it may not OFFER more.
+        public func trusted(at day: Day) -> [String] {
+            records
+                .filter { _, record in
+                    record.sightings >= sightingsBeforeTrust
+                        && day.day - record.lastSeen.day < trustLifetimeInDays
+                }
+                // Deterministic: most recent first, then most seen, then
+                // alphabetical, so the cap never depends on dictionary order.
+                .sorted { a, b in
+                    if a.value.lastSeen != b.value.lastSeen { return a.value.lastSeen > b.value.lastSeen }
+                    if a.value.sightings != b.value.sightings { return a.value.sightings > b.value.sightings }
+                    return a.key.meant < b.key.meant
+                }
+                .prefix(Vocabulary.activeLimit)
+                .map(\.key.meant)
+        }
+
+        /// The learned mishearings, as exact replacements.
+        ///
+        /// **This is the important half, and an end-to-end test is what
+        /// revealed it.** `trusted` hands the matcher a vocabulary, and the
+        /// matcher then has to rediscover phonetically what the user already
+        /// told it explicitly. It cannot: `Chalan` and `Chalant` sit below the
+        /// 0.90 similarity floor that the 2026-08-15 sweep set to keep the
+        /// matcher from corrupting ordinary words. So the learner would learn
+        /// the pair and the matcher would refuse to use it, and the loop that
+        /// is the entire product would quietly do nothing.
+        ///
+        /// A pair the user typed themselves, twice, is not a guess that needs
+        /// phonetic verification. It is a fact about their vocabulary. It gets
+        /// applied by exact match, and `TermMatcher.applyingAliases` does not
+        /// consult confidence at all, because proper-noun errors are CONFIDENT
+        /// errors: `Chalan` arrived at 0.87.
+        public func aliases(at day: Day) -> [String: String] {
+            var out: [String: String] = [:]
+            for (pair, record) in records
+            where record.sightings >= sightingsBeforeTrust
+                && day.day - record.lastSeen.day < trustLifetimeInDays {
+                out[pair.heard.lowercased()] = pair.meant
+            }
+            return out
+        }
+
+        /// Everything remembered, for the settings screen that has to exist
+        /// before this can be trusted by anyone.
+        public var all: [(pair: Pair, sightings: Int, lastSeen: Day)] {
+            records
+                .map { (pair: $0.key, sightings: $0.value.sightings, lastSeen: $0.value.lastSeen) }
+                .sorted { $0.lastSeen > $1.lastSeen }
+        }
+    }
+
+    /// §0.13's cap, named here so Core does not depend on the app shell.
+    public enum Vocabulary {
+        public static let activeLimit = 100
+    }
+}

@@ -300,7 +300,10 @@ public enum TermMatcher {
     /// keys there is no bar left to raise. **Known limitation, stated rather
     /// than discovered later: a term that genuinely contains a function word
     /// ("Bank of America") cannot be joined by this pass.** No term in use does.
-    private static let stopwords: Set<String> = [
+    /// Shared with `Correction`, which needs the same refusal for the same
+    /// reason: "on" becoming "in" is the user writing, not the engine
+    /// mishearing, and learning it would corrupt every sentence after.
+    static let stopwords: Set<String> = [
         "a", "an", "and", "are", "as", "at", "be", "but", "by", "do", "for",
         "from", "had", "has", "have", "he", "her", "his", "i", "if", "in", "is",
         "it", "its", "me", "my", "no", "not", "of", "on", "or", "our", "out",
@@ -322,6 +325,37 @@ public enum TermMatcher {
     /// `SF speech recognizer`; beyond that the false-positive surface grows
     /// faster than the vocabulary does.
     public static let maximumSpan = 3
+
+    /// Apply the mishearings the user has personally corrected.
+    ///
+    /// **This runs first and it does NOT consult confidence, which is the
+    /// opposite of every other gate in this file.** The reason is measured:
+    /// proper-noun errors are CONFIDENT errors. `Chalan` for `Chalant` arrived
+    /// at 0.87, because `Chalan` is a perfectly plausible sound. A confidence
+    /// gate here would refuse exactly the repairs the user asked for.
+    ///
+    /// The evidence is different in kind from everywhere else. `resolve` is
+    /// guessing from sound and needs guards against its own guessing.
+    /// This is not guessing: the user typed this replacement themselves,
+    /// twice, over a word Chalant had just put in their document. Nothing
+    /// acoustic beats that.
+    ///
+    /// **The risk this accepts, stated rather than buried:** if the user really
+    /// does mean the heard word one day, this rewrites it. That is why the
+    /// pairs are inspectable and why `Ledger.forget` is permanent. It is also
+    /// bounded by only ever firing on words the user has already, repeatedly,
+    /// told us they never meant.
+    public static func applyingAliases(tokens: [Token], aliases: [String: String]) -> [Token] {
+        guard !aliases.isEmpty else { return tokens }
+        return tokens.map { token in
+            let (prefix, core, suffix) = split(token.text)
+            guard !core.isEmpty, let meant = aliases[core.lowercased()], meant != core
+            else { return token }
+            return Token(
+                text: prefix + meant + suffix,
+                confidence: token.confidence, range: token.range)
+        }
+    }
 
     /// Put a name back together after the engine broke it into separate words.
     ///
