@@ -68,6 +68,10 @@ actor AudioEngine {
     /// When the live device last produced a sample above zero. Compared
     /// against `InputChoice.isDead` to decide whether to move on.
     private var lastSoundAt = Date()
+    /// Whether the tap is still delivering buffers at all. Reset with every
+    /// warm start, because every warm start makes a new ring whose count
+    /// begins at zero.
+    private var pulse = TapPulse(count: 0, at: Date())
 
     /// Choose the best ear available and start on it. Preference decides the
     /// order, evidence overrules it (`InputChoice`).
@@ -133,6 +137,7 @@ actor AudioEngine {
         try engine.start()
         isRunning = true
         lastSoundAt = Date()
+        pulse = TapPulse(count: ring.observedBufferCount, at: Date())
         Self.log.info(
             """
             warm engine running at \(inputFormat.sampleRate, privacy: .public) Hz \
@@ -141,14 +146,38 @@ actor AudioEngine {
         )
     }
 
-    /// Move to the next ear when this one has stopped being a microphone.
+    /// Move to the next ear when this one has stopped being a microphone, or
+    /// restart on this one when the tap has stopped being a tap.
     ///
     /// Polled from outside rather than timed in here, so the actor owns no
-    /// timer and the policy stays in one testable place (`InputChoice`).
-    /// Returns the device it moved to, or nil if nothing changed.
+    /// timer and the policy stays in testable places (`TapPulse`,
+    /// `InputChoice`). Returns the device now live if anything was restarted,
+    /// or nil if nothing changed.
+    ///
+    /// The two checks answer different failures and must stay in this order.
+    /// A stalled tap delivers NO buffers, so `peak` is stale, frozen at
+    /// whatever the last buffer held; a silence verdict read off it would be
+    /// wrong in both directions. Measured 2026-08-16: a sample-rate change on
+    /// the live device left the engine believing it was running and fed
+    /// 0 buffers to every hold after, with no notification to act on. The
+    /// microphone was fine, so it is NOT marked silent; the engine is simply
+    /// rebuilt on the device it already had.
     @discardableResult
     func hopIfDeaf() -> InputChoice.Device? {
         guard isRunning, !capturing.isOpen else { return nil }
+
+        if let ring, pulse.observe(count: ring.observedBufferCount, at: Date()) {
+            Self.log.error(
+                """
+                tap on \(self.currentDevice?.name ?? "the system default", privacy: .public) \
+                delivered no buffers for \(Int(TapPulse.threshold), privacy: .public)s; restarting the engine
+                """
+            )
+            stop()
+            try? startWarm(avoiding: silentUIDs)
+            return currentDevice
+        }
+
         if peak > 0 {
             lastSoundAt = Date()
             return nil
