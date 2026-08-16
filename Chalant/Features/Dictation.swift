@@ -23,6 +23,11 @@ final class Dictation {
     /// nothing is worse than no switch.
     static let shared = Dictation()
 
+    /// The island. Set once by the app after the notch controller exists;
+    /// before that, dictation cannot start, which is fine: it is off by
+    /// default and the switch is in the island's own settings.
+    var surface: (any DictationSurface)?
+
     /// Whether this OS has the engine at all.
     static var isSupported: Bool {
         if #available(macOS 26, *) { return true }
@@ -77,7 +82,11 @@ final class Dictation {
         guard stack == nil else { return }
         guard #available(macOS 26, *) else { return }
 
-        let live = DictationStack()
+        guard let surface else {
+            Self.log.error("dictation cannot start: no surface installed yet")
+            return
+        }
+        let live = DictationStack(surface: surface)
         tapInstalled = live.start()
         stack = live
 
@@ -107,8 +116,12 @@ final class Dictation {
 @available(macOS 26, *)
 @MainActor
 private final class DictationStack {
-    private let controller = DictationController()
+    private let controller: DictationController
     private var monitor: EventTapMonitor?
+
+    init(surface: any DictationSurface) {
+        controller = DictationController(surface: surface)
+    }
 
     /// Returns whether the event tap installed.
     func start() -> Bool {

@@ -85,15 +85,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.setActivationPolicy(.regular)
         }
 
-        // Hold-to-dictate, if this machine can and the user has said yes.
-        // Silent and free when either is false, so a macOS 14 install or
-        // somebody who has never opened the switch pays nothing for it.
-        Dictation.shared.start()
-
         // The island itself
         let controller = NotchWindowController()
         controller.show()
         notchController = controller
+
+        // Dictation lights up the island rather than drawing its own panel,
+        // so it needs the island to exist before it can start. The surface
+        // also answers "which display is this pid on" for the strip.
+        //
+        // Hold-to-dictate, if this machine can and the user has said yes.
+        // Silent and free when either is false, so a macOS 14 install or
+        // somebody who has never opened the switch pays nothing for it.
+        let surface = IslandDictationSurface(
+            model: controller.viewModel,
+            displays: controller.viewModel.displays
+        )
+        Dictation.shared.surface = surface
+        IslandDictationSurface.shared = surface
+        Dictation.shared.start()
+
         controller.viewModel.installUpdate = { [weak self] in
             self?.updater.checkForUpdates(nil)
         }
