@@ -204,6 +204,9 @@ final class DictationController {
         let transcriber = AppleTranscriber()
         self.transcriber = transcriber
 
+        // A dead ear is rebuilt HERE, before the format below is read, so the
+        // analyzer is prepared against the engine that will actually feed it.
+        await audio.ensureAlive()
         let format = await audio.currentFormat
         // Part 0 §0.5: preheat, measured at ~1.45s finalized versus ~2.2s cold.
         await transcriber.prepare(locale: locale, format: format)

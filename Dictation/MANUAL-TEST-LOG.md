@@ -674,3 +674,104 @@ What a pass looks like, per the spec:
 - [ ] no words appear in the strip at any point
 
 Result (founder, dated):
+
+---
+
+## 2026-08-16 — the warm engine wedges on a device change, and now heals itself
+
+Branch `fix/audio-engine-survives-device-change`. Release builds, Developer ID,
+installed at `/Applications/Chalant.app`. macOS 27.0, arm64. Driven by
+`Dictation/tools/earprobe/earprobe`, which streams the log and posts a 2s
+synthetic left-Option hold before and after each change (`log show` does not
+keep info-level lines, so every number below was read live).
+
+### What the founder hit (12:48, from their own use, before this branch)
+
+`fed 28 buffers` → wired earphones plugged/unplugged → `fed 0 buffers` on
+every hold until relaunch. Root cause fixed one commit back on this branch
+(`6b7b458`): the ONE `AVAudioEngine` reused across a device change. That
+change alone was HALF-verified: four clean holds (30/38/66/39 buffers) but no
+device change ever landed in the log.
+
+### Reproducing a 0-buffer wedge without hardware
+
+`earprobe device` (a CoreAudio aggregate wrapping the built-in mic appears and
+is made default input, then is destroyed) did NOT wedge the released 1.15.0:
+`fed 19` before, `fed 19` after appear, `fed 19` after disappear, with the
+engine restarting on the same instance in between. So the plug/unplug SET
+change is not, by itself, the wedge on this Mac. Regression check only.
+
+`earprobe rate` (the built-in mic's nominal sample rate changed under the
+running engine, 48000 → 44100, the trigger Apple documents for a
+configuration change) wedged BOTH builds identically:
+
+| build | before | after 48000→44100 | after 44100→48000 |
+|---|---|---|---|
+| released 1.15.0 (`build/export`) | fed 19 | **fed 0** | fed 19 |
+| fresh-engine fix `6b7b458` | fed 19 | **fed 0** | fed 19 |
+
+No `input devices changed` line in either: no `AVAudioEngineConfigurationChange`
+reached the app. Nothing restarted the engine. `peak` sat frozen above zero,
+so `hopIfDeaf` called the mic alive. Restoring the rate healed the tap in
+place. That is a wedge every safeguard in the file was blind to.
+
+### After `TapPulse` (this commit's build)
+
+| step | log |
+|---|---|
+| baseline hold | `fed 18` / `fed 20` (two runs) |
+| rate 48000→44100, +2s | `tap on MacBook Air Microphone delivered no buffers for 2s; restarting the engine` then `warm engine running` |
+| hold while still at 44100 | `fed 0` (the fresh engine still reports 48000 Hz; a fresh PROCESS reports 48000 Hz too, so this is CoreAudio's view, not ours) |
+| every ~3s while inconsistent | restart, restart, restart |
+| rate 44100→48000 | next restart takes, no more firings |
+| hold | **`fed 19`**, no relaunch |
+| `earprobe device` on this build | fed 19 / 20 / 19, unchanged |
+| 75s idle | **0** watchdog firings |
+
+Verdict: the fresh-engine fix is necessary and this makes it sufficient for
+any wedge that shows up as a dead tap, whatever the cause and whether or not
+a notification arrives. The engine retries every ~3s until the hardware is
+consistent, then dictation resumes by itself.
+
+Still unproven, honestly: that the founder's exact jack event goes through
+this path rather than a third one. What is proven is that no dead-tap state
+survives more than ~2s any more. The founder's next plug/unplug in ordinary
+use is the remaining evidence; the pass is a `delivered no buffers ...
+restarting` line (or none at all) followed by `fed [1-9]`.
+
+### 17:07 to 17:25, same day: the founder's real device, and a crash of my own
+
+**The founder said "its not listening". Chalant was not running.** Crash report
+`Chalant-2026-08-16-170750.ips`: at 17:07:28 the tap on the built-in mic
+stalled (the founder had connected a Beats Pill, a 16 kHz Bluetooth input, and
+plugged the wired earphones), the watchdog rebuilt the engine, and at 17:07:45
+a later rebuild's `installTap` RAISED `Failed to create tap due to format
+mismatch, 1 ch, 16000 Hz`. Uncaught NSException, SIGABRT. **The watchdog had
+turned a wedge into a crash.** The AUHAL log shows its stream-format change
+landing 1.3s after a bind, so a rebuild inside that window reads a stale
+format. Fixed by wrapping `installTap` and `engine.start` in the parent
+project's `AudioGuard` (which VoiceController already used and this engine
+never adopted: the two-ears debt), tearing down on a raise, and letting the
+poll bring a downed engine back (one attempt per 5s).
+
+**Then the founder-shaped event was caught live, `earprobe flip`** (default
+input to the 16 kHz Pill and back, engine on the built-in mic, device SET
+unchanged):
+
+| step | 1.15.0 would have | this branch |
+|---|---|---|
+| default → Pill | sometimes nothing, sometimes the tap dies silently | same; watchdog restarts within 2s if it dies |
+| default → built-in (the disconnect shape) | `input devices changed`, engine stopped itself, **dead until relaunch** | `engine stopped itself on a configuration change ... restarting` ~100ms after the flip |
+| hold 1s after the flip back | fed 0 | **fed 19** |
+| hold inside a 2s dead window | fed 0 | `was dead at key-down; rebuilding before capture` then **fed 18** |
+| six holds 0.3s after six flips | | 19-20 each, no false rebuild |
+
+Non-deterministic which direction disturbs the tap and whether a notification
+arrives at all; three watchers now cover it whichever way it goes: the
+notification (`engine.isRunning`), the 2s watchdog, and the key-down check.
+Process alive through every run. Rate and device scenarios re-run on the final
+build: unchanged.
+
+**Still unproven, honestly:** the exact headphone-jack unplug with the engine
+ON the earphone mic (lid closed). Every reproduction here had the engine on
+the built-in mic. The founder's ordinary use is the remaining evidence.

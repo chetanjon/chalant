@@ -44,6 +44,11 @@ final class AudioRing: @unchecked Sendable {
     /// real-time callback because it is arithmetic over samples already in
     /// registers: no allocation, no locking, nothing that can block.
     private let peakMillionths = Atomic<UInt64>(0)
+    /// How many buffers the tap has handed over, gate open or shut. `peak`
+    /// cannot say whether the tap is still alive, only what the LAST buffer
+    /// sounded like, and it freezes above zero the moment buffers stop, which
+    /// is exactly the failure that needs noticing (`TapPulse`).
+    private let observedBuffers = Atomic<UInt64>(0)
 
     init(format: AVAudioFormat, frameCapacity: AVAudioFrameCount) {
         var built: [AVAudioPCMBuffer] = []
@@ -76,6 +81,11 @@ final class AudioRing: @unchecked Sendable {
     /// the engine failed.
     var peak: Double { Double(peakMillionths.load(ordering: .relaxed)) / 1_000_000 }
 
+    /// Total buffers observed since this ring was made. Standing still while
+    /// the engine believes it is running means the tap is dead, whatever
+    /// `peak` says.
+    var observedBufferCount: UInt64 { observedBuffers.load(ordering: .relaxed) }
+
     // MARK: - Producer (real-time thread, nothing may block here)
 
     /// Read the loudest sample in a buffer WITHOUT keeping any of it.
@@ -90,6 +100,10 @@ final class AudioRing: @unchecked Sendable {
     /// Same real-time rules as `write` (Part 1 §2): one pass, no allocation,
     /// no locks, no logging, and nothing retained.
     func observe(_ buffer: AVAudioPCMBuffer) {
+        // Counted before any guard: an arriving buffer is proof of life even
+        // if its format is one this ring cannot read. One relaxed atomic add,
+        // which is allowed on this thread.
+        observedBuffers.wrappingAdd(1, ordering: .relaxed)
         guard let src = buffer.floatChannelData, buffer.format.channelCount > 0 else { return }
         var peak: Float = 0
         for i in 0..<Int(buffer.frameLength) {
