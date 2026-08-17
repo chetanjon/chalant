@@ -59,6 +59,30 @@ public enum Correction {
     /// nothing to do with what was said.
     public static let sightingsBeforeTrust = 2
 
+    /// **Names in one shot (2026-08-16).** A name is misheard differently
+    /// every time (Chalant arrived as Shalan, Chalawant and Chalant inside five
+    /// minutes; Kizu as Kizu, Pisu and Kisu), so "the same pair twice" almost
+    /// never happens for exactly the words the learner exists for. A word the
+    /// user typed with a capital letter, which is what a name looks like, is
+    /// trusted the first time. An ordinary lowercase word still needs
+    /// `sightingsBeforeTrust`, because "effect" typed over "affect" once can be
+    /// a slip, and learning it would rewrite ordinary English.
+    public static func sightingsBeforeTrusting(_ pair: Pair) -> Int {
+        pair.meant.first?.isUppercase == true ? 1 : sightingsBeforeTrust
+    }
+
+    /// The exact alias is stricter than the vocabulary term, because it
+    /// rewrites blind: no sound check, no confidence check, every time. Met on
+    /// the first live run (2026-08-16): "challenge" heard for Chalant, and a
+    /// one-shot alias would have rewritten every ordinary "challenge" into
+    /// "Chalant" forever. So a name misheard as a REAL WORD still needs two
+    /// sightings before the exact rewrite; a name misheard as a non-word
+    /// ("Kisu", "Shalan", "Kiesel") is rewritten from the first, because
+    /// nothing else was ever going to be meant by it.
+    static func sightingsBeforeAliasing(_ pair: Pair, heardIsWord: Bool) -> Int {
+        heardIsWord ? sightingsBeforeTrust : sightingsBeforeTrusting(pair)
+    }
+
     /// Part 3 M5. A term from a project that ended stops competing for the 100
     /// active slots §0.13 allows.
     public static let trustLifetimeInDays = 90
@@ -72,45 +96,55 @@ public enum Correction {
     /// user never touched is not mistaken for an edit, but CASE-SENSITIVELY,
     /// because `posthog` becoming `PostHog` is exactly the kind of fix worth
     /// learning.
+    /// The single-pair door, kept for callers that want one answer: the first
+    /// of `learnings`.
     public static func learning(inserted: String, nowReads field: String) -> Pair? {
+        learnings(inserted: inserted, nowReads: field).first
+    }
+
+    /// Every correction the user made to our span, each judged on its own.
+    ///
+    /// **Was "exactly one word changed, or nothing" until 2026-08-16.** The
+    /// founder's first live try in Chrome came out "Send the Chalawant bill to
+    /// Pisu and tell it and it is ready", three words wrong, and a person fixes
+    /// all three in one pass. Refusing that sentence outright refuses exactly
+    /// the sentences the learner exists for. So: slide our span across their
+    /// document, take the alignment with the fewest changed words, and put
+    /// each changed word through the same guards as before. The ones that
+    /// sound like what they replaced are corrections; the rest is the user
+    /// editing and is ignored. Changing more than a few words is a rewrite,
+    /// and a rewrite teaches nothing.
+    public static func learnings(inserted: String, nowReads field: String) -> [Pair] {
         let ours = words(inserted)
         let theirs = words(field)
-        guard !ours.isEmpty, theirs.count >= ours.count else { return nil }
+        guard !ours.isEmpty, theirs.count >= ours.count else { return [] }
 
-        // Slide our span across their document and take the closest fit. A
-        // correction leaves exactly one word different; anything else is the
-        // user writing, not fixing.
-        var best: (differences: Int, index: Int)?
+        var best: (differences: Int, start: Int)?
         for start in 0...(theirs.count - ours.count) {
             var differences = 0
-            var only = 0
             for offset in 0..<ours.count where ours[offset] != theirs[start + offset] {
                 differences += 1
-                only = offset
-                if differences > 1 { break }
+                if differences > maxCorrectionsPerSpan { break }
             }
+            if differences == 0 { return [] }  // untouched: nothing to learn
             if differences < (best?.differences ?? Int.max) {
-                best = (differences, only)
+                best = (differences, start)
             }
-            if differences == 0 { return nil }  // untouched: nothing to learn
         }
 
-        guard let best, best.differences == 1 else { return nil }
+        guard let best, best.differences <= maxCorrectionsPerSpan else { return [] }
 
-        // Recover the pair from the window that produced the single difference.
-        for start in 0...(theirs.count - ours.count) {
-            var differences = 0
-            var index = 0
-            for offset in 0..<ours.count where ours[offset] != theirs[start + offset] {
-                differences += 1
-                index = offset
-                if differences > 1 { break }
+        var pairs: [Pair] = []
+        for offset in 0..<ours.count where ours[offset] != theirs[best.start + offset] {
+            if let pair = pair(heard: ours[offset], meant: theirs[best.start + offset]) {
+                pairs.append(pair)
             }
-            guard differences == 1 else { continue }
-            return pair(heard: ours[index], meant: theirs[start + index])
         }
-        return nil
+        return pairs
     }
+
+    /// More changed words than this is a rewrite, not a set of fixes.
+    private static let maxCorrectionsPerSpan = 3
 
     /// The guards, in the order they are cheapest to check.
     private static func pair(heard: String, meant: String) -> Pair? {
@@ -170,6 +204,11 @@ public enum Correction {
         private struct Record: Sendable, Equatable {
             var sightings: Int
             var lastSeen: Day
+            /// Whether the misheard word is an ordinary dictionary word. The
+            /// shell decides (it has the spell checker; Core has no
+            /// dictionary); Core only remembers. Missing in files written before
+            /// 2026-08-16 and read back as true, the careful answer.
+            var heardIsWord: Bool
         }
 
         /// A dictionary keyed by a struct cannot be JSON, so the wire form is a
@@ -181,6 +220,7 @@ public enum Correction {
             var meant: String
             var sightings: Int
             var lastSeen: Int
+            var heardIsWord: Bool?
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -193,7 +233,9 @@ public enum Correction {
             let entries = try container.decodeIfPresent([Entry].self, forKey: .entries) ?? []
             for entry in entries {
                 records[Pair(heard: entry.heard, meant: entry.meant)] =
-                    Record(sightings: entry.sightings, lastSeen: Day(day: entry.lastSeen))
+                    Record(
+                        sightings: entry.sightings, lastSeen: Day(day: entry.lastSeen),
+                        heardIsWord: entry.heardIsWord ?? true)
             }
             let gone = try container.decodeIfPresent([Entry].self, forKey: .forgotten) ?? []
             forgotten = Set(gone.map { Pair(heard: $0.heard, meant: $0.meant) })
@@ -205,11 +247,12 @@ public enum Correction {
                 records.map {
                     Entry(
                         heard: $0.key.heard, meant: $0.key.meant,
-                        sightings: $0.value.sightings, lastSeen: $0.value.lastSeen.day)
+                        sightings: $0.value.sightings, lastSeen: $0.value.lastSeen.day,
+                        heardIsWord: $0.value.heardIsWord)
                 }.sorted { $0.heard < $1.heard },
                 forKey: .entries)
             try container.encode(
-                forgotten.map { Entry(heard: $0.heard, meant: $0.meant, sightings: 0, lastSeen: 0) }
+                forgotten.map { Entry(heard: $0.heard, meant: $0.meant, sightings: 0, lastSeen: 0, heardIsWord: nil) }
                     .sorted { $0.heard < $1.heard },
                 forKey: .forgotten)
         }
@@ -225,10 +268,17 @@ public enum Correction {
 
         public init() {}
 
-        public mutating func record(_ pair: Pair, at day: Day) {
+        /// `heardIsWord`: whether the misheard token is an ordinary dictionary
+        /// word, decided by the shell's spell checker. Defaults to the careful
+        /// answer. It gates only the exact alias (see `aliases`), never the
+        /// vocabulary term.
+        public mutating func record(_ pair: Pair, at day: Day, heardIsWord: Bool = true) {
             guard !forgotten.contains(pair) else { return }
             let existing = records[pair]
-            records[pair] = Record(sightings: (existing?.sightings ?? 0) + 1, lastSeen: day)
+            records[pair] = Record(
+                sightings: (existing?.sightings ?? 0) + 1, lastSeen: day,
+                // Once known to be a real word, always treated as one.
+                heardIsWord: (existing?.heardIsWord ?? false) || heardIsWord)
         }
 
         public mutating func forget(_ pair: Pair) {
@@ -244,8 +294,8 @@ public enum Correction {
         /// ledger may REMEMBER more than this; it may not OFFER more.
         public func trusted(at day: Day) -> [String] {
             records
-                .filter { _, record in
-                    record.sightings >= sightingsBeforeTrust
+                .filter { pair, record in
+                    record.sightings >= sightingsBeforeTrusting(pair)
                         && day.day - record.lastSeen.day < trustLifetimeInDays
                 }
                 // Deterministic: most recent first, then most seen, then
@@ -278,7 +328,7 @@ public enum Correction {
         public func aliases(at day: Day) -> [String: String] {
             var out: [String: String] = [:]
             for (pair, record) in records
-            where record.sightings >= sightingsBeforeTrust
+            where record.sightings >= sightingsBeforeAliasing(pair, heardIsWord: record.heardIsWord)
                 && day.day - record.lastSeen.day < trustLifetimeInDays {
                 out[pair.heard.lowercased()] = pair.meant
             }

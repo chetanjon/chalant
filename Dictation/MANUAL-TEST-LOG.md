@@ -775,3 +775,47 @@ build: unchanged.
 **Still unproven, honestly:** the exact headphone-jack unplug with the engine
 ON the earphone mic (lid closed). Every reproduction here had the engine on
 the built-in mic. The founder's ordinary use is the remaining evidence.
+
+---
+
+## 2026-08-16 — names in one shot: the correction learner, measured in the founder's hands and then end to end
+
+**Live test with the founder (18:30 to 18:45), 1.15.2:** dictate "Send the
+Chalant build to Kizu and tell Aidan it is ready" into Slack, Chrome, TextEdit,
+fix a name, wait. What actually happened, from the log and the corpus capture:
+
+| app | inserted | observer verdict | why |
+|---|---|---|---|
+| VS Code (this terminal) | many | **can read** | |
+| Slack | "Send the Shalan bill to Kizu and tell Aidan it is ready." | none | the next dictation (to the terminal, 11s later) cancelled the watch |
+| Chrome | "Send the Chalawant bill to Pisu and tell it and it is ready." then, second try, all correct | **can read** | nothing left to correct on the watched try |
+| TextEdit | "Send the Chalant bill to Kisu and tell Aden it is ready." | **can read** | the document still reads exactly that: no fix was typed |
+
+Reading works in every app tried. Nothing was learned because the loop's shape
+was wrong for a person: one watch that the next dictation anywhere cancels, a
+20s window, exactly one changed word accepted, and two sightings of the SAME
+pair before anything fires, while a name is misheard differently every time
+(Chalant: Shalan, Chalawant, Chalant; Kizu: Kizu, Pisu, Kisu; Aidan: Aidan,
+Aden). The founder: "it's not correcting at all ... we gotta get creative to
+make it work in one or two shots".
+
+**After this branch, end to end, driven by `say` into TextEdit with the fix
+applied to the document by AppleScript (the same edit a person makes):**
+
+```
+heard   : Send the challenge bill to Kazu and tell Aiden it is ready.
+fixed to: Send the Chalant bill to Kizu and tell Aidan it is ready.
+learned : challenge -> Chalant (heard is a word), Kazu -> Kizu (not a word),
+          Aiden -> Aidan (a word), all from ONE fix, 3 pairs from one sentence
+second  : Send the challenge bill to Kizu and tell Aiden it is ready.
+```
+
+**Kizu right after one fix.** "challenge" and "Aiden" are dictionary words, so
+their exact rewrite waits for a second fix by design (a one-shot alias would
+have turned every ordinary "challenge" into "Chalant"; that was measured, not
+imagined: it happened on the first build of this branch and was closed before
+anyone dictated on it). The names themselves ("Chalant", "Aidan") are already in
+the vocabulary after one fix, through the sound-and-confidence-gated path.
+
+Also: watches are per app now (a dictation elsewhere no longer cancels Slack's),
+45s not 20s, and several fixes in one sentence are several corrections.

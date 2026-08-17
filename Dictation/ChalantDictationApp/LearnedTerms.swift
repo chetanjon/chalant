@@ -65,13 +65,19 @@ actor LearnedTerms {
         return ledger.trusted(at: day)
     }
 
-    func record(_ pair: Correction.Pair, on day: Correction.Day = LearnedTerms.today()) {
+    /// `heardIsWord`: whether the misheard token is an ordinary dictionary
+    /// word, which decides whether the exact rewrite is trusted from the first
+    /// sighting or the second (`Correction.Ledger.sightingsBeforeAliasing`).
+    func record(_ pair: Correction.Pair, heardIsWord: Bool, on day: Correction.Day = LearnedTerms.today()) {
         load()
-        ledger.record(pair, at: day)
+        ledger.record(pair, at: day, heardIsWord: heardIsWord)
         save()
         // Lengths, never content. The pair IS the user's words.
         Self.log.info(
-            "learned a correction: \(pair.heard.count, privacy: .public) chars -> \(pair.meant.count, privacy: .public)")
+            """
+            learned a correction: \(pair.heard.count, privacy: .public) chars -> \
+            \(pair.meant.count, privacy: .public), heard is \(heardIsWord ? "a word" : "not a word", privacy: .public)
+            """)
     }
 
     func forget(_ pair: Correction.Pair) {

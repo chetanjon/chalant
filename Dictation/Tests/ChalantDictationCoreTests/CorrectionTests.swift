@@ -72,12 +72,40 @@ struct CorrectionTests {
         }
     }
 
-    @Test("more than one word changed is editing, not correcting")
-    func refusesMultiWordEdits() {
+    /// 2026-08-16, the founder's own first try in Chrome: "Send the Chalawant
+    /// bill to Pisu and tell it and it is ready". Three words wrong, and a
+    /// person fixes all of them in one go. Refusing to learn anything from that
+    /// is refusing to learn from exactly the sentences that need it most. Each
+    /// changed word is judged on its own; the ones that sound like what they
+    /// replaced are corrections, the rest is editing and is ignored.
+    @Test("several words fixed at once are several corrections, each judged alone")
+    func learnsEachOfSeveralFixes() {
+        let pairs = Correction.learnings(
+            inserted: "Send the Chalawant bill to Kisu and tell Aden it is ready",
+            nowReads: "Send the Chalant bill to Kizu and tell Aidan it is ready")
+        #expect(pairs.map(\.meant) == ["Chalant", "Kizu", "Aidan"])
+        #expect(pairs.map(\.heard) == ["Chalawant", "Kisu", "Aden"])
+    }
+
+    @Test("a fix beside a revision learns the fix and ignores the revision")
+    func learnsTheFixBesideARevision() {
+        // Chalan -> Chalant is a correction; Kizu -> Aatram sounds nothing alike.
+        let pairs = Correction.learnings(
+            inserted: "Ship Chalan to the Kizu group",
+            nowReads: "Ship Chalant to the Aatram group")
+        #expect(pairs == [Correction.Pair(heard: "Chalan", meant: "Chalant")])
+        // The single-pair door reports the first of them.
+        #expect(Correction.learning(
+            inserted: "Ship Chalan to the Kizu group",
+            nowReads: "Ship Chalant to the Aatram group") == Correction.Pair(heard: "Chalan", meant: "Chalant"))
+    }
+
+    @Test("changing most of the words is a rewrite, and nothing is learned from it")
+    func refusesWholesaleRewrites() {
         #expect(
-            Correction.learning(
-                inserted: "Ship Chalan to the Kizu group",
-                nowReads: "Ship Chalant to the Aatram group") == nil)
+            Correction.learnings(
+                inserted: "Ship Chalan to the Kizu group today please",
+                nowReads: "Chip Shalant two thee Keezu groop toady pleas").isEmpty)
     }
 
     @Test("a rewrite that keeps almost nothing is not a correction")
@@ -140,21 +168,58 @@ struct CorrectionTests {
     /// is allowed to change anything.** One sighting can be a typo, a slip, or
     /// the user editing for a reason that has nothing to do with what they
     /// said. Two is the cheapest possible guard against learning from noise.
-    @Test("one sighting is remembered but does not fire")
-    func requiresTwoSightings() {
+    /// **Names in one shot (2026-08-16).** The founder's ask, verbatim: "it
+    /// should remember names", and after the first live test, "make it work in
+    /// one or two shots". Two sightings of the SAME pair almost never happen
+    /// for a name, because a name is misheard differently every time: Chalant
+    /// arrived as Shalan, Chalawant and Chalant inside five minutes; Kizu as
+    /// Kizu, Pisu and Kisu. So a word the user typed with a capital letter,
+    /// which is what a name looks like, is trusted the first time. An ordinary
+    /// lowercase word still needs two, because "affect" typed over "effect"
+    /// once can be a slip and learning it would rewrite ordinary English.
+    @Test("a capitalised fix, a name, is trusted the first time")
+    func namesAreTrustedAtOnce() {
         var ledger = Correction.Ledger()
-        ledger.record(Correction.Pair(heard: "Chalan", meant: "Chalant"), at: .init(day: 0))
-        #expect(ledger.trusted(at: .init(day: 0)).isEmpty)
-
-        ledger.record(Correction.Pair(heard: "Chalan", meant: "Chalant"), at: .init(day: 1))
-        #expect(ledger.trusted(at: .init(day: 1)) == ["Chalant"])
+        ledger.record(Correction.Pair(heard: "Kisu", meant: "Kizu"), at: .init(day: 0), heardIsWord: false)
+        #expect(ledger.trusted(at: .init(day: 0)) == ["Kizu"])
+        #expect(ledger.aliases(at: .init(day: 0)) == ["kisu": "Kizu"])
     }
 
-    @Test("two different pairs do not add up to one trusted pair")
+    /// The one danger in one-shot aliases, met on the very first live run
+    /// (2026-08-16): the engine heard "challenge" for Chalant, the fix was
+    /// learned, and an exact alias would now rewrite every ordinary "challenge"
+    /// into "Chalant" forever. So when the misheard word is a real word, the
+    /// NAME still joins the vocabulary at once (that path is gated by sound,
+    /// length and confidence), but the exact, confidence-blind rewrite waits
+    /// for a second sighting, as it always did.
+    @Test("a name misheard as a real word joins the vocabulary at once, but the exact rewrite waits")
+    func realWordMishearingsDoNotAliasAtOnce() {
+        var ledger = Correction.Ledger()
+        ledger.record(Correction.Pair(heard: "challenge", meant: "Chalant"), at: .init(day: 0), heardIsWord: true)
+        #expect(ledger.trusted(at: .init(day: 0)) == ["Chalant"])
+        #expect(ledger.aliases(at: .init(day: 0)).isEmpty)
+
+        ledger.record(Correction.Pair(heard: "challenge", meant: "Chalant"), at: .init(day: 1), heardIsWord: true)
+        #expect(ledger.aliases(at: .init(day: 1)) == ["challenge": "Chalant"])
+    }
+
+    @Test("a lowercase fix is remembered but does not fire until seen twice")
+    func ordinaryWordsStillNeedTwoSightings() {
+        var ledger = Correction.Ledger()
+        ledger.record(Correction.Pair(heard: "affect", meant: "effect"), at: .init(day: 0))
+        #expect(ledger.trusted(at: .init(day: 0)).isEmpty)
+        #expect(ledger.aliases(at: .init(day: 0)).isEmpty)
+
+        ledger.record(Correction.Pair(heard: "affect", meant: "effect"), at: .init(day: 1))
+        #expect(ledger.trusted(at: .init(day: 1)) == ["effect"])
+        #expect(ledger.aliases(at: .init(day: 1)) == ["affect": "effect"])
+    }
+
+    @Test("two different lowercase pairs do not add up to one trusted pair")
     func countsPerPair() {
         var ledger = Correction.Ledger()
-        ledger.record(Correction.Pair(heard: "Chalan", meant: "Chalant"), at: .init(day: 0))
-        ledger.record(Correction.Pair(heard: "Chatan", meant: "Chetan"), at: .init(day: 0))
+        ledger.record(Correction.Pair(heard: "affect", meant: "effect"), at: .init(day: 0))
+        ledger.record(Correction.Pair(heard: "there", meant: "their"), at: .init(day: 0))
         #expect(ledger.trusted(at: .init(day: 0)).isEmpty)
     }
 
@@ -201,7 +266,7 @@ struct CorrectionTests {
     /// the real mis-hearing the corpus produced on 2026-08-15 (`Chalan` for
     /// `Chalant`, at 0.87 confidence) and the real matcher that has to act on
     /// what was learned.
-    @Test("the whole loop: mishear, get corrected twice, then get it right")
+    @Test("the whole loop: mishear, get corrected once, then get it right")
     func theMoat() {
         var ledger = Correction.Ledger()
 
@@ -212,10 +277,10 @@ struct CorrectionTests {
         #expect(first != nil)
         ledger.record(first!, at: .init(day: 0))
 
-        // Still nothing: one sighting is not evidence.
-        #expect(ledger.trusted(at: .init(day: 0)).isEmpty)
+        // A name, typed once, is enough (2026-08-16: names in one shot).
+        #expect(ledger.trusted(at: .init(day: 0)) == ["Chalant"])
 
-        // Day two. Same mistake, same fix.
+        // Day two. Same mistake, same fix: still trusted, still one entry.
         let second = Correction.learning(
             inserted: "Send Chalan the notes", nowReads: "Send Chalant the notes")
         #expect(second != nil)
