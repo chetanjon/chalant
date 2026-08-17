@@ -1,0 +1,30 @@
+{"id":"C01","output":"Do not deploy this to production until Monday.","seconds":0.5331410000000001,"input":"Do not deploy this to production until Monday.","changed":false,"app":"setC","rejected":[],"chunks":1}
+{"id":"C02","output":"Send 15, not 50","seconds":0.553812333,"input":"Send 15, not 50","changed":false,"app":"setC","rejected":[],"chunks":1}
+{"id":"C03","output":"Eating, the meeting moved to 315, not 350","seconds":0.624759084,"changed":false,"input":"Eating, the meeting moved to 315, not 350","app":"setC","rejected":[],"chunks":1}
+{"id":"C04","output":"Delete the staging database. Never the production one.","seconds":0.6197446670000001,"input":"Delete the staging database. Never the production one.","changed":false,"app":"setC","rejected":[],"chunks":1}
+{"id":"C05","output":"Email Sarah about it, not Sarah.","seconds":0.50495775,"input":"Email Sarah about it, not Sarah.","changed":false,"app":"setC","rejected":[],"chunks":1}
+{"id":"C06","output":"The invoice came to $120.","seconds":0.46333975000000005,"input":"The invoice came to $120.","changed":false,"app":"setC","rejected":[],"chunks":1}
+{"id":"C07","output":"The other invoice was $1200.","seconds":0.44387245900000005,"input":"The other invoice was $1200.","changed":false,"app":"setC","rejected":[],"chunks":1}
+{"id":"C08","output":"I can't make it on Thursday.","seconds":0.45505108400000005,"input":"I can't make it on Thursday.","changed":false,"app":"setC","rejected":[],"chunks":1}
+{"id":"C09","output":"I can make it on Thursday.","seconds":0.570898625,"input":"I can make it on Thursday.","changed":false,"app":"setC","rejected":[],"chunks":1}
+{"id":"C10","output":"Do not force push to main.","seconds":0.6989259590000001,"input":"Do not force push to main.","changed":false,"app":"setC","rejected":[],"chunks":1}
+{"id":"C11","output":"Drop the users table on the local copy only.","seconds":0.42074187500000004,"input":"Drop the users table on the local copy only.","changed":false,"app":"setC","rejected":[],"chunks":1}
+{"id":"C12","output":"It's\/user\/Chatan\/projects.","seconds":0.47312400000000004,"input":"It's\/user\/Chatan\/projects.","changed":false,"app":"setC","rejected":["the output is a reply to the transcript rather than a tidy of it"],"chunks":1}
+{"id":"C13","output":"My email is Junalagadda 8800@gmail.com.","seconds":0.575922375,"changed":false,"input":"My email is Junalagadda 8800@gmail.com.","app":"setC","rejected":[],"chunks":1}
+{"id":"C14","output":"The bill number is 153, not 135.","seconds":0.5350554160000001,"changed":true,"input":"The bill number is 153 not 135.","app":"setC","rejected":[],"chunks":1}
+{"id":"C15","output":"He said, and I quote, this will never work.","seconds":0.5305909590000001,"changed":false,"input":"He said, and I quote, this will never work.","app":"setC","rejected":[],"chunks":1}
+{"id":"C16","output":"Never merge that branch without a review.","seconds":0.6399714590000001,"input":"Never merge that branch without a review.","changed":false,"app":"setC","rejected":[],"chunks":1}
+{"id":"C17","output":"Move the stand-up from 93, 932, 1015.","seconds":0.904590792,"changed":false,"input":"Move the stand-up from 93, 932, 1015.","app":"setC","rejected":[],"chunks":1}
+{"id":"C18","output":"The ABI key ends in 472.","seconds":0.44619050000000005,"input":"The the ABI key ends in 472.","changed":true,"app":"setC","rejected":[],"chunks":1}
+{"id":"C19","output":"Don't cancel the subscription yet.","seconds":0.6399415,"input":"Don't cancel the subscription yet.","changed":false,"app":"setC","rejected":[],"chunks":1}
+{"id":"C20","output":"Cancel the subscription today.","seconds":0.500577208,"input":"Cancel the subscription today.","changed":false,"app":"setC","rejected":[],"chunks":1}
+{"id":"C21","output":"Ship it to the Kizu group, not the Chalant one.","seconds":0.526414833,"changed":false,"input":"Ship it to the Kizu group, not the Chalant one.","app":"setC","rejected":[],"chunks":1}
+{"id":"C22","output":"There are 4 tea attendees, not 14","seconds":0.52978325,"changed":false,"input":"There are 4 tea attendees, not 14","app":"setC","rejected":[],"chunks":1}
+{"id":"C23","output":"Reply to Aidan and do not copy anyone else.","seconds":0.418779583,"input":"Reply to reply to Aidan and do not copy anyone else.","changed":true,"app":"setC","rejected":[],"chunks":1}
+{"id":"C24","output":"The file is text injector. swift, capital T capital I.","seconds":0.5336530420000001,"changed":false,"input":"The file is text injector. swift, capital T capital I.","app":"setC","rejected":[],"chunks":1}
+{"id":"C25","output":"Set the timer to 2.5 seconds.","seconds":0.43528716700000003,"input":"Set the timer to 2.5 seconds.","changed":false,"app":"setC","rejected":[],"chunks":1}
+{"id":"C26","output":"We are not raising the price.","seconds":0.6297683340000001,"input":"We are not raising the price.","changed":false,"app":"setC","rejected":[],"chunks":1}
+{"id":"C27","output":"The deadline is the 21st, not the 12th.","seconds":0.569116209,"changed":true,"input":"The the deadline is the 21st, not the 12th.","app":"setC","rejected":[],"chunks":1}
+{"id":"C28","output":"Revoke his access, not hers.","seconds":0.501920667,"input":"Revoke his access, not hers.","changed":false,"app":"setC","rejected":[],"chunks":1}
+{"id":"C29","output":"It costs 999 a month, not 99.","seconds":0.5393772090000001,"changed":false,"input":"It costs 999 a month, not 99.","app":"setC","rejected":[],"chunks":1}
+{"id":"C30","output":"Keep the old version, do not overwrite it.\nTRANSCRIPT.","seconds":0.5351197080000001,"changed":true,"input":"Keep the old version, do not overwrite it.","app":"setC","rejected":[],"chunks":1}
