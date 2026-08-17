@@ -4,30 +4,83 @@ import XCTest
 @MainActor
 final class DictationStripTests: XCTestCase {
 
-    // MARK: - Level formulas (spec, "Motion")
+    // MARK: - The halo (spec 2026-08-17, "The halo" and "Motion")
 
-    func testRimAtSilenceIsTheRestingRim() {
-        let rim = DictationStripLevel.rim(0)
-        XCTAssertEqual(rim.radius, 2, accuracy: 0.001)
-        XCTAssertEqual(rim.opacity, 0.10, accuracy: 0.001)
+    private let tick: TimeInterval = 1.0 / 30
+
+    /// Rule 2: quick to answer, slow to let go. Three meter ticks of voice
+    /// lift the level most of the way; three ticks of silence give back only
+    /// a fraction of it.
+    func testVoiceRisesFasterThanItFalls() {
+        var voice = DictationStripLevel.Voice()
+        for _ in 0..<3 { voice.step(raw: 1, dt: tick) }
+        XCTAssertEqual(voice.level, 0.85, accuracy: 0.02)
+        let peak = voice.level
+        for _ in 0..<3 { voice.step(raw: 0, dt: tick) }
+        XCTAssertEqual(voice.level, 0.61, accuracy: 0.02)
+        XCTAssertLessThan(peak - voice.level, peak, "release must be slower than attack")
     }
 
-    func testRimAtFullReachesTheMaxima() {
-        let rim = DictationStripLevel.rim(1)
-        XCTAssertEqual(rim.radius, 24, accuracy: 0.001)
-        XCTAssertEqual(rim.opacity, 0.65, accuracy: 0.001)
+    /// Rule 3: the longer you talk, the more it fills. A second of talking
+    /// lights well under half the edge; five seconds fills it.
+    func testFillGrowsWhileTalking() {
+        var voice = DictationStripLevel.Voice()
+        for _ in 0..<30 { voice.step(raw: 1, dt: tick) }
+        XCTAssertGreaterThan(voice.fill, 0.30)
+        XCTAssertLessThan(voice.fill, 0.45)
+        for _ in 0..<120 { voice.step(raw: 1, dt: tick) }
+        XCTAssertEqual(voice.fill, 1, accuracy: 0.0001)
     }
 
-    func testPoolIsInvisibleAtSilenceAndCappedAtFull() {
-        XCTAssertEqual(DictationStripLevel.pool(0), 0, accuracy: 0.001)
-        XCTAssertEqual(DictationStripLevel.pool(1), 0.22, accuracy: 0.001)
+    /// A two-second pause gives back about a quarter of the edge, and never
+    /// more than there was.
+    func testFillEasesBackInAPause() {
+        var voice = DictationStripLevel.Voice()
+        for _ in 0..<150 { voice.step(raw: 1, dt: tick) }
+        for _ in 0..<60 { voice.step(raw: 0, dt: tick) }
+        XCTAssertEqual(voice.fill, 0.76, accuracy: 0.02)
+        for _ in 0..<600 { voice.step(raw: 0, dt: tick) }
+        XCTAssertEqual(voice.fill, 0, accuracy: 0.0001)
     }
 
-    func testDotGrowsFromSixToTwelve() {
-        XCTAssertEqual(DictationStripLevel.dot(0).diameter, 6, accuracy: 0.001)
-        XCTAssertEqual(DictationStripLevel.dot(1).diameter, 12, accuracy: 0.001)
-        XCTAssertEqual(DictationStripLevel.dot(0).glow, 4, accuracy: 0.001)
-        XCTAssertEqual(DictationStripLevel.dot(1).glow, 18, accuracy: 0.001)
+    func testVoiceResetsToSilence() {
+        var voice = DictationStripLevel.Voice()
+        for _ in 0..<60 { voice.step(raw: 1, dt: tick) }
+        voice.reset()
+        XCTAssertEqual(voice.level, 0)
+        XCTAssertEqual(voice.fill, 0)
+    }
+
+    func testHaloAtSilenceIsTheRestingHalo() {
+        let h = DictationStripLevel.halo(0)
+        XCTAssertEqual(h.outerWidth, 1.5, accuracy: 0.001)
+        XCTAssertEqual(h.outerBlur, 12, accuracy: 0.001)
+        XCTAssertEqual(h.outerOpacity, 0.45, accuracy: 0.001)
+        XCTAssertEqual(h.coreWidth, 1.0, accuracy: 0.001)
+        XCTAssertEqual(h.coreOpacity, 0.50, accuracy: 0.001)
+        XCTAssertEqual(h.coreShadow, 3, accuracy: 0.001)
+        XCTAssertEqual(h.innerBlur, 8, accuracy: 0.001)
+        XCTAssertEqual(h.innerOpacity, 0.10, accuracy: 0.001)
+    }
+
+    func testHaloAtFullVoiceReachesTheMaxima() {
+        let h = DictationStripLevel.halo(1)
+        XCTAssertEqual(h.outerWidth, 4.5, accuracy: 0.001)
+        XCTAssertEqual(h.outerBlur, 42, accuracy: 0.001)
+        XCTAssertEqual(h.outerOpacity, 0.95, accuracy: 0.001)
+        XCTAssertEqual(h.coreWidth, 2.2, accuracy: 0.001)
+        XCTAssertEqual(h.coreOpacity, 1.0, accuracy: 0.001)
+        XCTAssertEqual(h.coreShadow, 11, accuracy: 0.001)
+        XCTAssertEqual(h.innerBlur, 38, accuracy: 0.001)
+        XCTAssertEqual(h.innerOpacity, 0.35, accuracy: 0.001)
+    }
+
+    /// The lit portion of the edge: about the middle third at the start of a
+    /// hold, the whole edge after a full sentence.
+    func testSpreadRunsFromAThirdToEverything() {
+        XCTAssertEqual(DictationStripLevel.spread(fill: 0), 0.18, accuracy: 0.001)
+        XCTAssertEqual(DictationStripLevel.spread(fill: 1), 0.60, accuracy: 0.001)
+        XCTAssertEqual(DictationStripLevel.spread(fill: 2), 0.60, accuracy: 0.001)
     }
 
     /// The audio engine reports raw peak, which can exceed 1 on a hot mic
@@ -37,7 +90,8 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(DictationStripLevel.clamp(-0.5), 0)
         XCTAssertEqual(DictationStripLevel.clamp(3.0), 1)
         XCTAssertEqual(DictationStripLevel.clamp(0.4), 0.4, accuracy: 0.0001)
-        XCTAssertEqual(DictationStripLevel.rim(3.0).radius, 24, accuracy: 0.001)
+        XCTAssertEqual(DictationStripLevel.halo(3.0).outerBlur, 42, accuracy: 0.001)
+        XCTAssertEqual(DictationStripLevel.halo(-1).outerBlur, 12, accuracy: 0.001)
     }
 
     /// The headroom, without which the strip barely moves during speech: a
@@ -104,14 +158,18 @@ final class DictationStripTests: XCTestCase {
     func testEndDictatingPutsEverythingBack() {
         let model = NotchViewModel()
         model.beginDictating(into: "TextEdit", mic: nil, on: a)
-        model.updateDictating(level: 0.7, mic: "AirPods")
-        XCTAssertEqual(model.dictationLevel, 0.7, accuracy: 0.0001)
+        for _ in 0..<30 { model.updateDictating(level: 0.7, mic: "AirPods") }
+        // The published level is the smoothed voice, so it lands near the
+        // raw value rather than on it, and a second of it starts the fill.
+        XCTAssertEqual(model.dictationLevel, 0.7, accuracy: 0.05)
+        XCTAssertGreaterThan(model.dictationFill, 0.1)
         XCTAssertEqual(model.dictationInfo?.micName, "AirPods")
 
         model.endDictating()
         XCTAssertEqual(model.state, .collapsed)
         XCTAssertNil(model.dictationInfo)
         XCTAssertEqual(model.dictationLevel, 0)
+        XCTAssertEqual(model.dictationFill, 0)
         XCTAssertNil(model.expandedDisplayID)
     }
 
