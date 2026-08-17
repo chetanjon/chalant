@@ -4,6 +4,7 @@
 #
 #   Dictation/tools/earprobe/earprobe rate    [logdir]   sample-rate change on the live device
 #   Dictation/tools/earprobe/earprobe device  [logdir]   an input device appears, then disappears
+#   Dictation/tools/earprobe/earprobe flip <uid> [logdir]  default input to <uid> and back to the built-in mic
 #
 # Each run streams the app's log (info level is NOT persisted by `log show`,
 # so it has to be streamed live), drives a 2s synthetic left-Option hold
@@ -20,6 +21,12 @@
 #           made default input, then destroyed: the device SET changes the
 #           way a plug/unplug changes it. Note: on the 1.15.0 code this did
 #           NOT wedge, so it is a regression check, not a reproduction.
+#   flip    the system default input moves to another device (a Bluetooth
+#           headset, say) and back, the SET unchanged. The flip BACK is the
+#           founder-shaped event of 2026-08-16: the engine stops itself on
+#           the notification, devicesChanged() had nothing to do, and on
+#           1.15.0 the tap stays dead. Pass = `engine stopped itself ...
+#           restarting` within ~100ms and a hold 1s later feeds >0.
 #
 # Side effects, all undone before exit: default input device, the built-in
 # mic's nominal rate, a scratch TextEdit document (which absorbs anything a
@@ -28,7 +35,7 @@
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 SCENARIO=${1:-rate}
-OUT=${2:-/tmp/earprobe}
+if [ "$SCENARIO" = flip ]; then FLIP_UID=${2:?usage: earprobe flip <uid> [logdir]}; OUT=${3:-/tmp/earprobe}; else OUT=${2:-/tmp/earprobe}; fi
 mkdir -p "$OUT"
 BIN="$OUT/bin"; mkdir -p "$BIN"
 for t in audiodev optionhold; do
@@ -60,11 +67,16 @@ case "$SCENARIO" in
     hold after-appear
     mark "DEVICE DISAPPEARS"; "$BIN/audiodev" remove $MIC; sleep 3
     hold after-disappear ;;
-  *) echo "usage: earprobe rate|device [logdir]"; kill $STREAM; exit 2 ;;
+  flip)
+    mark "DEFAULT -> $FLIP_UID"; "$BIN/audiodev" default "$FLIP_UID"; sleep 4
+    hold other-default
+    mark "DEFAULT -> built-in"; "$BIN/audiodev" default $MIC; sleep 1
+    hold one-second-after-flip-back ;;
+  *) echo "usage: earprobe rate|device|flip <uid> [logdir]"; kill $STREAM; exit 2 ;;
 esac
 sleep 2; kill $STREAM 2>/dev/null; mark "DONE"
 "$BIN/audiodev" list
 echo
-grep -E '=====|keyDown entered|fed [0-9]+ buffers|nothing heard|utterance:|devices changed|warm engine|delivered no|could not bind' "$LOG" \
+grep -E '=====|keyDown entered|fed [0-9]+ buffers|nothing heard|utterance:|devices changed|warm engine|delivered no|stopped itself|raised|could not bind' "$LOG" \
   | sed -E 's/^[0-9-]+ //' | cut -c1-160
 echo; echo "full log: $LOG"

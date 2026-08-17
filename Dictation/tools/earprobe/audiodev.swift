@@ -4,6 +4,8 @@
 //   audiodev list
 //   audiodev add <source-device-uid>      creates "Chalant Test Aggregate" wrapping the source, makes it default input
 //   audiodev remove <restore-default-uid> destroys the aggregate, restores the default input
+//   audiodev rates <uid> | rate <uid> <hz>  read / set a device's nominal sample rate
+//   audiodev default <uid>                make a device the system default input
 import CoreAudio
 import Foundation
 
@@ -113,6 +115,9 @@ case "rate":
     var value = hz
     let st = AudioObjectSetPropertyData(id, &a, 0, nil, UInt32(MemoryLayout<Float64>.size), &value)
     print("set nominal sample rate of \(args[2]) to \(hz): \(st == noErr ? "ok" : "failed \(st)")")
+case "default":
+    guard args.count > 2, let id = find(uid: args[2]) else { print("usage: audiodev default <uid>"); exit(2) }
+    print("set default input to \(args[2]): \(setDefaultInput(id))")
 default:
-    print("usage: audiodev list | add <uid> | remove [restore-uid] | rates <uid> | rate <uid> <hz>")
+    print("usage: audiodev list | add <uid> | remove [restore-uid] | rates <uid> | rate <uid> <hz> | default <uid>")
 }
