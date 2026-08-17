@@ -86,13 +86,17 @@ actor FoundationModelsPolisher: Polisher {
             } catch {
                 // Includes guardrail refusals, which Part 0 §0.7 makes an
                 // ordinary outcome. This piece ships as dictated; the rest of
-                // the paragraph still gets its chance.
-                Self.log.error("cleanup failed on a chunk, shipping that chunk as dictated")
+                // the paragraph still gets its chance. The framework's own
+                // words are logged (token counts, refusal class), never the
+                // transcript, because a failure that only says "failed" is
+                // how the shared-session context overflow went unnoticed.
+                Self.log.error(
+                    "cleanup failed on a chunk, shipping that chunk as dictated: \(String(describing: error), privacy: .public)")
                 out.append(piece)
                 continue
             }
 
-            let cleaned = CleanupPrompt.unwrap(reply)
+            let cleaned = CleanupPrompt.keepingEnding(of: piece, in: CleanupPrompt.unwrap(reply))
 
             // Lengths and reasons, never content. Part 1 §2: transcripts never
             // enter logs, and this path exists precisely when the model got the

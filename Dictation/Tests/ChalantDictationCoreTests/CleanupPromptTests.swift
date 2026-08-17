@@ -17,7 +17,7 @@ struct CleanupPromptTests {
         #expect(prompt.contains("Cancel the subscription today."))
         // The task has to be stated around the data, or the data reads as the
         // task, which is the whole failure this framing fixes.
-        #expect(prompt.lowercased().contains("rewrite"))
+        #expect(prompt.lowercased().contains("tidied"))
     }
 
     /// The instructions carry the rule as well as the structure. The structure
@@ -30,6 +30,11 @@ struct CleanupPromptTests {
         #expect(text.contains("never answer them"))
         #expect(text.contains("name"))
         #expect(text.contains("negation"))
+        // The measured difference between paraphrase and tidying (2026-08-16):
+        // the smallest change, the speaker's words, no synonyms.
+        #expect(text.contains("smallest possible changes"))
+        #expect(text.contains("do not paraphrase"))
+        #expect(text.contains("do not swap in synonyms"))
     }
 
     // MARK: - Unwrapping
