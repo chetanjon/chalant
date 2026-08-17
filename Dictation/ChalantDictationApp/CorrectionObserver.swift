@@ -1,3 +1,4 @@
+import AppKit
 import ApplicationServices
 import ChalantDictationCore
 import Foundation
@@ -49,13 +50,20 @@ actor CorrectionObserver {
         defaults.set(on, forKey: enabledKey)
     }
 
-    /// How long a correction stays interesting. Part 8 §3 says ~20 seconds:
-    /// long enough for someone to notice a wrong name and fix it, short enough
-    /// that the next thing they type is a different thought entirely.
-    private static let window: Duration = .seconds(20)
+    /// How long a correction stays interesting. Part 8 §3 said ~20 seconds.
+    /// **45 now, measured 2026-08-16:** the founder reads a message back before
+    /// fixing it, and 20 was gone before the fix landed.
+    private static let window: Duration = .seconds(45)
     private static let interval: Duration = .milliseconds(750)
 
-    private var watching: Task<Void, Never>?
+    /// One watch PER APP, not one watch. Measured 2026-08-16 in the founder's
+    /// own hands: they dictate in bursts, Slack, then a word to the terminal,
+    /// then Chrome, and a single "the next dictation cancels the watch" rule
+    /// meant Slack was never observed once in five minutes of trying. A new
+    /// insertion replaces the watch for THAT app only; the others keep looking,
+    /// and each only reads the field while its own app is in front, so a
+    /// dictation elsewhere cannot be mistaken for an edit here.
+    private var watching: [String: Task<Void, Never>] = [:]
 
     /// Which apps this has ever managed to read, so coverage is measurable
     /// rather than assumed. Process-lifetime only; it is a diagnostic, not a
@@ -66,17 +74,18 @@ actor CorrectionObserver {
     func watch(inserted: String, in bundleID: String?) {
         guard Self.isEnabled(), !inserted.isEmpty else { return }
 
-        // One watch at a time. A second dictation means the user has moved on
-        // and the first correction is no longer the interesting one.
-        watching?.cancel()
-        watching = Task { [inserted, bundleID] in
+        // A second dictation into the SAME app means the user has moved on
+        // there; watches on other apps are still live.
+        let key = bundleID ?? ""
+        watching[key]?.cancel()
+        watching[key] = Task { [inserted, bundleID] in
             await self.poll(inserted: inserted, bundleID: bundleID)
         }
     }
 
     func stop() {
-        watching?.cancel()
-        watching = nil
+        for task in watching.values { task.cancel() }
+        watching = [:]
     }
 
     private func poll(inserted: String, bundleID: String?) async {
@@ -87,20 +96,45 @@ actor CorrectionObserver {
             try? await Task.sleep(for: Self.interval)
             guard !Task.isCancelled else { return }
 
+            // Only this watch's own app. The focused field belongs to whatever
+            // is in front, and a burst of dictation elsewhere must not be
+            // diffed against words that went somewhere else.
+            if let bundleID, Self.frontmostBundleID() != bundleID { continue }
+
             guard let field = Self.focusedFieldValue() else { continue }
             sawAnything = true
 
-            guard let pair = Correction.learning(inserted: inserted, nowReads: field) else {
-                continue
+            let pairs = Correction.learnings(inserted: inserted, nowReads: field)
+            guard !pairs.isEmpty else { continue }
+            for pair in pairs {
+                let isWord = await Self.isDictionaryWord(pair.heard)
+                await LearnedTerms.shared.record(pair, heardIsWord: isWord)
             }
-            await LearnedTerms.shared.record(pair)
             note(bundleID, readable: true)
-            // One correction per insertion. A second edit to the same text is
-            // the user writing, not fixing.
+            // One round of corrections per insertion. A further edit to the
+            // same text is the user writing, not fixing.
             return
         }
 
         note(bundleID, readable: sawAnything)
+    }
+
+    /// Whether the system spell checker knows this as an English word.
+    /// "challenge" yes; "Kisu", "Shalan", "Kiesel" no. It decides whether a
+    /// learned exact rewrite is trusted from the first sighting: a name
+    /// misheard as a real word must not start rewriting that real word after
+    /// one fix (2026-08-16, "challenge" for Chalant on the first live run).
+    @MainActor
+    private static func isDictionaryWord(_ word: String) -> Bool {
+        let checker = NSSpellChecker.shared
+        let range = checker.checkSpelling(
+            of: word, startingAt: 0, language: "en", wrap: false,
+            inSpellDocumentWithTag: 0, wordCount: nil)
+        return range.location == NSNotFound
+    }
+
+    private static func frontmostBundleID() -> String? {
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     }
 
     private func note(_ bundleID: String?, readable ok: Bool) {
