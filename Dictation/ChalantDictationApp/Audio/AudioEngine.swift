@@ -72,6 +72,10 @@ actor AudioEngine {
     /// warm start, because every warm start makes a new ring whose count
     /// begins at zero.
     private var pulse = TapPulse(count: 0, at: Date())
+    /// When a start was last attempted while the engine was down, so the
+    /// poll can retry without retrying every tick.
+    private var lastStartAttempt = Date.distantPast
+    private static let downRetryInterval: TimeInterval = 5
 
     /// Choose the best ear available and start on it. Preference decides the
     /// order, evidence overrules it (`InputChoice`).
@@ -81,6 +85,7 @@ actor AudioEngine {
 
     private func startWarm(avoiding silent: Set<String>) throws {
         guard !isRunning else { return }
+        lastStartAttempt = Date()
 
         // A brand-new engine, tied to the hardware as it is right now. The old
         // one may have been bound to a device that is gone, or to a
@@ -122,19 +127,50 @@ actor AudioEngine {
         self.format = inputFormat
 
         let gate = capturing
-        input.installTap(onBus: 0, bufferSize: 4800, format: inputFormat) { buffer, time in
-            // ---- REAL-TIME THREAD. Part 1 §2 governs absolutely. ----
-            // No await, no allocation, no locks, no logging, no concurrency.
-            // Health first, and unconditionally: a mic that is delivering
-            // nothing has to be knowable before a session is spent on it.
-            ring.observe(buffer)
-            guard gate.isOpen else { return }
-            ring.write(buffer, hostTime: time.hostTime)
-            // ---------------------------------------------------------
+        // Both of these RAISE rather than throw when the graph disagrees
+        // with them, and a raised NSException ends the process where it
+        // stands. It did, 2026-08-16 17:07:45: the founder connected a
+        // Bluetooth headset, the tap on the built-in mic stalled, the
+        // watchdog rebuilt the engine, and `installTap` raised "Failed to
+        // create tap due to format mismatch, 1 ch, 16000 Hz". The input
+        // node's format lags the device it was just bound to (the AUHAL
+        // logged its stream-format change 1.3s after the bind), so a
+        // restart inside that window reads a stale format. `AudioGuard`
+        // is what the parent project already uses for exactly this; a
+        // caught raise means the engine is torn down and the next poll
+        // tries again, by which time the formats have settled.
+        do {
+            try AudioGuard.attempt("dictation installTap") {
+                input.installTap(onBus: 0, bufferSize: 4800, format: inputFormat) { buffer, time in
+                    // ---- REAL-TIME THREAD. Part 1 §2 governs absolutely. ----
+                    // No await, no allocation, no locks, no logging, no concurrency.
+                    // Health first, and unconditionally: a mic that is delivering
+                    // nothing has to be knowable before a session is spent on it.
+                    ring.observe(buffer)
+                    guard gate.isOpen else { return }
+                    ring.write(buffer, hostTime: time.hostTime)
+                    // ---------------------------------------------------------
+                }
+            }
+            engine.prepare()
+            var startError: Error?
+            try AudioGuard.attempt("dictation engine start") {
+                do { try engine.start() } catch { startError = error }
+            }
+            if let startError { throw startError }
+        } catch {
+            // Whatever the framework left behind is not to be trusted. Drop
+            // the tap if one landed, and let go of the engine entirely: the
+            // next start makes a new one.
+            AudioGuard.succeeds("dictation removeTap after a failed start") {
+                input.removeTap(onBus: 0)
+            }
+            engine.stop()
+            self.ring = nil
+            self.format = nil
+            isRunning = false
+            throw error
         }
-
-        engine.prepare()
-        try engine.start()
         isRunning = true
         lastSoundAt = Date()
         pulse = TapPulse(count: ring.observedBufferCount, at: Date())
@@ -164,7 +200,19 @@ actor AudioEngine {
     /// rebuilt on the device it already had.
     @discardableResult
     func hopIfDeaf() -> InputChoice.Device? {
-        guard isRunning, !capturing.isOpen else { return nil }
+        guard !capturing.isOpen else { return nil }
+
+        // Down, for whatever reason: a start that raised, a device that
+        // reported 0 Hz, nothing attached at launch. While this poll exists
+        // the engine is meant to be up, so keep trying, but not every second
+        // for hours on a Mac with no microphone: a start attempt is a fresh
+        // engine plus a device scan, and a failure logs.
+        guard isRunning else {
+            guard Date().timeIntervalSince(lastStartAttempt) >= Self.downRetryInterval else { return nil }
+            lastStartAttempt = Date()
+            try? startWarm(avoiding: silentUIDs)
+            return isRunning ? currentDevice : nil
+        }
 
         if let ring, pulse.observe(count: ring.observedBufferCount, at: Date()) {
             Self.log.error(
