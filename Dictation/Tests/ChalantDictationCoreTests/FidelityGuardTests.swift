@@ -252,6 +252,31 @@ struct FidelityGuardTests {
         #expect(!ok("The ABI key ends in 472.", "The ABI key ends in 4723 ends in 472."))
     }
 
+    /// Measured 2026-08-16 on the founder's real utterances, fresh session per
+    /// utterance: "I'm already working on a project" came back as "I'm I'm
+    /// already working on a project", and "Kalisi, Veldam" as "Kalisi, Kalisi,
+    /// Veldam". A single word doubled is not a repeated PAIR, so the bigram
+    /// rule let both through.
+    @Test("a word the model doubled is a stutter too")
+    func catchesDoubledWord() {
+        #expect(!ok(
+            "I'm already working on a project right now.",
+            "I'm I'm already working on a project right now."))
+        #expect(!ok(
+            "Evening movie, Ki, Veldamu, Ante, Andaram, Kalisi, Veldam.",
+            "Evening movie, Ki, Veldamu, Ante, Andaram, Kalisi, Kalisi, Veldam."))
+    }
+
+    @Test("a doubled word the speaker said is theirs to keep")
+    func speakersDoubledWordIsFine() {
+        #expect(ok(
+            "I know that that is the plan.",
+            "I know that that is the plan."))
+        #expect(ok(
+            "It was very very late.",
+            "It was very, very late."))
+    }
+
     @Test("throwing the text away is a violation")
     func catchesEmptyOutput() {
         #expect(!ok("Ship Chalant on Monday.", ""))

@@ -108,6 +108,18 @@ public enum FidelityGuard {
             positions[tokens[index] + " " + tokens[index + 1], default: []].append(index)
         }
 
+        // A single word doubled ("I'm I'm already", "Kalisi, Kalisi, Veldam")
+        // is not a repeated PAIR, so the bigram rule below misses it. Measured
+        // 2026-08-16 on the founder's real utterances, both from the model.
+        // Only when the speaker did not say it doubled: "that that" and
+        // "very very" are English.
+        let doubledBefore = doubledWords(raw)
+        for index in 1..<tokens.count where tokens[index] == tokens[index - 1] {
+            if !doubledBefore.contains(tokens[index]) {
+                return "the model repeated itself: \(tokens[index])"
+            }
+        }
+
         let before = bigrams(raw)
         for (pair, where_) in positions where where_.count >= 2 {
             // A repetition the speaker made is not the model's stutter, and
@@ -118,6 +130,16 @@ public enum FidelityGuard {
             }
         }
         return nil
+    }
+
+    private static func doubledWords(_ text: String) -> Set<String> {
+        let tokens = words(in: text).map { bare($0).lowercased() }.filter { !$0.isEmpty }
+        guard tokens.count > 1 else { return [] }
+        var doubled: Set<String> = []
+        for index in 1..<tokens.count where tokens[index] == tokens[index - 1] {
+            doubled.insert(tokens[index])
+        }
+        return doubled
     }
 
     private static func bigrams(_ text: String) -> [String: Int] {
