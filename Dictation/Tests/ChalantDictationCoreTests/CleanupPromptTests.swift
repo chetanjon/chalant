@@ -99,6 +99,27 @@ struct CleanupPromptTests {
         #expect(CleanupPrompt.keepingEnding(of: "Do it.", in: "") == "")
     }
 
+    /// Set C, C30, 2026-08-16, 2 of 4 runs: "Keep the old version, do not
+    /// overwrite it." came back with a second line reading "TRANSCRIPT.", a
+    /// fragment of the closing marker without its brackets. A stray line is
+    /// corruption no guard rule covers (nothing went missing, nothing was
+    /// negated), so it would have been pasted into the user's document.
+    @Test("a bare marker fragment on its own line is stripped, top or bottom")
+    func strayMarkerLinesStripped() {
+        #expect(CleanupPrompt.unwrap("Keep the old version, do not overwrite it.\nTRANSCRIPT.") == "Keep the old version, do not overwrite it.")
+        #expect(CleanupPrompt.unwrap("Keep the old version, do not overwrite it.\nTRANSCRIPT") == "Keep the old version, do not overwrite it.")
+        #expect(CleanupPrompt.unwrap("Keep the old version, do not overwrite it.\n<<<TRANSCRIPT") == "Keep the old version, do not overwrite it.")
+        #expect(CleanupPrompt.unwrap("TRANSCRIPT\nKeep the old version.") == "Keep the old version.")
+    }
+
+    /// The speaker's own word "transcript" is theirs: same line, their case.
+    @Test("the word transcript in the speaker's own sentence is not a marker")
+    func speakersOwnTranscriptWordSurvives() {
+        #expect(CleanupPrompt.unwrap("Send me the transcript.") == "Send me the transcript.")
+        #expect(CleanupPrompt.unwrap("Send me the TRANSCRIPT.") == "Send me the TRANSCRIPT.")
+        #expect(CleanupPrompt.unwrap("Where is the transcript?\nI need it today.") == "Where is the transcript?\nI need it today.")
+    }
+
     @Test("an ordinary reply passes through untouched")
     func leavesCleanRepliesAlone() {
         #expect(CleanupPrompt.unwrap("Ship Chalant on Monday.") == "Ship Chalant on Monday.")
