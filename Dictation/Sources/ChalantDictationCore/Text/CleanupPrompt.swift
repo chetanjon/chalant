@@ -64,6 +64,24 @@ public enum CleanupPrompt {
         it unchanged. Do not summarise and do not explain what you did.
         """
 
+    /// Whether an utterance is worth the model's time at all.
+    ///
+    /// **Option B, the founder's decision of 2026-08-16**, from the measured
+    /// table in `verification/SETC_AND_L6_2026-08-16.md`. On 92 of their real
+    /// utterances the model changed 22, and only 2 of those were 40 characters
+    /// or shorter, both trivial ("How do we uh?" to "How do we?"). Short
+    /// dictation is commands and replies, and there the model has nothing to
+    /// add and half a second to cost. Cleaning only above this line takes L6
+    /// from a 0.86s median to 0.35s (p95 2.11s to 1.87s) and keeps 20 of the
+    /// 22 fixes; on Set C it halves the utterances the model touches (4-5 of
+    /// 30 to 2). Deterministic passes (Guardrail, Disfluency, Fillers) still
+    /// run on everything; this gates the model only.
+    public static let minimumCharactersForCleanup = 40
+
+    public static func worthCleaning(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).count > minimumCharactersForCleanup
+    }
+
     /// One utterance, wrapped so the model cannot mistake it for a turn in a
     /// conversation.
     public static func framing(_ transcript: String) -> String {

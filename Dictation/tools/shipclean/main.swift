@@ -6,7 +6,7 @@ import FoundationModels
 // utterances, so "how clean is the output on real speech" is a number and a
 // list, not a feeling.
 //
-//   shipclean <captured.jsonl> <out.jsonl> [--before <ISO-8601 recorded cutoff>] [--limit N] [--fresh]
+//   shipclean <captured.jsonl> <out.jsonl> [--before <ISO-8601 recorded cutoff>] [--limit N] [--fresh] [--all]
 //
 // `--fresh` makes a NEW LanguageModelSession per utterance (the model stays
 // resident, so this costs almost nothing). Without it, one session is shared
@@ -26,6 +26,8 @@ guard a.count > 2 else { print("usage: shipclean <captured.jsonl> <out.jsonl> [-
 var cutoff = "9999"
 var limit = Int.max
 let fresh = a.contains("--fresh")
+let all = a.contains("--all")
+var skipped = 0
 // `--tight` used to select an experimental smallest-edit wording; that wording
 // is now Core's, so the flag is a no-op kept for old command lines.
 let tight = a.contains("--tight")
@@ -62,6 +64,15 @@ var changedCount = 0, rejectedCount = 0
 var times: [Double] = []
 for (n, r) in rows.enumerated() {
     let text = r.output.trimmingCharacters(in: .whitespacesAndNewlines)
+    // The shipping gate: `--all` ignores it, to measure what the model WOULD do
+    // to everything (the number that justified the gate).
+    if !all, !CleanupPrompt.worthCleaning(text) {
+        let res = Result(id: r.id, app: r.app, input: text, output: text, changed: false, chunks: 0, rejected: [], seconds: 0)
+        out.write(try! enc.encode(res)); out.write(Data("\n".utf8))
+        skipped += 1
+        print("\(n + 1)/\(rows.count) skipped (\(text.count) chars)")
+        continue
+    }
     let pieces = CleanupPrompt.chunks(text)
     if fresh, n > 0 { session = LanguageModelSession(instructions: instructionsInUse) }
     let started = ContinuousClock.now
@@ -91,4 +102,4 @@ for (n, r) in rows.enumerated() {
 }
 let sorted = times.sorted()
 func pct(_ p: Double) -> Double { sorted[min(sorted.count - 1, Int(Double(sorted.count) * p))] }
-print("changed \(changedCount)/\(rows.count), rejected \(rejectedCount)/\(rows.count), p50 \(String(format: "%.2f", pct(0.5)))s p95 \(String(format: "%.2f", pct(0.95)))s")
+print("skipped by the length gate \(skipped)/\(rows.count); changed \(changedCount)/\(rows.count), rejected \(rejectedCount)/\(rows.count), p50 \(String(format: "%.2f", pct(0.5)))s p95 \(String(format: "%.2f", pct(0.95)))s")

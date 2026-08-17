@@ -37,6 +37,29 @@ struct CleanupPromptTests {
         #expect(text.contains("do not swap in synonyms"))
     }
 
+    // MARK: - Which utterances are worth the model's time
+
+    /// Option B, chosen by the founder 2026-08-16 from the measured table in
+    /// `verification/SETC_AND_L6_2026-08-16.md`: on 92 real utterances the
+    /// model changed 22, and only 2 of those were 40 characters or shorter,
+    /// both trivial. Cleaning only above 40 takes L6 from a 0.86s median to
+    /// 0.35s and keeps 20 of the 22 fixes. Short dictation is commands and
+    /// replies; the model has nothing to add there and half a second to cost.
+    @Test("forty characters or fewer ship as dictated; forty-one go to the model")
+    func shortUtterancesSkipTheModel() {
+        let forty = String(repeating: "a", count: 40)
+        #expect(!CleanupPrompt.worthCleaning(forty))
+        #expect(CleanupPrompt.worthCleaning(forty + "b"))
+        #expect(!CleanupPrompt.worthCleaning("What next?"))
+        #expect(CleanupPrompt.worthCleaning("Send the Chalant build to Kizu and tell Aidan it is ready."))
+    }
+
+    @Test("surrounding whitespace does not buy a cleanup")
+    func whitespaceDoesNotCount() {
+        let thirtyNine = String(repeating: "a", count: 39)
+        #expect(!CleanupPrompt.worthCleaning("   " + thirtyNine + "   \n"))
+    }
+
     // MARK: - Unwrapping
 
     @Test("markers the model echoed are stripped back off")
