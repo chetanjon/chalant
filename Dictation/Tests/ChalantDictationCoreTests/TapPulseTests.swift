@@ -19,8 +19,11 @@ struct TapPulseTests {
 
     /// `#expect` cannot call a mutating member inline, so every observation
     /// goes through here.
-    private func stalled(_ pulse: inout TapPulse, count: UInt64, after seconds: TimeInterval) -> Bool {
-        pulse.observe(count: count, at: t0 + seconds)
+    private func stalled(
+        _ pulse: inout TapPulse, count: UInt64, after seconds: TimeInterval,
+        threshold: TimeInterval = TapPulse.threshold
+    ) -> Bool {
+        pulse.observe(count: count, at: t0 + seconds, threshold: threshold)
     }
 
     @Test("buffers arriving means the tap is alive, however slowly it is polled")
@@ -56,5 +59,18 @@ struct TapPulseTests {
     func freshStartIsNotAStall() {
         var pulse = TapPulse(count: 0, at: t0)
         #expect(!stalled(&pulse, count: 0, after: 1))
+    }
+
+    /// At key-down the question is sharper: a live tap delivers a buffer
+    /// every ~100ms, so half a second of nothing is already a dead ear, and
+    /// the hold should get a fresh one rather than feed 0 buffers.
+    @Test("a shorter threshold trips sooner, on the same clock")
+    func shorterThresholdTripsSooner() {
+        var pulse = TapPulse(count: 0, at: t0)
+        #expect(!stalled(&pulse, count: 5, after: 1))
+        #expect(!stalled(&pulse, count: 5, after: 1.4, threshold: 0.5))
+        #expect(stalled(&pulse, count: 5, after: 1.5, threshold: 0.5))
+        // And the default threshold still holds its own bar.
+        #expect(!stalled(&pulse, count: 5, after: 2.9))
     }
 }

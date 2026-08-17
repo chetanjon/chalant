@@ -315,6 +315,38 @@ actor AudioEngine {
         try? startWarm(avoiding: silentUIDs)
     }
 
+    /// The ear must be alive at key-down, and this is where that is settled,
+    /// BEFORE the session reads the engine's format and prepares the
+    /// analyzer against it, so a rebuild here is the format the session sees.
+    ///
+    /// A live tap delivers a buffer every ~100ms, so half a second of nothing
+    /// means the hold is about to feed 0 buffers and the user is about to see
+    /// nothing land. Measured 2026-08-16 17:20: the default input moved to a
+    /// Bluetooth headset, the tap on the built-in mic stopped without a word,
+    /// and a hold that landed inside the watchdog's 2s window fed 0.
+    /// Rebuilding costs ~100ms once, against a whole sentence lost.
+    ///
+    /// The half-second bar, not the watchdog's two: at key-down the question
+    /// is "is it alive right now", and a fresh engine that has not delivered
+    /// its first buffer within 500ms is not going to.
+    func ensureAlive() {
+        guard !capturing.isOpen else { return }
+        if isRunning, let ring,
+           pulse.observe(count: ring.observedBufferCount, at: Date(), threshold: Self.keyDownStallThreshold) {
+            Self.log.error(
+                """
+                tap on \(self.currentDevice?.name ?? "the system default", privacy: .public) \
+                was dead at key-down; rebuilding before capture
+                """
+            )
+            stop()
+            try? startWarm(avoiding: silentUIDs)
+        } else if !isRunning {
+            try? startWarm(avoiding: silentUIDs)
+        }
+    }
+    private static let keyDownStallThreshold: TimeInterval = 0.5
+
     /// Open the gate. Cheap by design: no engine start, so no spin-up latency
     /// and no clipped onset.
     func beginCapture() {
