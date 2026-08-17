@@ -863,3 +863,63 @@ problem, and not the whole-paragraph failure of rewriting the speaker in the
 third person throughout. Every run keeps *"I will just go back to sleep"*.
 There is still no guard for pronoun identity; this is the size of what it would
 be catching.
+
+### 2026-08-16 (evening) — THE SHIPPING CLEANUP, RUN AS SHIPPED, ON 92 REAL UTTERANCES: ONE SHARED SESSION WAS COSTING 4x AND KILLING ITSELF; "REWRITE" WAS PARAPHRASING
+
+`tools/shipclean`: the shipping path (`CleanupPrompt.chunks` / `framing` /
+`unwrap`, `FidelityGuard`, compiled from Core) over every utterance in
+`captured.jsonl` recorded before cleanup shipped, so `output` is raw
+deterministic text. 92 utterances of the founder's own speech.
+
+**Finding 1, a shipping bug (1.14.0 through 1.15.1): the polisher reused ONE
+`LanguageModelSession` for every utterance.** A session keeps a transcript, so
+the context grew all day. Same 92 utterances, same wording:
+
+| | shared session | fresh session per utterance |
+|---|---|---|
+| median | 2.2 to 2.7s | **0.55s** |
+| p95 | 4.6 to 6.1s | **1.9s** |
+| utterances changed | 17 to 26 | **50** |
+| context overflow (`exceeds the maximum allowed context size of 8192`) | every row past ~90 | none |
+
+The model was slower AND lazier with a history of prior turns in front of it,
+and eventually failed on every call until relaunch. Nobody saw it because the
+failure log said only "failed" and the founder's app was relaunched often.
+**Fixed: a fresh session per utterance; the model stays resident so it costs
+nothing measurable. The log now carries the framework's reason.**
+
+**Finding 2: "rewrite" is licence to paraphrase.** With fresh sessions the
+model cleaned far more, and rewrote far more: "What next?" → "What comes
+next?", "We got to be perfect" → "We must be perfect", "Make it PDF, man" →
+"Make it a PDF", "I gave you" → "you gave me" (meaning inverted, uncaught), a
+whole clause dropped (uncaught). Smallest-edit wording, measured against it:
+
+| | "rewrite" | "smallest possible changes" |
+|---|---|---|
+| utterances given words never said | 23 | **1 to 2** |
+| chunks the guard rejected | 13 | **2 to 3** |
+| utterances with fillers, before → after | 14 → 9 | 14 → 7 or 8 |
+| the model's own stutters | 3 → 2 | 3 → 1 |
+| lost final period/question mark | 1 | 4 before `keepingEnding`, **0** after |
+| median / p95 | 0.55s / 1.9s | 0.58s / 1.8s |
+
+Two runs of the final wording agree within one utterance (22/92 changed, 2 and
+3 rejected). **Shipped.**
+
+**Finding 3, three model habits the guard now catches or unwrap repairs:**
+typographic quotes ("it’s", "“done”": 0 of 92 after `plainQuotes`); a single
+doubled word ("I'm I'm", "Kalisi, Kalisi": caught, both recur run to run);
+dropped final punctuation on short lines (repaired, above).
+
+**What is still not clean, honestly:** 5 of 92 keep a "like, you know" run
+the small model does not touch, code-switched Telugu gets a letter changed now
+and then ("vellama" → "wellama", not a capitalised name so the names check
+cannot see it), and there is still no guard for pronoun identity or for a
+dropped clause of ordinary words. Under the tight wording neither happened in
+184 runs; under "rewrite" both did.
+
+**Method note that outlasts the numbers: measure the SHIPPING path, not a copy
+of it.** `tools/cleanupprobe` carries its own prompt and its own session
+policy, and it could never have found finding 1. `shipclean` compiles Core so
+it cannot drift; the polisher's session policy is the one line it must mirror
+by hand, and it does now.
