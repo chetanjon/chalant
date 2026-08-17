@@ -37,6 +37,29 @@ struct CleanupPromptTests {
         #expect(text.contains("do not swap in synonyms"))
     }
 
+    // MARK: - Which utterances are worth the model's time
+
+    /// Option B, chosen by the founder 2026-08-16 from the measured table in
+    /// `verification/SETC_AND_L6_2026-08-16.md`: on 92 real utterances the
+    /// model changed 22, and only 2 of those were 40 characters or shorter,
+    /// both trivial. Cleaning only above 40 takes L6 from a 0.86s median to
+    /// 0.35s and keeps 20 of the 22 fixes. Short dictation is commands and
+    /// replies; the model has nothing to add there and half a second to cost.
+    @Test("forty characters or fewer ship as dictated; forty-one go to the model")
+    func shortUtterancesSkipTheModel() {
+        let forty = String(repeating: "a", count: 40)
+        #expect(!CleanupPrompt.worthCleaning(forty))
+        #expect(CleanupPrompt.worthCleaning(forty + "b"))
+        #expect(!CleanupPrompt.worthCleaning("What next?"))
+        #expect(CleanupPrompt.worthCleaning("Send the Chalant build to Kizu and tell Aidan it is ready."))
+    }
+
+    @Test("surrounding whitespace does not buy a cleanup")
+    func whitespaceDoesNotCount() {
+        let thirtyNine = String(repeating: "a", count: 39)
+        #expect(!CleanupPrompt.worthCleaning("   " + thirtyNine + "   \n"))
+    }
+
     // MARK: - Unwrapping
 
     @Test("markers the model echoed are stripped back off")
@@ -74,6 +97,27 @@ struct CleanupPromptTests {
         #expect(CleanupPrompt.keepingEnding(of: "We start there. See, we are doing like, uh,", in: "We start there. See, we are doing like") == "We start there. See, we are doing like")
         // Empty reply is the guard's business, not this one's.
         #expect(CleanupPrompt.keepingEnding(of: "Do it.", in: "") == "")
+    }
+
+    /// Set C, C30, 2026-08-16, 2 of 4 runs: "Keep the old version, do not
+    /// overwrite it." came back with a second line reading "TRANSCRIPT.", a
+    /// fragment of the closing marker without its brackets. A stray line is
+    /// corruption no guard rule covers (nothing went missing, nothing was
+    /// negated), so it would have been pasted into the user's document.
+    @Test("a bare marker fragment on its own line is stripped, top or bottom")
+    func strayMarkerLinesStripped() {
+        #expect(CleanupPrompt.unwrap("Keep the old version, do not overwrite it.\nTRANSCRIPT.") == "Keep the old version, do not overwrite it.")
+        #expect(CleanupPrompt.unwrap("Keep the old version, do not overwrite it.\nTRANSCRIPT") == "Keep the old version, do not overwrite it.")
+        #expect(CleanupPrompt.unwrap("Keep the old version, do not overwrite it.\n<<<TRANSCRIPT") == "Keep the old version, do not overwrite it.")
+        #expect(CleanupPrompt.unwrap("TRANSCRIPT\nKeep the old version.") == "Keep the old version.")
+    }
+
+    /// The speaker's own word "transcript" is theirs: same line, their case.
+    @Test("the word transcript in the speaker's own sentence is not a marker")
+    func speakersOwnTranscriptWordSurvives() {
+        #expect(CleanupPrompt.unwrap("Send me the transcript.") == "Send me the transcript.")
+        #expect(CleanupPrompt.unwrap("Send me the TRANSCRIPT.") == "Send me the TRANSCRIPT.")
+        #expect(CleanupPrompt.unwrap("Where is the transcript?\nI need it today.") == "Where is the transcript?\nI need it today.")
     }
 
     @Test("an ordinary reply passes through untouched")

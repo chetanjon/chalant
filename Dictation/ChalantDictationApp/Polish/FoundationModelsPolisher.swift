@@ -57,6 +57,14 @@ actor FoundationModelsPolisher: Polisher {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return text }
 
+        // Option B (founder, 2026-08-16): short utterances ship as dictated.
+        // The model does nothing useful under 40 characters and costs half a
+        // second there; the measured case is on `CleanupPrompt.worthCleaning`.
+        guard CleanupPrompt.worthCleaning(trimmed) else {
+            Self.log.info("cleanup skipped: \(trimmed.count, privacy: .public) chars, under the line")
+            return text
+        }
+
         guard case .available = SystemLanguageModel.default.availability else { return text }
 
         // One session per utterance, never shared: see `warmed`.

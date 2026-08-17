@@ -64,6 +64,24 @@ public enum CleanupPrompt {
         it unchanged. Do not summarise and do not explain what you did.
         """
 
+    /// Whether an utterance is worth the model's time at all.
+    ///
+    /// **Option B, the founder's decision of 2026-08-16**, from the measured
+    /// table in `verification/SETC_AND_L6_2026-08-16.md`. On 92 of their real
+    /// utterances the model changed 22, and only 2 of those were 40 characters
+    /// or shorter, both trivial ("How do we uh?" to "How do we?"). Short
+    /// dictation is commands and replies, and there the model has nothing to
+    /// add and half a second to cost. Cleaning only above this line takes L6
+    /// from a 0.86s median to 0.35s (p95 2.11s to 1.87s) and keeps 20 of the
+    /// 22 fixes; on Set C it halves the utterances the model touches (4-5 of
+    /// 30 to 2). Deterministic passes (Guardrail, Disfluency, Fillers) still
+    /// run on everything; this gates the model only.
+    public static let minimumCharactersForCleanup = 40
+
+    public static func worthCleaning(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).count > minimumCharactersForCleanup
+    }
+
     /// One utterance, wrapped so the model cannot mistake it for a turn in a
     /// conversation.
     public static func framing(_ transcript: String) -> String {
@@ -85,7 +103,7 @@ public enum CleanupPrompt {
     /// the user's document, and the fidelity guard would not catch it: the
     /// words are all still there.
     public static func unwrap(_ reply: String) -> String {
-        var text = reply
+        var text = droppingStrayMarkerLines(reply)
         if let open = text.range(of: openMarker) {
             text = String(text[open.upperBound...])
         }
@@ -93,6 +111,29 @@ public enum CleanupPrompt {
             text = String(text[..<close.lowerBound])
         }
         return plainQuotes(text).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A line that is nothing but a marker fragment, top or bottom, goes.
+    ///
+    /// Set C, C30, 2026-08-16, 2 of 4 runs: the reply carried a second line
+    /// reading "TRANSCRIPT.", the closing marker without its brackets. An
+    /// added line is corruption no guard rule sees. Only a line that is
+    /// EXACTLY the fragment, in the marker's own capitals, is dropped: the
+    /// speaker's "Send me the transcript." is on their line, in their case,
+    /// and stays.
+    private static func droppingStrayMarkerLines(_ text: String) -> String {
+        var lines = text.components(separatedBy: "\n")
+        while let first = lines.first, isStrayMarkerLine(first) { lines.removeFirst() }
+        while let last = lines.last, isStrayMarkerLine(last) { lines.removeLast() }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func isStrayMarkerLine(_ line: String) -> Bool {
+        var core = line.trimmingCharacters(in: .whitespaces)
+        if core.hasPrefix("<<<") { core.removeFirst(3) }
+        if core.hasSuffix(">>>") { core.removeLast(3) }
+        if core.hasSuffix(".") { core.removeLast() }
+        return core == "TRANSCRIPT"
     }
 
     /// The model writes "it’s" and "“done”"; the transcriber never does, and a
