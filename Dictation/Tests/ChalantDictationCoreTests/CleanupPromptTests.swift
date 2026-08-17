@@ -44,6 +44,33 @@ struct CleanupPromptTests {
         #expect(CleanupPrompt.unwrap(echoed) == "Ship Chalant on Monday.")
     }
 
+    /// Measured 2026-08-16 on 92 of the founder's real utterances: the model
+    /// writes "it’s" and "I’m" with typographic apostrophes, and "“done”" with
+    /// curly quotes. The transcriber never does, and a curly apostrophe pasted
+    /// into a terminal breaks the command. The speaker's punctuation style is
+    /// theirs to keep.
+    @Test("typographic quotes the model introduced come back as the plain ones")
+    func plainQuotesRestored() {
+        #expect(CleanupPrompt.unwrap("It’s “done”, isn‘t it? ‚yes‘ „no“") == "It's \"done\", isn't it? 'yes' \"no\"")
+    }
+
+    /// Measured 2026-08-16 with the smallest-edit wording: "Do it." came back
+    /// "Do it", "Wikipedia." as "Wikipedia", "How do we uh?" as "How do we".
+    /// The speaker ended the sentence; the model does not get to unend it.
+    @Test("the speaker's final punctuation survives a reply that dropped it")
+    func finalPunctuationRestored() {
+        #expect(CleanupPrompt.keepingEnding(of: "Do it.", in: "Do it") == "Do it.")
+        #expect(CleanupPrompt.keepingEnding(of: "How do we uh?", in: "How do we") == "How do we?")
+        #expect(CleanupPrompt.keepingEnding(of: "Wikipedia.", in: "Wikipedia") == "Wikipedia.")
+        // Already ended: nothing doubled.
+        #expect(CleanupPrompt.keepingEnding(of: "Do it.", in: "Do it!") == "Do it!")
+        // The speaker trailed off with no punctuation: nothing invented.
+        #expect(CleanupPrompt.keepingEnding(of: "Tell me how to do it. I", in: "Tell me how to do it.") == "Tell me how to do it.")
+        #expect(CleanupPrompt.keepingEnding(of: "We start there. See, we are doing like, uh,", in: "We start there. See, we are doing like") == "We start there. See, we are doing like")
+        // Empty reply is the guard's business, not this one's.
+        #expect(CleanupPrompt.keepingEnding(of: "Do it.", in: "") == "")
+    }
+
     @Test("an ordinary reply passes through untouched")
     func leavesCleanRepliesAlone() {
         #expect(CleanupPrompt.unwrap("Ship Chalant on Monday.") == "Ship Chalant on Monday.")

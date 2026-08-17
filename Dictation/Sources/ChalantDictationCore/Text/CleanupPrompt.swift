@@ -75,10 +75,44 @@ public enum CleanupPrompt {
         if let close = text.range(of: closeMarker) {
             text = String(text[..<close.lowerBound])
         }
-        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return plainQuotes(text).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Roughly how many tokens a piece of text will cost.
+    /// The model writes "it’s" and "“done”"; the transcriber never does, and a
+    /// typographic apostrophe pasted into a terminal breaks the command.
+    /// Measured 2026-08-16 on 92 of the founder's real utterances with a fresh
+    /// session each. Punctuation style is the speaker's to keep, so the
+    /// model's curly quotes come back as the plain ones it was given.
+    static func plainQuotes(_ text: String) -> String {
+        var out = ""
+        out.reserveCapacity(text.utf8.count)
+        for ch in text {
+            switch ch {
+            case "\u{2018}", "\u{2019}", "\u{201A}", "\u{201B}", "\u{2032}": out.append("'")
+            case "\u{201C}", "\u{201D}", "\u{201E}", "\u{201F}", "\u{2033}": out.append("\"")
+            default: out.append(ch)
+            }
+        }
+        return out
+    }
+
+    /// The speaker's final punctuation, put back if the model dropped it.
+    ///
+    /// Measured 2026-08-16 with the smallest-edit wording: "Do it." came back
+    /// "Do it", "Wikipedia." as "Wikipedia", "How do we uh?" as "How do we".
+    /// The speaker ended the sentence and the model does not get to unend it.
+    /// Only ever restores what was said: a reply that already ends is left
+    /// alone, a speaker who trailed off without punctuation gets none invented,
+    /// and an empty reply is the guard's business.
+    public static func keepingEnding(of raw: String, in cleaned: String) -> String {
+        guard let last = raw.last(where: { !$0.isWhitespace }), terminal.contains(last),
+              let end = cleaned.last(where: { !$0.isWhitespace }), end.isLetter || end.isNumber
+        else { return cleaned }
+        return cleaned + String(last)
+    }
+    private static let terminal: Set<Character> = [".", "?", "!"]
+
+    /// Roughly how many tokens a piece of text will cost.    /// Roughly how many tokens a piece of text will cost.
     ///
     /// Part 0 §0.7: the window is a hard 4,096 tokens, input plus output
     /// combined, and it throws rather than truncating. The real
