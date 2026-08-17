@@ -276,6 +276,28 @@ actor AudioEngine {
     ///    one that was just plugged in has earned a fresh hearing, because the
     ///    reason it could not hear may have just been removed.
     func devicesChanged() {
+        // The engine stops ITSELF when it posts a configuration change (that
+        // is what the notification means), and it says so: `engine.isRunning`
+        // goes false while this actor still believes otherwise. Measured
+        // 2026-08-16 17:15: default input flipped from a headset back to the
+        // built-in mic, the device SET was unchanged so the guard below
+        // returned, and the tap sat dead until the watchdog noticed 2.7s
+        // later. On 1.15.0 nothing noticed at all. So before asking whether
+        // the SET changed, ask the engine whether it is still running, and
+        // if not, rebuild now rather than in two seconds. Loop-safe: the
+        // rebuild's own notification arrives with a running engine.
+        if isRunning, !engine.isRunning, !capturing.isOpen {
+            Self.log.error(
+                """
+                engine stopped itself on a configuration change while on \
+                \(self.currentDevice?.name ?? "the system default", privacy: .public); restarting
+                """
+            )
+            stop()
+            try? startWarm(avoiding: silentUIDs)
+            return
+        }
+
         let attached = AudioDevices.all()
         let present = Set(attached.map(\.device.uid))
         guard present != knownUIDs else { return }
