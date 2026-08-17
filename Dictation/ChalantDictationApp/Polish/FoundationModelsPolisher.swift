@@ -25,7 +25,18 @@ actor FoundationModelsPolisher: Polisher {
     /// costs the user their words.
     private static let timeout: Duration = .seconds(30)
 
-    private var session: LanguageModelSession?
+    /// Held only so the warm-up has something to prewarm. **Never used to
+    /// respond.** A `LanguageModelSession` keeps a transcript of every turn,
+    /// and 1.14.0 through 1.15.1 reused ONE session for every utterance ever
+    /// dictated, so the context grew all day: each call carried everything
+    /// said before it, got slower for it, and past ~8k tokens every cleanup
+    /// failed on context size until relaunch. Measured 2026-08-16 on 92 of the
+    /// founder's real utterances through the shipping path: shared session
+    /// p50 2.2 to 2.7s and 17 to 26 utterances changed, then context-overflow
+    /// failures; a fresh session per utterance p50 0.55s, p95 1.9s, 50
+    /// changed, none failed. The model stays resident across sessions, so a
+    /// new one costs nothing worth measuring.
+    private var warmed: LanguageModelSession?
 
     /// Warm the model at launch rather than on first use.
     ///
@@ -37,8 +48,8 @@ actor FoundationModelsPolisher: Polisher {
     /// whichever sentence the user happens to dictate first.
     func warmUp() {
         guard case .available = SystemLanguageModel.default.availability else { return }
-        let session = session ?? LanguageModelSession(instructions: CleanupPrompt.instructions)
-        self.session = session
+        let session = warmed ?? LanguageModelSession(instructions: CleanupPrompt.instructions)
+        warmed = session
         session.prewarm()
     }
 
@@ -48,8 +59,8 @@ actor FoundationModelsPolisher: Polisher {
 
         guard case .available = SystemLanguageModel.default.availability else { return text }
 
-        let session = session ?? LanguageModelSession(instructions: CleanupPrompt.instructions)
-        self.session = session
+        // One session per utterance, never shared: see `warmed`.
+        let session = LanguageModelSession(instructions: CleanupPrompt.instructions)
 
         // A few sentences at a time, and the reason is reliability rather than
         // the context window. Measured on the founder's own long paragraph
@@ -75,13 +86,17 @@ actor FoundationModelsPolisher: Polisher {
             } catch {
                 // Includes guardrail refusals, which Part 0 §0.7 makes an
                 // ordinary outcome. This piece ships as dictated; the rest of
-                // the paragraph still gets its chance.
-                Self.log.error("cleanup failed on a chunk, shipping that chunk as dictated")
+                // the paragraph still gets its chance. The framework's own
+                // words are logged (token counts, refusal class), never the
+                // transcript, because a failure that only says "failed" is
+                // how the shared-session context overflow went unnoticed.
+                Self.log.error(
+                    "cleanup failed on a chunk, shipping that chunk as dictated: \(String(describing: error), privacy: .public)")
                 out.append(piece)
                 continue
             }
 
-            let cleaned = CleanupPrompt.unwrap(reply)
+            let cleaned = CleanupPrompt.keepingEnding(of: piece, in: CleanupPrompt.unwrap(reply))
 
             // Lengths and reasons, never content. Part 1 §2: transcripts never
             // enter logs, and this path exists precisely when the model got the
