@@ -1,0 +1,30 @@
+{"id": "C01", "output": "Do not deploy this to production until Monday.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "Do not deploy this to production until Monday."}
+{"id": "C02", "output": "Send 15, not 50", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "Send 15, not 50."}
+{"id": "C03", "output": "Eating, the meeting moved to 315, not 350", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "The meeting moved to 3:15, not 3:50."}
+{"id": "C04", "output": "Delete the staging database. Never the production one.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "Delete the staging database, never the production one."}
+{"id": "C05", "output": "Email Sarah about it, not Sarah.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "Email Sarah about it, not Sara."}
+{"id": "C06", "output": "The invoice came to $120.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "The invoice came to $120."}
+{"id": "C07", "output": "The other invoice was $1200.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "The other invoice was $1,200."}
+{"id": "C08", "output": "I can't make it on Thursday.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "I can't make it on Thursday."}
+{"id": "C09", "output": "I can make it on Thursday.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "I can make it on Thursday."}
+{"id": "C10", "output": "Do not force push to main.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "Do not force push to main."}
+{"id": "C11", "output": "Drop the users table on the local copy only.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "Drop the users table on the local copy only."}
+{"id": "C12", "output": "It's/user/Chatan/projects.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "It's /Users/chetan/projects"}
+{"id": "C13", "output": "My email is Junalagadda 8800@gmail.com.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "My email is jonnalagadda8800@gmail.com"}
+{"id": "C14", "output": "The bill number is 153 not 135.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "The build number is 153, not 135."}
+{"id": "C15", "output": "He said, and I quote, this will never work.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "He said, and I quote, this will never work."}
+{"id": "C16", "output": "Never merge that branch without a review.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "Never merge that branch without a review."}
+{"id": "C17", "output": "Move the stand-up from 93, 932, 1015.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "Move the standup from 9:30 to 10:15."}
+{"id": "C18", "output": "The the ABI key ends in 472.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "The API key ends in 472."}
+{"id": "C19", "output": "Don't cancel the subscription yet.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "Don't cancel the subscription yet."}
+{"id": "C20", "output": "Cancel the subscription today.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "Cancel the subscription today."}
+{"id": "C21", "output": "Ship it to the Kizu group, not the Chalant one.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "Ship it to the Kizu group, not the Chalant one."}
+{"id": "C22", "output": "There are 4 tea attendees, not 14", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "There were 40 attendees, not 14."}
+{"id": "C23", "output": "Reply to reply to Aidan and do not copy anyone else.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "Reply to Aidan, and do not copy anyone else."}
+{"id": "C24", "output": "The file is text injector. swift, capital T capital I.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "The file is TextInjector dot swift, capital T capital I."}
+{"id": "C25", "output": "Set the timer to 2.5 seconds.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "Set the timeout to 2.5 seconds."}
+{"id": "C26", "output": "We are not raising the price.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "We are not raising the price."}
+{"id": "C27", "output": "The the deadline is the 21st, not the 12th.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "The deadline is the 21st, not the 12th."}
+{"id": "C28", "output": "Revoke his access, not hers.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "Revoke his access, not hers."}
+{"id": "C29", "output": "It costs 999 a month, not 99.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "It costs $9.99 a month, not $99."}
+{"id": "C30", "output": "Keep the old version, do not overwrite it.", "recorded": "2000-01-01T00:00:00Z", "app": "setC", "desired": "Keep the old version, do not overwrite it."}
