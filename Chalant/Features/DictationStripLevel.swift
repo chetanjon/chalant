@@ -76,16 +76,23 @@ enum DictationStripLevel {
 
     // MARK: - The halo
 
-    /// The three strokes of the island's outline that make the halo, all read
-    /// off the smoothed level. Outer glow spills both ways; the core is the
-    /// thin white edge; the inner bleed is clipped to the inside.
+    /// The strokes of the island's outline that make the halo, all read off
+    /// the smoothed level. The outer glow and the wide bloom spill both ways;
+    /// the core is the thin white edge; the inner bleed is clipped inside.
+    /// Two spilling layers rather than one because a single wide blur spreads
+    /// a thin stroke's light too thin to see on a 1x display; the tight glow
+    /// carries the edge, the bloom carries the air around it.
     struct Halo: Equatable {
         var outerWidth: CGFloat
         var outerBlur: CGFloat
         var outerOpacity: Double
+        var bloomWidth: CGFloat
+        var bloomBlur: CGFloat
+        var bloomOpacity: Double
         var coreWidth: CGFloat
         var coreOpacity: Double
         var coreShadow: CGFloat
+        var innerWidth: CGFloat
         var innerBlur: CGFloat
         var innerOpacity: Double
     }
@@ -94,14 +101,18 @@ enum DictationStripLevel {
         let l = clamp(level)
         let d = Double(l)
         return Halo(
-            outerWidth: 1.5 + l * 3.0,
-            outerBlur: 12 + l * 30,
-            outerOpacity: 0.45 + d * 0.50,
-            coreWidth: 1.0 + l * 1.2,
-            coreOpacity: 0.50 + d * 0.50,
-            coreShadow: 3 + l * 8,
-            innerBlur: 8 + l * 30,
-            innerOpacity: 0.10 + d * 0.25
+            outerWidth: 3 + l * 5,
+            outerBlur: 10 + l * 24,
+            outerOpacity: 0.55 + d * 0.45,
+            bloomWidth: 8 + l * 10,
+            bloomBlur: 22 + l * 30,
+            bloomOpacity: 0.25 + d * 0.45,
+            coreWidth: 1.0 + l * 1.4,
+            coreOpacity: 0.55 + d * 0.45,
+            coreShadow: 4 + l * 10,
+            innerWidth: 8,
+            innerBlur: 8 + l * 24,
+            innerOpacity: 0.14 + d * 0.36
         )
     }
 

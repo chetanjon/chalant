@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import Chalant
 
@@ -53,26 +54,33 @@ final class DictationStripTests: XCTestCase {
 
     func testHaloAtSilenceIsTheRestingHalo() {
         let h = DictationStripLevel.halo(0)
-        XCTAssertEqual(h.outerWidth, 1.5, accuracy: 0.001)
-        XCTAssertEqual(h.outerBlur, 12, accuracy: 0.001)
-        XCTAssertEqual(h.outerOpacity, 0.45, accuracy: 0.001)
+        XCTAssertEqual(h.outerWidth, 3, accuracy: 0.001)
+        XCTAssertEqual(h.outerBlur, 10, accuracy: 0.001)
+        XCTAssertEqual(h.outerOpacity, 0.55, accuracy: 0.001)
+        XCTAssertEqual(h.bloomWidth, 8, accuracy: 0.001)
+        XCTAssertEqual(h.bloomBlur, 22, accuracy: 0.001)
+        XCTAssertEqual(h.bloomOpacity, 0.25, accuracy: 0.001)
         XCTAssertEqual(h.coreWidth, 1.0, accuracy: 0.001)
-        XCTAssertEqual(h.coreOpacity, 0.50, accuracy: 0.001)
-        XCTAssertEqual(h.coreShadow, 3, accuracy: 0.001)
+        XCTAssertEqual(h.coreOpacity, 0.55, accuracy: 0.001)
+        XCTAssertEqual(h.coreShadow, 4, accuracy: 0.001)
+        XCTAssertEqual(h.innerWidth, 8, accuracy: 0.001)
         XCTAssertEqual(h.innerBlur, 8, accuracy: 0.001)
-        XCTAssertEqual(h.innerOpacity, 0.10, accuracy: 0.001)
+        XCTAssertEqual(h.innerOpacity, 0.14, accuracy: 0.001)
     }
 
     func testHaloAtFullVoiceReachesTheMaxima() {
         let h = DictationStripLevel.halo(1)
-        XCTAssertEqual(h.outerWidth, 4.5, accuracy: 0.001)
-        XCTAssertEqual(h.outerBlur, 42, accuracy: 0.001)
-        XCTAssertEqual(h.outerOpacity, 0.95, accuracy: 0.001)
-        XCTAssertEqual(h.coreWidth, 2.2, accuracy: 0.001)
+        XCTAssertEqual(h.outerWidth, 8, accuracy: 0.001)
+        XCTAssertEqual(h.outerBlur, 34, accuracy: 0.001)
+        XCTAssertEqual(h.outerOpacity, 1.0, accuracy: 0.001)
+        XCTAssertEqual(h.bloomWidth, 18, accuracy: 0.001)
+        XCTAssertEqual(h.bloomBlur, 52, accuracy: 0.001)
+        XCTAssertEqual(h.bloomOpacity, 0.70, accuracy: 0.001)
+        XCTAssertEqual(h.coreWidth, 2.4, accuracy: 0.001)
         XCTAssertEqual(h.coreOpacity, 1.0, accuracy: 0.001)
-        XCTAssertEqual(h.coreShadow, 11, accuracy: 0.001)
-        XCTAssertEqual(h.innerBlur, 38, accuracy: 0.001)
-        XCTAssertEqual(h.innerOpacity, 0.35, accuracy: 0.001)
+        XCTAssertEqual(h.coreShadow, 14, accuracy: 0.001)
+        XCTAssertEqual(h.innerBlur, 32, accuracy: 0.001)
+        XCTAssertEqual(h.innerOpacity, 0.50, accuracy: 0.001)
     }
 
     /// The lit portion of the edge: about the middle third at the start of a
@@ -90,8 +98,8 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(DictationStripLevel.clamp(-0.5), 0)
         XCTAssertEqual(DictationStripLevel.clamp(3.0), 1)
         XCTAssertEqual(DictationStripLevel.clamp(0.4), 0.4, accuracy: 0.0001)
-        XCTAssertEqual(DictationStripLevel.halo(3.0).outerBlur, 42, accuracy: 0.001)
-        XCTAssertEqual(DictationStripLevel.halo(-1).outerBlur, 12, accuracy: 0.001)
+        XCTAssertEqual(DictationStripLevel.halo(3.0).outerBlur, 34, accuracy: 0.001)
+        XCTAssertEqual(DictationStripLevel.halo(-1).outerBlur, 10, accuracy: 0.001)
     }
 
     /// The headroom, without which the strip barely moves during speech: a
@@ -104,6 +112,45 @@ final class DictationStripTests: XCTestCase {
         // A broken mic can report a negative sample; the strip shows silence,
         // never a rim that lights up from below zero.
         XCTAssertEqual(DictationStripLevel.normalize(peak: -0.2), 0, accuracy: 0.0001)
+    }
+
+    // MARK: - The halo actually puts light on screen
+
+    /// Blur, mask and opacity can each silently zero a layer (a mask sized to
+    /// the strip clips the outer glow square; a stroke on an offscreen top
+    /// edge draws nothing). Render the halo for real and check that a full
+    /// voice is plainly brighter than rest, and rest is not black.
+    func testHaloRendersMoreLightAtFullVoiceThanAtRest() throws {
+        let rest = try renderedBrightness(level: 0, fill: 0)
+        let full = try renderedBrightness(level: 1, fill: 1)
+        XCTAssertGreaterThan(rest, 0.5, "the resting halo must be visible")
+        XCTAssertGreaterThan(full, rest * 2.5, "a full voice must plainly outshine rest")
+    }
+
+    /// Mean 0...255 luminance of the halo drawn white on black over a
+    /// 520 × 68 strip with room around it for the spill.
+    private func renderedBrightness(level: CGFloat, fill: CGFloat) throws -> Double {
+        let size = CGSize(width: 520, height: 68)
+        let shape = IslandShape(eave: 0, bottomRadius: 40, belly: 0, topRadius: 40)
+        let view = DictationHalo(shape: shape, accent: .white, level: level, fill: fill, size: size)
+            .frame(width: size.width, height: size.height)
+            .padding(60)
+            .background(Color.black)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 1
+        let image = try XCTUnwrap(renderer.cgImage)
+        let w = image.width, h = image.height
+        var pixels = [UInt8](repeating: 0, count: w * h * 4)
+        let ctx = try XCTUnwrap(CGContext(
+            data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        var total = 0
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            total += (Int(pixels[i]) + Int(pixels[i + 1]) + Int(pixels[i + 2])) / 3
+        }
+        return Double(total) / Double(w * h)
     }
 
     // MARK: - Which display (spec, "Which display")

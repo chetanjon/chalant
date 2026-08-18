@@ -61,17 +61,21 @@ The strip's body stays pure black (no lit-ink gradient, no material). Height
 
 ### The halo
 
-Three concentric strokes of the island's own shape, all driven by one smoothed
+Four concentric strokes of the island's own shape, all driven by one smoothed
 level `l` in 0...1 (see Motion), all in the current accent (silver by default,
-which reads as white light; the album colour when music plays):
+which reads as white light; the album colour when music plays). Two spilling
+layers rather than one because a single wide blur spreads a thin stroke's light
+too thin to see on a 1x external display; the tight glow carries the edge, the
+bloom carries the air around it.
 
 | layer | what | at silence (l = 0) | at full voice (l = 1) |
 |---|---|---|---|
-| outer glow | the shape stroked in accent, then blurred, spilling outward and inward | width 1.5, blur 12, opacity 0.45 | width 4.5, blur 42, opacity 0.95 |
-| edge core | a thin white stroke on the edge with a small accent shadow | width 1.0, opacity 0.50, shadow 3 | width 2.2, opacity 1.0, shadow 11 |
-| inner bleed | the shape stroked wide in accent, blurred, clipped to the inside | blur 8, opacity 0.10 | blur 38, opacity 0.35 |
+| bloom | the shape stroked wide in accent, blurred wide, spilling outward and inward | width 8, blur 22, opacity 0.25 | width 18, blur 52, opacity 0.70 |
+| outer glow | the shape stroked in accent, blurred, spilling both ways | width 3, blur 10, opacity 0.55 | width 8, blur 34, opacity 1.0 |
+| edge core | a thin white stroke on the edge with a small accent shadow | width 1.0, opacity 0.55, shadow 4 | width 2.4, opacity 1.0, shadow 14 |
+| inner bleed | the shape stroked 8 wide in accent, blurred, clipped to the inside | blur 8, opacity 0.14 | blur 32, opacity 0.50 |
 
-**Spread.** The three layers are masked by a horizontal gradient centred on the
+**Spread.** The four layers are masked by a horizontal gradient centred on the
 strip: fully lit at the centre, fading to nothing at half-width `h` of the
 strip's width on each side, where `h = 0.18 + 0.42 * fill` (`fill` in 0...1,
 see Motion). At `fill = 0` roughly the middle third of the bottom edge is lit;
@@ -122,14 +126,14 @@ untouched.
 - `Features/DictationStripLevel.swift`: `rim`, `pool` and `dot` go (their
   formulas belong to the removed elements). `clamp` and `normalize` stay. New:
   `struct Voice` (the smoother and the fill, `mutating func step(raw:dt:)`,
-  `reset()`), `static func halo(_ level:)` returning the three layers' numbers,
+  `reset()`), `static func halo(_ level:)` returning the four layers' numbers,
   and `static func spread(fill:)`. All pure, all pinned by tests.
 - `NotchViewModel`: `updateDictating(level:mic:)` steps a `Voice` and publishes
   `dictationLevel` (now the smoothed value) and a new `dictationFill`.
   `beginDictating` resets the voice. `micName` stays in `DictationInfo` (the
   ear can still hop; nothing renders it now).
 - `Views/NotchRootView.swift`: the rim `.shadow` and pool overlay on the shell
-  are replaced by a `DictationHalo` overlay (the three strokes, masked, breathing)
+  are replaced by a `DictationHalo` overlay (the four strokes, masked, breathing)
   and a `sent` overlay keyed on leaving `.dictating`. `dictatingContent` becomes
   the app name alone.
 - `ChalantTests/DictationStripTests.swift`: the rim/pool/dot tests are replaced

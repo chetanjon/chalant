@@ -2,8 +2,8 @@ import SwiftUI
 
 /// The dictation strip's light: the island's own outline, glowing.
 ///
-/// Three strokes of the shape (an outer glow that spills both ways, a thin
-/// white core on the edge, an inner bleed clipped inside), all read off the
+/// Four strokes of the shape (a wide bloom and a tighter glow that spill
+/// both ways, a thin white core on the edge, an inner bleed clipped inside), all read off the
 /// smoothed voice through `DictationStripLevel.halo`, and all masked so the
 /// lit stretch of edge starts around the strip's centre and spreads toward
 /// the ends as the sentence goes on (`DictationStripLevel.spread`). At rest,
@@ -29,11 +29,15 @@ struct DictationHalo: View {
         let halo = DictationStripLevel.halo(level)
         ZStack {
             shape
+                .stroke(accent, lineWidth: halo.bloomWidth)
+                .blur(radius: halo.bloomBlur)
+                .opacity(halo.bloomOpacity)
+            shape
                 .stroke(accent, lineWidth: halo.outerWidth)
                 .blur(radius: halo.outerBlur)
                 .opacity(halo.outerOpacity)
             shape
-                .strokeBorder(accent, lineWidth: 6)
+                .strokeBorder(accent, lineWidth: halo.innerWidth)
                 .blur(radius: halo.innerBlur)
                 .opacity(halo.innerOpacity)
                 .clipShape(shape)
