@@ -1036,7 +1036,7 @@ final class NotchViewModel: ObservableObject {
                 if text.hasPrefix("debug welcome") {
                     let tail = text.dropFirst("debug welcome".count)
                         .trimmingCharacters(in: .whitespaces)
-                    self.welcomeStep = min(3, max(0, Int(tail) ?? 0))
+                    self.welcomeStep = min(WelcomeView.stepCount - 1, max(0, Int(tail) ?? 0))
                     self.pane = .welcome
                     self.expand()
                     return

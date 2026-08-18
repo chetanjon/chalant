@@ -241,7 +241,7 @@ struct GeneralSection: View {
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
                     .tint(Theme.controlTint)
-                SettingNote("The four cards you saw the first time Chalant opened.")
+                SettingNote("The cards you saw the first time Chalant opened.")
             }
         }
         .onAppear {
