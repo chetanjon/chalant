@@ -819,3 +819,42 @@ the vocabulary after one fix, through the sound-and-confidence-gated path.
 
 Also: watches are per app now (a dictation elsewhere no longer cancels Slack's),
 45s not 20s, and several fixes in one sentence are several corrections.
+
+## 2026-08-18 — names for both ears (verification/NAMES_2026-08-18.md)
+
+**What changed:** the phonetic pass and the second ear both draw on `Names`:
+typed names ("Add a name" under Learn my names, stored as `dictationTerms`),
+learned names, and the names in Contacts that sound like something in the
+utterance. The second ear reads up to 20 of them as its prompt before it
+listens.
+
+**Measured offline first** (Set E, 30 names-dense clips, the shipped 626 MB
+model, `whisperkit-cli`): no names 29.9% WER at 0.91 s; all 34 names 18.6% at
+2.17 s; the shipping selector's per-clip lists 10.0% at 1.56 s. Table and
+method in the verification file.
+
+**Live, 14:47, installed Release build of this branch (Developer ID, ditto
+over /Applications):** synthetic left-Option hold + `say` into the scratch
+window, Better hearing on, four learned names standing:
+
+```
+heard 4s of audio as 17 chars in 1.500680s with 4 names (14 prompt tokens)
+hearing kept: implausible (17 vs 49 chars)
+```
+
+Prompt path live: 4 names, 14 tokens, ~+0.2 s. The hearing was mush because
+speaker-to-mic audio on this Mac has been mush since 08-17 21:20 (`say` is for
+timing only, see the ear entry); the plausibility guard kept the landed text.
+
+**Not exercised live:** reading Contacts. macOS has not been asked on this Mac
+(no `contacts:` line in the log at launch, which is the authorized path's only
+line), and the ask is the founder's, from the "Use the names in Contacts"
+button. `ContactNames.usable` (the filter) is unit-tested; `read()` is the same
+`CNContactStore.enumerateContacts` the message door already uses.
+
+**Settings looked at (14:49, screenshot of the installed build):** under Learn
+my names, the six learned rows, then the Add a name box with its dim Add
+button, its note, then the Contacts row in its not-determined state ("Use the
+names in Contacts", bordered, with the note). Same shape as the hook-rules box
+on the Agents page; no capsule, hairlines only between rows. The founder
+reviews by pixels, so the PR asks them to look too.

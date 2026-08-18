@@ -29,7 +29,7 @@
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Chalant adds events and reads today's agenda.</string>
 	<key>NSContactsUsageDescription</key>
-	<string>Chalant looks up the person you name so a message reaches the right number.</string>
+	<string>Chalant looks up the person you name so a message reaches the right number, and reads the names in Contacts so dictation spells them right. Names only, on this Mac.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSLocationUsageDescription</key>

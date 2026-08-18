@@ -97,7 +97,7 @@ targets:
         # dialog where a user decides whether to trust the app, which is the
         # same failure the 2026-08-12 audit caught in the weather copy.
         NSAppleEventsUsageDescription: "Chalant asks System Events to paste your dictated text into the app you were using. It also controls your music players and sends the Messages you dictate."
-        NSContactsUsageDescription: Chalant looks up the person you name so a message reaches the right number.
+        NSContactsUsageDescription: Chalant looks up the person you name so a message reaches the right number, and reads the names in Contacts so dictation spells them right. Names only, on this Mac.
         # Dictation is macOS's own, and macOS sends it to Apple when the
         # local speech model is not ready (VoiceController sets
         # requiresOnDeviceRecognition false on purpose, for reliability).

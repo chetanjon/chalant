@@ -125,7 +125,7 @@ actor CorrectionObserver {
     /// misheard as a real word must not start rewriting that real word after
     /// one fix (2026-08-16, "challenge" for Chalant on the first live run).
     @MainActor
-    private static func isDictionaryWord(_ word: String) -> Bool {
+    static func isDictionaryWord(_ word: String) -> Bool {
         let checker = NSSpellChecker.shared
         let range = checker.checkSpelling(
             of: word, startingAt: 0, language: "en", wrap: false,

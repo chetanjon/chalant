@@ -204,8 +204,18 @@ struct GeneralSection: View {
                     // Part 0 §0.15: a learned pair the user cannot see or
                     // delete would rewrite one of their words on every future
                     // utterance with no way out. This list is what makes the
-                    // switch above safe to leave on.
+                    // switch above safe to leave on. The names typed by hand
+                    // and the box that adds one live in the same list: to
+                    // the user they are all "names it spells right".
                     LearnedTermsList()
+                    SettingNote(
+                        "Type a name exactly as it should land, and Chalant spells it that "
+                        + "way from then on."
+                    )
+                    // The wide pool: read only with macOS's leave, and a name
+                    // from it reaches an ear only when what you said sounds
+                    // like it. See `Names`.
+                    ContactsNamesRow()
 
                     SettingDivider()
                     // Everywhere else this app goes out of its way NOT to keep
