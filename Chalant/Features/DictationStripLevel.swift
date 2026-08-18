@@ -38,8 +38,10 @@ enum DictationStripLevel {
     /// The two numbers the view draws from, stepped once per meter tick.
     ///
     /// `level` is the voice, smoothed so the light is quick to answer and slow
-    /// to let go: it rises on a ~70 ms attack and falls on a ~300 ms release,
-    /// which is what makes the strip feel attentive rather than jittery.
+    /// to let go: one 30 Hz tick of voice is already ~87% of the way up (the
+    /// first cut ramped over ~100 ms and the founder felt it as lag), and it
+    /// falls on a ~300 ms release, which is what makes the strip feel
+    /// attentive rather than jittery.
     ///
     /// `fill` is how much of the sentence has been said: it grows while the
     /// voice is up, eases back during a pause, and is what spreads the lit
@@ -51,9 +53,9 @@ enum DictationStripLevel {
 
         /// Below this the meter is reading a pause, not a voice.
         static let pauseFloor: CGFloat = 0.05
-        static let attack: CGFloat = 14
+        static let attack: CGFloat = 26
         static let release: CGFloat = 3.2
-        static let fillRate: CGFloat = 0.42
+        static let fillRate: CGFloat = 0.65
         static let pauseGiveback: CGFloat = 0.12
 
         mutating func step(raw: CGFloat, dt: TimeInterval) {

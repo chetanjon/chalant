@@ -94,16 +94,18 @@ unchanged, `peak * 3.2` clamped). Two derived numbers are computed per tick and
 published by `NotchViewModel`, and the view draws only from them:
 
 - **`level`** (smoothed): `level += (raw - level) * min(1, dt * k)`, with
-  `k = 14` when rising and `k = 3.2` when falling. Attack about 70 ms, release
-  about 300 ms to settle.
-- **`fill`**: while dictating, `fill = min(1, fill + level * dt * 0.42)`; when
-  `raw < 0.05` (a pause) it also eases back by `dt * 0.12`. Reset to 0 when
-  the strip opens. Roughly: five seconds of ordinary talking fills the edge;
-  a two-second pause gives back a quarter of it.
+  `k = 26` when rising and `k = 3.2` when falling. One 30 Hz tick of voice is
+  ~87% of the way up (a first cut used `k = 14`, ~100 ms to 85%, and the
+  founder felt it as lag); release about 300 ms to settle.
+- **`fill`**: while dictating, `fill = min(1, fill + level * dt * 0.65)`; when
+  `raw < 0.05` (a pause) it eases back by `dt * 0.12` instead. Reset to 0 when
+  the strip opens. Roughly: two to three seconds of ordinary talking fills
+  the edge; a two-second pause gives back a quarter of it.
 
 Open and close use `Theme.Motion.island` like every other change of the
-island's size. The halo and the label arrive after the pour settles (insertion
-delayed ~0.18 s, `.opacity`), not during it, so nothing tears mid-pour.
+island's size. The halo arrives with the pour (plain `.opacity`, no delay);
+the label follows the content's usual 0.09 s. A first cut delayed the halo
+0.18 s past the pour and it read as lag.
 
 **Sent.** When the state leaves `.dictating`, a soft light (white heart, accent
 edge, ~28 pt, blurred) starts at the strip's centre and rises to the top edge
@@ -150,8 +152,10 @@ untouched.
   the notch on release. Then the thumb-over-the-mic test: the strip opens and
   stays at its resting halo. That is the pass.
 - Perf: `sample Chalant 5` while holding and talking; `NSHostingView.layout`
-  under the 10% bar. The halo is opacity, blur and mask on the shell, no
-  layout, and the breath is a Core Animation repeat, not a TimelineView.
+  under the 10% bar. The halo is opacity, blur and mask on the shell inside
+  one `.drawingGroup()` (four blurred strokes laid out separately measured
+  20% in 1.17.0), and the breath is a Core Animation repeat, not a
+  TimelineView.
 
 ## Out of scope
 

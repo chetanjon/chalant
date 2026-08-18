@@ -459,8 +459,9 @@ struct NotchRootView: View {
                     // spreads with the sentence (`DictationHalo`). Nothing is
                     // drawn on the strip itself; there are no bars, no dot, no
                     // pool. Absent everywhere except while dictating, so the
-                    // resting island is untouched. Arrives after the pour has
-                    // settled, not during it.
+                    // resting island is untouched. Arrives WITH the pour: a
+                    // first cut faded it in 0.18 s after the strip settled and
+                    // the founder felt that half second as lag.
                     .overlay {
                         if face.state == .dictating {
                             DictationHalo(
@@ -468,7 +469,7 @@ struct NotchRootView: View {
                                 level: model.dictationLevel, fill: model.dictationFill,
                                 size: dictatingSize
                             )
-                            .transition(.opacity.animation(.easeIn(duration: 0.3).delay(0.18)))
+                            .transition(.opacity)
                         }
                     }
                     // Letting go is a small satisfaction: a point of light

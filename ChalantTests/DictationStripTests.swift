@@ -10,25 +10,34 @@ final class DictationStripTests: XCTestCase {
     private let tick: TimeInterval = 1.0 / 30
 
     /// Rule 2: quick to answer, slow to let go. Three meter ticks of voice
-    /// lift the level most of the way; three ticks of silence give back only
-    /// a fraction of it.
+    /// (100 ms) lift the level essentially all the way; three ticks of
+    /// silence give back only a fraction of it. The attack used to sit at
+    /// ~85% after three ticks and the founder felt it as lag (1.17.0).
     func testVoiceRisesFasterThanItFalls() {
         var voice = DictationStripLevel.Voice()
         for _ in 0..<3 { voice.step(raw: 1, dt: tick) }
-        XCTAssertEqual(voice.level, 0.85, accuracy: 0.02)
+        XCTAssertGreaterThan(voice.level, 0.95)
         let peak = voice.level
         for _ in 0..<3 { voice.step(raw: 0, dt: tick) }
-        XCTAssertEqual(voice.level, 0.61, accuracy: 0.02)
+        XCTAssertEqual(voice.level, 0.71, accuracy: 0.03)
         XCTAssertLessThan(peak - voice.level, peak, "release must be slower than attack")
     }
 
+    /// One tick of voice is already most of the way up: the light must answer
+    /// on the first frame it can, not ramp.
+    func testVoiceAnswersOnTheFirstTick() {
+        var voice = DictationStripLevel.Voice()
+        voice.step(raw: 1, dt: tick)
+        XCTAssertGreaterThan(voice.level, 0.8)
+    }
+
     /// Rule 3: the longer you talk, the more it fills. A second of talking
-    /// lights well under half the edge; five seconds fills it.
+    /// lights over half the edge; a few seconds fills it.
     func testFillGrowsWhileTalking() {
         var voice = DictationStripLevel.Voice()
         for _ in 0..<30 { voice.step(raw: 1, dt: tick) }
-        XCTAssertGreaterThan(voice.fill, 0.30)
-        XCTAssertLessThan(voice.fill, 0.45)
+        XCTAssertGreaterThan(voice.fill, 0.55)
+        XCTAssertLessThan(voice.fill, 0.72)
         for _ in 0..<120 { voice.step(raw: 1, dt: tick) }
         XCTAssertEqual(voice.fill, 1, accuracy: 0.0001)
     }
@@ -114,43 +123,51 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(DictationStripLevel.normalize(peak: -0.2), 0, accuracy: 0.0001)
     }
 
-    // MARK: - The halo actually puts light on screen
+    // MARK: - The halo layers are wired to the numbers
 
-    /// Blur, mask and opacity can each silently zero a layer (a mask sized to
-    /// the strip clips the outer glow square; a stroke on an offscreen top
-    /// edge draws nothing). Render the halo for real and check that a full
-    /// voice is plainly brighter than rest, and rest is not black.
-    func testHaloRendersMoreLightAtFullVoiceThanAtRest() throws {
-        let rest = try renderedBrightness(level: 0, fill: 0)
-        let full = try renderedBrightness(level: 1, fill: 1)
-        XCTAssertGreaterThan(rest, 0.5, "the resting halo must be visible")
-        XCTAssertGreaterThan(full, rest * 2.5, "a full voice must plainly outshine rest")
+    /// The light lives on Core Animation layers now (see `DictationHalo`), so
+    /// what can go silently wrong is the wiring: a level that never reaches a
+    /// layer, or a spread mask that clips the spill square. Read the layers
+    /// back after an apply.
+    func testHaloLayersFollowTheLevel() {
+        let host = DictationHalo.HaloHostView(frame: CGRect(x: 0, y: 0, width: 520, height: 68))
+        let shape = IslandShape(eave: 0, bottomRadius: 40, belly: 0, topRadius: 40)
+        host.apply(shape: shape, accent: .white, level: 1, fill: 1, size: CGSize(width: 520, height: 68))
+        let full = DictationStripLevel.halo(1)
+        let (bloom, outer, inner, core) = (host.strokeLayers[0], host.strokeLayers[1], host.strokeLayers[2], host.strokeLayers[3])
+        XCTAssertEqual(bloom.shadowRadius, full.bloomBlur, accuracy: 0.001)
+        XCTAssertEqual(Double(bloom.shadowOpacity), full.bloomOpacity, accuracy: 0.001)
+        XCTAssertEqual(outer.lineWidth, full.outerWidth, accuracy: 0.001)
+        XCTAssertEqual(outer.shadowRadius, full.outerBlur, accuracy: 0.001)
+        XCTAssertEqual(inner.shadowRadius, full.innerBlur, accuracy: 0.001)
+        XCTAssertNotNil(inner.mask, "the inner bleed must be clipped to the inside")
+        XCTAssertEqual(core.lineWidth, full.coreWidth, accuracy: 0.001)
+        XCTAssertEqual(Double(core.opacity), full.coreOpacity, accuracy: 0.001)
+        XCTAssertNotNil(bloom.path, "paths must be laid out from the strip's frame")
+
+        host.apply(shape: shape, accent: .white, level: 0, fill: 0, size: CGSize(width: 520, height: 68))
+        let rest = DictationStripLevel.halo(0)
+        XCTAssertEqual(outer.shadowRadius, rest.outerBlur, accuracy: 0.001)
+        XCTAssertEqual(Double(core.opacity), rest.coreOpacity, accuracy: 0.001)
     }
 
-    /// Mean 0...255 luminance of the halo drawn white on black over a
-    /// 520 × 68 strip with room around it for the spill.
-    private func renderedBrightness(level: CGFloat, fill: CGFloat) throws -> Double {
-        let size = CGSize(width: 520, height: 68)
+    /// The spread mask is wider than the strip by the spill on each side, so
+    /// its stops are in mask coordinates: at fill 0 the lit half-width is
+    /// 0.18 of the strip, at fill 1 it is 0.60, and the mask never clips the
+    /// spill square (frame reaches past the strip on every side).
+    func testSpreadMaskCoversTheSpillAndFollowsFill() {
+        let host = DictationHalo.HaloHostView(frame: CGRect(x: 0, y: 0, width: 520, height: 68))
         let shape = IslandShape(eave: 0, bottomRadius: 40, belly: 0, topRadius: 40)
-        let view = DictationHalo(shape: shape, accent: .white, level: level, fill: fill, size: size)
-            .frame(width: size.width, height: size.height)
-            .padding(60)
-            .background(Color.black)
-        let renderer = ImageRenderer(content: view)
-        renderer.scale = 1
-        let image = try XCTUnwrap(renderer.cgImage)
-        let w = image.width, h = image.height
-        var pixels = [UInt8](repeating: 0, count: w * h * 4)
-        let ctx = try XCTUnwrap(CGContext(
-            data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
-        var total = 0
-        for i in stride(from: 0, to: pixels.count, by: 4) {
-            total += (Int(pixels[i]) + Int(pixels[i + 1]) + Int(pixels[i + 2])) / 3
-        }
-        return Double(total) / Double(w * h)
+        host.apply(shape: shape, accent: .white, level: 0, fill: 0, size: CGSize(width: 520, height: 68))
+        let spill = DictationHalo.HaloHostView.spill
+        XCTAssertEqual(host.spreadMask.frame.minX, -spill, accuracy: 0.001)
+        XCTAssertEqual(host.spreadMask.frame.width, 520 + spill * 2, accuracy: 0.001)
+        let maskWidth = 520 + spill * 2
+        let atRest = host.spreadMask.locations!.map { CGFloat(truncating: $0) }
+        XCTAssertEqual(atRest[1], 0.5 - 0.18 * 520 / maskWidth, accuracy: 0.001)
+        host.apply(shape: shape, accent: .white, level: 0, fill: 1, size: CGSize(width: 520, height: 68))
+        let full = host.spreadMask.locations!.map { CGFloat(truncating: $0) }
+        XCTAssertEqual(full[3], 0.5 + 0.60 * 520 / maskWidth, accuracy: 0.001)
     }
 
     // MARK: - Which display (spec, "Which display")
