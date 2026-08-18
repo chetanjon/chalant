@@ -2,7 +2,12 @@ import Foundation
 
 /// Whether the on-device model tidies what you dictated.
 ///
-/// **Off by default since 2026-08-17.** It was on by default from 2026-08-14
+/// **On by default, and off the path the user feels (evening of 2026-08-17):
+/// the words land at once and the model's version replaces them in place a
+/// second later, only if it changed something and the user has not touched
+/// the document since. See `DictationController.startTidiedSwap` and
+/// `SwapPolicy`.** For a few hours that day it was off by default: it was on
+/// by default from 2026-08-14
 /// (the founder's decision, taken twice: cleaned output like Wispr, "because
 /// people can just talk whatever they want"). Then, on the first evening they
 /// dictated with a strip that lights up and says "sent", they felt the wait:
@@ -29,7 +34,7 @@ enum Cleanup {
     static let enabledKey = "dictationCleanup"
 
     static func isEnabled(in defaults: UserDefaults = .standard) -> Bool {
-        defaults.object(forKey: enabledKey) as? Bool ?? false
+        defaults.object(forKey: enabledKey) as? Bool ?? true
     }
 
     static func setEnabled(_ on: Bool, in defaults: UserDefaults = .standard) {

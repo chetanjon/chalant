@@ -49,7 +49,13 @@ public enum FidelityGuard {
 
     public static func check(raw: String, cleaned: String) -> Verdict {
         let rawTrimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanTrimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Formatting is not a fidelity error: a list the speaker shaped comes
+        // back one item per line with "- " or "1. " in front. The markers are
+        // taken off and the lines rejoined before any check runs, so a numbered
+        // list does not fail "a number appeared that was not said" and a
+        // bulleted one does not fail the content overlap. A digit that is not
+        // a marker ("room 4") is still an invented number.
+        let cleanTrimmed = withoutListMarkers(cleaned).trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !rawTrimmed.isEmpty else { return .ok }
         guard !cleanTrimmed.isEmpty else { return .violated("the model returned nothing") }
@@ -61,6 +67,19 @@ public enum FidelityGuard {
         if let reason = stillTheSameMessage(rawTrimmed, cleanTrimmed) { return .violated(reason) }
 
         return .ok
+    }
+
+    /// List markers off the front of every line, lines joined with spaces.
+    static func withoutListMarkers(_ text: String) -> String {
+        text.components(separatedBy: .newlines).map { line -> String in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard let range = trimmed.range(of: "^([-•*]|\\d{1,2}[.)])\\s+", options: .regularExpression) else {
+                return trimmed
+            }
+            return String(trimmed[range.upperBound...])
+        }
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
     }
 
     // MARK: - Stutters the model made

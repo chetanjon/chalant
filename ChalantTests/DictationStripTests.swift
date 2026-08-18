@@ -123,18 +123,18 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(DictationStripLevel.normalize(peak: -0.2), 0, accuracy: 0.0001)
     }
 
-    // MARK: - Tidy is off by default (founder, 2026-08-17: "instant, as I said it")
+    // MARK: - Tidy is on by default, off the path the user feels
 
-    /// The on-device tidy pass costs ~1 s per sentence and nothing can be
-    /// shaved off it (prewarming during the hold measured no better), so the
-    /// founder chose instant text by default. The switch stays for anyone who
-    /// wants tidy back. Uses its own suite: the test host is the real app, so
-    /// `.standard` here is the founder's preferences.
-    func testTidyIsOffUnlessSwitchedOn() {
+    /// The tidy pass runs after the insert and swaps in place (spec
+    /// 2026-08-17, "Instant, then tidied in place"), so it no longer costs the
+    /// user a second, and it is on unless switched off. Uses its own suite:
+    /// the test host is the real app, so `.standard` here is the founder's
+    /// preferences.
+    func testTidyIsOnUnlessSwitchedOff() {
         let suite = UserDefaults(suiteName: "chalant.tests.\(UUID().uuidString)")!
-        XCTAssertFalse(Cleanup.isEnabled(in: suite))
-        Cleanup.setEnabled(true, in: suite)
         XCTAssertTrue(Cleanup.isEnabled(in: suite))
+        Cleanup.setEnabled(false, in: suite)
+        XCTAssertFalse(Cleanup.isEnabled(in: suite))
     }
 
     // MARK: - The strip is sized to what it holds (round four, "too big")

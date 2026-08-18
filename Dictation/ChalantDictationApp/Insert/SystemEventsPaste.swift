@@ -9,6 +9,30 @@ import os
 enum SystemEventsPaste {
     private static let log = Logger(subsystem: "com.cj.chalant.dictation", category: "insert")
 
+    /// Undo the last paste and paste again, for the tidied swap. One script,
+    /// so the two keystrokes cannot be split by anything of ours; the short
+    /// delay is for the app to apply the undo before the paste arrives.
+    static func undoThenPaste() -> Bool {
+        let script = """
+        with timeout of 3 seconds
+            tell application "System Events"
+                keystroke "z" using command down
+                delay 0.08
+                keystroke "v" using command down
+            end tell
+        end timeout
+        """
+        guard let apple = NSAppleScript(source: script) else { return false }
+        var error: NSDictionary?
+        apple.executeAndReturnError(&error)
+        if let error {
+            let message = error[NSAppleScript.errorMessage] as? String ?? "unknown AppleScript error"
+            log.error("System Events undo-then-paste failed: \(message, privacy: .public)")
+            return false
+        }
+        return true
+    }
+
     /// True when the script reported no error.
     static func run() -> Bool {
         // `with timeout` is not optional. Measured 2026-08-12: with Automation

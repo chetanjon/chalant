@@ -36,6 +36,12 @@ final class DictationController {
     private var healthTimer: Timer?
     private var transcriber: AppleTranscriber?
     private var pumpTask: Task<Void, Never>?
+    /// The tidied swap in flight after an insert (instant, then tidied in
+    /// place). A new key-down retires it: ⌘Z after a second insert would take
+    /// the wrong paste.
+    private var swapTask: Task<Void, Never>?
+    private var swapGeneration = 0
+    private let activity = UserActivityWatch()
     /// Turns a real day of dictating into the spontaneous half of the corpus.
     /// Off unless explicitly switched on; see `CorpusCapture`.
     private let corpus = CorpusCapture()
@@ -155,6 +161,7 @@ final class DictationController {
     // MARK: - The chain
 
     func keyDown() async {
+        retirePendingSwap()
         Self.log.info("keyDown entered")
         switch key.press() {
         case .begin:
@@ -420,28 +427,14 @@ final class DictationController {
                 "guardrail trimmed \(raw.count - deterministic.count, privacy: .public) chars of punctuation run")
         }
 
-        // The model pass, on EVERY utterance, which is the founder's decision of
-        // 2026-08-14 taken twice. The obvious alternative was to route only
-        // risky utterances through it using confidence; that was measured on
-        // 2026-08-16 and LOST (AUC 0.602, a coin flip), because confidence
-        // measures whether the engine HEARD right and cleanup fixes what the
-        // speaker SAID. A perfectly-heard "you know, like, we are just" scores
-        // high and needs the most cleaning.
-        //
-        // It costs ~1s at p50 and returns the input untouched on every failure,
-        // so the worst case is the text that would have shipped anyway, slower.
-        // **A switch, against law 6's "defaults over switches", for the same
-        // reason `CorpusCapture` gets one: this is not a feature that is simply
-        // better.** It trades roughly a second of the user's time for a tidier
-        // sentence, and that is a trade a person is entitled to decline. It
-        // defaults ON because that is the settled decision.
-        var text = deterministic
-        if Cleanup.isEnabled() {
-            let polishStart = Date()
-            text = (try? await polisher.polish(deterministic, profile: AppProfile(bundleID: target?.bundleID ?? "")))
-                ?? deterministic
-            timings.polish = Date().timeIntervalSince(polishStart)
-        }
+        // The model pass no longer stands between the speaker and their words.
+        // It used to (2026-08-14 to 1.17.0), at ~1 s per sentence, and the
+        // founder felt every one of them. Now the deterministic text lands at
+        // once and the model runs AFTER the insert; if it changed anything and
+        // the user has not touched the document since, the raw text is swapped
+        // for the tidied one in place (see `startTidiedSwap`). Instant, then
+        // tidied in place, spec 2026-08-17.
+        let text = deterministic
         guard !text.isEmpty else {
             // Silence is not a corpus entry. Keeping it would pad the set with
             // rows nobody can label.
@@ -472,6 +465,9 @@ final class DictationController {
         if case .inserted = outcome {
             await CorrectionObserver.shared.watch(
                 inserted: text, in: target.bundleID)
+            if Cleanup.isEnabled() {
+                startTidiedSwap(of: text, outcome: outcome, target: target, insertedAt: Date())
+            }
         }
 
         // Lengths and durations only. Part 1 §2: transcripts never enter logs.
@@ -495,6 +491,59 @@ final class DictationController {
             insert: timings.insertion)
 
         onStateChange?()
+    }
+
+    // MARK: - Instant, then tidied in place
+
+    /// The model pass, off the path the user feels. Runs after the insert;
+    /// when it returns, `SwapPolicy` decides whether the raw text may be
+    /// replaced (unchanged, typed since, focus moved, too late, no undo here:
+    /// keep). A swap is undo-then-paste through the same System Events path.
+    /// Logs lengths and the reason, never content.
+    private func startTidiedSwap(of inserted: String, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date) {
+        retirePendingSwap()
+        swapGeneration += 1
+        let generation = swapGeneration
+        activity.arm()
+        swapTask = Task { [weak self] in
+            guard let self else { return }
+            let tidied = (try? await self.polisher.polish(inserted, profile: AppProfile(bundleID: target.bundleID ?? "")))
+                ?? inserted
+            guard !Task.isCancelled, generation == self.swapGeneration else {
+                self.activity.disarm()
+                return
+            }
+            let front = NSWorkspace.shared.frontmostApplication
+            let situation = SwapPolicy.Situation(
+                inserted: inserted, tidied: tidied, outcome: outcome,
+                userActedSinceInsert: self.activity.sawActivity,
+                frontIsStillTarget: front?.processIdentifier == target.processID,
+                secondsSinceInsert: Date().timeIntervalSince(insertedAt),
+                bundleID: target.bundleID)
+            self.activity.disarm()
+            switch SwapPolicy.decide(situation) {
+            case .keep(let reason):
+                Self.log.info("tidy kept: \(reason.rawValue, privacy: .public) after \(Date().timeIntervalSince(insertedAt), privacy: .public)s")
+            case .swap:
+                let swapped = await self.inserter.replaceLastInsertion(with: tidied, into: target)
+                if swapped {
+                    // The observer diffs the field against what we put there;
+                    // it must now expect the tidied text, or our own swap
+                    // would read as the user correcting us.
+                    await CorrectionObserver.shared.watch(inserted: tidied, in: target.bundleID)
+                }
+                Self.log.info(
+                    "tidy \(swapped ? "swapped" : "swap failed", privacy: .public): \(inserted.count, privacy: .public) -> \(tidied.count, privacy: .public) chars after \(Date().timeIntervalSince(insertedAt), privacy: .public)s")
+            }
+            self.swapTask = nil
+        }
+    }
+
+    private func retirePendingSwap() {
+        swapGeneration += 1
+        swapTask?.cancel()
+        swapTask = nil
+        activity.disarm()
     }
 
     /// Tear down a session that was prepared but never captured, because the

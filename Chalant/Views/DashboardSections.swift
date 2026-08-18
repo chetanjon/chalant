@@ -24,7 +24,7 @@ struct GeneralSection: View {
     // not a nicety to add afterwards.
     @AppStorage(CorrectionObserver.enabledKey) private var learnCorrections = true
     // On, per the 2026-08-14 decision. Costs ~1s per utterance; see `Cleanup`.
-    @AppStorage(Cleanup.enabledKey) private var cleanup = false
+    @AppStorage(Cleanup.enabledKey) private var cleanup = true
 
     @State private var launchAtLogin = false
     /// The mics on offer right now, refreshed each time this section
@@ -157,9 +157,10 @@ struct GeneralSection: View {
                     // trade someone is entitled to decline.
                     SettingToggle(label: "Tidy what I said", isOn: $cleanup)
                     SettingNote(
-                        "Removes the ums and false starts and fixes punctuation, on this Mac. "
-                        + "It adds about a second before your words appear. Names, numbers and "
-                        + "every \"not\" are checked afterwards, and anything it changed that it "
+                        "Your words land at once. About a second later they are tidied in place, "
+                        + "on this Mac: ums and false starts gone, punctuation fixed, a spoken list "
+                        + "made into a list. If you have started typing, nothing is touched. Names, "
+                        + "numbers and every \"not\" are checked, and anything it changed that it "
                         + "should not have is thrown away."
                     )
 
