@@ -53,6 +53,49 @@ actor FoundationModelsPolisher: Polisher {
         session.prewarm()
     }
 
+    // MARK: - Clean while you talk
+
+    /// Pieces already tidied, by their exact text, and pieces in flight. Filled
+    /// by `pretidy` while the key is still held (every chunk of the transcript
+    /// that is closed, see `CleanupPrompt.closedChunks`) and read by `polish`
+    /// at release, so a long paragraph waits for its tail chunk, not for all
+    /// of them. Cleared for each new utterance: the pieces of one hold are no
+    /// use to the next, and the cache must never grow all day.
+    private var tidiedPieces: [String: String] = [:]
+    private var piecesInFlight: [String: Task<String, Never>] = [:]
+
+    func beginUtterance() {
+        for task in piecesInFlight.values { task.cancel() }
+        piecesInFlight.removeAll()
+        tidiedPieces.removeAll()
+    }
+
+    /// Tidy, in the background, every chunk of `text` that will not change as
+    /// the speaker goes on. Called on a timer during the hold with the
+    /// deterministic text of the finalized transcript so far.
+    func pretidy(_ text: String) {
+        guard Cleanup.isEnabled(), case .available = SystemLanguageModel.default.availability else { return }
+        let closed = CleanupPrompt.closedChunks(text)
+        let fresh = closed.filter { tidiedPieces[$0] == nil && piecesInFlight[$0] == nil }
+        if !fresh.isEmpty {
+            // Counts only, never content.
+            Self.log.info(
+                "pretidy: \(text.count, privacy: .public) chars finalized, \(closed.count, privacy: .public) closed chunk(s), \(fresh.count, privacy: .public) new")
+        }
+        for piece in fresh {
+            piecesInFlight[piece] = Task { [weak self] in
+                let result = await Self.tidy(piece: piece)
+                await self?.finished(piece: piece, result: result)
+                return result
+            }
+        }
+    }
+
+    private func finished(piece: String, result: String) {
+        tidiedPieces[piece] = result
+        piecesInFlight[piece] = nil
+    }
+
     func polish(_ text: String, profile: AppProfile) async throws -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return text }
@@ -67,9 +110,6 @@ actor FoundationModelsPolisher: Polisher {
 
         guard case .available = SystemLanguageModel.default.availability else { return text }
 
-        // One session per utterance, never shared: see `warmed`.
-        let session = LanguageModelSession(instructions: CleanupPrompt.instructions)
-
         // A few sentences at a time, and the reason is reliability rather than
         // the context window. Measured on the founder's own long paragraph
         // (2026-08-16): whole, the model dropped a negation, invented a
@@ -80,51 +120,69 @@ actor FoundationModelsPolisher: Polisher {
         // OWN, so one bad piece costs a sentence rather than the paragraph.
         // Before this, one rejected phrase anywhere threw away the whole
         // cleanup, which is what the founder saw on 1.14.0.
+        //
+        // Pieces tidied while the key was still held (see `pretidy`) are taken
+        // from the cache, or awaited if still in flight; only the rest go to
+        // the model now. That is what keeps a long paragraph's wait at release
+        // to about one chunk.
         let pieces = CleanupPrompt.chunks(trimmed)
         let started = ContinuousClock.now
         var out: [String] = []
-        var rejected = 0
+        var warm = 0
 
         for piece in pieces {
-            let reply: String
-            do {
-                reply = try await withTimeout(Self.timeout) {
-                    try await session.respond(to: CleanupPrompt.framing(piece)).content
-                }
-            } catch {
-                // Includes guardrail refusals, which Part 0 §0.7 makes an
-                // ordinary outcome. This piece ships as dictated; the rest of
-                // the paragraph still gets its chance. The framework's own
-                // words are logged (token counts, refusal class), never the
-                // transcript, because a failure that only says "failed" is
-                // how the shared-session context overflow went unnoticed.
-                Self.log.error(
-                    "cleanup failed on a chunk, shipping that chunk as dictated: \(String(describing: error), privacy: .public)")
-                out.append(piece)
-                continue
+            if let done = tidiedPieces[piece] {
+                out.append(done)
+                warm += 1
+            } else if let running = piecesInFlight[piece] {
+                out.append(await running.value)
+                warm += 1
+            } else {
+                out.append(await Self.tidy(piece: piece))
             }
-
-            let cleaned = CleanupPrompt.keepingEnding(of: piece, in: CleanupPrompt.unwrap(reply))
-
-            // Lengths and reasons, never content. Part 1 §2: transcripts never
-            // enter logs, and this path exists precisely when the model got the
-            // content wrong.
-            if case .violated(let reason) = FidelityGuard.check(raw: piece, cleaned: cleaned) {
-                Self.log.error("cleanup rejected a chunk: \(reason, privacy: .public)")
-                out.append(piece)
-                rejected += 1
-                continue
-            }
-            out.append(cleaned)
         }
 
         let elapsed = started.duration(to: .now)
         Self.log.info(
             """
             cleaned \(trimmed.count, privacy: .public) chars in \(pieces.count, privacy: .public) \
-            chunk(s), \(rejected, privacy: .public) shipped raw, \(elapsed.seconds, privacy: .public)s
+            chunk(s), \(warm, privacy: .public) tidied while talking, \(elapsed.seconds, privacy: .public)s
             """)
         return out.joined(separator: " ")
+    }
+
+    /// One piece through the model, unwrapped, ending kept, guarded. Every
+    /// failure returns the piece as dictated. One session per piece, never
+    /// shared: see `warmed`.
+    private static func tidy(piece: String) async -> String {
+        let session = LanguageModelSession(instructions: CleanupPrompt.instructions)
+        let reply: String
+        do {
+            reply = try await withTimeout(timeout) {
+                try await session.respond(to: CleanupPrompt.framing(piece)).content
+            }
+        } catch {
+            // Includes guardrail refusals, which Part 0 §0.7 makes an
+            // ordinary outcome. This piece ships as dictated; the rest of
+            // the paragraph still gets its chance. The framework's own
+            // words are logged (token counts, refusal class), never the
+            // transcript, because a failure that only says "failed" is
+            // how the shared-session context overflow went unnoticed.
+            log.error(
+                "cleanup failed on a chunk, shipping that chunk as dictated: \(String(describing: error), privacy: .public)")
+            return piece
+        }
+
+        let cleaned = CleanupPrompt.keepingEnding(of: piece, in: CleanupPrompt.unwrap(reply))
+
+        // Lengths and reasons, never content. Part 1 §2: transcripts never
+        // enter logs, and this path exists precisely when the model got the
+        // content wrong.
+        if case .violated(let reason) = FidelityGuard.check(raw: piece, cleaned: cleaned) {
+            log.error("cleanup rejected a chunk: \(reason, privacy: .public)")
+            return piece
+        }
+        return cleaned
     }
 
     /// A timeout that actually abandons the work.
@@ -132,7 +190,7 @@ actor FoundationModelsPolisher: Polisher {
     /// `Task.sleep` alone would leave the generation running and still holding
     /// the session, so the next utterance would queue behind a request nobody
     /// is waiting for.
-    private func withTimeout<T: Sendable>(
+    private static func withTimeout<T: Sendable>(
         _ duration: Duration, _ work: @escaping @Sendable () async throws -> T
     ) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in

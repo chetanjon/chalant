@@ -28,6 +28,12 @@ actor InsertionChain: TextInserter {
         profiles = Self.loadProfiles()
     }
 
+    /// The padding `Spacing` put around the last inserted text, so the tidied
+    /// version can be pasted with the same padding when it replaces the raw
+    /// one: undo puts the cursor back where it was, and the same character
+    /// still precedes it.
+    private var lastPadding: (before: String, after: String) = ("", "")
+
     func insert(_ text: String, into target: InsertionTarget) async -> InsertionOutcome {
         guard !text.isEmpty else { return .refused(reason: .noTarget) }
 
@@ -54,6 +60,7 @@ actor InsertionChain: TextInserter {
         // `Spacing` treats nil as the safe default rather than a degraded one.
         let preceding = await MainActor.run { CursorContext.characterBeforeCursor() }
         let spaced = Spacing.pad(text, precededBy: preceding)
+        lastPadding = Self.padding(around: text, in: spaced)
 
         // Preserve whatever the user had. Nil is fine and never blocks.
         let saved = await pasteboard.snapshot()
@@ -96,6 +103,41 @@ actor InsertionChain: TextInserter {
         // told in one sentence what to do about it.
         Self.log.error("all tiers failed for \(bundleID, privacy: .public); text left on clipboard")
         return .leftOnClipboard(reason: "Press ⌘V to paste it.")
+    }
+
+    /// Replace the text just inserted with its tidied version: undo the paste,
+    /// paste again. Instant, then tidied in place (spec 2026-08-17).
+    ///
+    /// Only through System Events, the same tier that landed the insert, and
+    /// only after `SwapPolicy` said yes: the caller has already checked that
+    /// nothing was typed, focus stayed, and the app has undo. ⌘Z undoes exactly
+    /// the pasted run in every editor with undo; the tidied text goes back with
+    /// the same padding the raw text carried, and the pasteboard is put back
+    /// after, exactly like an insert. Reports whether the script ran; a swap
+    /// that fails leaves the raw text, which was correct text.
+    func replaceLastInsertion(with tidied: String, into target: InsertionTarget) async -> Bool {
+        guard !tidied.isEmpty else { return false }
+        if SecureInputProbe.isActive { return false }
+        await Self.waitForClearModifiers()
+        guard case .proceed = currentVerdict(for: target) else {
+            Self.log.error("target moved before the tidied swap; keeping the raw text")
+            return false
+        }
+        guard AccessibilityPermission.isTrusted,
+              case .granted = await AutomationPermission.ensureSystemEvents()
+        else { return false }
+        let padded = lastPadding.before + tidied + lastPadding.after
+        let saved = await pasteboard.snapshot()
+        _ = await pasteboard.place(padded)
+        let swapped = SystemEventsPaste.undoThenPaste()
+        if let saved { Task { await pasteboard.restore(saved) } }
+        return swapped
+    }
+
+    /// What `Spacing` added around `text` to make `spaced`.
+    static func padding(around text: String, in spaced: String) -> (before: String, after: String) {
+        guard let range = spaced.range(of: text) else { return ("", "") }
+        return (String(spaced[..<range.lowerBound]), String(spaced[range.upperBound...]))
     }
 
     /// What the system reports right now, compared against where the user aimed.

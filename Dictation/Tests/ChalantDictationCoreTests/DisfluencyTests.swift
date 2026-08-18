@@ -71,4 +71,17 @@ struct DisfluencyTests {
             #expect(Disfluency.collapsingRepetitions(text) == text)
         }
     }
+
+    /// The engine sometimes emits one token over and over with punctuation
+    /// riding on each ("the, the, the, the, the,"), seen 2026-08-17 on a
+    /// starved microphone. Three or more in a row is never a sentence anyone
+    /// said; two with punctuation still ship, because "No, no." is English.
+    @Test("a run of three or more identical punctuated tokens is an artefact")
+    func collapsesRunsOfPunctuatedTokens() {
+        #expect(Disfluency.collapsingRepetitions("I feel like the, the, the, the, the, stars") == "I feel like the, stars")
+        #expect(Disfluency.collapsingRepetitions("one. one. one. one.") == "one.")
+        #expect(Disfluency.collapsingRepetitions("No, no.") == "No, no.")
+        #expect(Disfluency.collapsingRepetitions("one. one.") == "one. one.")
+        #expect(Disfluency.collapsingRepetitions("15, 15, 15, Main") == "15, 15, 15, Main")
+    }
 }

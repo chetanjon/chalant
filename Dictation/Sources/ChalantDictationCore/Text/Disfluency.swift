@@ -46,6 +46,22 @@ public enum Disfluency {
         var tokens = text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
         guard tokens.count > 1 else { return text }
 
+        // A run of three or more identical tokens WITH punctuation ("the, the,
+        // the, the," / "one. one. one.") is the engine stalling on a starved
+        // microphone, seen 2026-08-17, never a sentence anyone said. Two with
+        // punctuation still ship: "No, no." is English. Letters only, as below.
+        var i = 0
+        while i < tokens.count {
+            var j = i + 1
+            while j < tokens.count, tokens[j].lowercased() == tokens[i].lowercased() { j += 1 }
+            let run = j - i
+            if run >= 3, tokens[i].contains(where: { $0.isPunctuation }),
+               tokens[i].contains(where: { $0.isLetter }) {
+                tokens.removeSubrange((i + 1)..<j)
+            }
+            i += 1
+        }
+
         // Longest phrase first: "reply to reply to" must collapse as a pair,
         // not leave "to" behind after a single-token pass.
         for span in stride(from: maxPhrase, through: 1, by: -1) {

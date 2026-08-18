@@ -249,6 +249,11 @@ actor AppleTranscriber: Transcriber {
     /// provisional span, exactly once.
     var liveText: String { assembler.displayText }
 
+    /// The tokens the engine has committed so far, mid-utterance. Finals arrive
+    /// over distinct, non-overlapping ranges and never change afterwards, which
+    /// is what lets "clean while you talk" tidy them before the key comes up.
+    var finalizedTokens: [Token] { assembler.finalized }
+
     private func publish(_ event: TranscriptEvent) {
         assembler.apply(event)
         eventContinuation?.yield(event)

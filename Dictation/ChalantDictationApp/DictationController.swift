@@ -36,6 +36,17 @@ final class DictationController {
     private var healthTimer: Timer?
     private var transcriber: AppleTranscriber?
     private var pumpTask: Task<Void, Never>?
+    /// The tidied swap in flight after an insert (instant, then tidied in
+    /// place). A new key-down retires it: ⌘Z after a second insert would take
+    /// the wrong paste.
+    private var swapTask: Task<Void, Never>?
+    /// "Clean while you talk": during the hold, every chunk of the transcript
+    /// that is already closed goes to the model early, so at release only the
+    /// tail waits (spec 2026-08-17, track 3).
+    private var pretidyTask: Task<Void, Never>?
+    private static let pretidyInterval: Duration = .milliseconds(900)
+    private var swapGeneration = 0
+    private let activity = UserActivityWatch()
     /// Turns a real day of dictating into the spontaneous half of the corpus.
     /// Off unless explicitly switched on; see `CorpusCapture`.
     private let corpus = CorpusCapture()
@@ -155,6 +166,7 @@ final class DictationController {
     // MARK: - The chain
 
     func keyDown() async {
+        retirePendingSwap()
         Self.log.info("keyDown entered")
         switch key.press() {
         case .begin:
@@ -291,6 +303,27 @@ final class DictationController {
                 try? await Task.sleep(for: .milliseconds(10))
             }
         }
+        startPretidy(transcriber)
+    }
+
+    /// While the key is held, hand every closed chunk of what has been said so
+    /// far to the model, through the same deterministic passes the release
+    /// path uses, so the pieces match exactly at release and are already done.
+    private func startPretidy(_ transcriber: AppleTranscriber) {
+        pretidyTask?.cancel()
+        guard Cleanup.isEnabled() else { return }
+        pretidyTask = Task { [weak self, transcriber] in
+            guard let self else { return }
+            await self.polisher.beginUtterance()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.pretidyInterval)
+                guard !Task.isCancelled else { return }
+                let tokens = await transcriber.finalizedTokens
+                guard !tokens.isEmpty else { continue }
+                let text = await self.deterministicText(from: tokens)
+                await self.polisher.pretidy(text)
+            }
+        }
     }
 
     func keyUp() async {
@@ -324,6 +357,8 @@ final class DictationController {
         }
 
         let releasedAt = Date()
+        pretidyTask?.cancel()
+        pretidyTask = nil
         await audio.endCapture()
         stopMeter()
         surface.hide()
@@ -373,75 +408,20 @@ final class DictationController {
         // before, 18.22 after, with exactly three utterances changed and no
         // other output touched.
         let raw = transcript.rawText
-
-        // **The vocabulary pass runs FIRST, and on tokens rather than text.**
-        // It is the only stage that needs per-word confidence, and confidence
-        // exists only on tokens; the three stages after it delete words, after
-        // which nothing aligns back to the engine's own scoring. Substitution
-        // is strictly one word for one word, so running it first cannot disturb
-        // them.
-        //
-        // Measured on the 90-utterance corpus 2026-08-15: 8 repairs, 0
-        // corruptions (`Challant` → `Chalant`, `Jonalagata` → `Jonnalagadda`,
-        // `versal` → `Vercel`, `Kisu` → `Kizu`). It does nothing at all until
-        // the vocabulary is non-empty, which today means until someone sets it
-        // by hand or M5's learner fills it.
-        // Spans first, while every token is still present. A name the engine
-        // broke in half needs all its pieces, and joining can only shorten the
-        // sequence the single-word pass then walks.
-        //
-        // It is a separate pass because the evidence is different: a split name
-        // is made of CONFIDENTLY heard real words (`friction` and `lens` both
-        // came back at 0.98), so the single-word gate, which fires only on
-        // uncertainty, can never see it.
-        // Aliases FIRST, and they are the only stage that ignores confidence.
-        // A pair the user typed themselves, twice, over a word Chalant had just
-        // put in their document is not a guess needing acoustic verification.
-        // It also has to ignore confidence to work at all: proper-noun errors
-        // are confident errors, and `Chalan` for `Chalant` measured 0.87.
-        let learned = await LearnedTerms.shared.aliases()
-        let corrected = TermMatcher.applyingAliases(tokens: transcript.tokens, aliases: learned)
-
-        // Then the phonetic passes, over the hand-kept list plus everything
-        // learned. Spans before single words, while every token is present.
-        let vocabulary = Vocabulary.terms() + (await LearnedTerms.shared.terms())
-        let whole = TermMatcher.joiningSpans(tokens: corrected, terms: vocabulary)
-        let resolved = TermMatcher.resolving(tokens: whole, terms: vocabulary)
-
-        // Three stages, in order, all pure and all in Core: refuse what is not
-        // text, collapse what was said twice by accident, then remove the words
-        // nobody meant to say.
-        let deterministic = Fillers.removing(
-            Disfluency.collapsingRepetitions(
-                Guardrail.trimmingPunctuationRun(
-                    resolved.map(\.text).joined(separator: " "))))
+        let deterministic = await deterministicText(from: transcript.tokens)
         if deterministic != raw {
             Self.log.error(
                 "guardrail trimmed \(raw.count - deterministic.count, privacy: .public) chars of punctuation run")
         }
 
-        // The model pass, on EVERY utterance, which is the founder's decision of
-        // 2026-08-14 taken twice. The obvious alternative was to route only
-        // risky utterances through it using confidence; that was measured on
-        // 2026-08-16 and LOST (AUC 0.602, a coin flip), because confidence
-        // measures whether the engine HEARD right and cleanup fixes what the
-        // speaker SAID. A perfectly-heard "you know, like, we are just" scores
-        // high and needs the most cleaning.
-        //
-        // It costs ~1s at p50 and returns the input untouched on every failure,
-        // so the worst case is the text that would have shipped anyway, slower.
-        // **A switch, against law 6's "defaults over switches", for the same
-        // reason `CorpusCapture` gets one: this is not a feature that is simply
-        // better.** It trades roughly a second of the user's time for a tidier
-        // sentence, and that is a trade a person is entitled to decline. It
-        // defaults ON because that is the settled decision.
-        var text = deterministic
-        if Cleanup.isEnabled() {
-            let polishStart = Date()
-            text = (try? await polisher.polish(deterministic, profile: AppProfile(bundleID: target?.bundleID ?? "")))
-                ?? deterministic
-            timings.polish = Date().timeIntervalSince(polishStart)
-        }
+        // The model pass no longer stands between the speaker and their words.
+        // It used to (2026-08-14 to 1.17.0), at ~1 s per sentence, and the
+        // founder felt every one of them. Now the deterministic text lands at
+        // once and the model runs AFTER the insert; if it changed anything and
+        // the user has not touched the document since, the raw text is swapped
+        // for the tidied one in place (see `startTidiedSwap`). Instant, then
+        // tidied in place, spec 2026-08-17.
+        let text = deterministic
         guard !text.isEmpty else {
             // Silence is not a corpus entry. Keeping it would pad the set with
             // rows nobody can label.
@@ -472,6 +452,9 @@ final class DictationController {
         if case .inserted = outcome {
             await CorrectionObserver.shared.watch(
                 inserted: text, in: target.bundleID)
+            if Cleanup.isEnabled() {
+                startTidiedSwap(of: text, outcome: outcome, target: target, insertedAt: Date())
+            }
         }
 
         // Lengths and durations only. Part 1 §2: transcripts never enter logs.
@@ -495,6 +478,112 @@ final class DictationController {
             insert: timings.insertion)
 
         onStateChange?()
+    }
+
+    /// The deterministic passes, in order, from the engine's tokens to text:
+    /// aliases, then the phonetic vocabulary passes (spans before single
+    /// words), then refuse what is not text, collapse what was said twice by
+    /// accident, and remove the words nobody meant to say. All pure, all in
+    /// Core, all measured. Used at release on the whole transcript and, during
+    /// the hold, on the finalized prefix ("clean while you talk"), so the two
+    /// agree word for word on the part they share.
+    private func deterministicText(from tokens: [Token]) async -> String {
+
+        // **The vocabulary pass runs FIRST, and on tokens rather than text.**
+        // It is the only stage that needs per-word confidence, and confidence
+        // exists only on tokens; the three stages after it delete words, after
+        // which nothing aligns back to the engine's own scoring. Substitution
+        // is strictly one word for one word, so running it first cannot disturb
+        // them.
+        //
+        // Measured on the 90-utterance corpus 2026-08-15: 8 repairs, 0
+        // corruptions (`Challant` → `Chalant`, `Jonalagata` → `Jonnalagadda`,
+        // `versal` → `Vercel`, `Kisu` → `Kizu`). It does nothing at all until
+        // the vocabulary is non-empty, which today means until someone sets it
+        // by hand or M5's learner fills it.
+        // Spans first, while every token is still present. A name the engine
+        // broke in half needs all its pieces, and joining can only shorten the
+        // sequence the single-word pass then walks.
+        //
+        // It is a separate pass because the evidence is different: a split name
+        // is made of CONFIDENTLY heard real words (`friction` and `lens` both
+        // came back at 0.98), so the single-word gate, which fires only on
+        // uncertainty, can never see it.
+        // Aliases FIRST, and they are the only stage that ignores confidence.
+        // A pair the user typed themselves, twice, over a word Chalant had just
+        // put in their document is not a guess needing acoustic verification.
+        // It also has to ignore confidence to work at all: proper-noun errors
+        // are confident errors, and `Chalan` for `Chalant` measured 0.87.
+        let learned = await LearnedTerms.shared.aliases()
+        let corrected = TermMatcher.applyingAliases(tokens: tokens, aliases: learned)
+
+        // Then the phonetic passes, over the hand-kept list plus everything
+        // learned. Spans before single words, while every token is present.
+        let vocabulary = Vocabulary.terms() + (await LearnedTerms.shared.terms())
+        let whole = TermMatcher.joiningSpans(tokens: corrected, terms: vocabulary)
+        let resolved = TermMatcher.resolving(tokens: whole, terms: vocabulary)
+
+        // Three stages, in order, all pure and all in Core: refuse what is not
+        // text, collapse what was said twice by accident, then remove the words
+        // nobody meant to say.
+        let deterministic = Fillers.removing(
+            Disfluency.collapsingRepetitions(
+                Guardrail.trimmingPunctuationRun(
+                    resolved.map(\.text).joined(separator: " "))))
+        return deterministic
+    }
+
+    // MARK: - Instant, then tidied in place
+
+    /// The model pass, off the path the user feels. Runs after the insert;
+    /// when it returns, `SwapPolicy` decides whether the raw text may be
+    /// replaced (unchanged, typed since, focus moved, too late, no undo here:
+    /// keep). A swap is undo-then-paste through the same System Events path.
+    /// Logs lengths and the reason, never content.
+    private func startTidiedSwap(of inserted: String, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date) {
+        retirePendingSwap()
+        swapGeneration += 1
+        let generation = swapGeneration
+        activity.arm()
+        swapTask = Task { [weak self] in
+            guard let self else { return }
+            let tidied = (try? await self.polisher.polish(inserted, profile: AppProfile(bundleID: target.bundleID ?? "")))
+                ?? inserted
+            guard !Task.isCancelled, generation == self.swapGeneration else {
+                self.activity.disarm()
+                return
+            }
+            let front = NSWorkspace.shared.frontmostApplication
+            let situation = SwapPolicy.Situation(
+                inserted: inserted, tidied: tidied, outcome: outcome,
+                userActedSinceInsert: self.activity.sawActivity,
+                frontIsStillTarget: front?.processIdentifier == target.processID,
+                secondsSinceInsert: Date().timeIntervalSince(insertedAt),
+                bundleID: target.bundleID)
+            self.activity.disarm()
+            switch SwapPolicy.decide(situation) {
+            case .keep(let reason):
+                Self.log.info("tidy kept: \(reason.rawValue, privacy: .public) after \(Date().timeIntervalSince(insertedAt), privacy: .public)s")
+            case .swap:
+                let swapped = await self.inserter.replaceLastInsertion(with: tidied, into: target)
+                if swapped {
+                    // The observer diffs the field against what we put there;
+                    // it must now expect the tidied text, or our own swap
+                    // would read as the user correcting us.
+                    await CorrectionObserver.shared.watch(inserted: tidied, in: target.bundleID)
+                }
+                Self.log.info(
+                    "tidy \(swapped ? "swapped" : "swap failed", privacy: .public): \(inserted.count, privacy: .public) -> \(tidied.count, privacy: .public) chars after \(Date().timeIntervalSince(insertedAt), privacy: .public)s")
+            }
+            self.swapTask = nil
+        }
+    }
+
+    private func retirePendingSwap() {
+        swapGeneration += 1
+        swapTask?.cancel()
+        swapTask = nil
+        activity.disarm()
     }
 
     /// Tear down a session that was prepared but never captured, because the
@@ -522,6 +611,8 @@ final class DictationController {
         surface.hide()
         pumpTask?.cancel()
         pumpTask = nil
+        pretidyTask?.cancel()
+        pretidyTask = nil
         await standDown(transcriber)
     }
 

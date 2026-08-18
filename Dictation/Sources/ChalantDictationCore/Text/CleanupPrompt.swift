@@ -62,6 +62,27 @@ public enum CleanupPrompt {
         paraphrase, do not swap in synonyms, do not expand contractions, do not \
         add words that were not said. If the transcript is already clean, return \
         it unchanged. Do not summarise and do not explain what you did.
+
+        Format what the speaker shaped. When they enumerate three or more items, \
+        write it as a list, one item per line, and drop the spoken cue words \
+        ("first", "second", "number one", "bullet point"). Use "- " for each \
+        line, or "1. ", "2. ", "3. " if the speaker numbered them. Two items \
+        stay as a sentence. When they say "new paragraph" or "new line", break \
+        the line there and drop those words. Otherwise keep the text as one \
+        paragraph.
+
+        Examples of formatting:
+        Transcript: "okay so three things first we move the review second we ship the draft third we tell Priya"
+        Tidied: "Okay, so three things:
+        - Move the review.
+        - Ship the draft.
+        - Tell Priya."
+        Transcript: "number one call amma number two pick up the parcel number three send the notes"
+        Tidied: "1. Call Amma.
+        2. Pick up the parcel.
+        3. Send the notes."
+        Transcript: "so um I think we should um move the review to thursday"
+        Tidied: "So I think we should move the review to Thursday."
         """
 
     /// Whether an utterance is worth the model's time at all.
@@ -110,7 +131,12 @@ public enum CleanupPrompt {
         if let close = text.range(of: closeMarker) {
             text = String(text[..<close.lowerBound])
         }
-        return plainQuotes(text).trimmingCharacters(in: .whitespacesAndNewlines)
+        // Trailing spaces off every line: the model marks a line break the
+        // markdown way ("Call Amma.  ") and those two spaces would be pasted.
+        let lines = plainQuotes(text).components(separatedBy: "\n").map {
+            String($0.reversed().drop(while: { $0 == " " || $0 == "\t" }).reversed())
+        }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// A line that is nothing but a marker fragment, top or bottom, goes.
@@ -213,6 +239,31 @@ public enum CleanupPrompt {
     /// reliable and there is no evidence yet that longer holds.
     public static let chunkTargetWords = 40
 
+    /// Whether the speaker shaped a list: three or more ordinal cues, "number
+    /// N" cues, or "bullet point" cues. Two cues are prose ("first we..., and
+    /// second we..."), and digits or number words in running speech ("paid on
+    /// the twelfth", "call at six") are not cues at all.
+    public static func looksLikeList(_ text: String) -> Bool {
+        let lower = " " + text.lowercased().replacingOccurrences(of: "[^a-z0-9' ]", with: " ", options: .regularExpression) + " "
+        let ordinals = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"]
+        let distinctOrdinals = ordinals.filter { lower.contains(" \($0) ") }.count
+        if distinctOrdinals >= 3 { return true }
+        let numbered = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+        let numberCues = numbered.filter { lower.contains(" number \($0) ") }.count
+        if numberCues >= 3 { return true }
+        let bullets = lower.components(separatedBy: " bullet point").count - 1
+        return bullets >= 2
+    }
+
+    /// The most words a spoken list is handed to the model in one piece.
+    ///
+    /// Chunking at `chunkTargetWords` would split a list across chunks and
+    /// format the halves differently (one bulleted, one prose). Lists are short
+    /// parallel items, which is exactly the shape the model handles well, so a
+    /// list under this ceiling goes whole; the measured 25-70 word band held
+    /// clean and this stretches it only for the list case.
+    public static let wholeListWords = 110
+
     /// Split a transcript into pieces the model can be trusted with.
     ///
     /// Splits fall on sentence ends only, so no piece hands the model half a
@@ -224,6 +275,13 @@ public enum CleanupPrompt {
     public static func chunks(_ transcript: String, targetWords: Int = chunkTargetWords) -> [String] {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
+
+        // A spoken list stays whole (see `wholeListWords`), so its items are
+        // formatted together rather than half as bullets and half as prose.
+        if looksLikeList(trimmed),
+           trimmed.split(whereSeparator: \.isWhitespace).count <= wholeListWords {
+            return [trimmed]
+        }
 
         let sentences = sentencesOf(trimmed)
         var out: [String] = []
@@ -251,6 +309,17 @@ public enum CleanupPrompt {
                 words[$0..<min($0 + targetWords, words.count)].joined(separator: " ")
             }
         }
+    }
+
+    /// The chunks of a transcript that will not change as the speaker goes on:
+    /// every chunk but the last. Chunks fill greedily from the front, so text
+    /// added at the end never moves an earlier boundary, and a closed chunk
+    /// tidied while the key is still held is the same piece `polish` will ask
+    /// for at release ("clean while you talk", spec 2026-08-17). The last chunk
+    /// is still growing and is never closed. A spoken list is one chunk and so
+    /// is never pre-tidied; it is short by nature.
+    public static func closedChunks(_ transcript: String, targetWords: Int = chunkTargetWords) -> [String] {
+        Array(chunks(transcript, targetWords: targetWords).dropLast())
     }
 
     /// Sentences, each keeping its own terminator. A terminator counts only
