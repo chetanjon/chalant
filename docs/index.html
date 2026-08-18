@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <title>Chalant · the dynamic island for Mac</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Chalant is the dynamic island for the Mac notch. Talk to it or type at it: calendar, music, texting with read-back, screen reading. Keyless, on-device, free.">
+<meta name="description" content="Chalant is the dynamic island for the Mac notch. Talk to it or type at it: calendar, music, texting with read-back, screen reading. Hold Option and dictate anywhere. Keyless, on-device, free.">
 <meta property="og:title" content="Chalant · the dynamic island for Mac">
-<meta property="og:description" content="Talk to your notch. Calendar, music, texting with read-back, screen reading. Keyless, on-device, free.">
+<meta property="og:description" content="Talk to your notch. Calendar, music, texting with read-back, screen reading, and dictation anywhere on a held Option key. Keyless, on-device, free.">
 <meta property="og:image" content="https://chetanjon.github.io/chalant/assets/social-card.png">
 <meta property="og:url" content="https://www.chetanjonnalagadda.com/chalant">
 <meta property="og:type" content="website">
@@ -220,6 +220,60 @@
     color: var(--ghost);
   }
 
+  /* ---- Hold Option and talk ---- */
+
+  .dictate {
+    width: 100%;
+    border-top: 1px solid var(--hair);
+    padding: 56px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    text-align: center;
+  }
+
+  .dictate h2 {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--ghost);
+  }
+
+  .dictate .lead {
+    font-size: 17px;
+    line-height: 1.5;
+    color: var(--ink);
+    max-width: 30ch;
+  }
+
+  .dictate .lead code {
+    font-family: var(--mono);
+    font-size: 15px;
+    padding: 1px 7px;
+    border: 1px solid var(--edge);
+    border-radius: 6px;
+    color: var(--ink);
+  }
+
+  .dictate video {
+    display: block;
+    /* Wider than the column on purpose: the film is a strip under the
+       island and a line of 11pt text, and at 560 the words are too small
+       to read. Centered by the flex column, so it overhangs evenly. */
+    width: min(760px, 92vw);
+    border-radius: 18px;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07);
+  }
+
+  .dictate .more {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--ghost);
+    max-width: 52ch;
+  }
+
   /* ---- The honest note ---- */
 
   .film {
@@ -364,6 +418,23 @@
       <dd>Anything on your Mac can raise a status pill: builds, deploys, agents. Loopback only.</dd>
     </div>
   </dl>
+
+  <section class="dictate">
+    <h2>Hold Option and talk</h2>
+    <p class="lead">
+      In any app, hold the left <code>option</code> key, say it, let go.
+      The words land where you were typing.
+    </p>
+    <video src="assets/chalant-dictation.mp4" poster="assets/chalant-dictation-poster.jpg"
+           autoplay loop muted playsinline preload="metadata"
+           aria-label="A hold on the Option key: the strip glows under the island, a spoken sentence lands as tidy text in the document, and a name is corrected in place a moment later."></video>
+    <p class="more">
+      Ums gone, punctuation placed, a spoken list made into a list. Names spelled
+      the way you type or fix them, and, with Better hearing on, a second ear
+      that corrects a word in place a moment later. All of it on this Mac; nothing
+      you say leaves it. Needs macOS 26.
+    </p>
+  </section>
 
   <section class="film">
     <h2>The tour</h2>
