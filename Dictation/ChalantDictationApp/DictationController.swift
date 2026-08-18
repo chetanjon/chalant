@@ -40,6 +40,11 @@ final class DictationController {
     /// place). A new key-down retires it: ⌘Z after a second insert would take
     /// the wrong paste.
     private var swapTask: Task<Void, Never>?
+    /// The better ear's swap in flight, and what is currently in the document
+    /// from this utterance (the landed text, or the tidied text once swapped),
+    /// which is what the ear's version is compared against.
+    private var hearingTask: Task<Void, Never>?
+    private var lastLanded: String = ""
     /// "Clean while you talk": during the hold, every chunk of the transcript
     /// that is already closed goes to the model early, so at release only the
     /// tail waits (spec 2026-08-17, track 3).
@@ -123,6 +128,11 @@ final class DictationController {
         // the user happened to dictate first.
         if Cleanup.isEnabled() {
             await polisher.warmUp()
+        }
+        // The better ear, if the switch is on: download if needed, load, warm.
+        // Nothing happens here when it is off, which is the default.
+        if BetterHearing.isEnabled() {
+            Task { await BetterHearing.shared.prepare() }
         }
 
         watchInputDevices()
@@ -221,6 +231,9 @@ final class DictationController {
 
         let transcriber = AppleTranscriber()
         self.transcriber = transcriber
+        if BetterHearing.isEnabled(), await BetterHearing.shared.isReady {
+            await transcriber.setKeepSamplesForHearing(true)
+        }
 
         // A dead ear is rebuilt HERE, before the format below is read, so the
         // analyzer is prepared against the engine that will actually feed it.
@@ -391,6 +404,9 @@ final class DictationController {
             self.transcriber = nil
             return
         }
+        // The utterance's audio for the better ear, before the transcriber
+        // goes. Empty unless the ear was on and ready at key-down.
+        let hearingSamples = await transcriber.takeUtteranceSamples()
         self.transcriber = nil
 
         // Part 0 §0.5 makes this the number M0 exists to measure. No latency
@@ -478,8 +494,13 @@ final class DictationController {
         if case .inserted = outcome {
             await CorrectionObserver.shared.watch(
                 inserted: text, in: target.bundleID)
+            let insertedAt = Date()
+            lastLanded = text
             if Cleanup.isEnabled(), !refinedAtOnce {
-                startTidiedSwap(of: text, outcome: outcome, target: target, insertedAt: Date())
+                startTidiedSwap(of: text, outcome: outcome, target: target, insertedAt: insertedAt)
+            }
+            if !hearingSamples.isEmpty {
+                startHearingSwap(samples: hearingSamples, outcome: outcome, target: target, insertedAt: insertedAt)
             }
         }
 
@@ -588,13 +609,17 @@ final class DictationController {
                 frontIsStillTarget: front?.processIdentifier == target.processID,
                 secondsSinceInsert: Date().timeIntervalSince(insertedAt),
                 bundleID: target.bundleID)
-            self.activity.disarm()
+            // The better ear, if it is listening to this utterance too, still
+            // needs to know whether the user types after this point.
+            if self.hearingTask == nil { self.activity.disarm() }
             switch SwapPolicy.decide(situation) {
             case .keep(let reason):
                 Self.log.info("tidy kept: \(reason.rawValue, privacy: .public) after \(Date().timeIntervalSince(insertedAt), privacy: .public)s")
             case .swap:
+                self.activity.expectOwnKeystrokes()
                 let swapped = await self.inserter.replaceLastInsertion(with: tidied, into: target)
                 if swapped {
+                    self.lastLanded = tidied
                     // The observer diffs the field against what we put there;
                     // it must now expect the tidied text, or our own swap
                     // would read as the user correcting us.
@@ -611,7 +636,63 @@ final class DictationController {
         swapGeneration += 1
         swapTask?.cancel()
         swapTask = nil
+        hearingTask?.cancel()
+        hearingTask = nil
         activity.disarm()
+    }
+
+    // MARK: - Better hearing
+
+    /// The second ear, after the words have landed: Whisper hears the same
+    /// audio, its text goes through the plain deterministic passes and the
+    /// same tidy, and if it is plausibly the same utterance, differs from what
+    /// is in the document, and the policy allows (6 s ceiling, nothing typed,
+    /// focus stayed, an app with undo), the words are replaced in place. It
+    /// waits for the tidy swap, if one is running, so the two never race for
+    /// ⌘Z. Lengths and timings only in the log.
+    private func startHearingSwap(samples: [Float], outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date) {
+        hearingTask?.cancel()
+        let generation = swapGeneration
+        let pendingTidy = swapTask
+        if activity.isArmed == false { activity.arm() }
+        hearingTask = Task { [weak self] in
+            guard let self else { return }
+            let heard = await BetterHearing.shared.hear(samples)
+            guard !Task.isCancelled, generation == self.swapGeneration, let heard else { return }
+            await pendingTidy?.value
+            guard !Task.isCancelled, generation == self.swapGeneration else { return }
+            let landed = self.lastLanded
+            guard BetterHearing.plausible(hearing: heard, against: landed) else {
+                Self.log.info("hearing kept: implausible (\(heard.count, privacy: .public) vs \(landed.count, privacy: .public) chars)")
+                return
+            }
+            let cleaned = Listing.format(BetterHearing.deterministic(heard))
+            let tidied = (try? await self.polisher.polish(cleaned, profile: AppProfile(bundleID: target.bundleID ?? "")))
+                ?? cleaned
+            guard !Task.isCancelled, generation == self.swapGeneration else { return }
+            let front = NSWorkspace.shared.frontmostApplication
+            let situation = SwapPolicy.Situation(
+                inserted: landed, tidied: tidied, outcome: outcome,
+                userActedSinceInsert: self.activity.sawActivity,
+                frontIsStillTarget: front?.processIdentifier == target.processID,
+                secondsSinceInsert: Date().timeIntervalSince(insertedAt),
+                bundleID: target.bundleID, source: .hearing)
+            self.activity.disarm()
+            switch SwapPolicy.decide(situation) {
+            case .keep(let reason):
+                Self.log.info("hearing kept: \(reason.rawValue, privacy: .public) after \(Date().timeIntervalSince(insertedAt), privacy: .public)s")
+            case .swap:
+                self.activity.expectOwnKeystrokes()
+                let swapped = await self.inserter.replaceLastInsertion(with: tidied, into: target)
+                if swapped {
+                    self.lastLanded = tidied
+                    await CorrectionObserver.shared.watch(inserted: tidied, in: target.bundleID)
+                }
+                Self.log.info(
+                    "hearing \(swapped ? "swapped" : "swap failed", privacy: .public): \(landed.count, privacy: .public) -> \(tidied.count, privacy: .public) chars after \(Date().timeIntervalSince(insertedAt), privacy: .public)s")
+            }
+            self.hearingTask = nil
+        }
     }
 
     /// Tear down a session that was prepared but never captured, because the

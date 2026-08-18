@@ -21,6 +21,14 @@ import Foundation
 /// one loggable word.
 public enum SwapPolicy {
 
+    /// Who is asking to swap: the tidy pass (about a second after the
+    /// insert) or the better ear (a second or two more). Each has its own
+    /// ceiling: past it the user has moved on.
+    public enum Source: Sendable {
+        case tidy
+        case hearing
+    }
+
     public struct Situation: Sendable {
         public var inserted: String
         public var tidied: String
@@ -29,10 +37,12 @@ public enum SwapPolicy {
         public var frontIsStillTarget: Bool
         public var secondsSinceInsert: TimeInterval
         public var bundleID: String?
+        public var source: Source
 
         public init(
             inserted: String, tidied: String, outcome: InsertionOutcome, userActedSinceInsert: Bool,
-            frontIsStillTarget: Bool, secondsSinceInsert: TimeInterval, bundleID: String?
+            frontIsStillTarget: Bool, secondsSinceInsert: TimeInterval, bundleID: String?,
+            source: Source = .tidy
         ) {
             self.inserted = inserted
             self.tidied = tidied
@@ -41,6 +51,7 @@ public enum SwapPolicy {
             self.frontIsStillTarget = frontIsStillTarget
             self.secondsSinceInsert = secondsSinceInsert
             self.bundleID = bundleID
+            self.source = source
         }
     }
 
@@ -59,9 +70,18 @@ public enum SwapPolicy {
     }
 
     /// After this long the user has moved on. Measured cleanup p95 is ~2 s, so
-    /// an honest result arrives well inside it; anything later is a hung
-    /// request, not a slow one.
+    /// an honest tidy arrives well inside 4 s; anything later is a hung
+    /// request, not a slow one. The better ear needs ~1.2 s to hear plus the
+    /// tidy on top, so it gets 6.
     public static let maximumDelay: TimeInterval = 4
+    public static let maximumHearingDelay: TimeInterval = 6
+
+    public static func maximumDelay(for source: Source) -> TimeInterval {
+        switch source {
+        case .tidy: return maximumDelay
+        case .hearing: return maximumHearingDelay
+        }
+    }
 
     /// Apps where ⌘Z may not be "undo the last paste". Terminals: undo does
     /// nothing or something else, and a second ⌘V doubles the text. And the
@@ -86,7 +106,7 @@ public enum SwapPolicy {
         guard case .inserted(let tier) = s.outcome, tier != .clipboardOnly else { return .keep(.notPasted) }
         if s.userActedSinceInsert { return .keep(.userActed) }
         if !s.frontIsStillTarget { return .keep(.focusMoved) }
-        if s.secondsSinceInsert > maximumDelay { return .keep(.tooLate) }
+        if s.secondsSinceInsert > maximumDelay(for: s.source) { return .keep(.tooLate) }
         guard let bundleID = s.bundleID, !noUndoBundleIDs.contains(bundleID) else { return .keep(.noUndoHere) }
         return .swap
     }

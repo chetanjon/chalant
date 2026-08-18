@@ -25,6 +25,10 @@ struct GeneralSection: View {
     @AppStorage(CorrectionObserver.enabledKey) private var learnCorrections = true
     // On, per the 2026-08-14 decision. Costs ~1s per utterance; see `Cleanup`.
     @AppStorage(Cleanup.enabledKey) private var cleanup = true
+    // Off, and it downloads nothing until it is on: a 606 MB model, memory
+    // while loaded, more battery per sentence. See `BetterHearing`.
+    @AppStorage(BetterHearing.enabledKey) private var betterHearing = false
+    @ObservedObject private var hearingStatus = HearingStatus.shared
 
     @State private var launchAtLogin = false
     /// The mics on offer right now, refreshed each time this section
@@ -165,6 +169,26 @@ struct GeneralSection: View {
                         + "numbers and every \"not\" are checked, and anything it changed that it "
                         + "should not have is thrown away."
                     )
+
+                    SettingDivider()
+                    // A switch, and off, because it costs something real
+                    // (a 606 MB download, memory, battery) for something
+                    // measured but not free. See verification/EAR_2026-08-17.md.
+                    SettingToggle(label: "Better hearing", isOn: $betterHearing)
+                    SettingNote(
+                        "A second, stronger ear on this Mac listens to what you said after "
+                        + "the words land, and corrects them in place a second or two later "
+                        + "when it heard better: names, numbers, the word you actually said. "
+                        + "It downloads a \(BetterHearing.downloadSizeDescription) model once, "
+                        + "uses memory while it is loaded and more battery per sentence. "
+                        + "Nothing leaves this Mac."
+                    )
+                    SettingNote(hearingStatus.line)
+                        .onChange(of: betterHearing) { _, on in
+                            Task {
+                                if on { await BetterHearing.shared.prepare() } else { await BetterHearing.shared.stop() }
+                            }
+                        }
 
                     SettingDivider()
                     // Law 6 says defaults over switches, and this is the same

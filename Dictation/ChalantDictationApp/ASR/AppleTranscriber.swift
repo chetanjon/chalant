@@ -32,6 +32,21 @@ actor AppleTranscriber: Transcriber {
     private var assembler = TranscriptAssembler()
     private var canonicalLocale: Locale = .init(identifier: "en-US")
     private var analyzerFormat: AVAudioFormat?
+
+    // MARK: Better hearing's copy of the audio
+    //
+    // While the switch is on, every tap buffer is also resampled to 16 kHz
+    // mono Float32 and kept in memory for the utterance, so a second ear
+    // (WhisperKit, `BetterHearing`) can listen to it after the words have
+    // landed. Capped at 90 s (~5.8 MB); a hold longer than that keeps its
+    // first 90 s, which is more than any dictation the app has ever seen.
+    private(set) var keepSamplesForHearing = false
+    func setKeepSamplesForHearing(_ on: Bool) { keepSamplesForHearing = on }
+    private var hearingConverter: AVAudioConverter?
+    private static let hearingFormat = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
+    private static let hearingCapSamples = 16_000 * 90
+    private(set) var utteranceSamples: [Float] = []
     private var converter: AVAudioConverter?
 
     private var eventStream: AsyncStream<TranscriptEvent>?
@@ -140,6 +155,7 @@ actor AppleTranscriber: Transcriber {
 
     func begin(locale: Locale, bias: [BiasTerm]) async throws {
         assembler.reset()
+        utteranceSamples.removeAll(keepingCapacity: true)
 
         if analyzer == nil {
             await prepare(locale: locale, format: nil)
@@ -236,11 +252,40 @@ actor AppleTranscriber: Transcriber {
                 // the user their words, so this never throws outward.
                 try? captureFile?.write(from: item.buffer)
             }
+            if keepSamplesForHearing { keepForHearing(item.buffer) }
             guard let ready = converted(item.buffer) else { continue }
             inputContinuation?.yield(AnalyzerInput(buffer: ready))
             moved += 1
         }
         return moved
+    }
+
+    private func keepForHearing(_ buffer: AVAudioPCMBuffer) {
+        guard utteranceSamples.count < Self.hearingCapSamples else { return }
+        if hearingConverter == nil || hearingConverter?.inputFormat != buffer.format {
+            hearingConverter = AVAudioConverter(from: buffer.format, to: Self.hearingFormat)
+        }
+        guard let converter = hearingConverter else { return }
+        let ratio = Self.hearingFormat.sampleRate / buffer.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1024
+        guard let out = AVAudioPCMBuffer(pcmFormat: Self.hearingFormat, frameCapacity: capacity) else { return }
+        var supplied = false
+        var error: NSError?
+        converter.convert(to: out, error: &error) { _, status in
+            if supplied { status.pointee = .noDataNow; return nil }
+            supplied = true
+            status.pointee = .haveData
+            return buffer
+        }
+        guard error == nil, out.frameLength > 0, let channel = out.floatChannelData?[0] else { return }
+        utteranceSamples.append(contentsOf: UnsafeBufferPointer(start: channel, count: Int(out.frameLength)))
+    }
+
+    /// The utterance's audio for the second ear, and the buffer cleared for
+    /// the next hold.
+    func takeUtteranceSamples() -> [Float] {
+        defer { utteranceSamples.removeAll(keepingCapacity: true) }
+        return utteranceSamples
     }
 
     // MARK: - Internals
