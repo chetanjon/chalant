@@ -254,6 +254,11 @@ actor AppleTranscriber: Transcriber {
     /// is what lets "clean while you talk" tidy them before the key comes up.
     var finalizedTokens: [Token] { assembler.finalized }
 
+    /// Everything so far, committed plus the provisional tail, as tokens.
+    /// "Refined at once" tidies this speculatively while the key is held, so
+    /// the text the release ends on is often already tidied.
+    var liveTokens: [Token] { assembler.finalized + assembler.uncommitted }
+
     private func publish(_ event: TranscriptEvent) {
         assembler.apply(event)
         eventContinuation?.yield(event)

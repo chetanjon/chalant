@@ -120,3 +120,20 @@ final class PretidyChunkingTests: XCTestCase {
         XCTAssertEqual(CleanupPrompt.closedChunks("one short sentence."), [])
     }
 }
+
+/// The prompt has two sizes. The formatting examples cost the small model
+/// ~0.2 s of reading on every call, and only a spoken list needs them.
+final class PromptSizeTests: XCTestCase {
+    func testAPlainPieceGetsThePlainPrompt() {
+        let piece = "so um I think we should um move the review to thursday"
+        XCTAssertEqual(CleanupPrompt.instructions(for: piece), CleanupPrompt.instructionsPlain)
+        XCTAssertFalse(CleanupPrompt.instructionsPlain.contains("- Move the review."))
+        XCTAssertTrue(CleanupPrompt.instructionsPlain.contains("new paragraph"), "the paragraph rule stays")
+        XCTAssertLessThan(CleanupPrompt.instructionsPlain.count, CleanupPrompt.instructions.count - 500)
+    }
+
+    func testAListPieceGetsTheFullPrompt() {
+        let piece = "first we move the review second we ship the draft third we tell Priya"
+        XCTAssertEqual(CleanupPrompt.instructions(for: piece), CleanupPrompt.instructions)
+    }
+}

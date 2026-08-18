@@ -157,9 +157,11 @@ struct GeneralSection: View {
                     // trade someone is entitled to decline.
                     SettingToggle(label: "Tidy what I said", isOn: $cleanup)
                     SettingNote(
-                        "Your words land at once. About a second later they are tidied in place, "
-                        + "on this Mac: ums and false starts gone, punctuation fixed, a spoken list "
-                        + "made into a list. If you have started typing, nothing is touched. Names, "
+                        "Your words land tidied, on this Mac: ums and false starts gone, "
+                        + "punctuation fixed, a spoken list made into a list. Most of the tidying "
+                        + "happens while you talk; the rest takes about half a second after you "
+                        + "let go. If it is not ready by then, the words land as said and are "
+                        + "tidied in place a moment later, unless you have started typing. Names, "
                         + "numbers and every \"not\" are checked, and anything it changed that it "
                         + "should not have is thrown away."
                     )
