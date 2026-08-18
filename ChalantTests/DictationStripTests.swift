@@ -123,6 +123,21 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(DictationStripLevel.normalize(peak: -0.2), 0, accuracy: 0.0001)
     }
 
+    // MARK: - The strip is sized to what it holds (round four, "too big")
+
+    /// 320 wide everywhere; only as tall as the screen's notch needs above one
+    /// row of `Fonts.micro`. A pill display (reserve 8) gets 41, a notch
+    /// display (reserve 32) gets 65. The old fixed 520 × 68 was mostly empty
+    /// black on the founder's external monitor.
+    func testStripIsSizedToItsRow() {
+        let pill = DictationStripLevel.stripSize(topReserve: Theme.Space.m)
+        XCTAssertEqual(pill.width, 320, accuracy: 0.001)
+        XCTAssertEqual(pill.height, 41, accuracy: 0.001)
+        let notch = DictationStripLevel.stripSize(topReserve: 32)
+        XCTAssertEqual(notch.width, 320, accuracy: 0.001)
+        XCTAssertEqual(notch.height, 65, accuracy: 0.001)
+    }
+
     // MARK: - The halo layers are wired to the numbers
 
     /// The light lives on Core Animation layers now (see `DictationHalo`), so

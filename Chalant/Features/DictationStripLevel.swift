@@ -125,6 +125,24 @@ enum DictationStripLevel {
         0.18 + clamp(fill) * 0.42
     }
 
+    // MARK: - Size
+
+    /// The strip is sized to what it holds: 320 wide on every screen, and only
+    /// as tall as the screen's notch needs above one row of `Fonts.micro`. A
+    /// pill display gets 41, a notch display 65. It was a fixed 520 × 68 on
+    /// every screen until 1.17.0, which on a monitor with no notch was mostly
+    /// empty black ("too big, taking up the space", the founder, 2026-08-17).
+    static let stripWidth: CGFloat = 320
+    /// One line of `Fonts.micro` (11 pt semibold).
+    static let stripRow: CGFloat = 13
+
+    static func stripSize(topReserve: CGFloat) -> CGSize {
+        CGSize(
+            width: stripWidth,
+            height: topReserve + Theme.Space.notchClearance + stripRow + Theme.Space.m
+        )
+    }
+
     /// The breath the halo takes at rest while ambient motion is on: the low
     /// end of its opacity swing (the high end is 1) and half a cycle.
     static let breathFloor: Double = 0.85

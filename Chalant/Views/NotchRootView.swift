@@ -190,17 +190,14 @@ struct NotchRootView: View {
     // the live device caption underneath.
     private static let listeningSize = CGSize(width: 380, height: 192)
 
-    /// The dictation strip: this display's configured island width, 68pt tall.
+    /// The dictation strip: 320 wide, and only as tall as this screen's notch
+    /// needs above one row of `Fonts.micro` (`DictationStripLevel.stripSize`).
     /// Low on purpose; the founder chose the slim strip over the full
-    /// listening surface (2026-08-16), and 68 is the least that fits one row of
-    /// `Fonts.micro` with the notch clearance above it.
-    ///
-    /// `face.expandedWidth` is the user's own dial for this screen, which is
-    /// what the spec asks for. `model.expandedSize` is the last width any
-    /// island happened to measure, so on a second display, or before anything
-    /// has opened this session, it is somebody else's number.
+    /// listening surface (2026-08-16), then asked for it smaller still and
+    /// lighter (2026-08-17: on a monitor with no notch the old 520 × 68 was
+    /// mostly empty black).
     private var dictatingSize: CGSize {
-        CGSize(width: face.expandedWidth, height: 68)
+        DictationStripLevel.stripSize(topReserve: face.contentTopReserve)
     }
 
     /// How far a resting pill clears the top of its screen. Small on
@@ -321,8 +318,15 @@ struct NotchRootView: View {
     /// island's words and read as noise (tried 2026-07-22, rejected
     /// on sight); .regular melts the desktop into color, and the
     /// tint sets how much of it survives.
+    /// The dictation strip is glass whatever the island's material: the
+    /// founder chose "dark glass" for it over ink (2026-08-17, round four),
+    /// so an ink island lends the strip the veiled clarity, and a glass
+    /// island keeps its own.
+    private var glassBody: Bool { islandMaterial == "glass" || face.state == .dictating }
+    private var bodyClarity: String { islandMaterial == "glass" ? glassClarity : "veiled" }
+
     private var glassTint: Double {
-        switch glassClarity {
+        switch bodyClarity {
         case "veiled": return 0.35
         case "clear": return 0.06
         default: return 0.18
@@ -361,7 +365,7 @@ struct NotchRootView: View {
     /// chosen clarity where the real material exists.
     private var openSmoke: Double {
         if #available(macOS 26.0, *) {
-            switch glassClarity {
+            switch bodyClarity {
             case "veiled": return 0.12
             case "clear": return 0
             default: return 0.06
@@ -372,13 +376,13 @@ struct NotchRootView: View {
 
     private var islandBase: some View {
         ZStack {
-            if islandMaterial == "glass" {
+            if glassBody {
                 glassFill
                     .opacity(face.state == .collapsed ? 0 : 1)
             }
             islandShape
                 .fill(Color.black)
-                .opacity(islandMaterial == "glass" && face.state != .collapsed ? openSmoke : 1)
+                .opacity(glassBody && face.state != .collapsed ? openSmoke : 1)
         }
     }
 

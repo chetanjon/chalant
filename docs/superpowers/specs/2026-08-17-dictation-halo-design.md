@@ -50,14 +50,30 @@ Four rules, all shared by the round-three family and all binding here:
 | the edge | the halo (below) | accent, white core |
 | bottom left | the app the words are going into (display name) | `Fonts.micro`, `textSecondary` |
 
+The body is dark glass and the strip is small; see "Body and size" below.
+
 **Removed:** the centre dot, the base pool, the microphone name. The mic name
 only ever mattered when a mic was dead, and a dead mic is now visible as light
 that never blooms. The app name lifts from `textGhost` (45%) to `textSecondary`
 (55%): it is the only word on the strip.
 
-The strip's body stays pure black (no lit-ink gradient, no material). Height
-68, width the display's configured island width, corner radius
-`Island.radiusExpanded`. Unchanged.
+**Body and size (round four, same day).** On the founder's external monitor
+the strip read "too big, taking up the space, too dark", because it was a
+fixed 520 × 68 on every screen and solid ink. Now:
+
+- **320 wide on every screen**, and only as tall as the screen's notch needs
+  above one row of `Fonts.micro`: `contentTopReserve + notchClearance + 13 +
+  Space.m`, so 41 on a pill display and 65 on a notch display
+  (`DictationStripLevel.stripSize`).
+- **Dark glass, not ink.** The strip uses the island's existing glass
+  material whatever the user's island material is: an ink island lends the
+  strip the "veiled" clarity (tint 0.35, smoke 0.12 on macOS 26; the
+  VisualEffectBlur fallback below), a glass island keeps its own clarity. The
+  founder chose this from three bodies (dark glass, frosted, small ink) shown
+  live over a light page and a dark one.
+
+Corner radius stays `Island.radiusExpanded` on a notch display and the pill's
+own radius on a pill display.
 
 ### The halo
 
