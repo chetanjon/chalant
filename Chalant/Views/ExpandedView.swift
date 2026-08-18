@@ -501,14 +501,25 @@ struct DropStashCard: View {
                     Theme.textTertiary,
                     style: StrokeStyle(lineWidth: 1.5, dash: [7, 6])
                 )
-            VStack(spacing: Theme.Space.s) {
-                Image(systemName: "tray.and.arrow.down.fill")
-                    .font(Theme.Fonts.icon(.l))
-                    .foregroundStyle(Theme.textSecondary)
-                Text("Drop to stash")
-                    .font(Theme.Fonts.body)
-                    .foregroundStyle(Theme.textPrimary)
-                if !compact {
+            if compact {
+                // The tray under the island is low, so glyph and title sit
+                // side by side (2026-08-18) instead of stacked.
+                HStack(spacing: Theme.Space.m) {
+                    Image(systemName: "tray.and.arrow.down.fill")
+                        .font(Theme.Fonts.icon(.l))
+                        .foregroundStyle(Theme.textSecondary)
+                    Text("Drop to stash")
+                        .font(Theme.Fonts.body)
+                        .foregroundStyle(Theme.textPrimary)
+                }
+            } else {
+                VStack(spacing: Theme.Space.s) {
+                    Image(systemName: "tray.and.arrow.down.fill")
+                        .font(Theme.Fonts.icon(.l))
+                        .foregroundStyle(Theme.textSecondary)
+                    Text("Drop to stash")
+                        .font(Theme.Fonts.body)
+                        .foregroundStyle(Theme.textPrimary)
                     Text("Files and links to the shelf, images and text to clips.")
                         .font(Theme.Fonts.caption)
                         .foregroundStyle(Theme.textHint)
