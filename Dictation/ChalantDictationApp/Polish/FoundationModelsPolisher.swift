@@ -48,7 +48,7 @@ actor FoundationModelsPolisher: Polisher {
     /// whichever sentence the user happens to dictate first.
     func warmUp() {
         guard case .available = SystemLanguageModel.default.availability else { return }
-        let session = warmed ?? LanguageModelSession(instructions: CleanupPrompt.instructions)
+        let session = warmed ?? LanguageModelSession(instructions: CleanupPrompt.instructionsPlain)
         warmed = session
         session.prewarm()
     }
@@ -68,19 +68,32 @@ actor FoundationModelsPolisher: Polisher {
         for task in piecesInFlight.values { task.cancel() }
         piecesInFlight.removeAll()
         tidiedPieces.removeAll()
+        tailInFlight = nil
     }
 
-    /// Tidy, in the background, every chunk of `text` that will not change as
-    /// the speaker goes on. Called on a timer during the hold with the
-    /// deterministic text of the finalized transcript so far.
+    /// Tidy, in the background, every chunk of `text` so far: the closed
+    /// chunks, which will not change as the speaker goes on, and the tail
+    /// chunk as it stands right now, speculatively. Called on a timer during
+    /// the hold with the deterministic text of the live transcript. The tail
+    /// changes with every few words, so at most one tail speculation runs at
+    /// a time; whichever tail text the release actually ends on is then
+    /// often already tidied, and the words can land refined at once.
     func pretidy(_ text: String) {
         guard Cleanup.isEnabled(), case .available = SystemLanguageModel.default.availability else { return }
-        let closed = CleanupPrompt.closedChunks(text)
-        let fresh = closed.filter { tidiedPieces[$0] == nil && piecesInFlight[$0] == nil }
+        let all = CleanupPrompt.chunks(text)
+        guard !all.isEmpty else { return }
+        let closed = Array(all.dropLast())
+        var fresh = closed.filter { tidiedPieces[$0] == nil && piecesInFlight[$0] == nil }
+        let tail = all[all.count - 1]
+        if tidiedPieces[tail] == nil, piecesInFlight[tail] == nil, tailInFlight == nil,
+           CleanupPrompt.worthCleaning(tail) || all.count > 1 {
+            fresh.append(tail)
+            tailInFlight = tail
+        }
         if !fresh.isEmpty {
             // Counts only, never content.
             Self.log.info(
-                "pretidy: \(text.count, privacy: .public) chars finalized, \(closed.count, privacy: .public) closed chunk(s), \(fresh.count, privacy: .public) new")
+                "pretidy: \(text.count, privacy: .public) chars so far, \(closed.count, privacy: .public) closed chunk(s), \(fresh.count, privacy: .public) started")
         }
         for piece in fresh {
             piecesInFlight[piece] = Task { [weak self] in
@@ -91,12 +104,27 @@ actor FoundationModelsPolisher: Polisher {
         }
     }
 
+    /// The tail speculation in flight, if any: only one at a time.
+    private var tailInFlight: String?
+
     private func finished(piece: String, result: String) {
         tidiedPieces[piece] = result
         piecesInFlight[piece] = nil
+        if tailInFlight == piece { tailInFlight = nil }
     }
 
     func polish(_ text: String, profile: AppProfile) async throws -> String {
+        try await polish(text, profile: profile, within: nil) ?? text
+    }
+
+    /// The tidied text if every piece is ready within `budget`, else nil.
+    ///
+    /// "Refined at once" (spec 2026-08-17, late): at release the caller waits
+    /// this long for the refined text and lands it once; if it is not ready,
+    /// the raw words land and the swap takes over. Pieces started here keep
+    /// running past the budget and land in the cache, so the swap's own call
+    /// picks them up rather than starting over.
+    func polish(_ text: String, profile: AppProfile, within budget: Duration?) async throws -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return text }
 
@@ -127,6 +155,7 @@ actor FoundationModelsPolisher: Polisher {
         // to about one chunk.
         let pieces = CleanupPrompt.chunks(trimmed)
         let started = ContinuousClock.now
+        let deadline = budget.map { started.advanced(by: $0) }
         var out: [String] = []
         var warm = 0
 
@@ -134,11 +163,30 @@ actor FoundationModelsPolisher: Polisher {
             if let done = tidiedPieces[piece] {
                 out.append(done)
                 warm += 1
-            } else if let running = piecesInFlight[piece] {
-                out.append(await running.value)
+                continue
+            }
+            let task: Task<String, Never>
+            if let running = piecesInFlight[piece] {
+                task = running
                 warm += 1
             } else {
-                out.append(await Self.tidy(piece: piece))
+                task = Task { [weak self] in
+                    let result = await Self.tidy(piece: piece)
+                    await self?.finished(piece: piece, result: result)
+                    return result
+                }
+                piecesInFlight[piece] = task
+            }
+            if let deadline {
+                let remaining = ContinuousClock.now.duration(to: deadline)
+                guard remaining > .zero, let value = await Self.value(of: task, within: remaining) else {
+                    Self.log.info(
+                        "cleanup not ready within budget: \(trimmed.count, privacy: .public) chars, \(pieces.count, privacy: .public) chunk(s), \(warm, privacy: .public) warm")
+                    return nil
+                }
+                out.append(value)
+            } else {
+                out.append(await task.value)
             }
         }
 
@@ -146,16 +194,29 @@ actor FoundationModelsPolisher: Polisher {
         Self.log.info(
             """
             cleaned \(trimmed.count, privacy: .public) chars in \(pieces.count, privacy: .public) \
-            chunk(s), \(warm, privacy: .public) tidied while talking, \(elapsed.seconds, privacy: .public)s
+            chunk(s), \(warm, privacy: .public) tidied while talking, \(elapsed.seconds, privacy: .public)s\
+            \(budget == nil ? "" : " (within budget)")
             """)
         return out.joined(separator: " ")
+    }
+
+    /// The task's value if it finishes within `limit`, else nil; the task
+    /// itself keeps running.
+    private static func value(of task: Task<String, Never>, within limit: Duration) async -> String? {
+        await withTaskGroup(of: String?.self) { group in
+            group.addTask { await task.value }
+            group.addTask { try? await Task.sleep(for: limit); return nil }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
     }
 
     /// One piece through the model, unwrapped, ending kept, guarded. Every
     /// failure returns the piece as dictated. One session per piece, never
     /// shared: see `warmed`.
     private static func tidy(piece: String) async -> String {
-        let session = LanguageModelSession(instructions: CleanupPrompt.instructions)
+        let session = LanguageModelSession(instructions: CleanupPrompt.instructions(for: piece))
         let reply: String
         do {
             reply = try await withTimeout(timeout) {

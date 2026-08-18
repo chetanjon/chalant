@@ -46,7 +46,16 @@ public enum CleanupPrompt {
     /// against 1). The one thing this wording does worse, dropping a final
     /// period on short lines, is repaired deterministically by
     /// `keepingEnding(of:in:)`. Cleaned like Wispr, still the speaker's words.
-    public static let instructions = """
+    /// The full prompt: the tidying rules, then the formatting rules with
+    /// their examples. Used for a piece that has list cues.
+    public static let instructions = instructionsPlain + "\n" + formattingRules
+
+    /// The plain prompt: the tidying rules and the one-line paragraph rule,
+    /// no formatting examples. Used for every other piece. The examples cost
+    /// the small on-device model about 0.2 s of reading on every call
+    /// (measured 2026-08-17: a five-word tail took 0.6 s with them, 0.45 s
+    /// without), and only a spoken list needs them.
+    public static let instructionsPlain = """
         You tidy raw speech-to-text transcripts into clean written English with \
         the smallest possible changes.
 
@@ -63,13 +72,22 @@ public enum CleanupPrompt {
         add words that were not said. If the transcript is already clean, return \
         it unchanged. Do not summarise and do not explain what you did.
 
+        When the speaker says "new paragraph" or "new line", break the line \
+        there and drop those words. Otherwise keep the text as one paragraph.
+        """
+
+    /// Which prompt a piece gets: the examples only when there is a list to
+    /// shape (`looksLikeList`).
+    public static func instructions(for piece: String) -> String {
+        looksLikeList(piece) ? instructions : instructionsPlain
+    }
+
+    static let formattingRules = """
         Format what the speaker shaped. When they enumerate three or more items, \
         write it as a list, one item per line, and drop the spoken cue words \
         ("first", "second", "number one", "bullet point"). Use "- " for each \
         line, or "1. ", "2. ", "3. " if the speaker numbered them. Two items \
-        stay as a sentence. When they say "new paragraph" or "new line", break \
-        the line there and drop those words. Otherwise keep the text as one \
-        paragraph.
+        stay as a sentence.
 
         Examples of formatting:
         Transcript: "okay so three things first we move the review second we ship the draft third we tell Priya"
@@ -84,6 +102,7 @@ public enum CleanupPrompt {
         Transcript: "so um I think we should um move the review to thursday"
         Tidied: "So I think we should move the review to Thursday."
         """
+
 
     /// Whether an utterance is worth the model's time at all.
     ///

@@ -111,6 +111,39 @@ more identical tokens that carry punctuation ("the, the, the, the,", "one. one.
 one."), which the engine emits on a starved microphone; two with punctuation
 still ship ("No, no." is English).
 
+### Refined at once (the founder's bar, late 2026-08-17: "the words should
+land after being refined, there should be no kind of lag")
+
+The model's floor on this Mac, measured: 0.45 s for a few leftover words with
+the plain prompt, 0.65 s for a whole sentence, 0.6 to 1.2 s with the
+formatting examples in the prompt. So:
+
+1. **Tidy ahead on the live text.** The 0.6 s tick during the hold now takes
+   the engine's live tokens (finalized plus provisional) and tidies every
+   closed chunk AND the tail as it stands, one tail speculation at a time,
+   cached by exact text. The text the release ends on is often already done.
+2. **Wait a fixed budget at release, land once.** `polish(_:profile:within:)`
+   returns the refined text if every piece is ready inside 0.65 s
+   (`DictationController.refineBudget`), reusing pieces in flight; the words
+   then land refined, once, no swap. If it is not ready, they land as said and
+   the swap takes over exactly as in 1.18.0 (the pieces started keep running
+   into the cache, so the swap does not start over).
+3. **Two prompt sizes.** `CleanupPrompt.instructionsPlain` (rules, no
+   examples) for any piece without list cues; the full prompt with the
+   examples only when `looksLikeList`. Measured 0.6 s to 0.45 s on a five-word
+   tail.
+4. **Lists without the model.** `Listing.format` turns explicit spoken cues
+   (three or more ordinals, "number N", or two or more "bullet point", in
+   order, each starting a real item; never an ordinal after a determiner)
+   into "- " or "1. " lines before the words land, so a list lands as a list
+   at once even when the model is not in time; the model then refines it in
+   place.
+
+Measured live on the Scratch app: a sentence whose tail was tidied during the
+hold landed refined 0.13 s after release ("refined at once after 0.0009s
+wait"). The log line for every utterance now says `refined at once` or `raw`
+and the wait.
+
 ## Architecture
 
 - `ChalantDictationCore/Insert/SwapPolicy.swift` (new, pure, tested): the

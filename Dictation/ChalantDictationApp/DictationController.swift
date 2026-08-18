@@ -44,7 +44,13 @@ final class DictationController {
     /// that is already closed goes to the model early, so at release only the
     /// tail waits (spec 2026-08-17, track 3).
     private var pretidyTask: Task<Void, Never>?
-    private static let pretidyInterval: Duration = .milliseconds(900)
+    private static let pretidyInterval: Duration = .milliseconds(600)
+    /// How long the release waits for the refined text before landing the raw
+    /// words instead. The on-device model needs ~0.45 s for a few leftover
+    /// words with the plain prompt (measured 2026-08-17), so this catches the
+    /// common case, a short tail after tidy-ahead, and gives up before the wait
+    /// is felt.
+    static let refineBudget: Duration = .milliseconds(650)
     private var swapGeneration = 0
     private let activity = UserActivityWatch()
     /// Turns a real day of dictating into the spontaneous half of the corpus.
@@ -318,7 +324,7 @@ final class DictationController {
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.pretidyInterval)
                 guard !Task.isCancelled else { return }
-                let tokens = await transcriber.finalizedTokens
+                let tokens = await transcriber.liveTokens
                 guard !tokens.isEmpty else { continue }
                 let text = await self.deterministicText(from: tokens)
                 await self.polisher.pretidy(text)
@@ -421,7 +427,27 @@ final class DictationController {
         // the user has not touched the document since, the raw text is swapped
         // for the tidied one in place (see `startTidiedSwap`). Instant, then
         // tidied in place, spec 2026-08-17.
-        let text = deterministic
+        // A spoken list is shaped without the model, so it lands as a list at
+        // once even when the model is not ready in time (`Listing`).
+        let shaped = Listing.format(deterministic)
+
+        // Refined at once: wait a short, fixed budget for the tidied text and
+        // land it once, tidied. Tidy-ahead during the hold usually leaves the
+        // model only the last few words. If it is not ready in time, the raw
+        // words land now and the tidied version replaces them in place when
+        // it arrives (`startTidiedSwap`), which is what shipped in 1.18.0.
+        var text = shaped
+        var refinedAtOnce = false
+        if Cleanup.isEnabled(), !shaped.isEmpty, let target {
+            let waitStart = Date()
+            if let refined = try? await polisher.polish(
+                shaped, profile: AppProfile(bundleID: target.bundleID ?? ""), within: Self.refineBudget),
+               !refined.isEmpty {
+                text = refined
+                refinedAtOnce = true
+            }
+            timings.polish = Date().timeIntervalSince(waitStart)
+        }
         guard !text.isEmpty else {
             // Silence is not a corpus entry. Keeping it would pad the set with
             // rows nobody can label.
@@ -452,7 +478,7 @@ final class DictationController {
         if case .inserted = outcome {
             await CorrectionObserver.shared.watch(
                 inserted: text, in: target.bundleID)
-            if Cleanup.isEnabled() {
+            if Cleanup.isEnabled(), !refinedAtOnce {
                 startTidiedSwap(of: text, outcome: outcome, target: target, insertedAt: Date())
             }
         }
@@ -463,6 +489,8 @@ final class DictationController {
             """
             utterance: \(text.count, privacy: .public) chars, \
             finalize \(self.timings.finalization ?? -1, privacy: .public)s, \
+            \(refinedAtOnce ? "refined at once" : "raw", privacy: .public) after \
+            \(self.timings.polish ?? 0, privacy: .public)s wait, \
             insert \(self.timings.insertion ?? -1, privacy: .public)s, \
             outcome \(String(describing: outcome), privacy: .public), \
             ring overruns \(overruns, privacy: .public)
