@@ -52,6 +52,20 @@ actor AudioEngine {
     private let capturing = CaptureGate()
 
     private(set) var isRunning = false
+    /// Asleep on purpose: stopped because nobody has dictated for a while,
+    /// not because anything failed. While resting, the health poll and the
+    /// device watcher leave the engine alone; the next key-down wakes it
+    /// (`ensureAlive`), which costs one engine start (~100 ms) once.
+    ///
+    /// The engine used to run permanently ("capture was never off", Part 6
+    /// §2) so a hold could start with no spin-up. The founder (2026-08-18):
+    /// "the app is consuming a lot of power in the background". A live mic
+    /// holds coreaudiod's PreventUserIdleSystemSleep assertion, keeps the
+    /// audio I/O thread waking every ~10 ms and the mic-in-use dot lit, all
+    /// day, for a feature used a few minutes an hour. Warm for a while after
+    /// each dictation, asleep otherwise, is the trade. Asleep from launch too:
+    /// the health poll would otherwise start it within its retry interval.
+    private(set) var resting = true
 
     /// Which ear is live, and which ears have been proven deaf this launch.
     ///
@@ -85,6 +99,7 @@ actor AudioEngine {
 
     private func startWarm(avoiding silent: Set<String>) throws {
         guard !isRunning else { return }
+        resting = false
         lastStartAttempt = Date()
 
         // A brand-new engine, tied to the hardware as it is right now. The old
@@ -200,7 +215,7 @@ actor AudioEngine {
     /// rebuilt on the device it already had.
     @discardableResult
     func hopIfDeaf() -> InputChoice.Device? {
-        guard !capturing.isOpen else { return nil }
+        guard !capturing.isOpen, !resting else { return nil }
 
         // Down, for whatever reason: a start that raised, a device that
         // reported 0 Hz, nothing attached at launch. While this poll exists
@@ -276,6 +291,9 @@ actor AudioEngine {
     ///    one that was just plugged in has earned a fresh hearing, because the
     ///    reason it could not hear may have just been removed.
     func devicesChanged() {
+        // Asleep: nothing to rebuild. The next warm start enumerates the
+        // devices as they are then.
+        guard !resting else { return }
         // The engine stops ITSELF when it posts a configuration change (that
         // is what the notification means), and it says so: `engine.isRunning`
         // goes false while this actor still believes otherwise. Measured
@@ -378,6 +396,15 @@ actor AudioEngine {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         isRunning = false
+    }
+
+    /// Put the ear to sleep until the next key-down: the mic closes, the
+    /// I/O thread stops, the mic-in-use dot goes out. See `resting`.
+    func rest() {
+        guard !capturing.isOpen else { return }
+        stop()
+        resting = true
+        Self.log.info("ear resting; the next hold wakes it")
     }
 }
 

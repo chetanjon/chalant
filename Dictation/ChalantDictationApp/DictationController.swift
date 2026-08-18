@@ -49,6 +49,11 @@ final class DictationController {
     /// that is already closed goes to the model early, so at release only the
     /// tail waits (spec 2026-08-17, track 3).
     private var pretidyTask: Task<Void, Never>?
+    /// The ear stays warm this long after a dictation ends, then rests. Long
+    /// enough that a burst of dictations never pays the ~100 ms start twice;
+    /// short enough that a Mac left alone stops holding its microphone.
+    static let earWarmHold: Duration = .seconds(180)
+    private var earRestTask: Task<Void, Never>?
     private static let pretidyInterval: Duration = .milliseconds(600)
     /// How long the release waits for the refined text before landing the raw
     /// words instead. The on-device model needs ~0.45 s for a few leftover
@@ -105,13 +110,12 @@ final class DictationController {
         assetState = await assets.ensure(locale: locale)
         onStateChange?()
 
-        do {
-            try await audio.startWarm()
-        } catch {
-            assetState = .failed(reason: error.localizedDescription)
-            Self.log.error("warm engine failed: \(error.localizedDescription, privacy: .public)")
-            onStateChange?()
-        }
+        // The ear used to start warm here and stay warm all day. It now
+        // starts on the first hold (`AudioEngine.ensureAlive` at key-down,
+        // ~100 ms once) and rests again a while after the last one
+        // (`scheduleEarRest`), so an idle Chalant holds no microphone and no
+        // sleep assertion. Founder, 2026-08-18: "consuming a lot of power in
+        // the background".
 
         // The insertion path has a cold start too, and it is the biggest one
         // in the whole chain: 3.644s on the first insert against 0.007s on the
@@ -183,6 +187,8 @@ final class DictationController {
 
     func keyDown() async {
         retirePendingSwap()
+        earRestTask?.cancel()
+        earRestTask = nil
         Self.log.info("keyDown entered")
         switch key.press() {
         case .begin:
@@ -381,6 +387,8 @@ final class DictationController {
         await audio.endCapture()
         stopMeter()
         surface.hide()
+        // Whatever happens below, the hold is over: the ear may rest in a while.
+        scheduleEarRest()
 
         // Drain whatever is left before finalizing, so the tail of the
         // utterance is not cut off. Part 1 §2: never lose the user's text.
@@ -527,6 +535,19 @@ final class DictationController {
             insert: timings.insertion)
 
         onStateChange?()
+    }
+
+    /// A while after the last dictation, close the microphone. Any key-down
+    /// cancels this; a hold in progress is never interrupted (`rest` refuses
+    /// while capturing).
+    private func scheduleEarRest() {
+        earRestTask?.cancel()
+        earRestTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.earWarmHold)
+            guard let self, !Task.isCancelled, !self.isListening else { return }
+            await self.audio.rest()
+            self.onStateChange?()
+        }
     }
 
     /// The deterministic passes, in order, from the engine's tokens to text:
@@ -700,6 +721,7 @@ final class DictationController {
     /// transcribe and nothing to insert: this only has to leave nothing
     /// running. The key is already back at idle, so the next press works.
     private func standDown(_ transcriber: AppleTranscriber) async {
+        scheduleEarRest()
         do {
             _ = try await transcriber.end()
         } catch {
