@@ -19,6 +19,10 @@ struct NotchRootView: View {
     @ObservedObject var activities: ActivityStore
     @ObservedObject var sessions: SessionStore
     @State private var pressStarted: Date?
+    /// The dictation strip's "sent" light, alive only for the half second
+    /// after a hold ends (see `DictationSentLight`).
+    @State private var sentLightVisible = false
+    @State private var sentLightPhase: CGFloat = 0
 
     // Declared so the view re-renders (and re-reads Theme.Motion) the
     // moment the user changes the feel in settings.
@@ -450,25 +454,45 @@ struct NotchRootView: View {
                             .strokeBorder(accent.opacity(0.8), lineWidth: 1.5)
                             .opacity(face.isDropTargeted ? 1 : 0)
                     )
-                    // The strip IS the meter. Rim glow and base pool both come
-                    // from one number through the pinned formulas; there are no
-                    // bars. Zero everywhere except while dictating, so the
-                    // resting island is untouched.
-                    .shadow(
-                        color: accent.opacity(face.state == .dictating ? DictationStripLevel.rim(model.dictationLevel).opacity : 0),
-                        radius: face.state == .dictating ? DictationStripLevel.rim(model.dictationLevel).radius : 0
-                    )
-                    .overlay(
-                        islandShape.fill(
-                            RadialGradient(
-                                colors: [accent.opacity(DictationStripLevel.pool(model.dictationLevel)), .clear],
-                                center: .bottom, startRadius: 0, endRadius: dictatingSize.width * 0.6
+                    // The strip IS the meter, and its edge is the light: the
+                    // outline glows with the smoothed voice and the lit stretch
+                    // spreads with the sentence (`DictationHalo`). Nothing is
+                    // drawn on the strip itself; there are no bars, no dot, no
+                    // pool. Absent everywhere except while dictating, so the
+                    // resting island is untouched. Arrives after the pour has
+                    // settled, not during it.
+                    .overlay {
+                        if face.state == .dictating {
+                            DictationHalo(
+                                shape: islandShape, accent: accent,
+                                level: model.dictationLevel, fill: model.dictationFill,
+                                size: dictatingSize
                             )
-                        )
-                        .opacity(face.state == .dictating ? 1 : 0)
-                        .allowsHitTesting(false)
-                    )
-                    .animation(.easeOut(duration: 0.1), value: model.dictationLevel)
+                            .transition(.opacity.animation(.easeIn(duration: 0.3).delay(0.18)))
+                        }
+                    }
+                    // Letting go is a small satisfaction: a point of light
+                    // gathers at the strip's centre and slips up into the
+                    // notch while the strip pours shut. Once.
+                    .overlay(alignment: .top) {
+                        if sentLightVisible {
+                            DictationSentLight(
+                                accent: accent, phase: sentLightPhase,
+                                stripHeight: dictatingSize.height
+                            )
+                        }
+                    }
+                    .onChange(of: face.state) { was, now in
+                        guard was == .dictating, now != .dictating else { return }
+                        sentLightPhase = 0
+                        sentLightVisible = true
+                        withAnimation(.easeOut(duration: DictationStripLevel.sentDuration)) {
+                            sentLightPhase = 1
+                        }
+                        DispatchQueue.main.asyncAfter(
+                            deadline: .now() + DictationStripLevel.sentDuration + 0.05
+                        ) { sentLightVisible = false }
+                    }
                     .shadow(
                         color: Color.black.opacity(face.state == .collapsed ? 0 : 0.45),
                         radius: 14, y: 7
@@ -855,35 +879,19 @@ struct NotchRootView: View {
         }
     }
 
-    /// The dictation strip's one row: where the words are going, one dot
-    /// that is the accent, which ear is live. Nothing else. No words while
-    /// talking, no finish hint (letting go is the instruction), no second
-    /// symbol. Law 3, one symbol per meaning; law 5, a control appears only
-    /// when it can do something.
+    /// The dictation strip's one word: where the words are going. Nothing
+    /// else on the strip itself; the light is on its edge (`DictationHalo`).
+    /// No words while talking, no finish hint (letting go is the
+    /// instruction), no dot, no microphone name (a dead mic is now visible as
+    /// light that never blooms). The app name reads at `textSecondary`, not
+    /// ghost: it is the only word here.
     private var dictatingContent: some View {
-        let dot = DictationStripLevel.dot(model.dictationLevel)
-        // The dot is centred on the STRIP, not between the two labels. Sat
-        // inside the HStack it took the midpoint of whatever gap the labels
-        // left, which drifts with a long app name and lurches right whenever
-        // there is no microphone name to balance it. An overlay on the same
-        // frame puts it where the eye expects it, whatever the labels say.
-        return HStack {
+        HStack {
             Text(model.dictationInfo?.appName ?? "")
                 .font(Theme.Fonts.micro)
-                .foregroundStyle(Theme.textGhost)
+                .foregroundStyle(Theme.textSecondary)
                 .lineLimit(1)
             Spacer(minLength: Theme.Space.l)
-            Text(model.dictationInfo?.micName ?? "")
-                .font(Theme.Fonts.micro)
-                .foregroundStyle(Theme.textGhost.opacity(0.8))
-                .lineLimit(1)
-        }
-        .overlay(alignment: .center) {
-            Circle()
-                .fill(accent)
-                .frame(width: dot.diameter, height: dot.diameter)
-                .shadow(color: accent.opacity(0.35 + Double(DictationStripLevel.clamp(model.dictationLevel)) * 0.5), radius: dot.glow)
-                .animation(.easeOut(duration: 0.1), value: model.dictationLevel)
         }
         .padding(.horizontal, Theme.Space.xxl)
         .padding(.top, face.contentTopReserve + Theme.Space.notchClearance)

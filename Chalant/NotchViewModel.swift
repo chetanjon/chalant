@@ -1496,9 +1496,18 @@ final class NotchViewModel: ObservableObject {
         var micName: String?
     }
 
-    /// The voice, 0...1, driven by DictationController's meter timer.
+    /// The voice, 0...1, driven by DictationController's meter timer and
+    /// smoothed by `DictationStripLevel.Voice` (quick to answer, slow to let
+    /// go), and how much of the sentence has been said, which is what spreads
+    /// the lit edge. The view draws from these two and nothing else.
     @Published var dictationLevel: CGFloat = 0
+    @Published var dictationFill: CGFloat = 0
     @Published var dictationInfo: DictationInfo?
+    private var dictationVoice = DictationStripLevel.Voice()
+    /// The meter is a fixed 30 Hz timer (`DictationController.startMeter`),
+    /// so the voice is stepped by that interval rather than by a wall clock:
+    /// deterministic under test, and timer jitter is invisible in a light.
+    private static let dictationTick: TimeInterval = 1.0 / 30
 
     /// Open the strip. Owns a display like an expansion does, ducks the room
     /// like listening does, and touches nothing on `voice`.
@@ -1519,14 +1528,18 @@ final class NotchViewModel: ObservableObject {
             expandedDisplayID = defaultOwnerDisplay()
         }
         dictationInfo = DictationInfo(appName: appName, micName: mic)
+        dictationVoice.reset()
         dictationLevel = 0
+        dictationFill = 0
         quietTheRoom()
         state = .dictating
     }
 
     func updateDictating(level: CGFloat, mic: String?) {
         guard state == .dictating else { return }
-        dictationLevel = level
+        dictationVoice.step(raw: level, dt: Self.dictationTick)
+        dictationLevel = dictationVoice.level
+        dictationFill = dictationVoice.fill
         if let mic, mic != dictationInfo?.micName {
             // The ear can hop mid-hold; the strip must say so in place.
             dictationInfo?.micName = mic
@@ -1536,7 +1549,9 @@ final class NotchViewModel: ObservableObject {
     func endDictating() {
         guard state == .dictating else { return }
         restoreTheRoom()
+        dictationVoice.reset()
         dictationLevel = 0
+        dictationFill = 0
         dictationInfo = nil
         // The strip can now be entered from an open island, and the island it
         // closes into is a collapsed one. Left true, the music controller
