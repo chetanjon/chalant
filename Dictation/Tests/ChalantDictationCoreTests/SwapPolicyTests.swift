@@ -55,6 +55,17 @@ final class SwapPolicyTests: XCTestCase {
         XCTAssertEqual(SwapPolicy.decide(situation(elapsed: 4.1)), .keep(.tooLate))
     }
 
+    /// The better ear needs ~1.2 s to hear plus the tidy, so it may arrive
+    /// later than the tidy alone and still be welcome; not indefinitely.
+    func testTheBetterEarGetsALongerCeiling() {
+        var s = situation(elapsed: 5.5); s.source = .hearing
+        XCTAssertEqual(SwapPolicy.decide(s), .swap)
+        s.secondsSinceInsert = 6.5
+        XCTAssertEqual(SwapPolicy.decide(s), .keep(.tooLate))
+        XCTAssertEqual(SwapPolicy.maximumDelay(for: .tidy), 4)
+        XCTAssertEqual(SwapPolicy.maximumDelay(for: .hearing), 6)
+    }
+
     /// ⌘Z is not undo in a terminal, and a second paste would double the text.
     func testTerminalsNeverSwap() {
         for id in ["com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable", "com.mitchellh.ghostty", "net.kovidgoyal.kitty", "org.alacritty", "com.github.wez.wezterm"] {

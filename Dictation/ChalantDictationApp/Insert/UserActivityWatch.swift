@@ -17,13 +17,33 @@ import Foundation
 final class UserActivityWatch {
     private var monitors: [Any] = []
     private(set) var sawActivity = false
+    var isArmed: Bool { !monitors.isEmpty }
+    /// Our own swap is two keystrokes, ⌘Z and ⌘V, sent through System
+    /// Events, and this monitor sees them like anyone else's. While a swap is
+    /// being sent they are ours, not the user's; a real ⌘Z or ⌘V from the user
+    /// in that same half second is the one thing this cannot tell apart, and
+    /// it is a small window on purpose.
+    private var ownKeystrokesUntil = Date.distantPast
+    private static let ownKeystrokeCodes: Set<UInt16> = [6, 9]  // z, v
+
+    func expectOwnKeystrokes(for seconds: TimeInterval = 0.6) {
+        ownKeystrokesUntil = Date().addingTimeInterval(seconds)
+    }
 
     func arm() {
         disarm()
         sawActivity = false
         let mask: NSEvent.EventTypeMask = [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
-        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
-            Task { @MainActor in self?.sawActivity = true }
+        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            let isOwn = event.type == .keyDown
+                && event.modifierFlags.contains(.command)
+                && Self.ownKeystrokeCodes.contains(event.keyCode)
+            let at = Date()
+            Task { @MainActor in
+                guard let self else { return }
+                if isOwn, at <= self.ownKeystrokesUntil { return }
+                self.sawActivity = true
+            }
         }) {
             monitors.append(monitor)
         }

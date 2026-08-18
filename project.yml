@@ -10,6 +10,13 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     from: 2.9.4
+  # "Better hearing" (2026-08-18): Whisper on device, as the background
+  # final that corrects the words in place a second or two after they land.
+  # Off by default; the model (606 MB) downloads only when the switch is on.
+  # Measured before it was added: verification/EAR_2026-08-17.md.
+  WhisperKit:
+    url: https://github.com/argmaxinc/WhisperKit
+    from: 1.1.0
   # Dictation's pure core, merged 2026-08-15 by git subtree so its 20 commits
   # of history came along. The package boundary is kept on purpose: it lets
   # Core stay Swift 6 `complete` while this app target stays 5.9 `targeted`,
@@ -62,6 +69,8 @@ targets:
         codeSign: true
         link: false
       - package: Sparkle
+      - package: WhisperKit
+        product: WhisperKit
       - package: ChalantDictationCore
         product: ChalantDictationCore
     info:
