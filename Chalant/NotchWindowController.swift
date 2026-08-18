@@ -756,11 +756,14 @@ final class NotchWindowController {
         }
     }
 
-    /// A drag rising toward the top of the screen summons the drop
-    /// bubble a third of the way down, nowhere near the top edge,
-    /// whose Mission Control reveal fires after ~2s of dwell and
-    /// cannot be disabled for file drags on this macOS. Held drags
-    /// hover the bubble safely for as long as they like.
+    /// A drag rising toward the top of the screen summons the drop tray,
+    /// hanging just under the island. It sits there rather than at the
+    /// very edge because Mission Control's top-edge reveal fires after
+    /// ~2s of dwell within a few points of the edge and cannot be
+    /// disabled for file drags on this macOS; and it no longer sits a
+    /// fifth of the way down the screen because that read as a box in
+    /// the middle of the founder's work (2026-08-18). Held drags hover
+    /// the tray safely for as long as they like.
     private func senseDrag(at location: NSPoint, on screen: NSScreen, face: IslandFace) {
         guard Date() >= dockPinnedUntil else { return }
         let buttonDown = NSEvent.pressedMouseButtons & 1 != 0
@@ -780,11 +783,17 @@ final class NotchWindowController {
             return
         }
         guard dragPasteboard.changeCount != dragBaseline else { return }
+        // The top third of the screen, a window's width around the
+        // island. It was the top half and 860pt wide, which met drags
+        // that were never coming this way (a tab, a text selection
+        // moving across a document) and popped a box into the middle
+        // of the work. Narrower and higher, it answers a drag that is
+        // actually rising toward the notch.
         let zone = NSRect(
-            x: screen.frame.midX - 430,
-            y: screen.frame.maxY - screen.frame.height * 0.5,
-            width: 860,
-            height: screen.frame.height * 0.5
+            x: screen.frame.midX - Self.dockZoneHalfWidth,
+            y: screen.frame.maxY - screen.frame.height * Self.dockZoneDepth,
+            width: Self.dockZoneHalfWidth * 2,
+            height: screen.frame.height * Self.dockZoneDepth
         )
         // A drag already over the island uses the island itself.
         if face.isDropTargeted {
@@ -801,48 +810,30 @@ final class NotchWindowController {
 
     private var dropDock: NSPanel?
 
-    /// How far down the screen the bubble's centre sits.
-    ///
-    /// It only has to clear Mission Control's top-edge reveal, which
-    /// fires within a few points of the edge and cannot be disabled for
-    /// file drags on this macOS. A third of the way down was further
-    /// than that needed and read as landing in the middle of the screen
-    /// (founder, 2026-08-11). A fifth is ~290pt clear on a 1440pt
-    /// display, still nowhere near the edge, and close enough to the
-    /// island to read as belonging to it.
-    ///
-    /// The island's panel is 1000x720 hanging from the top edge, so
-    /// BOTH this position and the old one sit inside its frame; the
-    /// bubble works anyway because a drag over the panel's transparent
-    /// regions passes through to whatever is behind rather than
-    /// lighting `isDropTargeted`. Where that stops being true is the
-    /// visible island itself.
-    ///
-    /// MEASURED 2026-08-12, which the note here used to say nobody had
-    /// done. `dropClearance(screenHeight:collapsedHeight:)` below is
-    /// the arithmetic, pinned in DropBubbleTests. On this machine:
-    /// 173pt of daylight on the 2560x1440 external, 76pt on the
-    /// 1470x956 built-in, between the bottom of the collapsed island
-    /// and the top of the bubble. A collapsed island is at most
-    /// `height + 3 + 4` (hover growth), so 45pt at the shipped 38.
-    /// The bubble only stops clearing below a ~575pt display, and no
-    /// Mac has one. It also cannot meet an EXPANDED island, because
-    /// the click that begins a drag goes to another app and the global
-    /// click monitor collapses the island on the way past.
-    ///
-    /// So a bubble that blinks out as a drag arrives is not this
-    /// number any more. Look at `face.isDropTargeted` first, which
-    /// hides the bubble on purpose so the island can take the drop.
-    private static let dockDropFromTop: CGFloat = 0.20
+    /// The tray hangs this far under the tallest collapsed island
+    /// (`configured height + 3`, plus 4 while hovering: 45 at the
+    /// shipped 38). A fixed gap rather than a fraction of the screen,
+    /// so it sits at the top on every display and can never touch the
+    /// visible island, whose `isDropTargeted` would otherwise steal the
+    /// drag and hide the tray on purpose. Pinned in DropBubbleTests.
+    static let dockGapBelowIsland: CGFloat = 10
+    static let tallestCollapsedIsland: CGFloat = 38 + 3 + 4
+
+    /// The zone a drag has to enter for the tray to appear: the top
+    /// `dockZoneDepth` of the screen, `dockZoneHalfWidth` either side of
+    /// the island.
+    static let dockZoneDepth: CGFloat = 0.34
+    static let dockZoneHalfWidth: CGFloat = 330
+
+    static func dockTopFromScreenTop(collapsedHeight: CGFloat) -> CGFloat {
+        collapsedHeight + dockGapBelowIsland
+    }
 
     /// Points between the bottom of the collapsed island and the top
-    /// of the drop bubble. Negative means they overlap and the bubble
-    /// is about to lose its drags to `isDropTargeted`.
+    /// of the tray: the fixed gap, on any display. Kept as a function
+    /// so the test that pins it reads the same as before it was fixed.
     static func dropClearance(screenHeight: CGFloat, collapsedHeight: CGFloat) -> CGFloat {
-        // The bubble is centred `dockDropFromTop` of the way down, so
-        // its top edge is half a bubble above that.
-        let bubbleTopFromScreenTop = screenHeight * dockDropFromTop - dockSize.height / 2
-        return bubbleTopFromScreenTop - collapsedHeight
+        dockTopFromScreenTop(collapsedHeight: collapsedHeight) - collapsedHeight
     }
 
     /// The bubble, which is exactly as big as it looks.
@@ -860,7 +851,10 @@ final class NotchWindowController {
     /// borderless panel passes drags THROUGH to the window behind, so
     /// the margin would have been a dead zone that looks catchable and
     /// is not. What you see is what catches.
-    private static let dockSize = CGSize(width: 400, height: 140)
+    /// 320 x 64 (2026-08-18): under the island it is a mouth, not a
+    /// card, and it should cover as little of the window as it can; the
+    /// glyph and title sit side by side to fit the height.
+    static let dockSize = CGSize(width: 320, height: 64)
 
     /// Built once: a panel whose whole face is the dashed stash card,
     /// floating where a rising drag will meet it.
@@ -928,7 +922,7 @@ final class NotchWindowController {
         let size = dock.frame.size
         let origin = NSPoint(
             x: screen.frame.midX - size.width / 2,
-            y: screen.frame.maxY - screen.frame.height * Self.dockDropFromTop - size.height / 2
+            y: screen.frame.maxY - Self.dockTopFromScreenTop(collapsedHeight: Self.tallestCollapsedIsland) - size.height
         )
         // Rise a few points while fading in; arriving, not popping.
         dock.setFrameOrigin(NSPoint(x: origin.x, y: origin.y - 12))
