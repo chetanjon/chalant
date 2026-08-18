@@ -1,16 +1,27 @@
 import SwiftUI
 
-/// The first hello: four quiet steps inside the island itself. No
+/// The first hello: a few quiet steps inside the island itself. No
 /// separate window, no permission wall; macOS asks for things as they
 /// are first used, and the tour just says so.
+///
+/// Five steps where dictation exists (macOS 26), four where it does not:
+/// law 5, a card appears only when it can do something, and a card that
+/// says "hold Option" on a Mac that cannot is a promise the build cannot
+/// keep.
 struct WelcomeView: View {
     @ObservedObject var model: NotchViewModel
     @Environment(\.chalantAccent) private var accent
 
-    private let steps = 4
+    /// How many cards this Mac gets. Read by the tour's own controls and by
+    /// the "debug welcome <n>" hook, so the two can never disagree.
+    @MainActor static var stepCount: Int { Dictation.isSupported ? 5 : 4 }
+    private var steps: Int { Self.stepCount }
     /// The permissions page's one-tap state.
     @State private var primed = false
     @State private var priming = false
+    /// The dictation page's switch, read once when the card appears so an
+    /// install that already turned it on says so instead of asking again.
+    @State private var dictating = Dictation.isEnabled()
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xl) {
@@ -22,6 +33,11 @@ struct WelcomeView: View {
         .frame(height: 250)
         .onExitCommand { model.finishWelcome() }
     }
+
+    /// The page index of each card, so inserting the dictation card on the
+    /// Macs that have it does not renumber the rest by hand.
+    private var dictationStep: Int? { Dictation.isSupported ? 2 : nil }
+    private var permissionsStep: Int { Dictation.isSupported ? 3 : 2 }
 
     @ViewBuilder
     private var content: some View {
@@ -62,7 +78,9 @@ struct WelcomeView: View {
                     .foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        case 2:
+        case dictationStep:
+            dictationCard
+        case permissionsStep:
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 Text("Say yes once.")
                     .font(Theme.Fonts.headline)
@@ -106,6 +124,46 @@ struct WelcomeView: View {
                     ("calendar", "Your day shows once macOS says yes to Calendar, and it never leaves this Mac."),
                 ]
             )
+        }
+    }
+
+    /// The second door, in its own card because the first card is about
+    /// talking TO the island and this is about talking THROUGH it, into
+    /// whatever you were typing. The gesture line is read off `VoiceDoor`,
+    /// never written here, so the tour and Settings can never describe two
+    /// different keys. The button is the same consent the Settings switch
+    /// is: turning it on is what raises the Input Monitoring and
+    /// Accessibility asks, so nothing is asked of a Mac that only wanted
+    /// the island.
+    private var dictationCard: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
+            step(
+                title: "Hold Option and talk.",
+                lines: [
+                    ("option", VoiceDoor.dictationLine(available: true) ?? ""),
+                    ("text.badge.checkmark", "Ums gone, punctuation placed, and the names you fix, learned. All on this Mac."),
+                ]
+            )
+            Button {
+                guard !dictating else { return }
+                Dictation.setEnabled(true)
+                Dictation.shared.start()
+                dictating = true
+            } label: {
+                Text(dictating ? "On. Hold Option and try it." : "Turn on hold to dictate")
+                    .font(Theme.Fonts.subhead)
+                    .foregroundStyle(dictating ? Theme.textSecondary : .black)
+                    .padding(.horizontal, Theme.Space.l)
+                    .padding(.vertical, Theme.Space.s)
+                    .background(
+                        Capsule().fill(dictating ? Theme.hairlineFaint : accent)
+                    )
+            }
+            .buttonStyle(PressableStyle())
+            Text("macOS asks for Input Monitoring and Accessibility: one to notice the key, one to place the text.")
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
