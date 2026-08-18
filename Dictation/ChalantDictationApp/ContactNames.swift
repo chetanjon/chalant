@@ -16,7 +16,11 @@ import os
 /// hear "Rose", "Mark" and "Will"; a vocabulary that carries them would only
 /// capitalize the verb, and a Whisper prompt full of them tilts its
 /// capitalization for nothing. The pool exists for Priya, Gangothri and
-/// Jonnalagadda. Same spell-checker test the learner uses.
+/// Jonnalagadda. Same spell-checker test the learner uses, asked of the
+/// LOWERCASED name: the checker knows "Priya", "Sarah" and "Ravi" as proper
+/// nouns and accepts them capitalized, but rejects "priya" and "ravi" while
+/// accepting "rose" and "will", which is exactly the line wanted (measured
+/// 2026-08-18 on this Mac's en dictionary).
 ///
 /// Refuses nothing else on its own: which of these names reach an ear for a
 /// given utterance is `NameHints`' decision, made from what the first ear
@@ -105,8 +109,8 @@ actor ContactNames {
 
     /// The pieces worth keeping: two to forty characters, made of letters
     /// (with the apostrophes, hyphens and dots names carry), not an ordinary
-    /// dictionary word, each spelling once. Sorted, so the pool is the same
-    /// list whatever order the store enumerated in.
+    /// dictionary word when lowercased, each spelling once. Sorted, so the
+    /// pool is the same list whatever order the store enumerated in.
     @MainActor
     static func usable(_ pieces: [String]) -> [String] {
         var seen = Set<String>()
@@ -117,7 +121,7 @@ actor ContactNames {
             guard trimmed.contains(where: { $0.isLetter }) else { continue }
             guard trimmed.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "-" || $0 == "." || $0 == "\u{2019}" }) else { continue }
             guard seen.insert(trimmed.lowercased()).inserted else { continue }
-            guard !CorrectionObserver.isDictionaryWord(trimmed) else { continue }
+            guard !CorrectionObserver.isDictionaryWord(trimmed.lowercased()) else { continue }
             out.append(trimmed)
         }
         return out.sorted { $0.lowercased() < $1.lowercased() }
