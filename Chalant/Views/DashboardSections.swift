@@ -24,7 +24,7 @@ struct GeneralSection: View {
     // not a nicety to add afterwards.
     @AppStorage(CorrectionObserver.enabledKey) private var learnCorrections = true
     // On, per the 2026-08-14 decision. Costs ~1s per utterance; see `Cleanup`.
-    @AppStorage(Cleanup.enabledKey) private var cleanup = true
+    @AppStorage(Cleanup.enabledKey) private var cleanup = false
 
     @State private var launchAtLogin = false
     /// The mics on offer right now, refreshed each time this section
