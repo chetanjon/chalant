@@ -104,7 +104,12 @@ actor BetterHearing {
     /// Whisper's hearing of the utterance, or nil when there is nothing to
     /// say (not loaded, too little audio, failure). 16 kHz mono Float32 in.
     /// Lengths and timings are logged, never content.
-    func hear(_ samples: [Float]) async -> String? {
+    ///
+    /// `hints` are the names it reads before it listens (`Names.forHearing`),
+    /// as Whisper's previous-text prompt. Every prompt token is a decoder step
+    /// (~13 ms on this Mac), which is why the list arrives already capped and
+    /// chosen for this utterance; the encoder is unaffected.
+    func hear(_ samples: [Float], hints: [String] = []) async -> String? {
         guard let pipe else { return nil }
         guard samples.count >= 16_000 / 2 else { return nil }
         var options = DecodingOptions()
@@ -115,6 +120,17 @@ actor BetterHearing {
         options.usePrefillPrompt = true
         options.temperatureFallbackCount = 2
         options.concurrentWorkerCount = 1
+        var promptTokenCount = 0
+        if !hints.isEmpty, let tokenizer = pipe.tokenizer {
+            // The same encoding WhisperKit's own CLI uses for `--prompt`: a
+            // leading space, and no special tokens the text might spell.
+            let tokens = tokenizer.encode(text: " " + NameHints.prompt(hints))
+                .filter { $0 < tokenizer.specialTokens.specialTokenBegin }
+            if !tokens.isEmpty {
+                options.promptTokens = tokens
+                promptTokenCount = tokens.count
+            }
+        }
         let started = ContinuousClock.now
         do {
             let results = try await pipe.transcribe(audioArray: samples, decodeOptions: options)
@@ -123,7 +139,7 @@ actor BetterHearing {
             let seconds = Double(started.duration(to: .now).components.seconds)
                 + Double(started.duration(to: .now).components.attoseconds) * 1e-18
             Self.log.info(
-                "heard \(samples.count / 16_000, privacy: .public)s of audio as \(text.count, privacy: .public) chars in \(seconds, privacy: .public)s")
+                "heard \(samples.count / 16_000, privacy: .public)s of audio as \(text.count, privacy: .public) chars in \(seconds, privacy: .public)s with \(hints.count, privacy: .public) names (\(promptTokenCount, privacy: .public) prompt tokens)")
             return text.isEmpty ? nil : text
         } catch {
             Self.log.error("hearing failed: \(String(describing: error), privacy: .public)")

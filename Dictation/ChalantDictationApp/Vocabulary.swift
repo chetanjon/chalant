@@ -1,19 +1,21 @@
 import Foundation
 
-/// The words this user says that the engine has never heard of.
+/// The words this user says that the engine has never heard of, typed by hand.
 ///
-/// **Empty by default, and that is the honest state of the feature.** There is
-/// no term store yet and no editor, so today this is populated by hand:
+/// **Empty by default.** M5's correction learner (`LearnedTerms`) fills the
+/// vocabulary properly, by watching what the user fixes rather than asking them
+/// to type it. That is the whole differentiator: every competitor makes you
+/// type your aliases by hand, and each one is a mistake you already suffered,
+/// noticed, diagnosed and then went into settings to record. This list is the
+/// door for the name you would rather not suffer even once: "Add a name" under
+/// Learn my names writes here, and so does the older hand path:
 ///
 /// ```
 /// defaults write com.cj.chalant dictationTerms -array Chalant Kizu Aatram
 /// ```
 ///
-/// M5's correction learner is what fills it properly, by watching what the user
-/// fixes rather than asking them to type it. That is the whole differentiator:
-/// every competitor makes you type your aliases by hand, and each one is a
-/// mistake you already suffered, noticed, diagnosed and then went into settings
-/// to record.
+/// Both ears read it: the phonetic pass as vocabulary, the second ear as the
+/// first names in its prompt (`Names`).
 ///
 /// **Canonical spelling matters and is easy to get wrong.** Whatever is stored
 /// here is what gets inserted into the user's document, so `Chalant` and
@@ -44,5 +46,27 @@ enum Vocabulary {
             if out.count == activeLimit { break }
         }
         return out
+    }
+
+    /// Adds a name, spelled exactly as typed, once. Whitespace-only and
+    /// duplicates (case-insensitively) are ignored. Returns whether it was new.
+    @discardableResult
+    static func add(_ name: String, in defaults: UserDefaults = .standard) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        var stored = defaults.array(forKey: key) as? [String] ?? []
+        guard !stored.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == trimmed.lowercased() })
+        else { return false }
+        stored.append(trimmed)
+        defaults.set(stored, forKey: key)
+        return true
+    }
+
+    /// Removes a name (case-insensitively). Nothing happens if it is not there.
+    static func remove(_ name: String, in defaults: UserDefaults = .standard) {
+        let target = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let stored = defaults.array(forKey: key) as? [String] ?? []
+        let kept = stored.filter { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != target }
+        if kept.isEmpty { defaults.removeObject(forKey: key) } else { defaults.set(kept, forKey: key) }
     }
 }
