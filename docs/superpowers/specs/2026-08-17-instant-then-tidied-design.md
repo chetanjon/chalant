@@ -92,6 +92,25 @@ and false starts gone, punctuation fixed, spoken lists made into lists. If you
 have started typing, nothing is touched." Off means the raw text is never
 revisited.
 
+### Track 3: clean while you talk
+
+The swap gives up at 4 s, and a long paragraph takes the model a second per
+~40-word chunk, so without this a 30-second dictation would land instantly and
+never be tidied. While the key is held, every 0.9 s the controller takes the
+engine's finalized tokens so far, runs the same deterministic passes the
+release path runs, and hands every **closed** chunk (`CleanupPrompt
+.closedChunks`: all but the last, since chunks fill greedily from the front
+and text added later never moves an earlier boundary) to the model in the
+background. `FoundationModelsPolisher` keeps the results by exact piece text
+for this utterance only; at release `polish` takes cached pieces, awaits ones
+still in flight, and sends only the rest to the model. Log line: `cleaned N
+chars in K chunk(s), W tidied while talking`. Cleared on every new hold.
+
+Also from this evening's testing: `Disfluency` now collapses a run of three or
+more identical tokens that carry punctuation ("the, the, the, the,", "one. one.
+one."), which the engine emits on a starved microphone; two with punctuation
+still ship ("No, no." is English).
+
 ## Architecture
 
 - `ChalantDictationCore/Insert/SwapPolicy.swift` (new, pure, tested): the

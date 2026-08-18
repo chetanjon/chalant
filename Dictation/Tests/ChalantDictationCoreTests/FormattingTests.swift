@@ -93,3 +93,30 @@ final class FormattingTests: XCTestCase {
         XCTAssertEqual(CleanupPrompt.unwrap("1. Call Amma.  \n2. Send the notes.  "), "1. Call Amma.\n2. Send the notes.")
     }
 }
+
+/// Track 3, "clean while you talk": chunks that are closed while the speaker is
+/// still talking can be tidied early, so at release only the tail waits.
+final class PretidyChunkingTests: XCTestCase {
+
+    private let sentence = "we should move the review to thursday because Priya is not back until wednesday. "
+
+    /// Greedy fill from the front means adding sentences at the end never moves
+    /// an earlier boundary, which is what makes a chunk tidied mid-hold reusable
+    /// at release.
+    func testEarlierChunksAreStableAsTextGrows() {
+        let short = String(repeating: sentence, count: 6)
+        let long = short + String(repeating: sentence, count: 4)
+        let closed = CleanupPrompt.closedChunks(short)
+        let later = CleanupPrompt.chunks(long)
+        XCTAssertFalse(closed.isEmpty)
+        XCTAssertEqual(Array(later.prefix(closed.count)), closed)
+    }
+
+    /// The last chunk is still growing; it is never closed.
+    func testTheLastChunkIsNeverClosed() {
+        let text = String(repeating: sentence, count: 6)
+        let all = CleanupPrompt.chunks(text)
+        XCTAssertEqual(CleanupPrompt.closedChunks(text), Array(all.dropLast()))
+        XCTAssertEqual(CleanupPrompt.closedChunks("one short sentence."), [])
+    }
+}

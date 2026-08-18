@@ -311,6 +311,17 @@ public enum CleanupPrompt {
         }
     }
 
+    /// The chunks of a transcript that will not change as the speaker goes on:
+    /// every chunk but the last. Chunks fill greedily from the front, so text
+    /// added at the end never moves an earlier boundary, and a closed chunk
+    /// tidied while the key is still held is the same piece `polish` will ask
+    /// for at release ("clean while you talk", spec 2026-08-17). The last chunk
+    /// is still growing and is never closed. A spoken list is one chunk and so
+    /// is never pre-tidied; it is short by nature.
+    public static func closedChunks(_ transcript: String, targetWords: Int = chunkTargetWords) -> [String] {
+        Array(chunks(transcript, targetWords: targetWords).dropLast())
+    }
+
     /// Sentences, each keeping its own terminator. A terminator counts only
     /// when whitespace follows it, so a decimal point inside a number does not
     /// end a sentence.

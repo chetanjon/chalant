@@ -40,6 +40,11 @@ final class DictationController {
     /// place). A new key-down retires it: ⌘Z after a second insert would take
     /// the wrong paste.
     private var swapTask: Task<Void, Never>?
+    /// "Clean while you talk": during the hold, every chunk of the transcript
+    /// that is already closed goes to the model early, so at release only the
+    /// tail waits (spec 2026-08-17, track 3).
+    private var pretidyTask: Task<Void, Never>?
+    private static let pretidyInterval: Duration = .milliseconds(900)
     private var swapGeneration = 0
     private let activity = UserActivityWatch()
     /// Turns a real day of dictating into the spontaneous half of the corpus.
@@ -298,6 +303,27 @@ final class DictationController {
                 try? await Task.sleep(for: .milliseconds(10))
             }
         }
+        startPretidy(transcriber)
+    }
+
+    /// While the key is held, hand every closed chunk of what has been said so
+    /// far to the model, through the same deterministic passes the release
+    /// path uses, so the pieces match exactly at release and are already done.
+    private func startPretidy(_ transcriber: AppleTranscriber) {
+        pretidyTask?.cancel()
+        guard Cleanup.isEnabled() else { return }
+        pretidyTask = Task { [weak self, transcriber] in
+            guard let self else { return }
+            await self.polisher.beginUtterance()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.pretidyInterval)
+                guard !Task.isCancelled else { return }
+                let tokens = await transcriber.finalizedTokens
+                guard !tokens.isEmpty else { continue }
+                let text = await self.deterministicText(from: tokens)
+                await self.polisher.pretidy(text)
+            }
+        }
     }
 
     func keyUp() async {
@@ -331,6 +357,8 @@ final class DictationController {
         }
 
         let releasedAt = Date()
+        pretidyTask?.cancel()
+        pretidyTask = nil
         await audio.endCapture()
         stopMeter()
         surface.hide()
@@ -380,48 +408,7 @@ final class DictationController {
         // before, 18.22 after, with exactly three utterances changed and no
         // other output touched.
         let raw = transcript.rawText
-
-        // **The vocabulary pass runs FIRST, and on tokens rather than text.**
-        // It is the only stage that needs per-word confidence, and confidence
-        // exists only on tokens; the three stages after it delete words, after
-        // which nothing aligns back to the engine's own scoring. Substitution
-        // is strictly one word for one word, so running it first cannot disturb
-        // them.
-        //
-        // Measured on the 90-utterance corpus 2026-08-15: 8 repairs, 0
-        // corruptions (`Challant` → `Chalant`, `Jonalagata` → `Jonnalagadda`,
-        // `versal` → `Vercel`, `Kisu` → `Kizu`). It does nothing at all until
-        // the vocabulary is non-empty, which today means until someone sets it
-        // by hand or M5's learner fills it.
-        // Spans first, while every token is still present. A name the engine
-        // broke in half needs all its pieces, and joining can only shorten the
-        // sequence the single-word pass then walks.
-        //
-        // It is a separate pass because the evidence is different: a split name
-        // is made of CONFIDENTLY heard real words (`friction` and `lens` both
-        // came back at 0.98), so the single-word gate, which fires only on
-        // uncertainty, can never see it.
-        // Aliases FIRST, and they are the only stage that ignores confidence.
-        // A pair the user typed themselves, twice, over a word Chalant had just
-        // put in their document is not a guess needing acoustic verification.
-        // It also has to ignore confidence to work at all: proper-noun errors
-        // are confident errors, and `Chalan` for `Chalant` measured 0.87.
-        let learned = await LearnedTerms.shared.aliases()
-        let corrected = TermMatcher.applyingAliases(tokens: transcript.tokens, aliases: learned)
-
-        // Then the phonetic passes, over the hand-kept list plus everything
-        // learned. Spans before single words, while every token is present.
-        let vocabulary = Vocabulary.terms() + (await LearnedTerms.shared.terms())
-        let whole = TermMatcher.joiningSpans(tokens: corrected, terms: vocabulary)
-        let resolved = TermMatcher.resolving(tokens: whole, terms: vocabulary)
-
-        // Three stages, in order, all pure and all in Core: refuse what is not
-        // text, collapse what was said twice by accident, then remove the words
-        // nobody meant to say.
-        let deterministic = Fillers.removing(
-            Disfluency.collapsingRepetitions(
-                Guardrail.trimmingPunctuationRun(
-                    resolved.map(\.text).joined(separator: " "))))
+        let deterministic = await deterministicText(from: transcript.tokens)
         if deterministic != raw {
             Self.log.error(
                 "guardrail trimmed \(raw.count - deterministic.count, privacy: .public) chars of punctuation run")
@@ -491,6 +478,59 @@ final class DictationController {
             insert: timings.insertion)
 
         onStateChange?()
+    }
+
+    /// The deterministic passes, in order, from the engine's tokens to text:
+    /// aliases, then the phonetic vocabulary passes (spans before single
+    /// words), then refuse what is not text, collapse what was said twice by
+    /// accident, and remove the words nobody meant to say. All pure, all in
+    /// Core, all measured. Used at release on the whole transcript and, during
+    /// the hold, on the finalized prefix ("clean while you talk"), so the two
+    /// agree word for word on the part they share.
+    private func deterministicText(from tokens: [Token]) async -> String {
+
+        // **The vocabulary pass runs FIRST, and on tokens rather than text.**
+        // It is the only stage that needs per-word confidence, and confidence
+        // exists only on tokens; the three stages after it delete words, after
+        // which nothing aligns back to the engine's own scoring. Substitution
+        // is strictly one word for one word, so running it first cannot disturb
+        // them.
+        //
+        // Measured on the 90-utterance corpus 2026-08-15: 8 repairs, 0
+        // corruptions (`Challant` → `Chalant`, `Jonalagata` → `Jonnalagadda`,
+        // `versal` → `Vercel`, `Kisu` → `Kizu`). It does nothing at all until
+        // the vocabulary is non-empty, which today means until someone sets it
+        // by hand or M5's learner fills it.
+        // Spans first, while every token is still present. A name the engine
+        // broke in half needs all its pieces, and joining can only shorten the
+        // sequence the single-word pass then walks.
+        //
+        // It is a separate pass because the evidence is different: a split name
+        // is made of CONFIDENTLY heard real words (`friction` and `lens` both
+        // came back at 0.98), so the single-word gate, which fires only on
+        // uncertainty, can never see it.
+        // Aliases FIRST, and they are the only stage that ignores confidence.
+        // A pair the user typed themselves, twice, over a word Chalant had just
+        // put in their document is not a guess needing acoustic verification.
+        // It also has to ignore confidence to work at all: proper-noun errors
+        // are confident errors, and `Chalan` for `Chalant` measured 0.87.
+        let learned = await LearnedTerms.shared.aliases()
+        let corrected = TermMatcher.applyingAliases(tokens: tokens, aliases: learned)
+
+        // Then the phonetic passes, over the hand-kept list plus everything
+        // learned. Spans before single words, while every token is present.
+        let vocabulary = Vocabulary.terms() + (await LearnedTerms.shared.terms())
+        let whole = TermMatcher.joiningSpans(tokens: corrected, terms: vocabulary)
+        let resolved = TermMatcher.resolving(tokens: whole, terms: vocabulary)
+
+        // Three stages, in order, all pure and all in Core: refuse what is not
+        // text, collapse what was said twice by accident, then remove the words
+        // nobody meant to say.
+        let deterministic = Fillers.removing(
+            Disfluency.collapsingRepetitions(
+                Guardrail.trimmingPunctuationRun(
+                    resolved.map(\.text).joined(separator: " "))))
+        return deterministic
     }
 
     // MARK: - Instant, then tidied in place
@@ -571,6 +611,8 @@ final class DictationController {
         surface.hide()
         pumpTask?.cancel()
         pumpTask = nil
+        pretidyTask?.cancel()
+        pretidyTask = nil
         await standDown(transcriber)
     }
 
