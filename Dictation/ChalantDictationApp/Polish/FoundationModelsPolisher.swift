@@ -78,14 +78,20 @@ actor FoundationModelsPolisher: Polisher {
     /// changes with every few words, so at most one tail speculation runs at
     /// a time; whichever tail text the release actually ends on is then
     /// often already tidied, and the words can land refined at once.
-    func pretidy(_ text: String) {
+    ///
+    /// `urgent` is the key-up call: the last live text before finalization,
+    /// started even while an older tail is still in flight, because that older
+    /// tail is by definition not the one the release will ask for, and this
+    /// one often is. It buys the model the finalization time (0.05 to 0.4 s
+    /// measured) as a head start.
+    func pretidy(_ text: String, urgent: Bool = false) {
         guard Cleanup.isEnabled(), case .available = SystemLanguageModel.default.availability else { return }
         let all = CleanupPrompt.chunks(text)
         guard !all.isEmpty else { return }
         let closed = Array(all.dropLast())
         var fresh = closed.filter { tidiedPieces[$0] == nil && piecesInFlight[$0] == nil }
         let tail = all[all.count - 1]
-        if tidiedPieces[tail] == nil, piecesInFlight[tail] == nil, tailInFlight == nil,
+        if tidiedPieces[tail] == nil, piecesInFlight[tail] == nil, urgent || tailInFlight == nil,
            CleanupPrompt.worthCleaning(tail) || all.count > 1 {
             fresh.append(tail)
             tailInFlight = tail
@@ -180,8 +186,12 @@ actor FoundationModelsPolisher: Polisher {
             if let deadline {
                 let remaining = ContinuousClock.now.duration(to: deadline)
                 guard remaining > .zero, let value = await Self.value(of: task, within: remaining) else {
+                    // The elapsed figure is the point: the caller measured
+                    // waits of 0.9 to 2.5 s against a 0.65 s budget (log,
+                    // 2026-08-18), and this says whether the overshoot is in
+                    // here or on the way back to the caller.
                     Self.log.info(
-                        "cleanup not ready within budget: \(trimmed.count, privacy: .public) chars, \(pieces.count, privacy: .public) chunk(s), \(warm, privacy: .public) warm")
+                        "cleanup not ready within budget: \(trimmed.count, privacy: .public) chars, \(pieces.count, privacy: .public) chunk(s), \(warm, privacy: .public) warm, \(started.duration(to: .now).seconds, privacy: .public)s elapsed here")
                     return nil
                 }
                 out.append(value)
