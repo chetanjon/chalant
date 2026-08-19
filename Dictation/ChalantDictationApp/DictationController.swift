@@ -49,7 +49,12 @@ final class DictationController {
     /// The ear stays warm this long after a dictation ends, then rests. Long
     /// enough that a burst of dictations never pays the ~100 ms start twice;
     /// short enough that a Mac left alone stops holding its microphone.
-    static let earWarmHold: Duration = .seconds(180)
+    /// Ten minutes, up from three (1.20.1). The 180 s rest saved the mic from
+    /// running all day, which was the complaint; but a dictation ten minutes
+    /// after the last one met a sleeping ear, and the founder felt the
+    /// 0.5 s wake as lag (2026-08-19). Ten minutes covers a working burst and
+    /// still lets the mic rest for the rest of the day.
+    static let earWarmHold: Duration = .seconds(600)
     private var earRestTask: Task<Void, Never>?
     /// How often the hold hands the live text to the model. Only one tail
     /// speculation runs at a time, so a shorter tick does not mean more
@@ -240,6 +245,16 @@ final class DictationController {
         // into. Resolved here, at key-down, because that is when we know it.
         let targetDisplay = front.flatMap { installedDictationDisplayLookup?.displayShowing(pid: $0.processIdentifier) }
 
+        // The strip opens NOW, at the press, not when the ear is ready. The
+        // founder (2026-08-19): "when I press Option there's a lot of lag and
+        // the popup seems slow." Measured that morning: press to capturing
+        // 523 ms with the ear asleep, 83 ms warm, and the strip used to wait
+        // for that. The mic name follows through the meter. Every way out of
+        // the setup below hides it again.
+        surface.show(into: target?.appName ?? target?.bundleID ?? "", mic: nil, on: targetDisplay)
+        startMeter()
+        onStateChange?()
+
         let transcriber = AppleTranscriber()
         self.transcriber = transcriber
         if BetterHearing.isEnabled(), await BetterHearing.shared.isReady {
@@ -249,6 +264,12 @@ final class DictationController {
         // A dead ear is rebuilt HERE, before the format below is read, so the
         // analyzer is prepared against the engine that will actually feed it.
         await audio.ensureAlive()
+        // Capture opens the moment the engine runs, BEFORE the analyzer is
+        // prepared and begun: the ring holds ~1.6 s, preparation takes ~0.25 s,
+        // and the pump drains the backlog once the analyzer is live. What was
+        // said during preparation is no longer lost; only the engine's own
+        // start, when it was asleep, is still ahead of the first word.
+        await audio.beginCapture()
         let format = await audio.currentFormat
         // Part 0 §0.5: preheat, measured at ~1.45s finalized versus ~2.2s cold.
         await transcriber.prepare(locale: locale, format: format)
@@ -265,6 +286,10 @@ final class DictationController {
             Self.log.error("could not begin transcription: \(error.localizedDescription, privacy: .public)")
             key.setupFailed()
             self.transcriber = nil
+            await audio.endCapture()
+            stopMeter()
+            surface.hide()
+            onStateChange?()
             return
         }
 
@@ -289,28 +314,17 @@ final class DictationController {
             return
         }
 
-        await audio.beginCapture()
-        let ear = await audio.currentDevice?.name
-
-        // `ready()` is not the last word: `beginCapture` and the device name
-        // are both awaits, and a release landing inside them runs the whole of
-        // `keyUp` before this line resumes. That `keyUp` hides a surface that
-        // was never shown, and then this one opens a strip with no key held
-        // and nothing left to close it, wedging the island in `.dictating`.
-        // Same answer as `.abandon` above: the session the key has already
-        // ended is not a session to go live for. The teardown belongs to the
-        // `keyUp` that took the release, which holds this transcriber and is
-        // finalizing it; standing it down a second time here would race that
-        // finalize and could cost the user the words they just spoke.
+        // `ready()` is not the last word: a release landing in any await
+        // above runs the whole of `keyUp` before this line resumes. That
+        // `keyUp` hides the strip and is finalizing this transcriber; the
+        // session the key has already ended is not a session to go live for,
+        // and standing it down a second time here would race that finalize
+        // and could cost the user the words they just spoke.
         guard key.state == .listening else {
-            Self.log.info("released while going live; no strip, keyUp owns the stand-down")
+            Self.log.info("released while going live; keyUp owns the stand-down")
             surface.hide()
             return
         }
-
-        surface.show(into: target?.appName ?? target?.bundleID ?? "", mic: ear, on: targetDisplay)
-        startMeter()
-        onStateChange?()
 
         // Drain the lock-free ring into the analyzer. The ring is polled
         // because its producer is a real-time thread that may not resume a
@@ -705,6 +719,11 @@ final class DictationController {
     /// running. The key is already back at idle, so the next press works.
     private func standDown(_ transcriber: AppleTranscriber) async {
         scheduleEarRest()
+        // The strip opens and capture begins at the press now, so a session
+        // stood down during setup has both to close.
+        await audio.endCapture()
+        stopMeter()
+        surface.hide()
         do {
             _ = try await transcriber.end()
         } catch {
