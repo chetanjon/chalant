@@ -36,13 +36,10 @@ final class DictationController {
     private var healthTimer: Timer?
     private var transcriber: AppleTranscriber?
     private var pumpTask: Task<Void, Never>?
-    /// The tidied swap in flight after an insert (instant, then tidied in
-    /// place). A new key-down retires it: ⌘Z after a second insert would take
-    /// the wrong paste.
-    private var swapTask: Task<Void, Never>?
-    /// The better ear's swap in flight, and what is currently in the document
-    /// from this utterance (the landed text, or the tidied text once swapped),
-    /// which is what the ear's version is compared against.
+    /// The better ear's swap in flight after an insert, and what is currently
+    /// in the document from this utterance, which is what the ear's version is
+    /// compared against. A new key-down retires it: ⌘Z after a second insert
+    /// would take the wrong paste.
     private var hearingTask: Task<Void, Never>?
     private var lastLanded: String = ""
     /// "Clean while you talk": during the hold, every chunk of the transcript
@@ -54,7 +51,11 @@ final class DictationController {
     /// short enough that a Mac left alone stops holding its microphone.
     static let earWarmHold: Duration = .seconds(180)
     private var earRestTask: Task<Void, Never>?
-    private static let pretidyInterval: Duration = .milliseconds(600)
+    /// How often the hold hands the live text to the model. Only one tail
+    /// speculation runs at a time, so a shorter tick does not mean more
+    /// concurrent work; it means the next speculation starts sooner after the
+    /// last one finishes, and the tail it starts on is fresher.
+    private static let pretidyInterval: Duration = .milliseconds(400)
     /// How long the release waits for the refined text before landing the raw
     /// words instead. The on-device model needs ~0.45 s for a few leftover
     /// words with the plain prompt (measured 2026-08-17), so this catches the
@@ -404,6 +405,18 @@ final class DictationController {
         pumpTask = nil
         onStateChange?()
 
+        // One last tidy-ahead on the live text as it stands right now, before
+        // finalization: the finalized text is very often these same words, so
+        // the model gets finalization's 0.05 to 0.4 s as a head start on the
+        // very piece the release will wait for.
+        if Cleanup.isEnabled() {
+            let live = await transcriber.liveTokens
+            if !live.isEmpty {
+                let text = await deterministicText(from: live)
+                await polisher.pretidy(text, urgent: true)
+            }
+        }
+
         // Close the corpus file before the transcript is asked for, so the
         // samples are on disk by the time the row naming them is written.
         await transcriber.endCapture()
@@ -450,20 +463,23 @@ final class DictationController {
 
         // The model pass no longer stands between the speaker and their words.
         // It used to (2026-08-14 to 1.17.0), at ~1 s per sentence, and the
-        // founder felt every one of them. Now the deterministic text lands at
-        // once and the model runs AFTER the insert; if it changed anything and
-        // the user has not touched the document since, the raw text is swapped
-        // for the tidied one in place (see `startTidiedSwap`). Instant, then
-        // tidied in place, spec 2026-08-17.
-        // A spoken list is shaped without the model, so it lands as a list at
-        // once even when the model is not ready in time (`Listing`).
+        // founder felt every one of them. 1.18.0 landed the raw words at once
+        // and swapped the tidied ones in place a moment later; 1.19.0 waited a
+        // short budget so most sentences land tidied once. A spoken list is
+        // shaped without the model, so it lands as a list at once even when
+        // the model is not ready in time (`Listing`).
         let shaped = Listing.format(deterministic)
 
-        // Refined at once: wait a short, fixed budget for the tidied text and
-        // land it once, tidied. Tidy-ahead during the hold usually leaves the
-        // model only the last few words. If it is not ready in time, the raw
-        // words land now and the tidied version replaces them in place when
-        // it arrives (`startTidiedSwap`), which is what shipped in 1.18.0.
+        // Refined at once, or as said: wait a short, fixed budget for the
+        // tidied text and land it once. Tidy-ahead during the hold usually
+        // leaves the model only the last few words. If it is not ready in
+        // time, the words land as said AND STAY: no in-place tidy swap after
+        // the fact. The founder, 2026-08-18: "the text is coming first and
+        // then it is refining and changing. The user should not see that
+        // because it feels slow." Measured on 37 real utterances that day:
+        // 16 landed raw and were then swapped, every one of them a visible
+        // change. The tidy is worth less than a still page; the second ear
+        // (Better hearing) is the one later change left, and it is a switch.
         var text = shaped
         var refinedAtOnce = false
         if Cleanup.isEnabled(), !shaped.isEmpty, let target {
@@ -508,9 +524,7 @@ final class DictationController {
                 inserted: text, in: target.bundleID)
             let insertedAt = Date()
             lastLanded = text
-            if Cleanup.isEnabled(), !refinedAtOnce {
-                startTidiedSwap(of: text, outcome: outcome, target: target, insertedAt: insertedAt)
-            }
+            retirePendingSwap()
             if !hearingSamples.isEmpty {
                 startHearingSwap(samples: hearingSamples, heard: raw, outcome: outcome, target: target, insertedAt: insertedAt)
             }
@@ -609,60 +623,13 @@ final class DictationController {
         return deterministic
     }
 
-    // MARK: - Instant, then tidied in place
+    // MARK: - After the words have landed
 
-    /// The model pass, off the path the user feels. Runs after the insert;
-    /// when it returns, `SwapPolicy` decides whether the raw text may be
-    /// replaced (unchanged, typed since, focus moved, too late, no undo here:
-    /// keep). A swap is undo-then-paste through the same System Events path.
-    /// Logs lengths and the reason, never content.
-    private func startTidiedSwap(of inserted: String, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date) {
-        retirePendingSwap()
-        swapGeneration += 1
-        let generation = swapGeneration
-        activity.arm()
-        swapTask = Task { [weak self] in
-            guard let self else { return }
-            let tidied = (try? await self.polisher.polish(inserted, profile: AppProfile(bundleID: target.bundleID ?? "")))
-                ?? inserted
-            guard !Task.isCancelled, generation == self.swapGeneration else {
-                self.activity.disarm()
-                return
-            }
-            let front = NSWorkspace.shared.frontmostApplication
-            let situation = SwapPolicy.Situation(
-                inserted: inserted, tidied: tidied, outcome: outcome,
-                userActedSinceInsert: self.activity.sawActivity,
-                frontIsStillTarget: front?.processIdentifier == target.processID,
-                secondsSinceInsert: Date().timeIntervalSince(insertedAt),
-                bundleID: target.bundleID)
-            // The better ear, if it is listening to this utterance too, still
-            // needs to know whether the user types after this point.
-            if self.hearingTask == nil { self.activity.disarm() }
-            switch SwapPolicy.decide(situation) {
-            case .keep(let reason):
-                Self.log.info("tidy kept: \(reason.rawValue, privacy: .public) after \(Date().timeIntervalSince(insertedAt), privacy: .public)s")
-            case .swap:
-                self.activity.expectOwnKeystrokes()
-                let swapped = await self.inserter.replaceLastInsertion(with: tidied, into: target)
-                if swapped {
-                    self.lastLanded = tidied
-                    // The observer diffs the field against what we put there;
-                    // it must now expect the tidied text, or our own swap
-                    // would read as the user correcting us.
-                    await CorrectionObserver.shared.watch(inserted: tidied, in: target.bundleID)
-                }
-                Self.log.info(
-                    "tidy \(swapped ? "swapped" : "swap failed", privacy: .public): \(inserted.count, privacy: .public) -> \(tidied.count, privacy: .public) chars after \(Date().timeIntervalSince(insertedAt), privacy: .public)s")
-            }
-            self.swapTask = nil
-        }
-    }
-
+    /// Whatever may still be running from the previous utterance stops here:
+    /// a hearing that has not come back yet must not swap the sentence after
+    /// this one. The activity watch is disarmed with it.
     private func retirePendingSwap() {
         swapGeneration += 1
-        swapTask?.cancel()
-        swapTask = nil
         hearingTask?.cancel()
         hearingTask = nil
         activity.disarm()
@@ -674,9 +641,9 @@ final class DictationController {
     /// audio, its text goes through the plain deterministic passes and the
     /// same tidy, and if it is plausibly the same utterance, differs from what
     /// is in the document, and the policy allows (6 s ceiling, nothing typed,
-    /// focus stayed, an app with undo), the words are replaced in place. It
-    /// waits for the tidy swap, if one is running, so the two never race for
-    /// ⌘Z. Lengths and timings only in the log.
+    /// focus stayed, an app with undo), the words are replaced in place. The
+    /// one change a page may still see after the words land, and it is behind
+    /// the Better hearing switch. Lengths and timings only in the log.
     ///
     /// `heard` is the first ear's raw text: it picks the names the second ear
     /// reads before it listens (`Names.forHearing`), which is what took the
@@ -684,18 +651,23 @@ final class DictationController {
     private func startHearingSwap(samples: [Float], heard firstHearing: String, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date) {
         hearingTask?.cancel()
         let generation = swapGeneration
-        let pendingTidy = swapTask
-        if activity.isArmed == false { activity.arm() }
+        activity.arm()
         hearingTask = Task { [weak self] in
             guard let self else { return }
             let hints = await Names.forHearing(heard: firstHearing)
             let heard = await BetterHearing.shared.hear(samples, hints: hints)
-            guard !Task.isCancelled, generation == self.swapGeneration, let heard else { return }
-            await pendingTidy?.value
+            // A retired hearing leaves the watch alone: a newer utterance
+            // owns it now. Only a hearing that is still current and came
+            // back empty stands the watch down itself.
             guard !Task.isCancelled, generation == self.swapGeneration else { return }
+            guard let heard else {
+                self.activity.disarm()
+                return
+            }
             let landed = self.lastLanded
             guard BetterHearing.plausible(hearing: heard, against: landed) else {
                 Self.log.info("hearing kept: implausible (\(heard.count, privacy: .public) vs \(landed.count, privacy: .public) chars)")
+                self.activity.disarm()
                 return
             }
             let cleaned = Listing.format(BetterHearing.deterministic(heard))
