@@ -41,6 +41,9 @@ final class DictationController {
     /// compared against. A new key-down retires it: ⌘Z after a second insert
     /// would take the wrong paste.
     private var hearingTask: Task<Void, Never>?
+    /// The Whisper listening itself, started at finalize so it never waits on
+    /// the tidy or the insert. Retired with the swap task.
+    private var hearingWorkTask: Task<String?, Never>?
     private var lastLanded: String = ""
     /// "Clean while you talk": during the hold, every chunk of the transcript
     /// that is already closed goes to the model early, so at release only the
@@ -257,7 +260,13 @@ final class DictationController {
 
         let transcriber = AppleTranscriber()
         self.transcriber = transcriber
-        if BetterHearing.isEnabled(), await BetterHearing.shared.isReady {
+        // Samples are kept whenever the switch is on, NOT only when the model
+        // is already loaded: gating on readiness at key-down meant a hold
+        // during the model's load window silently lost its second hearing,
+        // and on 2026-08-20 that was most of a night (74 utterances, 5
+        // hearings engaged). The samples cost a few MB for a capped 90 s;
+        // readiness is judged once, at release, when it matters.
+        if BetterHearing.isEnabled() {
             await transcriber.setKeepSamplesForHearing(true)
         }
 
@@ -469,6 +478,21 @@ final class DictationController {
         // before, 18.22 after, with exactly three utterances changed and no
         // other output touched.
         let raw = transcript.rawText
+
+        // The second ear starts listening NOW, at finalize, not after the
+        // insert. Whisper needs one to two seconds, the tidy wait and the
+        // insert cost most of another, and a hearing that starts late loses
+        // the race with the speaker's next sentence: measured 2026-08-20, 74
+        // utterances, 5 hearings engaged, 0 finished. Only the listening is
+        // early; the swap decision still waits for the insert's outcome.
+        var hearingWork: Task<String?, Never>?
+        if !hearingSamples.isEmpty, BetterHearing.isEnabled(), await BetterHearing.shared.isReady {
+            hearingWork = Task {
+                let hints = await Names.forHearing(heard: raw)
+                return await BetterHearing.shared.hear(hearingSamples, hints: hints)
+            }
+        }
+
         let deterministic = await deterministicText(from: transcript.tokens)
         if deterministic != raw {
             Self.log.error(
@@ -509,17 +533,22 @@ final class DictationController {
         guard !text.isEmpty else {
             // Silence is not a corpus entry. Keeping it would pad the set with
             // rows nobody can label.
+            hearingWork?.cancel()
             await corpus.discard()
             Self.log.info("nothing heard")
             return
         }
 
-        guard let target else { return }
+        guard let target else {
+            hearingWork?.cancel()
+            return
+        }
 
         // Re-validate: if focus moved between key-down and now, the paste
         // would land in the wrong app.
         let front = NSWorkspace.shared.frontmostApplication
         guard front?.processIdentifier == target.processID else {
+            hearingWork?.cancel()
             Self.log.error("focus moved during dictation; refusing to insert")
             return
         }
@@ -539,9 +568,12 @@ final class DictationController {
             let insertedAt = Date()
             lastLanded = text
             retirePendingSwap()
-            if !hearingSamples.isEmpty {
-                startHearingSwap(samples: hearingSamples, heard: raw, outcome: outcome, target: target, insertedAt: insertedAt)
+            if let hearingWork {
+                startHearingSwap(work: hearingWork, outcome: outcome, target: target, insertedAt: insertedAt)
             }
+        } else {
+            // Nothing landed, so there is nothing for the second ear to swap.
+            hearingWork?.cancel()
         }
 
         // Lengths and durations only. Part 1 §2: transcripts never enter logs.
@@ -646,6 +678,8 @@ final class DictationController {
         swapGeneration += 1
         hearingTask?.cancel()
         hearingTask = nil
+        hearingWorkTask?.cancel()
+        hearingWorkTask = nil
         activity.disarm()
     }
 
@@ -662,14 +696,16 @@ final class DictationController {
     /// `heard` is the first ear's raw text: it picks the names the second ear
     /// reads before it listens (`Names.forHearing`), which is what took the
     /// names set from 29.9% to 10.0% word error on this Mac.
-    private func startHearingSwap(samples: [Float], heard firstHearing: String, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date) {
+    private func startHearingSwap(work: Task<String?, Never>, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date) {
         hearingTask?.cancel()
+        hearingWorkTask = work
         let generation = swapGeneration
         activity.arm()
         hearingTask = Task { [weak self] in
             guard let self else { return }
-            let hints = await Names.forHearing(heard: firstHearing)
-            let heard = await BetterHearing.shared.hear(samples, hints: hints)
+            // The listening began at finalize (`hearingWork`); by now Whisper
+            // has had the tidy wait and the insert to itself.
+            let heard = await work.value
             // A retired hearing leaves the watch alone: a newer utterance
             // owns it now. Only a hearing that is still current and came
             // back empty stands the watch down itself.

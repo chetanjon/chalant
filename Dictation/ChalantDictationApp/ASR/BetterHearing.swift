@@ -141,6 +141,13 @@ actor BetterHearing {
             Self.log.info(
                 "heard \(samples.count / 16_000, privacy: .public)s of audio as \(text.count, privacy: .public) chars in \(seconds, privacy: .public)s with \(hints.count, privacy: .public) names (\(promptTokenCount, privacy: .public) prompt tokens)")
             return text.isEmpty ? nil : text
+        } catch is CancellationError {
+            // The next utterance landed first and retired this one. By
+            // design, not a failure: logged at info so a night of burst
+            // dictation does not read as a broken ear (2026-08-20: five
+            // ERROR lines that were all this).
+            Self.log.info("hearing retired before it finished")
+            return nil
         } catch {
             Self.log.error("hearing failed: \(String(describing: error), privacy: .public)")
             return nil
