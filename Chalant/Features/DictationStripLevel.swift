@@ -61,12 +61,20 @@ enum DictationStripLevel {
     /// back down between phrases rather than snapping.
     ///
     /// `beat` counts syllable onsets; the view fires a glint when it changes.
+    ///
+    /// `sway` is the pool's life: a phase that never stops advancing while
+    /// the strip listens, slow in a pause, quick under voice. The speaker
+    /// must always see something alive ("there should be something alive
+    /// like moving so the speaker knows its listening", the founder,
+    /// 2026-08-20); the pool moving IN PLACE is that life, and it keeps the
+    /// rule that nothing crosses the strip except a syllable's glint.
     struct Voice: Equatable {
         private(set) var level: CGFloat = 0
         private(set) var fill: CGFloat = 0
         private(set) var pulse: CGFloat = 0
         private(set) var pace: CGFloat = 0
         private(set) var beat: Int = 0
+        private(set) var sway: CGFloat = 0
         private var sinceOnset: TimeInterval = .infinity
 
         /// Below this the meter is reading a pause, not a voice.
@@ -98,6 +106,12 @@ enum DictationStripLevel {
         /// gear.
         static let pulseDecay: CGFloat = 10
         static let pulseDecayPaceSpan: CGFloat = 8
+        /// How fast the pool's life advances, in radians per second: a
+        /// gentle ~3 s cycle in a pause, under a second at full voice in a
+        /// high gear.
+        static let swayFloor: CGFloat = 2.2
+        static let swayVoiceSpan: CGFloat = 5.0
+        static let swayPaceSpan: CGFloat = 2.0
 
         mutating func step(raw: CGFloat, dt: TimeInterval) {
             let target = clamp(raw)
@@ -105,6 +119,7 @@ enum DictationStripLevel {
             let k = target > level ? Self.attack : (Self.releaseFloor + pace * Self.releaseSpan)
             let before = level
             level += (target - level) * min(1, dt * k)
+            sway += dt * (Self.swayFloor + level * Self.swayVoiceSpan + pace * Self.swayPaceSpan)
 
             pulse = max(0, pulse - dt * (Self.pulseDecay + pace * Self.pulseDecayPaceSpan))
             pace = max(0, pace - dt * Self.paceDecay)
@@ -132,6 +147,7 @@ enum DictationStripLevel {
             fill = 0
             pulse = 0
             pace = 0
+            sway = 0
             sinceOnset = .infinity
             // beat is left alone: it is a counter, not a state, and resetting
             // it to a value a previous hold already used would suppress the
@@ -204,6 +220,18 @@ enum DictationStripLevel {
             opacity: min(1, Double(0.05 + l * 0.46 + clamp(pulse) * 0.12))
         )
     }
+
+    /// The pool's life, read off the sway phase: where the light's heart
+    /// drifts (points off centre, wider under voice) and how its radius
+    /// wobbles. Two blobs breathe against each other (the second runs
+    /// counter-phase at `counterDrift` of the first) so it reads as living
+    /// liquid, never a metronome.
+    static func poolSway(phase: CGFloat, level: CGFloat) -> (drift: CGFloat, wobble: CGFloat) {
+        let amp = 6 + 14 * clamp(level)
+        return (sin(phase) * amp, 1 + 0.08 * sin(phase * 1.7 + 1.1))
+    }
+    static let counterDrift: CGFloat = -0.7
+    static let counterScale: CGFloat = 0.6
 
     // MARK: - The glints
 

@@ -61,6 +61,23 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(voice.fill, 0)
         XCTAssertEqual(voice.pulse, 0)
         XCTAssertEqual(voice.pace, 0)
+        XCTAssertEqual(voice.sway, 0)
+    }
+
+    /// Something is always alive while the strip listens: the sway phase
+    /// advances even through a silent pause (which is exactly when "I am
+    /// still listening" matters), and quickens under voice. The drift stays
+    /// inside the glass, motion in place, never travel.
+    func testTheSwayNeverStopsAndQuickensWithVoice() {
+        var paused = DictationStripLevel.Voice()
+        for _ in 0..<30 { paused.step(raw: 0, dt: tick) }
+        XCTAssertEqual(paused.sway, 2.2, accuracy: 0.05)
+        var voiced = DictationStripLevel.Voice()
+        for _ in 0..<30 { voiced.step(raw: 1, dt: tick) }
+        XCTAssertGreaterThan(voiced.sway, paused.sway + 3)
+        let life = DictationStripLevel.poolSway(phase: 1.2, level: 1)
+        XCTAssertLessThanOrEqual(abs(life.drift), 20)
+        XCTAssertEqual(life.wobble, 1, accuracy: 0.09)
     }
 
     /// The beat is a counter, not a state: resetting it to a value a
@@ -267,7 +284,7 @@ final class DictationStripTests: XCTestCase {
         let host = DictationStripLight.LightHostView(frame: CGRect(x: 0, y: 0, width: 320, height: 32))
         let shape = IslandShape(eave: 0, bottomRadius: 11.52, belly: 0, topRadius: 11.52)
         let size = CGSize(width: 320, height: 32)
-        host.apply(shape: shape, accent: .white, level: 1, fill: 1, pulse: 0, pace: 0, beat: 0, size: size)
+        host.apply(shape: shape, accent: .white, level: 1, fill: 1, pulse: 0, pace: 0, beat: 0, sway: 0, size: size)
         let full = DictationStripLevel.slip(level: 1, pulse: 0)
         let (glow, core) = (host.strokeLayers[0], host.strokeLayers[1])
         XCTAssertEqual(glow.lineWidth, full.glowWidth, accuracy: 0.001)
@@ -281,7 +298,7 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(host.poolLayer.transform.m11, pool.stretch, accuracy: 0.001)
         XCTAssertNotNil(host.poolLayer.superlayer?.mask, "the pool must be clipped inside the glass")
 
-        host.apply(shape: shape, accent: .white, level: 0, fill: 0, pulse: 0, pace: 0, beat: 0, size: size)
+        host.apply(shape: shape, accent: .white, level: 0, fill: 0, pulse: 0, pace: 0, beat: 0, sway: 0, size: size)
         let rest = DictationStripLevel.slip(level: 0, pulse: 0)
         XCTAssertEqual(Double(glow.opacity), rest.glowOpacity, accuracy: 0.001)
         XCTAssertEqual(Double(core.opacity), rest.coreOpacity, accuracy: 0.001)
@@ -294,9 +311,9 @@ final class DictationStripTests: XCTestCase {
         let host = DictationStripLight.LightHostView(frame: CGRect(x: 0, y: 0, width: 320, height: 32))
         let shape = IslandShape(eave: 0, bottomRadius: 11.52, belly: 0, topRadius: 11.52)
         let size = CGSize(width: 320, height: 32)
-        host.apply(shape: shape, accent: .white, level: 0.5, fill: 0.5, pulse: 1, pace: 0, beat: 3, size: size)
+        host.apply(shape: shape, accent: .white, level: 0.5, fill: 0.5, pulse: 1, pace: 0, beat: 3, sway: 0, size: size)
         XCTAssertFalse(host.glints.contains { $0.animation(forKey: "race") != nil })
-        host.apply(shape: shape, accent: .white, level: 0.5, fill: 0.5, pulse: 1, pace: 0, beat: 4, size: size)
+        host.apply(shape: shape, accent: .white, level: 0.5, fill: 0.5, pulse: 1, pace: 0, beat: 4, sway: 0, size: size)
         XCTAssertTrue(host.glints.contains { $0.animation(forKey: "race") != nil })
         XCTAssertEqual(host.glints.count, 4, "two per side, so a quick talker's glints can overlap")
     }
@@ -309,14 +326,14 @@ final class DictationStripTests: XCTestCase {
         let host = DictationStripLight.LightHostView(frame: CGRect(x: 0, y: 0, width: 320, height: 32))
         let shape = IslandShape(eave: 0, bottomRadius: 11.52, belly: 0, topRadius: 11.52)
         let size = CGSize(width: 320, height: 32)
-        host.apply(shape: shape, accent: .white, level: 0, fill: 0, pulse: 0, pace: 0, beat: 0, size: size)
+        host.apply(shape: shape, accent: .white, level: 0, fill: 0, pulse: 0, pace: 0, beat: 0, sway: 0, size: size)
         let spill = DictationStripLight.LightHostView.spill
         XCTAssertEqual(host.spreadMask.frame.minX, -spill, accuracy: 0.001)
         XCTAssertEqual(host.spreadMask.frame.width, 320 + spill * 2, accuracy: 0.001)
         let maskWidth = 320 + spill * 2
         let atRest = host.spreadMask.locations!.map { CGFloat(truncating: $0) }
         XCTAssertEqual(atRest[1], 0.5 - 0.18 * 320 / maskWidth, accuracy: 0.001)
-        host.apply(shape: shape, accent: .white, level: 0, fill: 1, pulse: 0, pace: 0, beat: 0, size: size)
+        host.apply(shape: shape, accent: .white, level: 0, fill: 1, pulse: 0, pace: 0, beat: 0, sway: 0, size: size)
         let full = host.spreadMask.locations!.map { CGFloat(truncating: $0) }
         XCTAssertEqual(full[3], 0.5 + 0.60 * 320 / maskWidth, accuracy: 0.001)
     }

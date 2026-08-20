@@ -518,7 +518,7 @@ struct NotchRootView: View {
                                 shape: islandShape, accent: accent,
                                 level: model.dictationLevel, fill: model.dictationFill,
                                 pulse: model.dictationPulse, pace: model.dictationPace,
-                                beat: model.dictationBeat,
+                                beat: model.dictationBeat, sway: model.dictationSway,
                                 size: dictatingSize
                             )
                             .transition(.opacity)

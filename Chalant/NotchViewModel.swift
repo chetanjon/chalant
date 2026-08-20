@@ -1509,6 +1509,9 @@ final class NotchViewModel: ObservableObject {
     @Published var dictationPulse: CGFloat = 0
     @Published var dictationPace: CGFloat = 0
     @Published var dictationBeat: Int = 0
+    /// The pool's life: a phase that never stops advancing while the strip
+    /// listens, slow in a pause, quick under voice.
+    @Published var dictationSway: CGFloat = 0
     @Published var dictationInfo: DictationInfo?
     private var dictationVoice = DictationStripLevel.Voice()
     /// The meter is a fixed 30 Hz timer (`DictationController.startMeter`),
@@ -1540,6 +1543,7 @@ final class NotchViewModel: ObservableObject {
         dictationFill = 0
         dictationPulse = 0
         dictationPace = 0
+        dictationSway = 0
         quietTheRoom()
         state = .dictating
     }
@@ -1552,6 +1556,7 @@ final class NotchViewModel: ObservableObject {
         dictationPulse = dictationVoice.pulse
         dictationPace = dictationVoice.pace
         dictationBeat = dictationVoice.beat
+        dictationSway = dictationVoice.sway
         if let mic, mic != dictationInfo?.micName {
             // The ear can hop mid-hold; the strip must say so in place.
             dictationInfo?.micName = mic
