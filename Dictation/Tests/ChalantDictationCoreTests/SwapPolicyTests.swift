@@ -66,6 +66,22 @@ final class SwapPolicyTests: XCTestCase {
         XCTAssertEqual(SwapPolicy.maximumDelay(for: .hearing), 6)
     }
 
+    /// The hearing ceiling earns time with the utterance: Whisper needs
+    /// ~6.3 s for 70 s of audio (measured 2026-08-20), and a flat 6 s
+    /// excluded exactly the long paragraphs the first ear is worst at. The
+    /// tidy's ceiling never moves, and the cap holds however long they spoke.
+    func testALongUtteranceEarnsTheEarMoreTime() {
+        var s = situation(elapsed: 12); s.source = .hearing; s.utteranceSeconds = 70
+        XCTAssertEqual(SwapPolicy.decide(s), .swap)
+        s.utteranceSeconds = 5
+        XCTAssertEqual(SwapPolicy.decide(s), .keep(.tooLate))
+        XCTAssertEqual(SwapPolicy.maximumDelay(for: .hearing, utteranceSeconds: 70), 16.5)
+        XCTAssertEqual(SwapPolicy.maximumDelay(for: .hearing, utteranceSeconds: 500), 20)
+        XCTAssertEqual(SwapPolicy.maximumDelay(for: .tidy, utteranceSeconds: 500), 4)
+        s.source = .tidy; s.utteranceSeconds = 500
+        XCTAssertEqual(SwapPolicy.decide(s), .keep(.tooLate))
+    }
+
     /// ⌘Z is not undo in a terminal, and a second paste would double the text.
     func testTerminalsNeverSwap() {
         for id in ["com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable", "com.mitchellh.ghostty", "net.kovidgoyal.kitty", "org.alacritty", "com.github.wez.wezterm"] {

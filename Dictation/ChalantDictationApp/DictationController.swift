@@ -594,7 +594,9 @@ final class DictationController {
             lastLanded = text
             retirePendingSwap()
             if let hearingWork {
-                startHearingSwap(work: hearingWork, outcome: outcome, target: target, insertedAt: insertedAt)
+                startHearingSwap(
+                    work: hearingWork, outcome: outcome, target: target, insertedAt: insertedAt,
+                    utteranceSeconds: Double(hearingSamples.count) / 16_000)
             }
         } else if case .inserted = outcome {
             // Rescued above; the toast has already spoken.
@@ -737,7 +739,7 @@ final class DictationController {
     /// `heard` is the first ear's raw text: it picks the names the second ear
     /// reads before it listens (`Names.forHearing`), which is what took the
     /// names set from 29.9% to 10.0% word error on this Mac.
-    private func startHearingSwap(work: Task<String?, Never>, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date) {
+    private func startHearingSwap(work: Task<String?, Never>, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date, utteranceSeconds: TimeInterval) {
         hearingTask?.cancel()
         hearingWorkTask = work
         let generation = swapGeneration
@@ -771,7 +773,8 @@ final class DictationController {
                 userActedSinceInsert: self.activity.sawActivity,
                 frontIsStillTarget: front?.processIdentifier == target.processID,
                 secondsSinceInsert: Date().timeIntervalSince(insertedAt),
-                bundleID: target.bundleID, source: .hearing)
+                bundleID: target.bundleID, source: .hearing,
+                utteranceSeconds: utteranceSeconds)
             self.activity.disarm()
             switch SwapPolicy.decide(situation) {
             case .keep(let reason):

@@ -38,11 +38,14 @@ public enum SwapPolicy {
         public var secondsSinceInsert: TimeInterval
         public var bundleID: String?
         public var source: Source
+        /// How long the speaker talked, which is how long the better ear
+        /// needs to listen. Zero (the default) keeps the flat ceilings.
+        public var utteranceSeconds: TimeInterval
 
         public init(
             inserted: String, tidied: String, outcome: InsertionOutcome, userActedSinceInsert: Bool,
             frontIsStillTarget: Bool, secondsSinceInsert: TimeInterval, bundleID: String?,
-            source: Source = .tidy
+            source: Source = .tidy, utteranceSeconds: TimeInterval = 0
         ) {
             self.inserted = inserted
             self.tidied = tidied
@@ -52,6 +55,7 @@ public enum SwapPolicy {
             self.secondsSinceInsert = secondsSinceInsert
             self.bundleID = bundleID
             self.source = source
+            self.utteranceSeconds = utteranceSeconds
         }
     }
 
@@ -72,14 +76,29 @@ public enum SwapPolicy {
     /// After this long the user has moved on. Measured cleanup p95 is ~2 s, so
     /// an honest tidy arrives well inside 4 s; anything later is a hung
     /// request, not a slow one. The better ear needs ~1.2 s to hear plus the
-    /// tidy on top, so it gets 6.
+    /// tidy on top, so it starts from 6.
     public static let maximumDelay: TimeInterval = 4
     public static let maximumHearingDelay: TimeInterval = 6
+    /// The hearing ceiling EARNS time with the utterance: Whisper needs
+    /// ~6.3 s for 70 s of audio (measured 2026-08-20 on the founder's
+    /// friend's longest clip, the very one Apple misheard), and a flat 6 s
+    /// ceiling excluded exactly the long paragraphs the first ear is worst
+    /// at ("its not taking longer snetences and paragraphs"). A tenth and a
+    /// half per spoken second covers the hearing and its tidy; the hard cap
+    /// keeps a swap from ever landing half a minute later. The other guards
+    /// (nothing typed, focus stayed, an app with undo) still apply at any
+    /// delay.
+    public static let hearingDelayPerSpokenSecond: TimeInterval = 0.15
+    public static let hearingDelayCap: TimeInterval = 20
 
-    public static func maximumDelay(for source: Source) -> TimeInterval {
+    public static func maximumDelay(for source: Source, utteranceSeconds: TimeInterval = 0) -> TimeInterval {
         switch source {
         case .tidy: return maximumDelay
-        case .hearing: return maximumHearingDelay
+        case .hearing:
+            return min(
+                maximumHearingDelay + max(0, utteranceSeconds) * hearingDelayPerSpokenSecond,
+                hearingDelayCap
+            )
         }
     }
 
@@ -106,7 +125,9 @@ public enum SwapPolicy {
         guard case .inserted(let tier) = s.outcome, tier != .clipboardOnly else { return .keep(.notPasted) }
         if s.userActedSinceInsert { return .keep(.userActed) }
         if !s.frontIsStillTarget { return .keep(.focusMoved) }
-        if s.secondsSinceInsert > maximumDelay(for: s.source) { return .keep(.tooLate) }
+        if s.secondsSinceInsert > maximumDelay(for: s.source, utteranceSeconds: s.utteranceSeconds) {
+            return .keep(.tooLate)
+        }
         guard let bundleID = s.bundleID, !noUndoBundleIDs.contains(bundleID) else { return .keep(.noUndoHere) }
         return .swap
     }
