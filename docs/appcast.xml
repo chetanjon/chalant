@@ -3,6 +3,14 @@
     <channel>
         <title>Chalant</title>
         <item>
+            <title>1.23.0</title>
+            <pubDate>Thu, 20 Aug 2026 01:06:27 -0700</pubDate>
+            <sparkle:version>172</sparkle:version>
+            <sparkle:shortVersionString>1.23.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/chetanjon/chalant/releases/download/v1.23.0/Chalant-1.23.0.zip" length="18628475" type="application/octet-stream" sparkle:edSignature="7E4vo3q5j18aA4Yvs4y1UIMv2lvDwEKxLXQw88oXbckUkYPkGUpevDXzM5cxmgjAA0/vSxIFg97QXQ4AW/9IDg=="/>
+        </item>
+        <item>
             <title>1.22.0</title>
             <pubDate>Tue, 18 Aug 2026 16:50:37 -0700</pubDate>
             <sparkle:version>171</sparkle:version>
