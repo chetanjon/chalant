@@ -190,7 +190,7 @@ actor FoundationModelsPolisher: Polisher {
                     // waits of 0.9 to 2.5 s against a 0.65 s budget (log,
                     // 2026-08-18), and this says whether the overshoot is in
                     // here or on the way back to the caller.
-                    Self.log.info(
+                    Self.log.notice(
                         "cleanup not ready within budget: \(trimmed.count, privacy: .public) chars, \(pieces.count, privacy: .public) chunk(s), \(warm, privacy: .public) warm, \(started.duration(to: .now).seconds, privacy: .public)s elapsed here")
                     return nil
                 }

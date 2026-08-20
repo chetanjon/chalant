@@ -647,7 +647,7 @@ final class DictationController {
 
         // Lengths and durations only. Part 1 §2: transcripts never enter logs.
         let overruns = await audio.overrunCount
-        Self.log.info(
+        Self.log.notice(
             """
             utterance: \(text.count, privacy: .public) chars, \
             finalize \(self.timings.finalization ?? -1, privacy: .public)s, \
@@ -665,7 +665,9 @@ final class DictationController {
             output: text,
             fedBuffers: fedBuffers,
             finalize: timings.finalization,
-            insert: timings.insertion)
+            insert: timings.insertion,
+            polish: timings.polish,
+            refinedAtOnce: refinedAtOnce)
 
         onStateChange?()
     }
@@ -785,7 +787,7 @@ final class DictationController {
             }
             let landed = self.lastLanded
             guard BetterHearing.plausible(hearing: heard, against: landed) else {
-                Self.log.info("hearing kept: implausible (\(heard.count, privacy: .public) vs \(landed.count, privacy: .public) chars)")
+                Self.log.notice("hearing kept: implausible (\(heard.count, privacy: .public) vs \(landed.count, privacy: .public) chars)")
                 self.activity.disarm()
                 return
             }
@@ -804,7 +806,7 @@ final class DictationController {
             self.activity.disarm()
             switch SwapPolicy.decide(situation) {
             case .keep(let reason):
-                Self.log.info("hearing kept: \(reason.rawValue, privacy: .public) after \(Date().timeIntervalSince(insertedAt), privacy: .public)s")
+                Self.log.notice("hearing kept: \(reason.rawValue, privacy: .public) after \(Date().timeIntervalSince(insertedAt), privacy: .public)s")
             case .swap:
                 self.activity.expectOwnKeystrokes()
                 let swapped = await self.inserter.replaceLastInsertion(with: tidied, into: target)
@@ -812,7 +814,7 @@ final class DictationController {
                     self.lastLanded = tidied
                     await CorrectionObserver.shared.watch(inserted: tidied, in: target.bundleID)
                 }
-                Self.log.info(
+                Self.log.notice(
                     "hearing \(swapped ? "swapped" : "swap failed", privacy: .public): \(landed.count, privacy: .public) -> \(tidied.count, privacy: .public) chars after \(Date().timeIntervalSince(insertedAt), privacy: .public)s")
             }
             self.hearingTask = nil
