@@ -209,26 +209,25 @@ enum DictationStripLevel {
 
     // MARK: - Size and shape
 
-    /// The strip is sized to what it holds: 260 wide on every screen, lower
-    /// and tauter than the 1.17 pill ("change the shape... the user should
-    /// feel speed", then "keep the size smaller and premium", the founder,
-    /// 2026-08-20; 1.23.1 shipped at 320 × 32 and still read big). A pill
-    /// display gets 28, a notch display 52.
+    /// The strip is ONE small shape on every display: 260 × 28, floating.
+    /// It no longer wraps a MacBook's notch: at this width the wrap read as
+    /// the notch swelling ("it looks weird cause its covering the notch",
+    /// the founder, 2026-08-20), so on a notch display the strip floats
+    /// `notchGap` beneath the hardware instead, and a pill display floats it
+    /// under the screen top the way the resting pill floats. Smaller and
+    /// premium was the same day's earlier word; 1.23.1 shipped at 320 × 32
+    /// and still read big.
     static let stripWidth: CGFloat = 260
+    static let stripHeight: CGFloat = 28
+    static var stripSize: CGSize { CGSize(width: stripWidth, height: stripHeight) }
     /// One line of `Fonts.micro` (11 pt semibold).
     static let stripRow: CGFloat = 13
-    /// Air above the row (below the reserve) and below it. Tighter than the
-    /// island's usual clearances on purpose: the slim strip is the shape of
-    /// the speed.
+    /// Air above and below the row. Tighter than the island's usual
+    /// clearances on purpose: the slim strip is the shape of the speed.
     static let stripTopAir: CGFloat = 3
     static let stripBottomAir: CGFloat = 4
-
-    static func stripSize(topReserve: CGFloat) -> CGSize {
-        CGSize(
-            width: stripWidth,
-            height: topReserve + stripTopAir + stripRow + stripBottomAir
-        )
-    }
+    /// The air between the hardware notch and the floating strip.
+    static let notchGap: CGFloat = 4
 
     /// Machined corners, not the soft full pill: just over a third of the
     /// height, which is what makes the slim strip read as built for speed.

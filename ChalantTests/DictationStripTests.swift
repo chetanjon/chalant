@@ -237,20 +237,17 @@ final class DictationStripTests: XCTestCase {
 
     // MARK: - The strip is sized and shaped for speed (Slipstream)
 
-    /// 260 wide everywhere; lower and tauter than the 1.17 pill, then
-    /// smaller again ("keep the size smaller and premium", 2026-08-20). A
-    /// pill display (reserve 8) gets 28 (was 41, then 32), a notch display
-    /// (reserve 32) gets 52 (was 65, then 56). The corners are machined,
-    /// just over a third of the height, never the soft full pill.
-    func testStripIsLowAndTaut() {
-        let pill = DictationStripLevel.stripSize(topReserve: Theme.Space.m)
-        XCTAssertEqual(pill.width, 260, accuracy: 0.001)
-        XCTAssertEqual(pill.height, 28, accuracy: 0.001)
-        let notch = DictationStripLevel.stripSize(topReserve: 32)
-        XCTAssertEqual(notch.width, 260, accuracy: 0.001)
-        XCTAssertEqual(notch.height, 52, accuracy: 0.001)
+    /// One small floating shape on every display: 260 × 28, machined
+    /// corners just over a third of the height, never the soft full pill.
+    /// It no longer wraps a notch (at 260 wide the wrap read as the notch
+    /// swelling: "it looks weird cause its covering the notch", 2026-08-20);
+    /// the strip floats `notchGap` beneath the hardware instead.
+    func testStripIsOneSmallShapeEverywhere() {
+        XCTAssertEqual(DictationStripLevel.stripSize.width, 260, accuracy: 0.001)
+        XCTAssertEqual(DictationStripLevel.stripSize.height, 28, accuracy: 0.001)
         XCTAssertEqual(DictationStripLevel.cornerRadius(height: 28), 10.08, accuracy: 0.001)
         XCTAssertLessThan(DictationStripLevel.cornerRadius(height: 28), 14, "machined, not a full pill")
+        XCTAssertGreaterThan(DictationStripLevel.notchGap, 0, "the strip floats beneath the notch, never on it")
     }
 
     // MARK: - The light's layers are wired to the numbers
