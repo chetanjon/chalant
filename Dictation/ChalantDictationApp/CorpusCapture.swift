@@ -67,7 +67,7 @@ actor CorpusCapture {
     /// machine's own guess is a story you tell yourself.
     func finish(
         output: String, fedBuffers: Int, finalize: TimeInterval?, insert: TimeInterval?,
-        polish: TimeInterval? = nil, refinedAtOnce: Bool = false
+        polish: TimeInterval? = nil, prepare: TimeInterval? = nil, refinedAtOnce: Bool = false
     ) {
         guard let p = pending else { return }
         pending = nil
@@ -92,6 +92,7 @@ actor CorpusCapture {
             "finalizeSeconds": finalize ?? 0,
             "insertSeconds": insert ?? 0,
             "polishSeconds": polish ?? 0,
+            "prepareSeconds": prepare ?? 0,
             "refinedAtOnce": refinedAtOnce,
             "note": "",
         ]
