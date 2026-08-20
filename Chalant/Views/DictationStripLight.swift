@@ -92,7 +92,7 @@ struct DictationStripLight: NSViewRepresentable {
             appliedFill = fill
 
             let slip = DictationStripLevel.slip(level: level, pulse: pulse)
-            let pool = DictationStripLevel.pool(level: level, pace: pace)
+            let pool = DictationStripLevel.pool(level: level, pulse: pulse, pace: pace)
             let tint = accent.cgColor
             CATransaction.begin()
             CATransaction.setAnimationDuration(Self.tickGlide)
@@ -244,7 +244,7 @@ struct DictationStripLight: NSViewRepresentable {
                 race.fromValue = from
                 race.toValue = to
                 let fade = CAKeyframeAnimation(keyPath: "opacity")
-                fade.values = [Float(0.5 + 0.4 * pulseStrength), Float(0.35 * pulseStrength), 0]
+                fade.values = [Float(0.75 + 0.25 * pulseStrength), Float(0.2 + 0.45 * pulseStrength), 0]
                 fade.keyTimes = [0, 0.6, 1]
                 for animation in [race, fade] as [CAAnimation] {
                     animation.duration = duration

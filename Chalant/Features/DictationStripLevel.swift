@@ -78,11 +78,14 @@ enum DictationStripLevel {
         static let releaseSpan: CGFloat = 4.5
         static let fillRate: CGFloat = 0.65
         static let pauseGiveback: CGFloat = 0.12
-        /// A syllable is the smoothed level jumping this much in one tick...
-        static let onsetJump: CGFloat = 0.05
+        /// A syllable is the smoothed level jumping this much in one tick.
+        /// Real speech dips far less cleanly than a synthetic voice, and at
+        /// 0.05 whole phrases passed without a beat, which the founder read
+        /// as "very little happening" (2026-08-20).
+        static let onsetJump: CGFloat = 0.035
         /// ...no sooner than this after the last one (a loud vowel jitters
         /// the meter tick to tick; a human does not produce 20 syllables/s).
-        static let onsetRefractory: TimeInterval = 0.12
+        static let onsetRefractory: TimeInterval = 0.10
         /// How the gap between syllables maps to the gear: 1.2/s and slower
         /// is unhurried (0), 4.5/s and faster is quick (1).
         static let paceFloorRate: CGFloat = 1.2
@@ -155,12 +158,17 @@ enum DictationStripLevel {
     static func slip(level: CGFloat, pulse: CGFloat) -> Slip {
         let l = clamp(level)
         let p = clamp(pulse)
+        // The voiced end sits well above the mockup's numbers on purpose:
+        // what read vivid on a canvas read quiet on real CA layers at the
+        // real 260 × 28 ("when im talking there is very little happening",
+        // the founder, 2026-08-20). Rest stays near dark; only the voiced
+        // terms grew.
         return Slip(
-            glowWidth: 1.6 + l * 1.2,
-            glowBlur: 4 + l * 7,
-            glowOpacity: min(1, 0.04 + Double(l) * 0.48 + Double(p) * 0.20),
-            coreWidth: 1.0 + l * 0.4,
-            coreBlur: 2 + l * 4,
+            glowWidth: 1.6 + l * 2.0,
+            glowBlur: 5 + l * 11,
+            glowOpacity: min(1, 0.05 + Double(l) * 0.70 + Double(p) * 0.25),
+            coreWidth: 1.0 + l * 0.6,
+            coreBlur: 2 + l * 6,
             coreOpacity: min(1, 0.12 + Double(l) * 0.85 + Double(p) * 0.45)
         )
     }
@@ -185,12 +193,15 @@ enum DictationStripLevel {
         var opacity: Double
     }
 
-    static func pool(level: CGFloat, pace: CGFloat) -> Pool {
+    /// The pulse kicks the pool too: every syllable, the light inside the
+    /// glass answers along with the edge, so talking is visibly answered
+    /// even between level swings.
+    static func pool(level: CGFloat, pulse: CGFloat, pace: CGFloat) -> Pool {
         let l = clamp(level)
         return Pool(
-            radius: 0.5 + l * 0.7,
+            radius: 0.55 + l * 0.95,
             stretch: 1.7 + (1.6 + clamp(pace) * 0.8) * l,
-            opacity: Double(0.04 + l * 0.30)
+            opacity: min(1, Double(0.05 + l * 0.46 + clamp(pulse) * 0.12))
         )
     }
 
@@ -203,8 +214,11 @@ enum DictationStripLevel {
         TimeInterval(0.18 - clamp(pace) * 0.09)
     }
     /// The streak's tail, width, and how far below the top edge it rides.
-    static let glintLength: CGFloat = 46
-    static let glintWidth: CGFloat = 1.6
+    /// Thicker and longer than the first cut: at 1.6 pt the glints were
+    /// nearly invisible in peripheral vision, and they are half of what
+    /// says "it hears you".
+    static let glintLength: CGFloat = 58
+    static let glintWidth: CGFloat = 2.0
     static let glintInset: CGFloat = 1.5
 
     // MARK: - Size and shape
