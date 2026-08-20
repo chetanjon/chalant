@@ -216,15 +216,6 @@ enum DictationStripLevel {
         1 + (0.015 + 0.02 * clamp(pace)) * clamp(level)
     }
 
-    // MARK: - The sheen
-
-    /// At rest the strip does not breathe, it waits: still and dark, with a
-    /// quick sheen sweeping the top edge every few seconds like light on a
-    /// blade. Ambient-gated; under Still there is no sweep.
-    static let sheenPeriod: TimeInterval = 3.2
-    static let sheenSweep: TimeInterval = 0.4
-    static let sheenOpacity: Double = 0.22
-
     // MARK: - Size and shape
 
     /// The strip is sized to what it holds: 320 wide on every screen, lower

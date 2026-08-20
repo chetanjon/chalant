@@ -9,8 +9,10 @@ import SwiftUI
 /// sentence goes on (`DictationStripLevel.spread`). A dim pool of accent
 /// light rests at the floor of the glass and kicks wider with the voice.
 /// Every syllable ticks the whole lit edge brighter at once (the pulse) and
-/// fires a pair of glints racing the top edge. At rest nothing breathes; a
-/// quick sheen sweeps the top edge every few seconds, ambient-gated.
+/// fires a pair of glints racing the top edge. At rest nothing moves: the
+/// strip waits, dark and taut. (A resting sheen that swept the top edge was
+/// built and cut the same day: the founder saw it "sliding from left",
+/// 2026-08-20. Nothing on this strip may travel except on a syllable.)
 ///
 /// Drawn on Core Animation layers, not SwiftUI views, for the reason written
 /// on `RimLayerView`: the halo's first cut (1.17.0) was blurred SwiftUI
@@ -62,12 +64,10 @@ struct DictationStripLight: NSViewRepresentable {
         private let poolGlow = CAGradientLayer()
         /// Two per side, round-robin, so a quick talker's glints can overlap.
         private var glintLayers: [CAGradientLayer] = []
-        private let sheen = CAGradientLayer()
         private var currentShape: IslandShape?
         private var stripSize: CGSize = .zero
         private var firedBeat: Int = -1
         private var glintTurn = 0
-        private var sheenArmed = false
         private(set) var appliedLevel: CGFloat = 0
         private(set) var appliedFill: CGFloat = 0
 
@@ -79,7 +79,6 @@ struct DictationStripLight: NSViewRepresentable {
         var spreadMask: CAGradientLayer { spread }
         var poolLayer: CAGradientLayer { poolGlow }
         var glints: [CAGradientLayer] { glintLayers }
-        var sheenLayer: CAGradientLayer { sheen }
 
         func apply(
             shape: IslandShape, accent: NSColor, level: CGFloat, fill: CGFloat,
@@ -134,7 +133,6 @@ struct DictationStripLight: NSViewRepresentable {
                 if firedBeat >= 0 { fireGlints(fill: fill, pace: pace, pulseStrength: max(pulse, 0.4)) }
                 firedBeat = beat
             }
-            armSheen(resting: level < DictationStripLevel.Voice.pauseFloor)
         }
 
         override func layout() {
@@ -183,17 +181,10 @@ struct DictationStripLight: NSViewRepresentable {
                 }
             }
 
-            sheen.startPoint = CGPoint(x: 0, y: 0.5)
-            sheen.endPoint = CGPoint(x: 1, y: 0.5)
-            sheen.colors = [NSColor.clear.cgColor, NSColor.white.cgColor]
-            sheen.cornerRadius = DictationStripLevel.glintWidth / 2
-            sheen.opacity = 0
-
             layer?.masksToBounds = false
             layer?.addSublayer(poolContainer)
             layer?.addSublayer(container)
             for glint in glintLayers { layer?.addSublayer(glint) }
-            layer?.addSublayer(sheen)
         }
 
         /// Lit at the centre, fading to nothing `spread` of the strip's width
@@ -229,8 +220,6 @@ struct DictationStripLight: NSViewRepresentable {
                 )
                 glint.position = CGPoint(x: bounds.midX, y: glintY)
             }
-            sheen.bounds = CGRect(x: 0, y: 0, width: 60, height: DictationStripLevel.glintWidth)
-            sheen.position = CGPoint(x: bounds.midX, y: glintY)
             let s = Self.spill
             spread.frame = bounds.insetBy(dx: -s, dy: -s)
         }
@@ -266,39 +255,6 @@ struct DictationStripLight: NSViewRepresentable {
                 glint.add(fade, forKey: "fade")
             }
             glintTurn += 1
-        }
-
-        /// The "ready" at rest: a quick sheen sweeps the top edge every few
-        /// seconds while ambient motion is on. Never while the voice is up,
-        /// and never under Still.
-        private func armSheen(resting: Bool) {
-            let wanted = resting && Theme.Feel.current.ambient
-            if wanted == sheenArmed, (sheen.animation(forKey: "sweep") != nil) == wanted { return }
-            sheenArmed = wanted
-            sheen.removeAnimation(forKey: "sweep")
-            sheen.removeAnimation(forKey: "sweepFade")
-            guard wanted, bounds.width > 0 else { return }
-            let corner = DictationStripLevel.cornerRadius(height: bounds.height)
-            let y = sheen.position.y
-            let period = DictationStripLevel.sheenPeriod
-            let sweepEnd = DictationStripLevel.sheenSweep / period
-            let sweep = CAKeyframeAnimation(keyPath: "position")
-            sweep.values = [
-                CGPoint(x: corner + 30, y: y),
-                CGPoint(x: bounds.width - corner - 30, y: y),
-                CGPoint(x: bounds.width - corner - 30, y: y),
-            ]
-            sweep.keyTimes = [0, NSNumber(value: sweepEnd), 1]
-            let fade = CAKeyframeAnimation(keyPath: "opacity")
-            fade.values = [0, Float(DictationStripLevel.sheenOpacity), 0, 0]
-            fade.keyTimes = [0, NSNumber(value: sweepEnd / 2), NSNumber(value: sweepEnd), 1]
-            for animation in [sweep, fade] as [CAAnimation] {
-                animation.duration = period
-                animation.repeatCount = .infinity
-                animation.isRemovedOnCompletion = false
-            }
-            sheen.add(sweep, forKey: "sweep")
-            sheen.add(fade, forKey: "sweepFade")
         }
     }
 }
