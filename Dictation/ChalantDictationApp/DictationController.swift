@@ -41,8 +41,8 @@ final class DictationController {
     /// compared against. A new key-down retires it: ⌘Z after a second insert
     /// would take the wrong paste.
     private var hearingTask: Task<Void, Never>?
-    /// The Whisper listening itself, started at finalize so it never waits on
-    /// the tidy or the insert. Retired with the swap task.
+    /// The Whisper listening itself. Retired with the swap task, and never
+    /// started before the words have landed: the ANE is the tidy's first.
     private var hearingWorkTask: Task<String?, Never>?
     private var lastLanded: String = ""
     /// "Clean while you talk": during the hold, every chunk of the transcript
@@ -479,26 +479,17 @@ final class DictationController {
         // other output touched.
         let raw = transcript.rawText
 
-        // The second ear starts listening NOW, at finalize, not after the
-        // insert. Whisper needs one to two seconds, the tidy wait and the
-        // insert cost most of another, and a hearing that starts late loses
-        // the race with the speaker's next sentence: measured 2026-08-20, 74
-        // utterances, 5 hearings engaged, 0 finished. Only the listening is
-        // early; the swap decision still waits for the insert's outcome.
-        var hearingWork: Task<String?, Never>?
-        if !hearingSamples.isEmpty, BetterHearing.isEnabled(), await BetterHearing.shared.isReady {
-            // Utility priority, deliberately below the words' own path.
-            // Measured 2026-08-20 (corpus polishSeconds): with Whisper at
-            // default priority the cooperative pool starved so hard that the
-            // release's budget timer fired seconds late (waits of 1.35 to
-            // 5.17 s against 0.65 s) and every real utterance landed raw.
-            // The second ear must never make the first one late.
-            hearingWork = Task(priority: .utility) {
-                let hints = await Names.forHearing(heard: raw)
-                return await BetterHearing.shared.hear(hearingSamples, hints: hints)
-            }
-        }
-
+        // The second ear does NOT start here. It did for one day (1.24.0
+        // started it at finalize so bursts could not retire it), and the
+        // corpus caught the price the same day: Whisper, the tidy model and
+        // the first ear share ONE Neural Engine, so a hearing running during
+        // the release window serialized the tidy behind it. Every real
+        // utterance landed raw with waits of 1.35 to 5.17 s against the
+        // 0.65 s budget, and neither priorities nor executor choices could
+        // fix what is hardware contention. The ear now waits its turn: it
+        // starts after the words have landed (`startHearingSwap`), with the
+        // ceiling that scales by utterance length making up the lost start.
+        let prepareStart = Date()
         let deterministic = await deterministicText(from: transcript.tokens)
         if deterministic != raw {
             Self.log.error(
@@ -513,6 +504,11 @@ final class DictationController {
         // shaped without the model, so it lands as a list at once even when
         // the model is not ready in time (`Listing`).
         let shaped = Listing.format(deterministic)
+        // The stretch between finalize and the tidy wait (aliases, names,
+        // the deterministic passes, list shaping) was the last untimed gap
+        // on the release path; the founder feels the whole path, so every
+        // piece of it gets a number (2026-08-20).
+        let prepareSeconds = Date().timeIntervalSince(prepareStart)
 
         // Refined at once, or as said: wait a short, fixed budget for the
         // tidied text and land it once. Tidy-ahead during the hold usually
@@ -573,14 +569,12 @@ final class DictationController {
         guard !text.isEmpty else {
             // Silence is not a corpus entry. Keeping it would pad the set with
             // rows nobody can label.
-            hearingWork?.cancel()
             await corpus.discard()
             Self.log.info("nothing heard")
             return
         }
 
         guard let target else {
-            hearingWork?.cancel()
             return
         }
 
@@ -588,7 +582,6 @@ final class DictationController {
         // would land in the wrong app.
         let front = NSWorkspace.shared.frontmostApplication
         guard front?.processIdentifier == target.processID else {
-            hearingWork?.cancel()
             Self.log.error("focus moved during dictation; refusing to insert")
             return
         }
@@ -617,7 +610,6 @@ final class DictationController {
         if case .inserted = outcome {
             let role = LandingProbe.focusedRole()
             if LandingRoles.verdict(role: role) == .doesNot {
-                hearingWork?.cancel()
                 await inserter.leaveOnClipboard(text)
                 surface.say("Nowhere to type. What you said is on the clipboard.")
                 Self.log.notice(
@@ -633,9 +625,10 @@ final class DictationController {
             let insertedAt = Date()
             lastLanded = text
             retirePendingSwap()
-            if let hearingWork {
+            if !hearingSamples.isEmpty, BetterHearing.isEnabled(), await BetterHearing.shared.isReady {
                 startHearingSwap(
-                    work: hearingWork, outcome: outcome, target: target, insertedAt: insertedAt,
+                    samples: hearingSamples, heard: raw, outcome: outcome, target: target,
+                    insertedAt: insertedAt,
                     utteranceSeconds: Double(hearingSamples.count) / 16_000)
             }
         } else if case .inserted = outcome {
@@ -645,7 +638,6 @@ final class DictationController {
             // and the words are already on the clipboard (the chain places
             // them there on every refusal that gets this far). Until tonight
             // nothing SAID so, and a refusal read as words vanishing.
-            hearingWork?.cancel()
             switch outcome {
             case .refused(reason: .secureInputActive(let holder)):
                 let who = holder.map { " (\($0))" } ?? ""
@@ -681,6 +673,7 @@ final class DictationController {
             finalize: timings.finalization,
             insert: timings.insertion,
             polish: timings.polish,
+            prepare: prepareSeconds,
             refinedAtOnce: refinedAtOnce)
 
         onStateChange?()
@@ -784,15 +777,22 @@ final class DictationController {
     /// `heard` is the first ear's raw text: it picks the names the second ear
     /// reads before it listens (`Names.forHearing`), which is what took the
     /// names set from 29.9% to 10.0% word error on this Mac.
-    private func startHearingSwap(work: Task<String?, Never>, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date, utteranceSeconds: TimeInterval) {
+    private func startHearingSwap(samples: [Float], heard firstHearing: String, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date, utteranceSeconds: TimeInterval) {
         hearingTask?.cancel()
-        hearingWorkTask = work
         let generation = swapGeneration
         activity.arm()
+        // Utility priority, and only AFTER the words landed: the three
+        // models share one Neural Engine, and a Whisper that runs during
+        // the release window serializes the tidy behind it (measured
+        // 2026-08-20, twice: every real utterance landed raw). The scaled
+        // ceiling in SwapPolicy absorbs the later start.
+        let work = Task<String?, Never>(priority: .utility) {
+            let hints = await Names.forHearing(heard: firstHearing)
+            return await BetterHearing.shared.hear(samples, hints: hints)
+        }
+        hearingWorkTask = work
         hearingTask = Task { [weak self] in
             guard let self else { return }
-            // The listening began at finalize (`hearingWork`); by now Whisper
-            // has had the tidy wait and the insert to itself.
             let heard = await work.value
             // A retired hearing leaves the watch alone: a newer utterance
             // owns it now. Only a hearing that is still current and came
