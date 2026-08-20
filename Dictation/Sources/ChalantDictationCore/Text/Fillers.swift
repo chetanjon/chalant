@@ -51,11 +51,13 @@ public enum Fillers {
                 precededByComma: endsWithComma(kept.last),
                 atStart: kept.isEmpty || endsSentence(kept.last))
             {
+                droppingPauseComma(&kept)
                 i += width
                 continue
             }
             let bare = strip(tokens[i])
             if noise.contains(bare) {
+                droppingPauseComma(&kept)
                 i += 1
                 continue
             }
@@ -67,6 +69,7 @@ public enum Fillers {
             // is why nothing is inherited here.
             let nextIsNoise = i + 1 < tokens.count && noise.contains(strip(tokens[i + 1]))
             if bare == "like", tokens[i].hasSuffix(",") || nextIsNoise {
+                droppingPauseComma(&kept)
                 i += 1
                 continue
             }
@@ -104,6 +107,19 @@ public enum Fillers {
 
     private static func endsWithComma(_ token: String?) -> Bool {
         token?.hasSuffix(",") ?? false
+    }
+
+    /// The comma the pause left behind. When a filler goes, a comma on the
+    /// word before it was marking the pause around the filler, not grammar,
+    /// and it goes too: "because, you know, the" must come back "because
+    /// the", never "because, the". Measured on the founder's own outputs
+    /// (2026-08-20, "chalant is using a lot of commas"): the transcriber
+    /// puts a comma at every pause, and stranding it after the filler is
+    /// removed was the single ugliest class in the corpus. A full stop is
+    /// never touched.
+    private static func droppingPauseComma(_ kept: inout [String]) {
+        guard let last = kept.last, last.hasSuffix(",") else { return }
+        kept[kept.count - 1] = String(last.dropLast())
     }
 
     /// Put the sentence back together after words were taken out of it.

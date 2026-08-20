@@ -923,3 +923,34 @@ of it.** `tools/cleanupprobe` carries its own prompt and its own session
 policy, and it could never have found finding 1. `shipclean` compiles Core so
 it cannot drift; the polisher's session policy is the one line it must mirror
 by hand, and it does now.
+
+## 2026-08-20 — sparse commas, say it once (`fix/hear-the-words`)
+
+Founder: "chalant is using a lot of commas... and if the user is saying the
+same thing it should refine and give me one without fluff." Attribution first:
+raw Apple transcripts of the comma-heavy clips (`transcribe` on the captured
+audio) show the commas are the TRANSCRIBER's, one at every pause ("because,
+you know, the music"), and en_IN returned byte-identical text to en_US on the
+same clips (2 clips, the cheap locale experiment finally run: no win there).
+
+Two changes, measured with `shipclean --all --fresh --limit 40` on the
+captured corpus, same 40 rows both runs:
+
+- Deterministic: a filler's OPENING comma now dies with it (Fillers). The
+  strand class ("because, the music") was all over the corpus outputs.
+- Prompt: remove commas that only mark a pause; when the speaker repeats or
+  rephrases, keep the version they finished with, ALWAYS THE LATER ONE.
+
+|                | before | after |
+|----------------|--------|-------|
+| commas/100w    | 11.14  | 10.47 |
+| changed        | 17/40  | 18/40 |
+| guard rejected | 1/40   | 2/40  |
+| p50            | 0.75s  | 0.85s |
+
+The extra rejection is the right one: "I don't, I do use it" repaired means
+dropping a negation, the guard vetoes it, and it ships verbatim. THE FIRST CUT
+OF THE REPETITION RULE KEPT THE EARLIER VERSION and flipped that sentence to
+"I don't use it" (guard-blind: a "don't" survives either way); "always the
+later one" is the load-bearing phrase. An explicit example in the prompt was
+tried and removed: it taught a case the guard vetoes anyway and cost tokens.
