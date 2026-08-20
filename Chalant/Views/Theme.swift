@@ -338,6 +338,13 @@ enum Theme {
             }
         }
 
+        /// The one exception to the island's bloom: entering the dictation
+        /// strip. At a key press the pour read as the strip "sliding" open
+        /// (founder, 2026-08-20, "popping up from sliding, I don't want
+        /// that"): dictation has to POP, there and ready before the first
+        /// word. Only the way IN; letting go still pours shut on `island`.
+        static let dictationPop: Animation = .spring(response: 0.22, dampingFraction: 0.85)
+
         static var hover: Animation {
             switch Feel.current {
             case .still: return .spring(response: 0.30, dampingFraction: 1.0)

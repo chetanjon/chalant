@@ -207,15 +207,6 @@ enum DictationStripLevel {
     static let glintWidth: CGFloat = 1.6
     static let glintInset: CGFloat = 1.5
 
-    // MARK: - The lean
-
-    /// The strip leans into the voice: a hair of horizontal stretch, more in
-    /// a higher gear, snapping back with the settle. Speed you can see
-    /// without anything travelling.
-    static func lean(level: CGFloat, pace: CGFloat) -> CGFloat {
-        1 + (0.015 + 0.02 * clamp(pace)) * clamp(level)
-    }
-
     // MARK: - Size and shape
 
     /// The strip is sized to what it holds: 320 wide on every screen, lower
