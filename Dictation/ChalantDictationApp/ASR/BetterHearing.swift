@@ -159,7 +159,8 @@ actor BetterHearing {
     /// are skipped): refuse what is not text, collapse what was said twice,
     /// remove the words nobody meant to say.
     static func deterministic(_ text: String) -> String {
-        Fillers.removing(Disfluency.collapsingRepetitions(Guardrail.trimmingPunctuationRun(text)))
+        Restatement.collapsing(
+            Fillers.removing(Disfluency.collapsingRepetitions(Guardrail.trimmingPunctuationRun(text))))
     }
 
     /// Whether a hearing is plausibly the same utterance as what landed.

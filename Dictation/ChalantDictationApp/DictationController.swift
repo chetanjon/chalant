@@ -747,10 +747,13 @@ final class DictationController {
         // Three stages, in order, all pure and all in Core: refuse what is not
         // text, collapse what was said twice by accident, then remove the words
         // nobody meant to say.
-        let deterministic = Fillers.removing(
-            Disfluency.collapsingRepetitions(
-                Guardrail.trimmingPunctuationRun(
-                    resolved.map(\.text).joined(separator: " "))))
+        // Restatement runs LAST, on the cleanest text, so a repeated
+        // sentence matches its twin even when only one copy carried an um.
+        let deterministic = Restatement.collapsing(
+            Fillers.removing(
+                Disfluency.collapsingRepetitions(
+                    Guardrail.trimmingPunctuationRun(
+                        resolved.map(\.text).joined(separator: " ")))))
         return deterministic
     }
 

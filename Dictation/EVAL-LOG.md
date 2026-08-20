@@ -954,3 +954,22 @@ OF THE REPETITION RULE KEPT THE EARLIER VERSION and flipped that sentence to
 "I don't use it" (guard-blind: a "don't" survives either way); "always the
 later one" is the load-bearing phrase. An explicit example in the prompt was
 tried and removed: it taught a case the guard vetoes anyway and cost tokens.
+
+## 2026-08-20 (afternoon) — the budget starved, and restatements collapse
+
+Founder on 1.24.2: "if I'm talking the same thing again, it's giving me
+exactly the same thing. It's not refining at all." First corpus read off the
+new instrumentation: EVERY real utterance landed raw (polishSeconds 1.35 /
+2.01 / 5.17 s on 26/29/40-word rows, refinedAtOnce false), and "budget
+expired at the caller" fired 5 times with waits far past the 0.73 s hard
+cap: Whisper (started at finalize since 1.24.0) starves the cooperative
+pool so thoroughly that the budget's own timers fire seconds late. With
+land-once, raw stays: so nothing ever refined.
+
+Fixes: hearing drops to utility priority; the caller's deadline moves to
+the main actor's executor (unstarveable by CoreML); `Restatement` collapses
+an exactly-repeated sentence (≥3 words, case/punctuation-blind, first copy
+kept) deterministically on every path including raw landings and the
+hearing pass. Measured: the pass touches 1 of 380 historical corpus rows
+(high precision by design; the historical set predates deliberate repeat
+testing). 241 Core tests, 6 new.
