@@ -75,6 +75,13 @@ final class DictationController {
     /// Turns a real day of dictating into the spontaneous half of the corpus.
     /// Off unless explicitly switched on; see `CorpusCapture`.
     private let corpus = CorpusCapture()
+    /// macOS may nap a background app, and Chalant is background whenever
+    /// the user dictates into their own app. On 2026-08-20 both budget
+    /// timers fired ~0.7 s late IN UNISON, the signature of coalesced
+    /// wake-ups rather than contention, and the words landed raw for it.
+    /// The whole utterance runs latency-critical, key-down to landed; the
+    /// hearing that may follow is deliberately nap-able.
+    private var utteranceActivity: NSObjectProtocol?
     /// The on-device cleanup pass. Returns the input untouched on every failure
     /// path, so the worst case is the text that would have shipped anyway.
     private let polisher = FoundationModelsPolisher()
@@ -199,6 +206,7 @@ final class DictationController {
     // MARK: - The chain
 
     func keyDown() async {
+        beginUtteranceActivity()
         retirePendingSwap()
         earRestTask?.cancel()
         earRestTask = nil
@@ -279,6 +287,19 @@ final class DictationController {
         // said during preparation is no longer lost; only the engine's own
         // start, when it was asleep, is still ahead of the first word.
         await audio.beginCapture()
+        // A device can flow buffers that are pure digital silence: the
+        // founder's built-in mic did exactly that with wired earphones in
+        // (2026-08-20, "working the second time... not the first"):
+        // `ensureAlive` saw a healthy pulse, the silence-based hop is
+        // forbidden mid-capture, and the whole first hold heard nothing. A
+        // real microphone's noise floor lifts the peak off EXACT zero within
+        // a buffer or two, so a peak still at zero this far into a capture
+        // is a dead input: condemn it and rebuild on the next candidate
+        // BEFORE the analyzer binds to its format. A healthy mic passes this
+        // gate in one or two buffers.
+        if await !audio.confirmHearing(within: 0.9) {
+            await audio.condemnCurrentInput()
+        }
         let format = await audio.currentFormat
         // Part 0 §0.5: preheat, measured at ~1.45s finalized versus ~2.2s cold.
         await transcriber.prepare(locale: locale, format: format)
@@ -298,6 +319,7 @@ final class DictationController {
             await audio.endCapture()
             stopMeter()
             surface.hide()
+            endUtteranceActivity()
             onStateChange?()
             return
         }
@@ -381,6 +403,9 @@ final class DictationController {
 
     func keyUp() async {
         Self.log.info("keyUp entered, listening=\(self.isListening, privacy: .public)")
+        // Whatever way this release ends, the latency-critical window ends
+        // with it; the hearing that may follow is deliberately nap-able.
+        defer { endUtteranceActivity() }
         switch key.release() {
         case .finish:
             break
@@ -755,6 +780,20 @@ final class DictationController {
     /// Whatever may still be running from the previous utterance stops here:
     /// a hearing that has not come back yet must not swap the sentence after
     /// this one. The activity watch is disarmed with it.
+    private func beginUtteranceActivity() {
+        endUtteranceActivity()
+        utteranceActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .latencyCritical],
+            reason: "dictation hold in flight")
+    }
+
+    private func endUtteranceActivity() {
+        if let utteranceActivity {
+            ProcessInfo.processInfo.endActivity(utteranceActivity)
+            self.utteranceActivity = nil
+        }
+    }
+
     private func retirePendingSwap() {
         swapGeneration += 1
         hearingTask?.cancel()
@@ -843,6 +882,7 @@ final class DictationController {
     /// transcribe and nothing to insert: this only has to leave nothing
     /// running. The key is already back at idle, so the next press works.
     private func standDown(_ transcriber: AppleTranscriber) async {
+        endUtteranceActivity()
         scheduleEarRest()
         // The strip opens and capture begins at the press now, so a session
         // stood down during setup has both to close.
@@ -863,6 +903,7 @@ final class DictationController {
     /// End a session that went live and then could not run, closing the gate
     /// and the surface the live path had already opened.
     private func abandonLiveSession(_ transcriber: AppleTranscriber) async {
+        endUtteranceActivity()
         _ = key.release()
         await audio.endCapture()
         stopMeter()
