@@ -190,14 +190,15 @@ struct NotchRootView: View {
     // the live device caption underneath.
     private static let listeningSize = CGSize(width: 380, height: 192)
 
-    /// The dictation strip: 320 wide, and only as tall as this screen's notch
-    /// needs above one row of `Fonts.micro` (`DictationStripLevel.stripSize`).
-    /// Low on purpose; the founder chose the slim strip over the full
-    /// listening surface (2026-08-16), asked for it smaller and lighter
-    /// (2026-08-17), then lower and tauter still (2026-08-20, Slipstream:
-    /// "the user should feel speed").
+    /// The dictation strip: one small floating shape on every display
+    /// (`DictationStripLevel.stripSize`, 260 × 28). It does not wrap a
+    /// notch: on a notch display it floats beneath the hardware (see
+    /// `topGap`). The founder chose the slim strip over the full listening
+    /// surface (2026-08-16), asked for it smaller and lighter (2026-08-17),
+    /// lower and tauter (2026-08-20, Slipstream), then smaller again and off
+    /// the notch ("it looks weird cause its covering the notch").
     private var dictatingSize: CGSize {
-        DictationStripLevel.stripSize(topReserve: face.contentTopReserve)
+        DictationStripLevel.stripSize
     }
 
     /// How far a resting pill clears the top of its screen. Small on
@@ -245,22 +246,30 @@ struct NotchRootView: View {
     }
 
     private var islandShape: IslandShape {
+        // The dictation strip is its own small shape on EVERY display:
+        // machined corners all round (just over a third of its height,
+        // never the soft full pill), no eaves, floating. On a notch Mac it
+        // sits beneath the hardware rather than wrapping it: at 260 wide
+        // the wrap read as the notch swelling (founder, 2026-08-20, "it
+        // looks weird cause its covering the notch").
+        if face.state == .dictating {
+            let radius = DictationStripLevel.cornerRadius(height: dictatingSize.height)
+            return IslandShape(
+                eave: 0,
+                bottomRadius: radius,
+                belly: Theme.Island.bellyExpanded,
+                topRadius: radius
+            )
+        }
         // Pill: a free-floating bar with all four corners turned and no
         // eaves to cling with. A screen with no cutout has nothing to
         // wrap, and wearing the notch silhouette there is what made the
         // island read as "still a notch" on an external display.
         if face.style == .pill {
             let expanded = face.state != .collapsed
-            // The dictation strip wears machined corners, not the soft full
-            // pill: just over a third of its height. The slim taut shape is
-            // half of what makes Slipstream read as built for speed
-            // (founder, 2026-08-20, "change the shape... the user should
-            // feel speed").
-            let radius = face.state == .dictating
-                ? DictationStripLevel.cornerRadius(height: dictatingSize.height)
-                : expanded
-                    ? max(face.cornerRadius, Theme.Island.radiusCollapsed)
-                    : face.cornerRadius
+            let radius = expanded
+                ? max(face.cornerRadius, Theme.Island.radiusCollapsed)
+                : face.cornerRadius
             return IslandShape(
                 eave: 0,
                 bottomRadius: radius,
@@ -310,13 +319,30 @@ struct NotchRootView: View {
         }
         return IslandShape(
             eave: Theme.Island.eaveExpanded,
-            // The strip's machined bottom corners on a notch display too;
-            // the top keeps the notch silhouette because it dresses hardware.
-            bottomRadius: face.state == .dictating
-                ? DictationStripLevel.cornerRadius(height: dictatingSize.height)
-                : Theme.Island.radiusExpanded,
+            bottomRadius: Theme.Island.radiusExpanded,
             belly: Theme.Island.bellyExpanded
         )
+    }
+
+    /// How far the island stands off the screen's top edge. The dictation
+    /// strip floats: beneath the hardware notch on a notch display, and by
+    /// the resting pill's own gap on a pill display. Everything else keeps
+    /// the old rule (a collapsed pill floats; open islands and notches meet
+    /// the edge).
+    private var topGap: CGFloat {
+        if face.state == .dictating {
+            // Hardware wins, the same rule as `contentTopReserve`: a screen
+            // with a real cutout floats the strip beneath it WHATEVER style
+            // the user chose. The founder runs Pill style on the MacBook,
+            // and gating this on style left the strip straddling the
+            // housing ("look hwo ugly it looks", 2026-08-20). An emulated
+            // notch draws its silhouette and gets the same room.
+            if face.cutout != nil || face.style == .notch {
+                return face.contentTopReserve + DictationStripLevel.notchGap
+            }
+            return Self.pillTopGap
+        }
+        return face.style == .pill && face.state == .collapsed ? Self.pillTopGap : 0
     }
 
     /// The shell's material. Ink everywhere by default (the blurred
@@ -492,7 +518,7 @@ struct NotchRootView: View {
                                 shape: islandShape, accent: accent,
                                 level: model.dictationLevel, fill: model.dictationFill,
                                 pulse: model.dictationPulse, pace: model.dictationPace,
-                                beat: model.dictationBeat,
+                                beat: model.dictationBeat, sway: model.dictationSway,
                                 size: dictatingSize
                             )
                             .transition(.opacity)
@@ -581,7 +607,7 @@ struct NotchRootView: View {
         // (founder, 2026-08-02, "the pill placement is too top"). The
         // gap is dropped while a pill is open, so an expanded island
         // still hangs from the top the way it always has.
-        .padding(.top, face.style == .pill && face.state == .collapsed ? Self.pillTopGap : 0)
+        .padding(.top, topGap)
         // Out of the way until reached for. A toast still comes
         // through: it is the island saying something happened, and a
         // notification nobody can see is not a quieter notification,
@@ -930,7 +956,8 @@ struct NotchRootView: View {
             Spacer(minLength: Theme.Space.l)
         }
         .padding(.horizontal, Theme.Space.xxl)
-        .padding(.top, face.contentTopReserve + DictationStripLevel.stripTopAir)
+        // No reserve: the strip no longer contains a notch to clear.
+        .padding(.top, DictationStripLevel.stripTopAir)
         .padding(.bottom, DictationStripLevel.stripBottomAir)
         .frame(maxHeight: .infinity, alignment: .bottom)
     }

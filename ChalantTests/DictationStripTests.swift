@@ -61,6 +61,23 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(voice.fill, 0)
         XCTAssertEqual(voice.pulse, 0)
         XCTAssertEqual(voice.pace, 0)
+        XCTAssertEqual(voice.sway, 0)
+    }
+
+    /// Something is always alive while the strip listens: the sway phase
+    /// advances even through a silent pause (which is exactly when "I am
+    /// still listening" matters), and quickens under voice. The drift stays
+    /// inside the glass, motion in place, never travel.
+    func testTheSwayNeverStopsAndQuickensWithVoice() {
+        var paused = DictationStripLevel.Voice()
+        for _ in 0..<30 { paused.step(raw: 0, dt: tick) }
+        XCTAssertEqual(paused.sway, 2.2, accuracy: 0.05)
+        var voiced = DictationStripLevel.Voice()
+        for _ in 0..<30 { voiced.step(raw: 1, dt: tick) }
+        XCTAssertGreaterThan(voiced.sway, paused.sway + 3)
+        let life = DictationStripLevel.poolSway(phase: 1.2, level: 1)
+        XCTAssertLessThanOrEqual(abs(life.drift), 20)
+        XCTAssertEqual(life.wobble, 1, accuracy: 0.09)
     }
 
     /// The beat is a counter, not a state: resetting it to a value a
@@ -132,20 +149,23 @@ final class DictationStripTests: XCTestCase {
     func testSlipAtSilenceIsNearDark() {
         let s = DictationStripLevel.slip(level: 0, pulse: 0)
         XCTAssertEqual(s.glowWidth, 1.6, accuracy: 0.001)
-        XCTAssertEqual(s.glowBlur, 4, accuracy: 0.001)
-        XCTAssertEqual(s.glowOpacity, 0.04, accuracy: 0.001)
+        XCTAssertEqual(s.glowBlur, 5, accuracy: 0.001)
+        XCTAssertEqual(s.glowOpacity, 0.05, accuracy: 0.001)
         XCTAssertEqual(s.coreWidth, 1.0, accuracy: 0.001)
         XCTAssertEqual(s.coreBlur, 2, accuracy: 0.001)
         XCTAssertEqual(s.coreOpacity, 0.12, accuracy: 0.001)
     }
 
+    /// The voiced end sits above the mockup's numbers on purpose: what read
+    /// vivid on a canvas read quiet on real CA layers at 260 × 28 ("when im
+    /// talking there is very little happening", 2026-08-20).
     func testSlipAtFullVoiceIsVivid() {
         let s = DictationStripLevel.slip(level: 1, pulse: 0)
-        XCTAssertEqual(s.glowWidth, 2.8, accuracy: 0.001)
-        XCTAssertEqual(s.glowBlur, 11, accuracy: 0.001)
-        XCTAssertEqual(s.glowOpacity, 0.52, accuracy: 0.001)
-        XCTAssertEqual(s.coreWidth, 1.4, accuracy: 0.001)
-        XCTAssertEqual(s.coreBlur, 6, accuracy: 0.001)
+        XCTAssertEqual(s.glowWidth, 3.6, accuracy: 0.001)
+        XCTAssertEqual(s.glowBlur, 16, accuracy: 0.001)
+        XCTAssertEqual(s.glowOpacity, 0.75, accuracy: 0.001)
+        XCTAssertEqual(s.coreWidth, 1.6, accuracy: 0.001)
+        XCTAssertEqual(s.coreBlur, 8, accuracy: 0.001)
         XCTAssertEqual(s.coreOpacity, 0.97, accuracy: 0.001)
     }
 
@@ -171,14 +191,18 @@ final class DictationStripTests: XCTestCase {
     // MARK: - The pool
 
     func testThePoolKicksWiderWithTheVoiceAndHarderInGear() {
-        let rest = DictationStripLevel.pool(level: 0, pace: 0)
-        XCTAssertEqual(rest.opacity, 0.04, accuracy: 0.001)
+        let rest = DictationStripLevel.pool(level: 0, pulse: 0, pace: 0)
+        XCTAssertEqual(rest.opacity, 0.05, accuracy: 0.001)
         XCTAssertEqual(rest.stretch, 1.7, accuracy: 0.001)
-        let talking = DictationStripLevel.pool(level: 1, pace: 0)
+        let talking = DictationStripLevel.pool(level: 1, pulse: 0, pace: 0)
         XCTAssertEqual(talking.stretch, 3.3, accuracy: 0.001)
-        let quick = DictationStripLevel.pool(level: 1, pace: 1)
+        XCTAssertEqual(talking.opacity, 0.51, accuracy: 0.001)
+        let quick = DictationStripLevel.pool(level: 1, pulse: 0, pace: 1)
         XCTAssertEqual(quick.stretch, 4.1, accuracy: 0.001)
-        XCTAssertEqual(quick.opacity, 0.34, accuracy: 0.001)
+        // A syllable kicks the pool as well as the edge.
+        let struck = DictationStripLevel.pool(level: 0.5, pulse: 1, pace: 0)
+        let quiet = DictationStripLevel.pool(level: 0.5, pulse: 0, pace: 0)
+        XCTAssertEqual(struck.opacity - quiet.opacity, 0.12, accuracy: 0.001)
     }
 
     /// The strip's body never moves on its own: the lean (a voice-driven
@@ -205,8 +229,8 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(DictationStripLevel.clamp(-0.5), 0)
         XCTAssertEqual(DictationStripLevel.clamp(3.0), 1)
         XCTAssertEqual(DictationStripLevel.clamp(0.4), 0.4, accuracy: 0.0001)
-        XCTAssertEqual(DictationStripLevel.slip(level: 3.0, pulse: 0).glowBlur, 11, accuracy: 0.001)
-        XCTAssertEqual(DictationStripLevel.slip(level: -1, pulse: 0).glowBlur, 4, accuracy: 0.001)
+        XCTAssertEqual(DictationStripLevel.slip(level: 3.0, pulse: 0).glowBlur, 16, accuracy: 0.001)
+        XCTAssertEqual(DictationStripLevel.slip(level: -1, pulse: 0).glowBlur, 5, accuracy: 0.001)
     }
 
     /// The headroom, without which the strip barely moves during speech: a
@@ -237,19 +261,17 @@ final class DictationStripTests: XCTestCase {
 
     // MARK: - The strip is sized and shaped for speed (Slipstream)
 
-    /// 320 wide everywhere; lower and tauter than the 1.17 pill. A pill
-    /// display (reserve 8) gets 32 (was 41), a notch display (reserve 32)
-    /// gets 56 (was 65). The corners are machined, just over a third of the
-    /// height, never the soft full pill.
-    func testStripIsLowAndTaut() {
-        let pill = DictationStripLevel.stripSize(topReserve: Theme.Space.m)
-        XCTAssertEqual(pill.width, 320, accuracy: 0.001)
-        XCTAssertEqual(pill.height, 32, accuracy: 0.001)
-        let notch = DictationStripLevel.stripSize(topReserve: 32)
-        XCTAssertEqual(notch.width, 320, accuracy: 0.001)
-        XCTAssertEqual(notch.height, 56, accuracy: 0.001)
-        XCTAssertEqual(DictationStripLevel.cornerRadius(height: 32), 11.52, accuracy: 0.001)
-        XCTAssertLessThan(DictationStripLevel.cornerRadius(height: 32), 16, "machined, not a full pill")
+    /// One small floating shape on every display: 260 × 28, machined
+    /// corners just over a third of the height, never the soft full pill.
+    /// It no longer wraps a notch (at 260 wide the wrap read as the notch
+    /// swelling: "it looks weird cause its covering the notch", 2026-08-20);
+    /// the strip floats `notchGap` beneath the hardware instead.
+    func testStripIsOneSmallShapeEverywhere() {
+        XCTAssertEqual(DictationStripLevel.stripSize.width, 260, accuracy: 0.001)
+        XCTAssertEqual(DictationStripLevel.stripSize.height, 28, accuracy: 0.001)
+        XCTAssertEqual(DictationStripLevel.cornerRadius(height: 28), 10.08, accuracy: 0.001)
+        XCTAssertLessThan(DictationStripLevel.cornerRadius(height: 28), 14, "machined, not a full pill")
+        XCTAssertGreaterThan(DictationStripLevel.notchGap, 0, "the strip floats beneath the notch, never on it")
     }
 
     // MARK: - The light's layers are wired to the numbers
@@ -262,7 +284,7 @@ final class DictationStripTests: XCTestCase {
         let host = DictationStripLight.LightHostView(frame: CGRect(x: 0, y: 0, width: 320, height: 32))
         let shape = IslandShape(eave: 0, bottomRadius: 11.52, belly: 0, topRadius: 11.52)
         let size = CGSize(width: 320, height: 32)
-        host.apply(shape: shape, accent: .white, level: 1, fill: 1, pulse: 0, pace: 0, beat: 0, size: size)
+        host.apply(shape: shape, accent: .white, level: 1, fill: 1, pulse: 0, pace: 0, beat: 0, sway: 0, size: size)
         let full = DictationStripLevel.slip(level: 1, pulse: 0)
         let (glow, core) = (host.strokeLayers[0], host.strokeLayers[1])
         XCTAssertEqual(glow.lineWidth, full.glowWidth, accuracy: 0.001)
@@ -271,12 +293,12 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(core.lineWidth, full.coreWidth, accuracy: 0.001)
         XCTAssertEqual(Double(core.opacity), full.coreOpacity, accuracy: 0.001)
         XCTAssertNotNil(glow.path, "paths must be laid out from the strip's frame")
-        let pool = DictationStripLevel.pool(level: 1, pace: 0)
+        let pool = DictationStripLevel.pool(level: 1, pulse: 0, pace: 0)
         XCTAssertEqual(Double(host.poolLayer.opacity), pool.opacity, accuracy: 0.001)
         XCTAssertEqual(host.poolLayer.transform.m11, pool.stretch, accuracy: 0.001)
         XCTAssertNotNil(host.poolLayer.superlayer?.mask, "the pool must be clipped inside the glass")
 
-        host.apply(shape: shape, accent: .white, level: 0, fill: 0, pulse: 0, pace: 0, beat: 0, size: size)
+        host.apply(shape: shape, accent: .white, level: 0, fill: 0, pulse: 0, pace: 0, beat: 0, sway: 0, size: size)
         let rest = DictationStripLevel.slip(level: 0, pulse: 0)
         XCTAssertEqual(Double(glow.opacity), rest.glowOpacity, accuracy: 0.001)
         XCTAssertEqual(Double(core.opacity), rest.coreOpacity, accuracy: 0.001)
@@ -289,9 +311,9 @@ final class DictationStripTests: XCTestCase {
         let host = DictationStripLight.LightHostView(frame: CGRect(x: 0, y: 0, width: 320, height: 32))
         let shape = IslandShape(eave: 0, bottomRadius: 11.52, belly: 0, topRadius: 11.52)
         let size = CGSize(width: 320, height: 32)
-        host.apply(shape: shape, accent: .white, level: 0.5, fill: 0.5, pulse: 1, pace: 0, beat: 3, size: size)
+        host.apply(shape: shape, accent: .white, level: 0.5, fill: 0.5, pulse: 1, pace: 0, beat: 3, sway: 0, size: size)
         XCTAssertFalse(host.glints.contains { $0.animation(forKey: "race") != nil })
-        host.apply(shape: shape, accent: .white, level: 0.5, fill: 0.5, pulse: 1, pace: 0, beat: 4, size: size)
+        host.apply(shape: shape, accent: .white, level: 0.5, fill: 0.5, pulse: 1, pace: 0, beat: 4, sway: 0, size: size)
         XCTAssertTrue(host.glints.contains { $0.animation(forKey: "race") != nil })
         XCTAssertEqual(host.glints.count, 4, "two per side, so a quick talker's glints can overlap")
     }
@@ -304,14 +326,14 @@ final class DictationStripTests: XCTestCase {
         let host = DictationStripLight.LightHostView(frame: CGRect(x: 0, y: 0, width: 320, height: 32))
         let shape = IslandShape(eave: 0, bottomRadius: 11.52, belly: 0, topRadius: 11.52)
         let size = CGSize(width: 320, height: 32)
-        host.apply(shape: shape, accent: .white, level: 0, fill: 0, pulse: 0, pace: 0, beat: 0, size: size)
+        host.apply(shape: shape, accent: .white, level: 0, fill: 0, pulse: 0, pace: 0, beat: 0, sway: 0, size: size)
         let spill = DictationStripLight.LightHostView.spill
         XCTAssertEqual(host.spreadMask.frame.minX, -spill, accuracy: 0.001)
         XCTAssertEqual(host.spreadMask.frame.width, 320 + spill * 2, accuracy: 0.001)
         let maskWidth = 320 + spill * 2
         let atRest = host.spreadMask.locations!.map { CGFloat(truncating: $0) }
         XCTAssertEqual(atRest[1], 0.5 - 0.18 * 320 / maskWidth, accuracy: 0.001)
-        host.apply(shape: shape, accent: .white, level: 0, fill: 1, pulse: 0, pace: 0, beat: 0, size: size)
+        host.apply(shape: shape, accent: .white, level: 0, fill: 1, pulse: 0, pace: 0, beat: 0, sway: 0, size: size)
         let full = host.spreadMask.locations!.map { CGFloat(truncating: $0) }
         XCTAssertEqual(full[3], 0.5 + 0.60 * 320 / maskWidth, accuracy: 0.001)
     }

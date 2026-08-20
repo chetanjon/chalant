@@ -61,12 +61,20 @@ enum DictationStripLevel {
     /// back down between phrases rather than snapping.
     ///
     /// `beat` counts syllable onsets; the view fires a glint when it changes.
+    ///
+    /// `sway` is the pool's life: a phase that never stops advancing while
+    /// the strip listens, slow in a pause, quick under voice. The speaker
+    /// must always see something alive ("there should be something alive
+    /// like moving so the speaker knows its listening", the founder,
+    /// 2026-08-20); the pool moving IN PLACE is that life, and it keeps the
+    /// rule that nothing crosses the strip except a syllable's glint.
     struct Voice: Equatable {
         private(set) var level: CGFloat = 0
         private(set) var fill: CGFloat = 0
         private(set) var pulse: CGFloat = 0
         private(set) var pace: CGFloat = 0
         private(set) var beat: Int = 0
+        private(set) var sway: CGFloat = 0
         private var sinceOnset: TimeInterval = .infinity
 
         /// Below this the meter is reading a pause, not a voice.
@@ -78,11 +86,14 @@ enum DictationStripLevel {
         static let releaseSpan: CGFloat = 4.5
         static let fillRate: CGFloat = 0.65
         static let pauseGiveback: CGFloat = 0.12
-        /// A syllable is the smoothed level jumping this much in one tick...
-        static let onsetJump: CGFloat = 0.05
+        /// A syllable is the smoothed level jumping this much in one tick.
+        /// Real speech dips far less cleanly than a synthetic voice, and at
+        /// 0.05 whole phrases passed without a beat, which the founder read
+        /// as "very little happening" (2026-08-20).
+        static let onsetJump: CGFloat = 0.035
         /// ...no sooner than this after the last one (a loud vowel jitters
         /// the meter tick to tick; a human does not produce 20 syllables/s).
-        static let onsetRefractory: TimeInterval = 0.12
+        static let onsetRefractory: TimeInterval = 0.10
         /// How the gap between syllables maps to the gear: 1.2/s and slower
         /// is unhurried (0), 4.5/s and faster is quick (1).
         static let paceFloorRate: CGFloat = 1.2
@@ -95,6 +106,12 @@ enum DictationStripLevel {
         /// gear.
         static let pulseDecay: CGFloat = 10
         static let pulseDecayPaceSpan: CGFloat = 8
+        /// How fast the pool's life advances, in radians per second: a
+        /// gentle ~3 s cycle in a pause, under a second at full voice in a
+        /// high gear.
+        static let swayFloor: CGFloat = 2.2
+        static let swayVoiceSpan: CGFloat = 5.0
+        static let swayPaceSpan: CGFloat = 2.0
 
         mutating func step(raw: CGFloat, dt: TimeInterval) {
             let target = clamp(raw)
@@ -102,6 +119,7 @@ enum DictationStripLevel {
             let k = target > level ? Self.attack : (Self.releaseFloor + pace * Self.releaseSpan)
             let before = level
             level += (target - level) * min(1, dt * k)
+            sway += dt * (Self.swayFloor + level * Self.swayVoiceSpan + pace * Self.swayPaceSpan)
 
             pulse = max(0, pulse - dt * (Self.pulseDecay + pace * Self.pulseDecayPaceSpan))
             pace = max(0, pace - dt * Self.paceDecay)
@@ -129,6 +147,7 @@ enum DictationStripLevel {
             fill = 0
             pulse = 0
             pace = 0
+            sway = 0
             sinceOnset = .infinity
             // beat is left alone: it is a counter, not a state, and resetting
             // it to a value a previous hold already used would suppress the
@@ -155,12 +174,17 @@ enum DictationStripLevel {
     static func slip(level: CGFloat, pulse: CGFloat) -> Slip {
         let l = clamp(level)
         let p = clamp(pulse)
+        // The voiced end sits well above the mockup's numbers on purpose:
+        // what read vivid on a canvas read quiet on real CA layers at the
+        // real 260 × 28 ("when im talking there is very little happening",
+        // the founder, 2026-08-20). Rest stays near dark; only the voiced
+        // terms grew.
         return Slip(
-            glowWidth: 1.6 + l * 1.2,
-            glowBlur: 4 + l * 7,
-            glowOpacity: min(1, 0.04 + Double(l) * 0.48 + Double(p) * 0.20),
-            coreWidth: 1.0 + l * 0.4,
-            coreBlur: 2 + l * 4,
+            glowWidth: 1.6 + l * 2.0,
+            glowBlur: 5 + l * 11,
+            glowOpacity: min(1, 0.05 + Double(l) * 0.70 + Double(p) * 0.25),
+            coreWidth: 1.0 + l * 0.6,
+            coreBlur: 2 + l * 6,
             coreOpacity: min(1, 0.12 + Double(l) * 0.85 + Double(p) * 0.45)
         )
     }
@@ -185,14 +209,29 @@ enum DictationStripLevel {
         var opacity: Double
     }
 
-    static func pool(level: CGFloat, pace: CGFloat) -> Pool {
+    /// The pulse kicks the pool too: every syllable, the light inside the
+    /// glass answers along with the edge, so talking is visibly answered
+    /// even between level swings.
+    static func pool(level: CGFloat, pulse: CGFloat, pace: CGFloat) -> Pool {
         let l = clamp(level)
         return Pool(
-            radius: 0.5 + l * 0.7,
+            radius: 0.55 + l * 0.95,
             stretch: 1.7 + (1.6 + clamp(pace) * 0.8) * l,
-            opacity: Double(0.04 + l * 0.30)
+            opacity: min(1, Double(0.05 + l * 0.46 + clamp(pulse) * 0.12))
         )
     }
+
+    /// The pool's life, read off the sway phase: where the light's heart
+    /// drifts (points off centre, wider under voice) and how its radius
+    /// wobbles. Two blobs breathe against each other (the second runs
+    /// counter-phase at `counterDrift` of the first) so it reads as living
+    /// liquid, never a metronome.
+    static func poolSway(phase: CGFloat, level: CGFloat) -> (drift: CGFloat, wobble: CGFloat) {
+        let amp = 6 + 14 * clamp(level)
+        return (sin(phase) * amp, 1 + 0.08 * sin(phase * 1.7 + 1.1))
+    }
+    static let counterDrift: CGFloat = -0.7
+    static let counterScale: CGFloat = 0.6
 
     // MARK: - The glints
 
@@ -203,31 +242,34 @@ enum DictationStripLevel {
         TimeInterval(0.18 - clamp(pace) * 0.09)
     }
     /// The streak's tail, width, and how far below the top edge it rides.
-    static let glintLength: CGFloat = 46
-    static let glintWidth: CGFloat = 1.6
+    /// Thicker and longer than the first cut: at 1.6 pt the glints were
+    /// nearly invisible in peripheral vision, and they are half of what
+    /// says "it hears you".
+    static let glintLength: CGFloat = 58
+    static let glintWidth: CGFloat = 2.0
     static let glintInset: CGFloat = 1.5
 
     // MARK: - Size and shape
 
-    /// The strip is sized to what it holds: 320 wide on every screen, lower
-    /// and tauter than the 1.17 pill ("change the shape... the user should
-    /// feel speed", the founder, 2026-08-20). A pill display gets 32, a notch
-    /// display 56.
-    static let stripWidth: CGFloat = 320
+    /// The strip is ONE small shape on every display: 260 × 28, floating.
+    /// It no longer wraps a MacBook's notch: at this width the wrap read as
+    /// the notch swelling ("it looks weird cause its covering the notch",
+    /// the founder, 2026-08-20), so on a notch display the strip floats
+    /// `notchGap` beneath the hardware instead, and a pill display floats it
+    /// under the screen top the way the resting pill floats. Smaller and
+    /// premium was the same day's earlier word; 1.23.1 shipped at 320 × 32
+    /// and still read big.
+    static let stripWidth: CGFloat = 260
+    static let stripHeight: CGFloat = 28
+    static var stripSize: CGSize { CGSize(width: stripWidth, height: stripHeight) }
     /// One line of `Fonts.micro` (11 pt semibold).
     static let stripRow: CGFloat = 13
-    /// Air above the row (below the reserve) and below it. Tighter than the
-    /// island's usual clearances on purpose: the slim strip is the shape of
-    /// the speed.
-    static let stripTopAir: CGFloat = 5
-    static let stripBottomAir: CGFloat = 6
-
-    static func stripSize(topReserve: CGFloat) -> CGSize {
-        CGSize(
-            width: stripWidth,
-            height: topReserve + stripTopAir + stripRow + stripBottomAir
-        )
-    }
+    /// Air above and below the row. Tighter than the island's usual
+    /// clearances on purpose: the slim strip is the shape of the speed.
+    static let stripTopAir: CGFloat = 3
+    static let stripBottomAir: CGFloat = 4
+    /// The air between the hardware notch and the floating strip.
+    static let notchGap: CGFloat = 4
 
     /// Machined corners, not the soft full pill: just over a third of the
     /// height, which is what makes the slim strip read as built for speed.

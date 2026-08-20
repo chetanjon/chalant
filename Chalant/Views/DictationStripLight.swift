@@ -28,6 +28,7 @@ struct DictationStripLight: NSViewRepresentable {
     let pulse: CGFloat
     let pace: CGFloat
     let beat: Int
+    let sway: CGFloat
     let size: CGSize
 
     func makeNSView(context: Context) -> LightHostView {
@@ -43,7 +44,7 @@ struct DictationStripLight: NSViewRepresentable {
     private func apply(to view: LightHostView) {
         view.apply(
             shape: shape, accent: NSColor(accent), level: level, fill: fill,
-            pulse: pulse, pace: pace, beat: beat, size: size
+            pulse: pulse, pace: pace, beat: beat, sway: sway, size: size
         )
     }
 
@@ -62,6 +63,9 @@ struct DictationStripLight: NSViewRepresentable {
         private let poolContainer = CALayer()
         private let poolMask = CAShapeLayer()
         private let poolGlow = CAGradientLayer()
+        /// The second blob of the living pool, counter-phase to the first,
+        /// so the light reads as liquid rather than a metronome.
+        private let poolGlow2 = CAGradientLayer()
         /// Two per side, round-robin, so a quick talker's glints can overlap.
         private var glintLayers: [CAGradientLayer] = []
         private var currentShape: IslandShape?
@@ -82,7 +86,7 @@ struct DictationStripLight: NSViewRepresentable {
 
         func apply(
             shape: IslandShape, accent: NSColor, level: CGFloat, fill: CGFloat,
-            pulse: CGFloat, pace: CGFloat, beat: Int, size: CGSize
+            pulse: CGFloat, pace: CGFloat, beat: Int, sway: CGFloat, size: CGSize
         ) {
             wantsLayer = true
             if container.superlayer == nil { build() }
@@ -92,7 +96,7 @@ struct DictationStripLight: NSViewRepresentable {
             appliedFill = fill
 
             let slip = DictationStripLevel.slip(level: level, pulse: pulse)
-            let pool = DictationStripLevel.pool(level: level, pace: pace)
+            let pool = DictationStripLevel.pool(level: level, pulse: pulse, pace: pace)
             let tint = accent.cgColor
             CATransaction.begin()
             CATransaction.setAnimationDuration(Self.tickGlide)
@@ -108,15 +112,31 @@ struct DictationStripLight: NSViewRepresentable {
             core.shadowColor = tint
             core.shadowRadius = slip.coreBlur
             core.shadowOpacity = 0.85
-            poolGlow.opacity = Float(pool.opacity)
-            poolGlow.transform = CATransform3DMakeScale(pool.stretch, 1, 1)
+            // The pool is alive: both blobs drift and wobble on the sway
+            // phase, in place, so the speaker always sees something moving
+            // while the strip listens.
+            let life = DictationStripLevel.poolSway(phase: sway, level: level)
+            let floor = CGPoint(x: bounds.midX, y: bounds.maxY)
             let poolRadius = size.height * pool.radius
-            poolGlow.bounds = CGRect(x: 0, y: 0, width: poolRadius * 2, height: poolRadius * 2)
-            poolGlow.colors = [
+            let poolColors = [
                 accent.withAlphaComponent(1).cgColor,
                 accent.withAlphaComponent(0.4).cgColor,
                 accent.withAlphaComponent(0).cgColor,
             ]
+            poolGlow.opacity = Float(pool.opacity)
+            poolGlow.transform = CATransform3DMakeScale(pool.stretch, 1, 1)
+            poolGlow.position = CGPoint(x: floor.x + life.drift, y: floor.y)
+            let r1 = poolRadius * life.wobble
+            poolGlow.bounds = CGRect(x: 0, y: 0, width: r1 * 2, height: r1 * 2)
+            poolGlow.colors = poolColors
+            poolGlow2.opacity = Float(pool.opacity * 0.7)
+            poolGlow2.transform = CATransform3DMakeScale(pool.stretch, 1, 1)
+            poolGlow2.position = CGPoint(
+                x: floor.x + life.drift * DictationStripLevel.counterDrift, y: floor.y
+            )
+            let r2 = poolRadius * DictationStripLevel.counterScale * (2 - life.wobble)
+            poolGlow2.bounds = CGRect(x: 0, y: 0, width: r2 * 2, height: r2 * 2)
+            poolGlow2.colors = poolColors
             CATransaction.commit()
 
             CATransaction.begin()
@@ -160,12 +180,15 @@ struct DictationStripLight: NSViewRepresentable {
             container.mask = spread
             for stroke in strokeLayers { container.addSublayer(stroke) }
 
-            poolGlow.type = .radial
-            poolGlow.startPoint = CGPoint(x: 0.5, y: 0.5)
-            poolGlow.endPoint = CGPoint(x: 1, y: 1)
-            poolGlow.locations = [0, 0.6, 1]
+            for blob in [poolGlow, poolGlow2] {
+                blob.type = .radial
+                blob.startPoint = CGPoint(x: 0.5, y: 0.5)
+                blob.endPoint = CGPoint(x: 1, y: 1)
+                blob.locations = [0, 0.6, 1]
+            }
             poolMask.fillColor = NSColor.black.cgColor
             poolContainer.mask = poolMask
+            poolContainer.addSublayer(poolGlow2)
             poolContainer.addSublayer(poolGlow)
 
             for side in [-1, 1] {
@@ -211,7 +234,6 @@ struct DictationStripLight: NSViewRepresentable {
             poolContainer.frame = bounds
             poolMask.frame = bounds
             poolMask.path = path
-            poolGlow.position = CGPoint(x: bounds.midX, y: bounds.maxY)
             let glintY = DictationStripLevel.glintInset + DictationStripLevel.glintWidth / 2
             for glint in glintLayers {
                 glint.bounds = CGRect(
@@ -244,7 +266,7 @@ struct DictationStripLight: NSViewRepresentable {
                 race.fromValue = from
                 race.toValue = to
                 let fade = CAKeyframeAnimation(keyPath: "opacity")
-                fade.values = [Float(0.5 + 0.4 * pulseStrength), Float(0.35 * pulseStrength), 0]
+                fade.values = [Float(0.75 + 0.25 * pulseStrength), Float(0.2 + 0.45 * pulseStrength), 0]
                 fade.keyTimes = [0, 0.6, 1]
                 for animation in [race, fade] as [CAAnimation] {
                     animation.duration = duration
