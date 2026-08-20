@@ -1502,6 +1502,13 @@ final class NotchViewModel: ObservableObject {
     /// the lit edge. The view draws from these two and nothing else.
     @Published var dictationLevel: CGFloat = 0
     @Published var dictationFill: CGFloat = 0
+    /// The syllable (1 the tick a word lands, gone in ~0.1 s), the speaker's
+    /// gear (0 unhurried to 1 quick), and the onset counter the view fires a
+    /// glint on. All three live in `DictationStripLevel.Voice`; the view
+    /// draws from these and nothing else.
+    @Published var dictationPulse: CGFloat = 0
+    @Published var dictationPace: CGFloat = 0
+    @Published var dictationBeat: Int = 0
     @Published var dictationInfo: DictationInfo?
     private var dictationVoice = DictationStripLevel.Voice()
     /// The meter is a fixed 30 Hz timer (`DictationController.startMeter`),
@@ -1531,6 +1538,8 @@ final class NotchViewModel: ObservableObject {
         dictationVoice.reset()
         dictationLevel = 0
         dictationFill = 0
+        dictationPulse = 0
+        dictationPace = 0
         quietTheRoom()
         state = .dictating
     }
@@ -1540,6 +1549,9 @@ final class NotchViewModel: ObservableObject {
         dictationVoice.step(raw: level, dt: Self.dictationTick)
         dictationLevel = dictationVoice.level
         dictationFill = dictationVoice.fill
+        dictationPulse = dictationVoice.pulse
+        dictationPace = dictationVoice.pace
+        dictationBeat = dictationVoice.beat
         if let mic, mic != dictationInfo?.micName {
             // The ear can hop mid-hold; the strip must say so in place.
             dictationInfo?.micName = mic
@@ -1552,6 +1564,8 @@ final class NotchViewModel: ObservableObject {
         dictationVoice.reset()
         dictationLevel = 0
         dictationFill = 0
+        dictationPulse = 0
+        dictationPace = 0
         dictationInfo = nil
         // The strip can now be entered from an open island, and the island it
         // closes into is a collapsed one. Left true, the music controller

@@ -193,9 +193,9 @@ struct NotchRootView: View {
     /// The dictation strip: 320 wide, and only as tall as this screen's notch
     /// needs above one row of `Fonts.micro` (`DictationStripLevel.stripSize`).
     /// Low on purpose; the founder chose the slim strip over the full
-    /// listening surface (2026-08-16), then asked for it smaller still and
-    /// lighter (2026-08-17: on a monitor with no notch the old 520 × 68 was
-    /// mostly empty black).
+    /// listening surface (2026-08-16), asked for it smaller and lighter
+    /// (2026-08-17), then lower and tauter still (2026-08-20, Slipstream:
+    /// "the user should feel speed").
     private var dictatingSize: CGSize {
         DictationStripLevel.stripSize(topReserve: face.contentTopReserve)
     }
@@ -243,9 +243,16 @@ struct NotchRootView: View {
         // island read as "still a notch" on an external display.
         if face.style == .pill {
             let expanded = face.state != .collapsed
-            let radius = expanded
-                ? max(face.cornerRadius, Theme.Island.radiusCollapsed)
-                : face.cornerRadius
+            // The dictation strip wears machined corners, not the soft full
+            // pill: just over a third of its height. The slim taut shape is
+            // half of what makes Slipstream read as built for speed
+            // (founder, 2026-08-20, "change the shape... the user should
+            // feel speed").
+            let radius = face.state == .dictating
+                ? DictationStripLevel.cornerRadius(height: dictatingSize.height)
+                : expanded
+                    ? max(face.cornerRadius, Theme.Island.radiusCollapsed)
+                    : face.cornerRadius
             return IslandShape(
                 eave: 0,
                 bottomRadius: radius,
@@ -295,7 +302,11 @@ struct NotchRootView: View {
         }
         return IslandShape(
             eave: Theme.Island.eaveExpanded,
-            bottomRadius: Theme.Island.radiusExpanded,
+            // The strip's machined bottom corners on a notch display too;
+            // the top keeps the notch silhouette because it dresses hardware.
+            bottomRadius: face.state == .dictating
+                ? DictationStripLevel.cornerRadius(height: dictatingSize.height)
+                : Theme.Island.radiusExpanded,
             belly: Theme.Island.bellyExpanded
         )
     }
@@ -458,19 +469,22 @@ struct NotchRootView: View {
                             .strokeBorder(accent.opacity(0.8), lineWidth: 1.5)
                             .opacity(face.isDropTargeted ? 1 : 0)
                     )
-                    // The strip IS the meter, and its edge is the light: the
-                    // outline glows with the smoothed voice and the lit stretch
-                    // spreads with the sentence (`DictationHalo`). Nothing is
-                    // drawn on the strip itself; there are no bars, no dot, no
-                    // pool. Absent everywhere except while dictating, so the
-                    // resting island is untouched. Arrives WITH the pour: a
-                    // first cut faded it in 0.18 s after the strip settled and
-                    // the founder felt that half second as lag.
+                    // The strip IS the meter: a thin core and one tight glow
+                    // on the outline, near dark in silence and vivid on the
+                    // voice, a dim pool inside the glass, glints racing the
+                    // top edge on every syllable, all in the speaker's own
+                    // gear (`DictationStripLight`, "Slipstream"). Absent
+                    // everywhere except while dictating, so the resting
+                    // island is untouched. Arrives WITH the pour: a first cut
+                    // faded it in 0.18 s after the strip settled and the
+                    // founder felt that half second as lag.
                     .overlay {
                         if face.state == .dictating {
-                            DictationHalo(
+                            DictationStripLight(
                                 shape: islandShape, accent: accent,
                                 level: model.dictationLevel, fill: model.dictationFill,
+                                pulse: model.dictationPulse, pace: model.dictationPace,
+                                beat: model.dictationBeat,
                                 size: dictatingSize
                             )
                             .transition(.opacity)
@@ -506,6 +520,16 @@ struct NotchRootView: View {
                 contentLayer
             }
             .frame(width: islandSize.width, height: islandSize.height)
+            // The strip leans into the voice: a hair of horizontal stretch,
+            // more when the words come quickly, snapping back with the
+            // settle. A render transform only, so the 30 Hz meter tick never
+            // costs a layout pass.
+            .scaleEffect(
+                x: face.state == .dictating
+                    ? DictationStripLevel.lean(level: model.dictationLevel, pace: model.dictationPace)
+                    : 1,
+                anchor: .top
+            )
             // This used to gate the whole shell's opacity so it could
             // hand off to the bead (`NotchWindowController.rebuildSlivers`,
             // now deleted) whenever collapsed with nothing to say — the
@@ -885,22 +909,31 @@ struct NotchRootView: View {
     }
 
     /// The dictation strip's one word: where the words are going. Nothing
-    /// else on the strip itself; the light is on its edge (`DictationHalo`).
-    /// No words while talking, no finish hint (letting go is the
-    /// instruction), no dot, no microphone name (a dead mic is now visible as
-    /// light that never blooms). The app name reads at `textSecondary`, not
-    /// ghost: it is the only word here.
+    /// else on the strip itself; the light is `DictationStripLight`. No
+    /// words while talking, no finish hint (letting go is the instruction),
+    /// no dot, no microphone name (a dead mic is visible as light that never
+    /// lifts). The name matters in the first second, then it is noise: once
+    /// you are talking it steps back to almost nothing, and the strip earns
+    /// its emptiness.
     private var dictatingContent: some View {
         HStack {
             Text(model.dictationInfo?.appName ?? "")
                 .font(Theme.Fonts.micro)
                 .foregroundStyle(Theme.textSecondary)
                 .lineLimit(1)
+                .opacity(
+                    model.dictationFill > DictationStripLevel.nameFadesAtFill
+                        ? DictationStripLevel.nameFadedOpacity : 1
+                )
+                .animation(
+                    .easeInOut(duration: DictationStripLevel.nameFadeDuration),
+                    value: model.dictationFill > DictationStripLevel.nameFadesAtFill
+                )
             Spacer(minLength: Theme.Space.l)
         }
         .padding(.horizontal, Theme.Space.xxl)
-        .padding(.top, face.contentTopReserve + Theme.Space.notchClearance)
-        .padding(.bottom, Theme.Space.m)
+        .padding(.top, face.contentTopReserve + DictationStripLevel.stripTopAir)
+        .padding(.bottom, DictationStripLevel.stripBottomAir)
         .frame(maxHeight: .infinity, alignment: .bottom)
     }
 
