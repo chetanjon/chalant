@@ -209,18 +209,19 @@ enum DictationStripLevel {
 
     // MARK: - Size and shape
 
-    /// The strip is sized to what it holds: 320 wide on every screen, lower
+    /// The strip is sized to what it holds: 260 wide on every screen, lower
     /// and tauter than the 1.17 pill ("change the shape... the user should
-    /// feel speed", the founder, 2026-08-20). A pill display gets 32, a notch
-    /// display 56.
-    static let stripWidth: CGFloat = 320
+    /// feel speed", then "keep the size smaller and premium", the founder,
+    /// 2026-08-20; 1.23.1 shipped at 320 × 32 and still read big). A pill
+    /// display gets 28, a notch display 52.
+    static let stripWidth: CGFloat = 260
     /// One line of `Fonts.micro` (11 pt semibold).
     static let stripRow: CGFloat = 13
     /// Air above the row (below the reserve) and below it. Tighter than the
     /// island's usual clearances on purpose: the slim strip is the shape of
     /// the speed.
-    static let stripTopAir: CGFloat = 5
-    static let stripBottomAir: CGFloat = 6
+    static let stripTopAir: CGFloat = 3
+    static let stripBottomAir: CGFloat = 4
 
     static func stripSize(topReserve: CGFloat) -> CGSize {
         CGSize(
