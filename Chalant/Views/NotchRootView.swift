@@ -331,9 +331,16 @@ struct NotchRootView: View {
     /// the edge).
     private var topGap: CGFloat {
         if face.state == .dictating {
-            return face.style == .notch
-                ? face.contentTopReserve + DictationStripLevel.notchGap
-                : Self.pillTopGap
+            // Hardware wins, the same rule as `contentTopReserve`: a screen
+            // with a real cutout floats the strip beneath it WHATEVER style
+            // the user chose. The founder runs Pill style on the MacBook,
+            // and gating this on style left the strip straddling the
+            // housing ("look hwo ugly it looks", 2026-08-20). An emulated
+            // notch draws its silhouette and gets the same room.
+            if face.cutout != nil || face.style == .notch {
+                return face.contentTopReserve + DictationStripLevel.notchGap
+            }
+            return Self.pillTopGap
         }
         return face.style == .pill && face.state == .collapsed ? Self.pillTopGap : 0
     }
