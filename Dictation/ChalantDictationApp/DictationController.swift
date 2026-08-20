@@ -487,7 +487,13 @@ final class DictationController {
         // early; the swap decision still waits for the insert's outcome.
         var hearingWork: Task<String?, Never>?
         if !hearingSamples.isEmpty, BetterHearing.isEnabled(), await BetterHearing.shared.isReady {
-            hearingWork = Task {
+            // Utility priority, deliberately below the words' own path.
+            // Measured 2026-08-20 (corpus polishSeconds): with Whisper at
+            // default priority the cooperative pool starved so hard that the
+            // release's budget timer fired seconds late (waits of 1.35 to
+            // 5.17 s against 0.65 s) and every real utterance landed raw.
+            // The second ear must never make the first one late.
+            hearingWork = Task(priority: .utility) {
                 let hints = await Names.forHearing(heard: raw)
                 return await BetterHearing.shared.hear(hearingSamples, hints: hints)
             }
@@ -540,7 +546,11 @@ final class DictationController {
                             shaped, profile: AppProfile(bundleID: bundleID),
                             within: Self.refineBudget))
                 }
-                group.addTask {
+                group.addTask { @MainActor in
+                    // The deadline lives on the main actor's executor, which
+                    // Whisper's CoreML work cannot starve: the cooperative
+                    // pool version fired seconds late under hearing load
+                    // (measured 2026-08-20), which made the budget a fiction.
                     try? await Task.sleep(for: Self.refineBudget + .milliseconds(80), tolerance: .zero)
                     return .budgetExpired
                 }
@@ -550,7 +560,11 @@ final class DictationController {
             }
             if case .polished(.some(let refined)) = landed, !refined.isEmpty {
                 text = refined
-                refinedAtOnce = true
+                // Only an utterance the model actually cleans counts as
+                // refined: short ones come back untouched by design, and
+                // counting them was inflating the refined-at-once rate
+                // (2026-08-20, first corpus read).
+                refinedAtOnce = CleanupPrompt.worthCleaning(shaped)
             } else if case .budgetExpired = landed {
                 Self.log.notice("budget expired at the caller; the words land as said")
             }
