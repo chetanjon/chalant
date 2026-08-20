@@ -522,11 +522,37 @@ final class DictationController {
         var refinedAtOnce = false
         if Cleanup.isEnabled(), !shaped.isEmpty, let target {
             let waitStart = Date()
-            if let refined = try? await polisher.polish(
-                shaped, profile: AppProfile(bundleID: target.bundleID ?? ""), within: Self.refineBudget),
-               !refined.isEmpty {
+            // The budget is enforced HERE, not only inside the polisher. The
+            // inner deadline races on the cooperative pool, and Whisper now
+            // hears during this exact window (1.24.0 starts it at finalize),
+            // so a starved timer could stretch a 0.65 s promise to the
+            // measured 0.9-2.5 s waits (log, 2026-08-18). Whatever happens
+            // below, the words land when the budget says so, with a small
+            // grace for the hop back; pieces that finish late still land in
+            // the polisher's cache for the hearing pass to reuse.
+            enum Landed { case polished(String?), budgetExpired }
+            let polisher = self.polisher
+            let bundleID = target.bundleID ?? ""
+            let landed = await withTaskGroup(of: Landed.self) { group -> Landed in
+                group.addTask {
+                    .polished(
+                        try? await polisher.polish(
+                            shaped, profile: AppProfile(bundleID: bundleID),
+                            within: Self.refineBudget))
+                }
+                group.addTask {
+                    try? await Task.sleep(for: Self.refineBudget + .milliseconds(80), tolerance: .zero)
+                    return .budgetExpired
+                }
+                let first = await group.next() ?? .budgetExpired
+                group.cancelAll()
+                return first
+            }
+            if case .polished(.some(let refined)) = landed, !refined.isEmpty {
                 text = refined
                 refinedAtOnce = true
+            } else if case .budgetExpired = landed {
+                Self.log.notice("budget expired at the caller; the words land as said")
             }
             timings.polish = Date().timeIntervalSince(waitStart)
         }
