@@ -562,7 +562,32 @@ final class DictationController {
         // anything the focused field says next has nothing to do with us and
         // diffing against it would invent corrections out of the user's own
         // typing. Fire and forget, so nothing here is on the path they feel.
+        // The paste "succeeded", but did it have anywhere to land? Part 1 §1
+        // stands: accessibility never REFUSES an insertion. It is allowed to
+        // notice, afterwards and only on affirmative evidence, that focus was
+        // somewhere that takes no text (the desktop, a button): there the ⌘V
+        // was a no-op, the words would be silently lost, and worse, arming
+        // the swap machinery would send a later ⌘Z into an app like Finder,
+        // where undo moves files. The words go back on the clipboard and the
+        // island says so ("if the user forget to pick a place to speak... it
+        // should record and give them what they spoke", the founder,
+        // 2026-08-20). Electron and web apps report nothing affirmative and
+        // keep today's path untouched.
+        var landed = false
         if case .inserted = outcome {
+            let role = LandingProbe.focusedRole()
+            if LandingRoles.verdict(role: role) == .doesNot {
+                hearingWork?.cancel()
+                await inserter.leaveOnClipboard(text)
+                surface.say("Nowhere to type. What you said is on the clipboard.")
+                Self.log.notice(
+                    "no landing spot (role \(role ?? "none", privacy: .public)); words left on the clipboard")
+            } else {
+                landed = true
+            }
+        }
+
+        if landed {
             await CorrectionObserver.shared.watch(
                 inserted: text, in: target.bundleID)
             let insertedAt = Date()
@@ -571,9 +596,25 @@ final class DictationController {
             if let hearingWork {
                 startHearingSwap(work: hearingWork, outcome: outcome, target: target, insertedAt: insertedAt)
             }
+        } else if case .inserted = outcome {
+            // Rescued above; the toast has already spoken.
         } else {
-            // Nothing landed, so there is nothing for the second ear to swap.
+            // Nothing landed, so there is nothing for the second ear to swap,
+            // and the words are already on the clipboard (the chain places
+            // them there on every refusal that gets this far). Until tonight
+            // nothing SAID so, and a refusal read as words vanishing.
             hearingWork?.cancel()
+            switch outcome {
+            case .refused(reason: .secureInputActive(let holder)):
+                let who = holder.map { " (\($0))" } ?? ""
+                surface.say("A password field has the keyboard\(who). What you said is on the clipboard.")
+            case .refused(reason: .targetChanged):
+                surface.say("Focus moved while you spoke. What you said is on the clipboard.")
+            case .leftOnClipboard:
+                surface.say("Couldn't type there. What you said is on the clipboard.")
+            default:
+                break
+            }
         }
 
         // Lengths and durations only. Part 1 §2: transcripts never enter logs.

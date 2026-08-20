@@ -47,6 +47,10 @@ final class IslandDictationSurface: DictationSurface, DictationDisplayLookup {
         model?.endDictating()
     }
 
+    func say(_ message: String) {
+        model?.flashGlance(message)
+    }
+
     func displayShowing(pid: pid_t) -> CGDirectDisplayID? {
         DictationDisplay.displayShowing(pid: pid)
     }

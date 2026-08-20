@@ -34,6 +34,13 @@ actor InsertionChain: TextInserter {
     /// still precedes it.
     private var lastPadding: (before: String, after: String) = ("", "")
 
+    /// Words handed back rather than typed: placed on the clipboard for the
+    /// user to ⌘V wherever they meant to be. The rescue path for an insertion
+    /// that "succeeded" into somewhere that takes no text.
+    func leaveOnClipboard(_ text: String) async {
+        await pasteboard.place(text)
+    }
+
     func insert(_ text: String, into target: InsertionTarget) async -> InsertionOutcome {
         guard !text.isEmpty else { return .refused(reason: .noTarget) }
 
