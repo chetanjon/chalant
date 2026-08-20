@@ -190,7 +190,7 @@ actor FoundationModelsPolisher: Polisher {
                     // waits of 0.9 to 2.5 s against a 0.65 s budget (log,
                     // 2026-08-18), and this says whether the overshoot is in
                     // here or on the way back to the caller.
-                    Self.log.info(
+                    Self.log.notice(
                         "cleanup not ready within budget: \(trimmed.count, privacy: .public) chars, \(pieces.count, privacy: .public) chunk(s), \(warm, privacy: .public) warm, \(started.duration(to: .now).seconds, privacy: .public)s elapsed here")
                     return nil
                 }
@@ -215,7 +215,9 @@ actor FoundationModelsPolisher: Polisher {
     private static func value(of task: Task<String, Never>, within limit: Duration) async -> String? {
         await withTaskGroup(of: String?.self) { group in
             group.addTask { await task.value }
-            group.addTask { try? await Task.sleep(for: limit); return nil }
+            // Explicit zero tolerance: the default lets the system coalesce
+            // the wake, and this timer IS the budget.
+            group.addTask { try? await Task.sleep(for: limit, tolerance: .zero); return nil }
             let first = await group.next() ?? nil
             group.cancelAll()
             return first

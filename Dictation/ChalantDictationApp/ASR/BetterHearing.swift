@@ -138,7 +138,7 @@ actor BetterHearing {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let seconds = Double(started.duration(to: .now).components.seconds)
                 + Double(started.duration(to: .now).components.attoseconds) * 1e-18
-            Self.log.info(
+            Self.log.notice(
                 "heard \(samples.count / 16_000, privacy: .public)s of audio as \(text.count, privacy: .public) chars in \(seconds, privacy: .public)s with \(hints.count, privacy: .public) names (\(promptTokenCount, privacy: .public) prompt tokens)")
             return text.isEmpty ? nil : text
         } catch is CancellationError {

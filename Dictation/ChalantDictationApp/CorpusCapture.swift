@@ -65,11 +65,19 @@ actor CorpusCapture {
     /// `desired` column stays empty on purpose: only the person who spoke can
     /// say what they meant, and Part 4 is firm that a corpus labelled from the
     /// machine's own guess is a story you tell yourself.
-    func finish(output: String, fedBuffers: Int, finalize: TimeInterval?, insert: TimeInterval?) {
+    func finish(
+        output: String, fedBuffers: Int, finalize: TimeInterval?, insert: TimeInterval?,
+        polish: TimeInterval? = nil, refinedAtOnce: Bool = false
+    ) {
         guard let p = pending else { return }
         pending = nil
 
         // A row per utterance, appended, so an interrupted day loses nothing.
+        // The polish wait and whether the words landed refined ride along
+        // because the log's info retention is minutes and the standing
+        // overshoot question needs numbers that survive a night
+        // (2026-08-20; the "elapsed here" line kept purging before anyone
+        // could read it).
         let row: [String: Any] = [
             "id": p.id,
             "audio": "captured/\(p.id).caf",
@@ -83,6 +91,8 @@ actor CorpusCapture {
             "fedBuffers": fedBuffers,
             "finalizeSeconds": finalize ?? 0,
             "insertSeconds": insert ?? 0,
+            "polishSeconds": polish ?? 0,
+            "refinedAtOnce": refinedAtOnce,
             "note": "",
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: row),
