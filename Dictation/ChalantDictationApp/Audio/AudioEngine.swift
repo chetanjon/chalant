@@ -365,6 +365,37 @@ actor AudioEngine {
     }
     private static let keyDownStallThreshold: TimeInterval = 0.5
 
+    /// Whether the live input is actually hearing the world: a real
+    /// microphone's noise floor lifts the peak off exact zero within a
+    /// buffer or two, so a healthy device answers this in ~100 ms. A device
+    /// that flows buffers of pure digital silence, the failure `ensureAlive`
+    /// cannot see because its pulse looks healthy, stays at zero to the
+    /// deadline and is not a microphone.
+    func confirmHearing(within deadline: TimeInterval) async -> Bool {
+        let start = Date()
+        while Date().timeIntervalSince(start) < deadline {
+            if peak > 0 { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return peak > 0
+    }
+
+    /// The live input proved dead at key-down: condemn it so no automatic
+    /// choice returns to it, and rebuild on the next candidate with the
+    /// capture gate kept open, so the hold continues on the new ear.
+    func condemnCurrentInput() {
+        if let current = currentDevice {
+            Self.log.error(
+                "\(current.name, privacy: .public) heard nothing at key-down; condemned, moving to the next input")
+            silentUIDs.insert(current.uid)
+        }
+        let wasOpen = capturing.isOpen
+        if wasOpen { capturing.close() }
+        stop()
+        try? startWarm(avoiding: silentUIDs)
+        if wasOpen { capturing.open() }
+    }
+
     /// Open the gate. Cheap by design: no engine start, so no spin-up latency
     /// and no clipped onset.
     func beginCapture() {

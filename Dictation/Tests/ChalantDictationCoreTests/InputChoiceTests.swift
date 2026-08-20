@@ -49,6 +49,22 @@ struct InputChoiceTests {
         #expect(order.first?.isBuiltInMic == true)
     }
 
+    /// 2026-08-20, the founder's afternoon: the dead built-in hopped to
+    /// "Microsoft Teams Audio" and spent two more silent seconds on a device
+    /// that exists for routing app audio, not for hearing a person. An
+    /// automatic choice never lands on a virtual input; a PIN still does,
+    /// because a pin is an instruction.
+    @Test("virtual devices are never chosen automatically, but a pin wins")
+    func virtualDevicesSinkUnlessPinned() {
+        let order = InputChoice.order(
+            tonight, pinnedUID: nil, silent: ["BuiltInMicrophoneDevice"])
+        #expect(order.first?.name == "External Microphone")
+        #expect(InputChoice.isKnownVirtual(name: "Microsoft Teams Audio"))
+        #expect(!InputChoice.isKnownVirtual(name: "MacBook Air Microphone"))
+        let pinned = InputChoice.order(tonight, pinnedUID: "TeamsVirtual", silent: [])
+        #expect(pinned.first?.uid == "TeamsVirtual")
+    }
+
     /// THE REQUIREMENT. Once the built-in is known to deliver nothing it must
     /// stop leading and go to the back, however preferred it used to be.
     ///
@@ -58,12 +74,17 @@ struct InputChoiceTests {
     /// proven-silent device sinks and the hop continues until something
     /// hears. Asserting the jack here would be encoding tonight's desk into a
     /// test.
-    @Test("a device known to be silent sinks to the back")
+    @Test("a device known to be silent sinks below everything that hears")
     func silentDeviceSinks() {
         let order = InputChoice.order(
             tonight, pinnedUID: nil, silent: ["BuiltInMicrophoneDevice"])
         #expect(order.first?.isBuiltInMic == false)
-        #expect(order.last?.isBuiltInMic == true)
+        // Below every heard device; only the virtual routers, which were
+        // never microphones at all, may sit lower (2026-08-20).
+        let uids = order.map(\.uid)
+        let silentAt = uids.firstIndex(of: "BuiltInMicrophoneDevice")!
+        let heardAt = uids.firstIndex(of: "BuiltInHeadphoneInputDevice")!
+        #expect(silentAt > heardAt)
     }
 
     /// The lid-closed case end to end: the only device that hears anything is
@@ -80,10 +101,15 @@ struct InputChoiceTests {
     /// The jack claims the built-in transport, so it cannot be identified by
     /// transport alone. Absent evidence it still queues last, because on most
     /// Macs it is an empty socket.
-    @Test("the jack trails everything until evidence says otherwise")
+    @Test("the jack trails every real device until evidence says otherwise")
     func jackTrailsByDefault() {
         let order = InputChoice.order(tonight, pinnedUID: nil, silent: [])
-        #expect(order.last?.isJack == true)
+        // Behind the built-in; only the virtual routers sit lower.
+        let uids = order.map(\.uid)
+        let jackAt = uids.firstIndex(of: "BuiltInHeadphoneInputDevice")!
+        let builtInAt = uids.firstIndex(of: "BuiltInMicrophoneDevice")!
+        #expect(jackAt > builtInAt)
+        #expect(InputChoice.isKnownVirtual(name: order.last?.name ?? ""))
     }
 
     @Test("a pinned device leads, because the user said so")

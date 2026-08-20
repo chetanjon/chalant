@@ -868,3 +868,15 @@ type", ⌘V in any app pastes the words, and NO ⌘Z ever reaches Finder;
 (AX reports nothing affirmative there); (3) focus a password field → toast
 names the holder. Automated coverage: LandingRolesTests pins the verdict
 table (affirmative-only, closed list, unknown roles fail toward nothing).
+
+## 2026-08-20 — first-press dead mic (fix/first-press)
+
+Live protocol for the founder's next session, wired earphones in:
+(1) wait 10+ min so the ear rests, then FIRST press with earphones plugged:
+the hold must land words (the key-down proof condemns a silent built-in in
+under a second; log shows "heard nothing at key-down; condemned"); (2) the
+auto-hop must never visit "Microsoft Teams Audio" (log); (3) a normal-length
+utterance must land refined with polish wait <= 0.73 s while dictating into a
+BACKGROUND-app target (VS Code), which exercises the latency-critical
+activity against App Nap coalescing. Automated: InputChoiceTests pin the
+virtual-device exile and the pin exception.

@@ -68,11 +68,13 @@ public enum InputChoice {
             ordered.append(device)
         }
 
-        let heard = devices.filter { !silent.contains($0.uid) }
+        let heard = devices.filter { !silent.contains($0.uid) && !isKnownVirtual(name: $0.name) }
 
-        // The user's own choice, while it is still delivering audio.
+        // The user's own choice, while it is still delivering audio. A pin
+        // is an instruction, so a pinned virtual device is honored; only
+        // AUTOMATIC choices refuse them.
         if let pinnedUID {
-            add(heard.first { $0.uid == pinnedUID })
+            add(devices.first { $0.uid == pinnedUID && !silent.contains($0.uid) })
         }
         // Quality preference (CLAUDE.md 1575), among devices still believed
         // alive: the Mac's own mic, then the system default if it is a real
@@ -84,6 +86,21 @@ public enum InputChoice {
         // Everything proven silent, in its original order, last.
         devices.forEach { add($0) }
         return ordered
+    }
+
+    /// Inputs that exist for routing app audio, not for hearing a person:
+    /// conferencing loopbacks and virtual cables. Automatic selection must
+    /// never land on one: on 2026-08-20 a dead built-in mic hopped to
+    /// "Microsoft Teams Audio" and spent two more silent seconds there
+    /// before finding the real microphone. A user who PINS one still gets
+    /// it, because a pin is an instruction.
+    public static func isKnownVirtual(name: String) -> Bool {
+        let lowered = name.lowercased()
+        let virtual = [
+            "teams audio", "zoomaudiodevice", "zoom audio", "blackhole",
+            "loopback", "soundflower", "vb-cable", "krisp",
+        ]
+        return virtual.contains { lowered.contains($0) }
     }
 
     /// Whether a device has stopped being a microphone.
