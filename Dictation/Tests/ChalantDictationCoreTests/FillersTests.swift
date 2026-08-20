@@ -67,6 +67,24 @@ struct FillersTests {
         }
     }
 
+    /// The transcriber puts a comma at every pause, so a filler usually sits
+    /// between two of them. The filler's own comma always left with it; the
+    /// OPENING comma used to stay, and "because, you know, the music" came
+    /// back "because, the music" all over the founder's real corpus
+    /// (2026-08-20, "chalant is using a lot of commas"). The pause comma dies
+    /// with its filler; a full stop is never touched.
+    @Test("the pause comma dies with its filler")
+    func dropsThePauseComma() {
+        #expect(
+            Fillers.removing("the mixing was bad because, you know, the music was loud")
+                == "the mixing was bad because the music was loud")
+        #expect(
+            Fillers.removing("it is pretty good at, you know, um, parsing my gaps")
+                == "it is pretty good at parsing my gaps")
+        #expect(Fillers.removing("Yes, um, that's right") == "Yes that's right")
+        #expect(Fillers.removing("It landed. Um, next one") == "It landed. Next one")
+    }
+
     /// Fillers must never take a real word with them, and must never leave a
     /// stranded comma where one used to sit.
     @Test("no stranded punctuation is left behind")
