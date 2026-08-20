@@ -858,3 +858,13 @@ button, its note, then the Contacts row in its not-determined state ("Use the
 names in Contacts", bordered, with the note). Same shape as the hook-rules box
 on the Agents page; no capsule, hairlines only between rows. The founder
 reviews by pixels, so the PR asks them to look too.
+
+## 2026-08-20 — nowhere-to-type rescue (feat/nowhere-to-type)
+
+Not yet exercised live. The protocol rows to run at the founder's next
+session: (1) click the desktop, hold Option, speak → island toast "Nowhere to
+type", ⌘V in any app pastes the words, and NO ⌘Z ever reaches Finder;
+(2) dictate into VS Code and Slack → no toast, insertion exactly as before
+(AX reports nothing affirmative there); (3) focus a password field → toast
+names the holder. Automated coverage: LandingRolesTests pins the verdict
+table (affirmative-only, closed list, unknown roles fail toward nothing).

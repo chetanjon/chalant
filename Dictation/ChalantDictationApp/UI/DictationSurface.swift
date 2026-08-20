@@ -16,6 +16,10 @@ protocol DictationSurface: AnyObject {
     func update(level: CGFloat, mic: String?)
     /// The key came up, or the session stood down.
     func hide()
+    /// A short line the surface shows after the strip is gone: today, that
+    /// the words had nowhere to land and are on the clipboard. Never used
+    /// while the strip is up.
+    func say(_ message: String)
 }
 
 /// How the controller asks which display a pid is showing on, without the
