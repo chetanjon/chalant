@@ -164,10 +164,10 @@ struct GeneralSection: View {
                         "Your words land tidied, on this Mac: ums and false starts gone, "
                         + "punctuation fixed, a spoken list made into a list. Most of the tidying "
                         + "happens while you talk; the rest takes about half a second after you "
-                        + "let go. If it is not ready by then, the words land as said and are "
-                        + "tidied in place a moment later, unless you have started typing. Names, "
-                        + "numbers and every \"not\" are checked, and anything it changed that it "
-                        + "should not have is thrown away."
+                        + "let go. If it is not ready by then, the words land as said and stay: "
+                        + "nothing on the page changes after it lands. Names, numbers and every "
+                        + "\"not\" are checked, and anything it changed that it should not have "
+                        + "is thrown away."
                     )
 
                     SettingDivider()
