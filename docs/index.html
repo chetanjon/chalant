@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <title>Chalant · the AI-native dynamic island for Mac</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Chalant is the AI-native dynamic island for the Mac notch. Talk to it or type at it: calendar, music, texting with read-back, screen reading. Hold Option and dictate anywhere. Keyless, on-device, free.">
+<meta name="description" content="Hold Option and talk: system-wide dictation that tidies as you speak, your names learned, nothing leaving your Mac. It lives in Chalant, the AI-native dynamic island for the notch: calendar, music, texting with read-back, screen reading. Free.">
 <meta property="og:title" content="Chalant · the AI-native dynamic island for Mac">
-<meta property="og:description" content="Talk to your notch. Calendar, music, texting with read-back, screen reading, and dictation anywhere on a held Option key. Keyless, on-device, free.">
+<meta property="og:description" content="Hold Option and talk, anywhere on your Mac. Tidy dictation on-device, living in the AI-native dynamic island for the notch. Keyless, instant, free.">
 <meta property="og:image" content="https://chetanjon.github.io/chalant/assets/social-card.png">
 <meta property="og:url" content="https://www.chetanjonnalagadda.com/chalant">
 <meta property="og:type" content="website">
@@ -153,6 +153,28 @@
     /* The demo is the same black as the page; only a whisper of an
        edge so it reads as a surface, not a hole. */
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07);
+  }
+
+  /* The dictation film leads the page now, and it is a strip under the
+     island with a line of 11pt text: at 560 the words are too small to
+     read, so it overhangs the column the way it did further down. */
+  .demo-wide { width: min(760px, 92vw); }
+
+  .hero .more {
+    margin-top: 22px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--ghost);
+    max-width: 52ch;
+  }
+
+  .hero .more code {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 1px 6px;
+    border: 1px solid var(--edge);
+    border-radius: 6px;
+    color: var(--ink);
   }
 
   /* ---- Download ---- */
@@ -366,22 +388,44 @@
         <path d="M 995 70 L 1047 70"/>
       </svg>
     </div>
-    <h1>The AI-native dynamic island<br>your Mac was missing.</h1>
+    <h1>Hold Option and talk.<br>The words land where you were typing.</h1>
     <p class="sub">
-      Talk to it or type at it. Calendar, focus, music, windows, files.
-      <em>The verbs run on this Mac, keyless, instant.</em>
+      System-wide dictation that tidies as you speak: ums gone, punctuation
+      placed, your names learned. <em>All on this Mac, keyless, instant.</em>
+    </p>
+    <div class="demo demo-wide">
+      <video src="assets/chalant-dictation.mp4" poster="assets/chalant-dictation-poster.jpg"
+             autoplay loop muted playsinline preload="metadata"
+             aria-label="A hold on the Option key: the strip glows under the island, a spoken sentence lands as tidy text in the document, and a name is corrected in place a moment later."></video>
+    </div>
+    <p class="more">
+      In any app: hold the left <code>option</code> key, say it, let go. A
+      spoken list lands as a list, a repeated thought lands once, and with
+      Better hearing on a second ear corrects a word in place a moment later.
+      Nothing you say leaves this Mac. Dictation needs macOS 26.
+    </p>
+  </section>
+
+  <section class="get">
+    <a class="button" id="get" href="https://github.com/chetanjon/chalant/releases/latest/download/Chalant.dmg">Download for Mac</a>
+    <div class="fine">apple silicon · macos 15+ · dictation on 26 · free</div>
+    <div class="fine">open · drag chalant to applications</div>
+  </section>
+
+  <section class="dictate">
+    <h2>The island it lives in</h2>
+    <p class="lead">
+      The AI-native dynamic island your Mac was missing.
     </p>
     <div class="demo">
       <video src="assets/chalant-demo.mp4" poster="assets/chalant-demo-poster.jpg"
              autoplay loop muted playsinline preload="metadata"
              aria-label="The island blooms open from the notch into media, ambience, and your day."></video>
     </div>
-  </section>
-
-  <section class="get">
-    <a class="button" id="get" href="https://github.com/chetanjon/chalant/releases/latest/download/Chalant.dmg">Download for Mac</a>
-    <div class="fine">apple silicon · macos 15+ · free</div>
-    <div class="fine">open · drag chalant to applications</div>
+    <p class="more">
+      Talk to it or type at it. Calendar, focus, music, windows, files.
+      The verbs run on this Mac, keyless, instant.
+    </p>
   </section>
 
   <dl class="verbs">
@@ -418,23 +462,6 @@
       <dd>Anything on your Mac can raise a status pill: builds, deploys, agents. Loopback only.</dd>
     </div>
   </dl>
-
-  <section class="dictate">
-    <h2>Hold Option and talk</h2>
-    <p class="lead">
-      In any app, hold the left <code>option</code> key, say it, let go.
-      The words land where you were typing.
-    </p>
-    <video src="assets/chalant-dictation.mp4" poster="assets/chalant-dictation-poster.jpg"
-           autoplay loop muted playsinline preload="metadata"
-           aria-label="A hold on the Option key: the strip glows under the island, a spoken sentence lands as tidy text in the document, and a name is corrected in place a moment later."></video>
-    <p class="more">
-      Ums gone, punctuation placed, a spoken list made into a list. Names spelled
-      the way you type or fix them, and, with Better hearing on, a second ear
-      that corrects a word in place a moment later. All of it on this Mac; nothing
-      you say leaves it. Needs macOS 26.
-    </p>
-  </section>
 
   <section class="film">
     <h2>The tour</h2>
