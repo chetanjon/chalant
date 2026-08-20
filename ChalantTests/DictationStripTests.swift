@@ -168,7 +168,7 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(DictationStripLevel.slip(level: 1, pulse: 1).coreOpacity, 1, accuracy: 0.001)
     }
 
-    // MARK: - The pool and the lean
+    // MARK: - The pool
 
     func testThePoolKicksWiderWithTheVoiceAndHarderInGear() {
         let rest = DictationStripLevel.pool(level: 0, pace: 0)
@@ -181,12 +181,13 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(quick.opacity, 0.34, accuracy: 0.001)
     }
 
-    /// The lean is a hair, never a lurch: at most 3.5% even at full voice in
-    /// the highest gear, and exactly 1 in silence.
-    func testTheLeanIsAHairNeverALurch() {
-        XCTAssertEqual(DictationStripLevel.lean(level: 0, pace: 0), 1, accuracy: 0.0001)
-        XCTAssertEqual(DictationStripLevel.lean(level: 1, pace: 0), 1.015, accuracy: 0.0001)
-        XCTAssertEqual(DictationStripLevel.lean(level: 1, pace: 1), 1.035, accuracy: 0.0001)
+    /// The strip's body never moves on its own: the lean (a voice-driven
+    /// scaleX on the whole strip) shimmered text at 30 Hz and read as
+    /// glitchy sliding edges, and a resting sheen read as "sliding from
+    /// left" (founder, 2026-08-20). Both are gone; entering dictation pops
+    /// on its own curve instead of pouring open.
+    func testEnteringDictationPopsInsteadOfPouring() {
+        XCTAssertEqual(Theme.Motion.dictationPop, .spring(response: 0.22, dampingFraction: 0.85))
     }
 
     /// The lit portion of the edge: about the middle third at the start of a

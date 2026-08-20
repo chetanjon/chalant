@@ -236,6 +236,14 @@ struct NotchRootView: View {
         }
     }
 
+    /// The island pours between states on one curve, with one exception:
+    /// INTO dictation it pops (`Theme.Motion.dictationPop`). This evaluates
+    /// with the state already changed, so entering `.dictating` pops and
+    /// leaving it pours shut like everything else.
+    private var stateMotion: Animation {
+        face.state == .dictating ? Theme.Motion.dictationPop : Theme.Motion.island
+    }
+
     private var islandShape: IslandShape {
         // Pill: a free-floating bar with all four corners turned and no
         // eaves to cling with. A screen with no cutout has nothing to
@@ -520,16 +528,6 @@ struct NotchRootView: View {
                 contentLayer
             }
             .frame(width: islandSize.width, height: islandSize.height)
-            // The strip leans into the voice: a hair of horizontal stretch,
-            // more when the words come quickly, snapping back with the
-            // settle. A render transform only, so the 30 Hz meter tick never
-            // costs a layout pass.
-            .scaleEffect(
-                x: face.state == .dictating
-                    ? DictationStripLevel.lean(level: model.dictationLevel, pace: model.dictationPace)
-                    : 1,
-                anchor: .top
-            )
             // This used to gate the whole shell's opacity so it could
             // hand off to the bead (`NotchWindowController.rebuildSlivers`,
             // now deleted) whenever collapsed with nothing to say — the
@@ -570,7 +568,7 @@ struct NotchRootView: View {
             // (SwiftUI's onDrop never fires in this panel); the accent edge
             // lights via face.isDropTargeted. The island opens after the
             // drop lands, not during the drag, so nothing disrupts it.
-            .animation(Theme.Motion.island, value: face.state)
+            .animation(stateMotion, value: face.state)
             .animation(Theme.Motion.hover, value: face.isHovering)
             .animation(Theme.Motion.hover, value: statusWings)
 
@@ -590,7 +588,7 @@ struct NotchRootView: View {
         // it is a lost one.
         .opacity(hiddenUntilReachedFor ? 0 : 1)
         .animation(Theme.Motion.island, value: hiddenUntilReachedFor)
-        .animation(Theme.Motion.island, value: face.state)
+        .animation(stateMotion, value: face.state)
         .frame(maxWidth: .infinity, alignment: .top)
         // The user's accent choice, not the raw album color, fixed
         // modes must win everywhere below this point.
