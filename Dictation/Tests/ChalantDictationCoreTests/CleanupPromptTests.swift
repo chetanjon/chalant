@@ -35,6 +35,13 @@ struct CleanupPromptTests {
         #expect(text.contains("smallest possible changes"))
         #expect(text.contains("do not paraphrase"))
         #expect(text.contains("do not swap in synonyms"))
+        // 2026-08-20, the founder: "using a lot of commas" and "if the user
+        // is saying the same thing it should refine and give me one". The
+        // repair keeps the LATER version: the first cut of this rule kept
+        // the earlier one and flipped "I don't, I do use it" to "I don't
+        // use it" on the real corpus.
+        #expect(text.contains("only mark a pause"))
+        #expect(text.contains("always the later one"))
     }
 
     // MARK: - Which utterances are worth the model's time
