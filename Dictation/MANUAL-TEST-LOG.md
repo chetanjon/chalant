@@ -899,3 +899,21 @@ appears in the Clipboard tab (the paste mechanics stay masked; the user's
 old clipboard is restored). Automated: PasteboardGuard item tests pin which
 writes carry the mark; ClipboardStore tests pin that unmasked writes are
 archived and masked ones are skipped.
+
+## 2026-08-21 — the row tells the truth (feat/the-row-tells-the-truth, campaign phase 0)
+
+Not yet exercised live. Schema 2: the corpus row now carries the campaign's
+instruments (holdSeconds, inputPeak, keyDownHeard, polishOutcome, chunkCount,
+warmChunks, failedChunks, refinedChanged, polishColdStart,
+secondsSinceLastPolish), refinedAtOnce is honest (landed AND at least one
+chunk actually cleaned), and the hearing decision is appended as its own
+kind:"hearing" line joined on the row id. Protocol rows for the founder:
+(1) capture on, dictate 5 real utterances including one long paragraph;
+open captured.jsonl and confirm every new field is present, schema is 2,
+and refinedAtOnce is false on any row whose text landed as said;
+(2) with Better hearing on, dictate a name-dense sentence; confirm a
+kind:"hearing" line follows with a decision word (swapped / unchanged /
+userActed / ...); (3) speak 10 corpus takes containing deliberate
+self-corrections ("scratch that", "no wait, Wednesday"): phase 4's ground
+truth, collected now while capture is on. Automated: PolishOutcomeTests
+pins the refined-at-once truth table.

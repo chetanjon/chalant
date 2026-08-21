@@ -115,6 +115,13 @@ final class DictationController {
     /// How many audio buffers actually reached the analyzer this utterance.
     /// Zero with a healthy engine means the microphone is delivering silence.
     private(set) var fedBuffers = 0
+    /// The loudest meter reading of the hold, and whether the key-down mic
+    /// proof heard anything: the quiet-speech instruments (campaign phase 0).
+    /// Sampled off the 30 Hz meter, so it undercounts true peaks the same
+    /// known way the meter does; good enough to separate a whisper from a
+    /// normal voice, which is all it is for.
+    private var holdPeak: Double = 0
+    private var keyDownHeard = true
 
     var onStateChange: (@MainActor () -> Void)?
 
@@ -247,6 +254,8 @@ final class DictationController {
 
         startedAt = Date()
         timings = StageTimings()
+        holdPeak = 0
+        keyDownHeard = true
 
         let front = NSWorkspace.shared.frontmostApplication
         target = InsertionTarget(
@@ -300,7 +309,9 @@ final class DictationController {
         // is a dead input: condemn it and rebuild on the next candidate
         // BEFORE the analyzer binds to its format. A healthy mic passes this
         // gate in one or two buffers.
-        if await !audio.confirmHearing(within: 0.9) {
+        let heardAtKeyDown = await audio.confirmHearing(within: 0.9)
+        keyDownHeard = heardAtKeyDown
+        if !heardAtKeyDown {
             await audio.condemnCurrentInput()
         }
         let format = await audio.currentFormat
@@ -550,6 +561,14 @@ final class DictationController {
         // (Better hearing) is the one later change left, and it is a switch.
         var text = shaped
         var refinedAtOnce = false
+        // The facts behind the row (campaign phase 0): why the polish landed
+        // or didn't, and the counters the speed work steers by.
+        var polishOutcomeName = shaped.isEmpty ? "empty" : (Cleanup.isEnabled() ? "" : "off")
+        var chunkCount = 0
+        var warmChunks = 0
+        var failedChunks = 0
+        var polishColdStart = false
+        var sinceLastPolish: Double = -1
         if Cleanup.isEnabled(), !shaped.isEmpty, let target {
             let waitStart = Date()
             // The budget is enforced HERE, not only inside the polisher. The
@@ -560,13 +579,13 @@ final class DictationController {
             // below, the words land when the budget says so, with a small
             // grace for the hop back; pieces that finish late still land in
             // the polisher's cache for the hearing pass to reuse.
-            enum Landed { case polished(String?), budgetExpired }
+            enum Landed { case polished(PolishOutcome), budgetExpired }
             let polisher = self.polisher
             let bundleID = target.bundleID ?? ""
             let landed = await withTaskGroup(of: Landed.self) { group -> Landed in
                 group.addTask {
                     .polished(
-                        try? await polisher.polish(
+                        await polisher.polish(
                             shaped, profile: AppProfile(bundleID: bundleID),
                             within: Self.refineBudget))
                 }
@@ -604,18 +623,34 @@ final class DictationController {
                 group.cancelAll()
                 return first
             }
-            if case .polished(.some(let refined)) = landed, !refined.isEmpty {
-                text = refined
-                // Only an utterance the model actually cleans counts as
-                // refined: short ones come back untouched by design, and
-                // counting them was inflating the refined-at-once rate
-                // (2026-08-20, first corpus read).
-                refinedAtOnce = CleanupPrompt.worthCleaning(shaped)
-            } else if case .budgetExpired = landed {
+            switch landed {
+            case .polished(let outcome):
+                polishOutcomeName = outcome.result.rawValue
+                chunkCount = outcome.chunks
+                warmChunks = outcome.warmChunks
+                failedChunks = outcome.failedChunks
+                polishColdStart = outcome.coldStart
+                sinceLastPolish = outcome.secondsSinceLastPolish ?? -1
+                if let refined = outcome.text, !refined.isEmpty {
+                    text = refined
+                    // Honest now (phase 0): landed AND at least one chunk
+                    // actually came back from the model. An unavailable
+                    // model and a run where every chunk failed both used
+                    // to count, which inflated the rate the whole speed
+                    // campaign steers by.
+                    refinedAtOnce = outcome.refinedAtOnce
+                } else if outcome.result == .budgetExpiredInner {
+                    // Used to land raw in complete silence; the polisher's
+                    // own notice says where the time went.
+                    Self.log.notice("cleanup missed its inner budget; the words land as said")
+                }
+            case .budgetExpired:
+                polishOutcomeName = "budgetExpiredCaller"
                 Self.log.notice("budget expired at the caller; the words land as said")
             }
             timings.polish = Date().timeIntervalSince(waitStart)
         }
+        let refinedChanged = text != shaped
         guard !text.isEmpty else {
             // Silence is not a corpus entry. Keeping it would pad the set with
             // rows nobody can label.
@@ -639,6 +674,29 @@ final class DictationController {
         let insertStart = Date()
         let outcome = await inserter.insert(text, into: target)
         timings.insertion = Date().timeIntervalSince(insertStart)
+
+        // The row goes out the moment the outcome is known, BEFORE the
+        // hearing starts, so the hearing's decision seconds later can be
+        // appended against this row's id (`CorpusCapture.annotate`).
+        let holdSeconds = startedAt.map { releasedAt.timeIntervalSince($0) } ?? 0
+        let corpusRow = await corpus.finish(
+            output: text,
+            fedBuffers: fedBuffers,
+            finalize: timings.finalization,
+            insert: timings.insertion,
+            polish: timings.polish,
+            prepare: prepareSeconds,
+            refinedAtOnce: refinedAtOnce,
+            holdSeconds: holdSeconds,
+            inputPeak: holdPeak,
+            keyDownHeard: keyDownHeard,
+            polishOutcome: polishOutcomeName,
+            chunkCount: chunkCount,
+            warmChunks: warmChunks,
+            failedChunks: failedChunks,
+            refinedChanged: refinedChanged,
+            polishColdStart: polishColdStart,
+            secondsSinceLastPolish: sinceLastPolish)
 
         // Now watch what they do to it. Only when the text actually landed in
         // the document: text left on the clipboard was never inserted, so
@@ -679,7 +737,8 @@ final class DictationController {
                 startHearingSwap(
                     samples: hearingSamples, heard: raw, outcome: outcome, target: target,
                     insertedAt: insertedAt,
-                    utteranceSeconds: Double(hearingSamples.count) / 16_000)
+                    utteranceSeconds: Double(hearingSamples.count) / 16_000,
+                    corpusRow: corpusRow)
             }
         } else if case .inserted = outcome {
             // Rescued above; the toast has already spoken.
@@ -714,17 +773,6 @@ final class DictationController {
             ring overruns \(overruns, privacy: .public)
             """
         )
-
-        // The corpus row goes out last, once the outcome is known, so a
-        // captured utterance carries the same numbers the log line does.
-        await corpus.finish(
-            output: text,
-            fedBuffers: fedBuffers,
-            finalize: timings.finalization,
-            insert: timings.insertion,
-            polish: timings.polish,
-            prepare: prepareSeconds,
-            refinedAtOnce: refinedAtOnce)
 
         onStateChange?()
     }
@@ -859,7 +907,7 @@ final class DictationController {
     /// `heard` is the first ear's raw text: it picks the names the second ear
     /// reads before it listens (`Names.forHearing`), which is what took the
     /// names set from 29.9% to 10.0% word error on this Mac.
-    private func startHearingSwap(samples: [Float], heard firstHearing: String, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date, utteranceSeconds: TimeInterval) {
+    private func startHearingSwap(samples: [Float], heard firstHearing: String, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date, utteranceSeconds: TimeInterval, corpusRow: String? = nil) {
         hearingTask?.cancel()
         let generation = swapGeneration
         activity.arm()
@@ -887,6 +935,12 @@ final class DictationController {
             let landed = self.lastLanded
             guard BetterHearing.plausible(hearing: heard, against: landed) else {
                 Self.log.notice("hearing kept: implausible (\(heard.count, privacy: .public) vs \(landed.count, privacy: .public) chars)")
+                if let corpusRow {
+                    await self.corpus.annotate(
+                        id: corpusRow, decision: "implausible",
+                        seconds: Date().timeIntervalSince(insertedAt),
+                        charsBefore: landed.count, charsAfter: heard.count)
+                }
                 self.activity.disarm()
                 return
             }
@@ -906,6 +960,12 @@ final class DictationController {
             switch SwapPolicy.decide(situation) {
             case .keep(let reason):
                 Self.log.notice("hearing kept: \(reason.rawValue, privacy: .public) after \(Date().timeIntervalSince(insertedAt), privacy: .public)s")
+                if let corpusRow {
+                    await self.corpus.annotate(
+                        id: corpusRow, decision: reason.rawValue,
+                        seconds: Date().timeIntervalSince(insertedAt),
+                        charsBefore: landed.count, charsAfter: tidied.count)
+                }
             case .swap:
                 self.activity.expectOwnKeystrokes()
                 let swapped = await self.inserter.replaceLastInsertion(with: tidied, into: target)
@@ -915,6 +975,12 @@ final class DictationController {
                 }
                 Self.log.notice(
                     "hearing \(swapped ? "swapped" : "swap failed", privacy: .public): \(landed.count, privacy: .public) -> \(tidied.count, privacy: .public) chars after \(Date().timeIntervalSince(insertedAt), privacy: .public)s")
+                if let corpusRow {
+                    await self.corpus.annotate(
+                        id: corpusRow, decision: swapped ? "swapped" : "swapFailed",
+                        seconds: Date().timeIntervalSince(insertedAt),
+                        charsBefore: landed.count, charsAfter: tidied.count)
+                }
             }
             self.hearingTask = nil
         }
@@ -973,6 +1039,7 @@ final class DictationController {
                 // the surface, which can see the strip's formulas.
                 let level = await self.audio.peak
                 let mic = await self.audio.currentDevice?.name
+                self.holdPeak = max(self.holdPeak, Double(level))
                 self.surface.update(level: CGFloat(level), mic: mic)
             }
         }
