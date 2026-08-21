@@ -60,15 +60,27 @@ actor FoundationModelsPolisher: Polisher {
     /// that is closed, see `CleanupPrompt.closedChunks`) and read by `polish`
     /// at release, so a long paragraph waits for its tail chunk, not for all
     /// of them. Cleared for each new utterance: the pieces of one hold are no
-    /// use to the next, and the cache must never grow all day.
-    private var tidiedPieces: [String: String] = [:]
-    private var piecesInFlight: [String: Task<String, Never>] = [:]
+    /// use to the next, and the cache must never grow all day. Each piece
+    /// carries whether it FAILED (shipped as dictated), because the honest
+    /// refined-at-once flag needs to know when the reply is the input rejoined.
+    private var tidiedPieces: [String: (text: String, failed: Bool)] = [:]
+    private var piecesInFlight: [String: Task<(text: String, failed: Bool), Never>] = [:]
+
+    /// When the last model reply completed, ever, in this process. Set in
+    /// `finished`, so pretidy replies count too. Nil until the first reply:
+    /// that is the cold-start population the speed campaign hunts, and the
+    /// gap since is the eviction-horizon instrument (phase 0, 2026-08-21).
+    private var lastRespondCompletedAt: Date?
+    private var utteranceStartedCold = true
+    private var gapAtUtteranceStart: Double?
 
     func beginUtterance() {
         for task in piecesInFlight.values { task.cancel() }
         piecesInFlight.removeAll()
         tidiedPieces.removeAll()
         tailInFlight = nil
+        utteranceStartedCold = lastRespondCompletedAt == nil
+        gapAtUtteranceStart = lastRespondCompletedAt.map { Date().timeIntervalSince($0) }
     }
 
     /// Tidy, in the background, every chunk of `text` so far: the closed
@@ -113,36 +125,48 @@ actor FoundationModelsPolisher: Polisher {
     /// The tail speculation in flight, if any: only one at a time.
     private var tailInFlight: String?
 
-    private func finished(piece: String, result: String) {
+    private func finished(piece: String, result: (text: String, failed: Bool)) {
         tidiedPieces[piece] = result
         piecesInFlight[piece] = nil
         if tailInFlight == piece { tailInFlight = nil }
+        lastRespondCompletedAt = Date()
     }
 
     func polish(_ text: String, profile: AppProfile) async throws -> String {
-        try await polish(text, profile: profile, within: nil) ?? text
+        await polish(text, profile: profile, within: nil).text ?? text
     }
 
-    /// The tidied text if every piece is ready within `budget`, else nil.
+    /// The outcome of one release-time cleanup: the tidied text when every
+    /// piece is ready within `budget`, and always the facts (chunk counts,
+    /// warm hits, failures, cold start) the corpus row keeps.
     ///
     /// "Refined at once" (spec 2026-08-17, late): at release the caller waits
     /// this long for the refined text and lands it once; if it is not ready,
     /// the raw words land and the swap takes over. Pieces started here keep
     /// running past the budget and land in the cache, so the swap's own call
     /// picks them up rather than starting over.
-    func polish(_ text: String, profile: AppProfile, within budget: Duration?) async throws -> String? {
+    func polish(_ text: String, profile: AppProfile, within budget: Duration?) async -> PolishOutcome {
+        func outcome(_ result: PolishOutcome.Result, text: String? = nil, chunks: Int = 0, warm: Int = 0, failed: Int = 0) -> PolishOutcome {
+            PolishOutcome(
+                result: result, text: text, chunks: chunks, warmChunks: warm,
+                failedChunks: failed, coldStart: utteranceStartedCold,
+                secondsSinceLastPolish: gapAtUtteranceStart)
+        }
+
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return text }
+        guard !trimmed.isEmpty else { return outcome(.empty) }
 
         // Option B (founder, 2026-08-16): short utterances ship as dictated.
         // The model does nothing useful under 40 characters and costs half a
         // second there; the measured case is on `CleanupPrompt.worthCleaning`.
         guard CleanupPrompt.worthCleaning(trimmed) else {
             Self.log.info("cleanup skipped: \(trimmed.count, privacy: .public) chars, under the line")
-            return text
+            return outcome(.belowMinimum)
         }
 
-        guard case .available = SystemLanguageModel.default.availability else { return text }
+        guard case .available = SystemLanguageModel.default.availability else {
+            return outcome(.modelUnavailable)
+        }
 
         // A few sentences at a time, and the reason is reliability rather than
         // the context window. Measured on the founder's own long paragraph
@@ -164,14 +188,16 @@ actor FoundationModelsPolisher: Polisher {
         let deadline = budget.map { started.advanced(by: $0) }
         var out: [String] = []
         var warm = 0
+        var failed = 0
 
         for piece in pieces {
             if let done = tidiedPieces[piece] {
-                out.append(done)
+                out.append(done.text)
+                if done.failed { failed += 1 }
                 warm += 1
                 continue
             }
-            let task: Task<String, Never>
+            let task: Task<(text: String, failed: Bool), Never>
             if let running = piecesInFlight[piece] {
                 task = running
                 warm += 1
@@ -192,11 +218,14 @@ actor FoundationModelsPolisher: Polisher {
                     // here or on the way back to the caller.
                     Self.log.notice(
                         "cleanup not ready within budget: \(trimmed.count, privacy: .public) chars, \(pieces.count, privacy: .public) chunk(s), \(warm, privacy: .public) warm, \(started.duration(to: .now).seconds, privacy: .public)s elapsed here")
-                    return nil
+                    return outcome(.budgetExpiredInner, chunks: pieces.count, warm: warm, failed: failed)
                 }
-                out.append(value)
+                out.append(value.text)
+                if value.failed { failed += 1 }
             } else {
-                out.append(await task.value)
+                let value = await task.value
+                out.append(value.text)
+                if value.failed { failed += 1 }
             }
         }
 
@@ -204,16 +233,18 @@ actor FoundationModelsPolisher: Polisher {
         Self.log.info(
             """
             cleaned \(trimmed.count, privacy: .public) chars in \(pieces.count, privacy: .public) \
-            chunk(s), \(warm, privacy: .public) tidied while talking, \(elapsed.seconds, privacy: .public)s\
-            \(budget == nil ? "" : " (within budget)")
+            chunk(s), \(warm, privacy: .public) tidied while talking, \(failed, privacy: .public) \
+            failed, \(elapsed.seconds, privacy: .public)s\(budget == nil ? "" : " (within budget)")
             """)
-        return out.joined(separator: " ")
+        return outcome(
+            .landed, text: out.joined(separator: " "),
+            chunks: pieces.count, warm: warm, failed: failed)
     }
 
     /// The task's value if it finishes within `limit`, else nil; the task
     /// itself keeps running.
-    private static func value(of task: Task<String, Never>, within limit: Duration) async -> String? {
-        await withTaskGroup(of: String?.self) { group in
+    private static func value<T: Sendable>(of task: Task<T, Never>, within limit: Duration) async -> T? {
+        await withTaskGroup(of: T?.self) { group in
             group.addTask { await task.value }
             // Explicit zero tolerance: the default lets the system coalesce
             // the wake, and this timer IS the budget.
@@ -225,9 +256,10 @@ actor FoundationModelsPolisher: Polisher {
     }
 
     /// One piece through the model, unwrapped, ending kept, guarded. Every
-    /// failure returns the piece as dictated. One session per piece, never
-    /// shared: see `warmed`.
-    private static func tidy(piece: String) async -> String {
+    /// failure returns the piece as dictated, marked `failed` so the honest
+    /// refined-at-once flag can tell a cleaned reply from the input handed
+    /// back. One session per piece, never shared: see `warmed`.
+    private static func tidy(piece: String) async -> (text: String, failed: Bool) {
         let session = LanguageModelSession(instructions: CleanupPrompt.instructions(for: piece))
         let reply: String
         do {
@@ -243,7 +275,7 @@ actor FoundationModelsPolisher: Polisher {
             // how the shared-session context overflow went unnoticed.
             log.error(
                 "cleanup failed on a chunk, shipping that chunk as dictated: \(String(describing: error), privacy: .public)")
-            return piece
+            return (piece, failed: true)
         }
 
         let cleaned = CleanupPrompt.keepingEnding(of: piece, in: CleanupPrompt.unwrap(reply))
@@ -253,9 +285,9 @@ actor FoundationModelsPolisher: Polisher {
         // content wrong.
         if case .violated(let reason) = FidelityGuard.check(raw: piece, cleaned: cleaned) {
             log.error("cleanup rejected a chunk: \(reason, privacy: .public)")
-            return piece
+            return (piece, failed: true)
         }
-        return cleaned
+        return (cleaned, failed: false)
     }
 
     /// A timeout that actually abandons the work.

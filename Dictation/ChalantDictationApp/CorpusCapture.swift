@@ -59,17 +59,24 @@ actor CorpusCapture {
         return audio
     }
 
-    /// Close the utterance out with what the app actually produced.
+    /// Close the utterance out with what the app actually produced. Returns
+    /// the row's id so later facts (the hearing decision, seconds after this
+    /// row is written) can be appended against it, or nil when capture is off.
     ///
     /// `output` is the app's own text, which becomes the thing to score. The
     /// `desired` column stays empty on purpose: only the person who spoke can
     /// say what they meant, and Part 4 is firm that a corpus labelled from the
     /// machine's own guess is a story you tell yourself.
+    @discardableResult
     func finish(
         output: String, fedBuffers: Int, finalize: TimeInterval?, insert: TimeInterval?,
-        polish: TimeInterval? = nil, prepare: TimeInterval? = nil, refinedAtOnce: Bool = false
-    ) {
-        guard let p = pending else { return }
+        polish: TimeInterval? = nil, prepare: TimeInterval? = nil, refinedAtOnce: Bool = false,
+        holdSeconds: TimeInterval = 0, inputPeak: Double = 0, keyDownHeard: Bool = true,
+        polishOutcome: String = "", chunkCount: Int = 0, warmChunks: Int = 0,
+        failedChunks: Int = 0, refinedChanged: Bool = false, polishColdStart: Bool = false,
+        secondsSinceLastPolish: Double = -1
+    ) -> String? {
+        guard let p = pending else { return nil }
         pending = nil
 
         // A row per utterance, appended, so an interrupted day loses nothing.
@@ -77,8 +84,11 @@ actor CorpusCapture {
         // because the log's info retention is minutes and the standing
         // overshoot question needs numbers that survive a night
         // (2026-08-20; the "elapsed here" line kept purging before anyone
-        // could read it).
+        // could read it). schema 2 (2026-08-21): the campaign fields joined
+        // and `refinedAtOnce` became honest, so rows before and after must
+        // be tellable apart when rates are computed across the seam.
         let row: [String: Any] = [
+            "schema": 2,
             "id": p.id,
             "audio": "captured/\(p.id).caf",
             "recorded": ISO8601DateFormatter().string(from: p.startedAt),
@@ -94,8 +104,41 @@ actor CorpusCapture {
             "polishSeconds": polish ?? 0,
             "prepareSeconds": prepare ?? 0,
             "refinedAtOnce": refinedAtOnce,
+            "holdSeconds": holdSeconds,
+            "inputPeak": inputPeak,
+            "keyDownHeard": keyDownHeard,
+            "polishOutcome": polishOutcome,
+            "chunkCount": chunkCount,
+            "warmChunks": warmChunks,
+            "failedChunks": failedChunks,
+            "refinedChanged": refinedChanged,
+            "polishColdStart": polishColdStart,
+            "secondsSinceLastPolish": secondsSinceLastPolish,
             "note": "",
         ]
+        append(row)
+        Self.log.info("captured \(p.id, privacy: .public) (\(output.count, privacy: .public) chars)")
+        return p.id
+    }
+
+    /// A later fact about a row already written: the hearing decision lands
+    /// seconds after `finish`, so it rides its own appended line, joined on
+    /// the row's id by the scoring tools. Counts and durations only.
+    func annotate(
+        id: String, decision: String, seconds: TimeInterval, charsBefore: Int, charsAfter: Int
+    ) {
+        guard Self.isEnabled() else { return }
+        append([
+            "id": id,
+            "kind": "hearing",
+            "decision": decision,
+            "seconds": seconds,
+            "charsBefore": charsBefore,
+            "charsAfter": charsAfter,
+        ])
+    }
+
+    private func append(_ row: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: row),
               var line = String(data: data, encoding: .utf8) else { return }
         line += "\n"
@@ -108,7 +151,6 @@ actor CorpusCapture {
         } else {
             try? Data(line.utf8).write(to: manifest)
         }
-        Self.log.info("captured \(p.id, privacy: .public) (\(output.count, privacy: .public) chars)")
     }
 
     /// Drop a started utterance that produced nothing worth keeping.
