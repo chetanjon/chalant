@@ -14,7 +14,7 @@ struct WelcomeView: View {
 
     /// How many cards this Mac gets. Read by the tour's own controls and by
     /// the "debug welcome <n>" hook, so the two can never disagree.
-    @MainActor static var stepCount: Int { Dictation.isSupported ? 5 : 4 }
+    @MainActor static var stepCount: Int { Dictation.isSupported ? 6 : 4 }
     private var steps: Int { Self.stepCount }
     /// The permissions page's one-tap state.
     @State private var primed = false
@@ -22,6 +22,9 @@ struct WelcomeView: View {
     /// The dictation page's switch, read once when the card appears so an
     /// install that already turned it on says so instead of asking again.
     @State private var dictating = Dictation.isEnabled()
+    /// The role card's selection, read once so a replayed tour shows the
+    /// standing answer instead of forgetting it.
+    @State private var chosenRole = ChalantRole.current
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xl) {
@@ -34,15 +37,22 @@ struct WelcomeView: View {
         .onExitCommand { model.finishWelcome() }
     }
 
-    /// The page index of each card, so inserting the dictation card on the
-    /// Macs that have it does not renumber the rest by hand.
-    private var dictationStep: Int? { Dictation.isSupported ? 2 : nil }
-    private var permissionsStep: Int { Dictation.isSupported ? 3 : 2 }
+    /// The page index of each card, so inserting cards on the Macs that
+    /// have them does not renumber the rest by hand. The role question
+    /// leads on Macs that can dictate: it is the choice everything after
+    /// it reads (one app, two faces; founder, 2026-08-20).
+    private var roleStep: Int? { Dictation.isSupported ? 0 : nil }
+    private var introStep: Int { Dictation.isSupported ? 1 : 0 }
+    private var sayItStep: Int { Dictation.isSupported ? 2 : 1 }
+    private var dictationStep: Int? { Dictation.isSupported ? 3 : nil }
+    private var permissionsStep: Int { Dictation.isSupported ? 4 : 2 }
 
     @ViewBuilder
     private var content: some View {
         switch model.welcomeStep {
-        case 0:
+        case roleStep:
+            roleCard
+        case introStep:
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 ChalantWordmark()
                     .frame(width: 104, height: 22)
@@ -60,7 +70,7 @@ struct WelcomeView: View {
                     ]
                 )
             }
-        case 1:
+        case sayItStep:
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 Text("Say it.")
                     .font(Theme.Fonts.headline)
@@ -125,6 +135,57 @@ struct WelcomeView: View {
                 ]
             )
         }
+    }
+
+    /// The first question, on the Macs that can dictate: what is Chalant
+    /// here? Choosing only selects; the arrows still advance, and Settings
+    /// can change the answer any day. "Just dictation" hides the island
+    /// everywhere and keeps only the strip and its moments.
+    private var roleCard: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
+            Text("What should Chalant be?")
+                .font(Theme.Fonts.headline)
+                .foregroundStyle(Theme.textPrimary)
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                roleChoice(
+                    .both, "Both",
+                    "The island up top, and hold Option to dictate anywhere.")
+                roleChoice(
+                    .dictation, "Just dictation",
+                    "No island. A small strip appears only while you talk.")
+                roleChoice(
+                    .island, "The island",
+                    "The island and its verbs; dictation stays off.")
+            }
+            Text("You can change this any time in Settings.")
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textTertiary)
+        }
+    }
+
+    private func roleChoice(_ role: ChalantRole, _ title: String, _ detail: String) -> some View {
+        Button {
+            ChalantRole.set(role)
+            chosenRole = role
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.m) {
+                Image(systemName: chosenRole == role ? "circle.inset.filled" : "circle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(chosenRole == role ? accent : Theme.textTertiary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(Theme.Fonts.subhead)
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(detail)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle())
     }
 
     /// The second door, in its own card because the first card is about

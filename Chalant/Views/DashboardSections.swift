@@ -137,6 +137,20 @@ struct GeneralSection: View {
             // already typing. Its own card so the two are never confused.
             SettingCard(title: "Dictation") {
                 if Dictation.isSupported {
+                    // One app, two faces (founder, 2026-08-20). "Just
+                    // dictation" hides the island everywhere; the strip and
+                    // its moments still appear. The change takes hold the
+                    // next time the island would draw, so this pane finishes
+                    // its own business first.
+                    Picker("Chalant is", selection: Binding(
+                        get: { ChalantRole.current },
+                        set: { ChalantRole.set($0) })) {
+                        Text("Both").tag(ChalantRole.both)
+                        Text("Just dictation").tag(ChalantRole.dictation)
+                        Text("The island").tag(ChalantRole.island)
+                    }
+                    .pickerStyle(.segmented)
+                    SettingDivider()
                     SettingToggle(label: "Hold to dictate", isOn: Binding(
                         get: { dictationOn },
                         set: { on in

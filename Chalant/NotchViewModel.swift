@@ -1165,6 +1165,12 @@ final class NotchViewModel: ObservableObject {
     /// (`NotchRootView.swift`). Swapped in place, the chat went blank
     /// on both (EC-9, 2026-08-02).
     func expand(on display: CGDirectDisplayID?, takeKey: Bool = true) {
+        // Dictation-only Chalant has no doors: hover, hotkeys and clicks all
+        // arrive here, and none of them may open an island the user chose
+        // not to have. The one exception is the welcome tour, which is how
+        // the role gets chosen in the first place (one app, two faces;
+        // founder, 2026-08-20).
+        guard ChalantRole.current != .dictation || pane == .welcome else { return }
         // Switched off on this screen, or the screen is gone. Refused
         // here rather than hidden in the view: hover is tracked by the
         // window controller against screen zones, not by the island's
@@ -1457,6 +1463,9 @@ final class NotchViewModel: ObservableObject {
 
 
     func beginListening(to destination: VoiceDestination = .chalant) {
+        // The voice door belongs to the island; dictation-only keeps only
+        // the hold-to-dictate ear.
+        guard ChalantRole.current != .dictation else { return }
         guard state == .collapsed else { return }
         voiceDestination = destination
         voiceEntry = .held
