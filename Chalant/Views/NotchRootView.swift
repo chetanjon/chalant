@@ -221,7 +221,19 @@ struct NotchRootView: View {
     /// the user is looking at or something the island is trying to
     /// tell them. Reaching for the top edge brings it back either way.
     private var hiddenUntilReachedFor: Bool {
-        (autoHideIsland || (face.style == .pill && face.fullscreenBelow))
+        // Dictation-only: hidden is the rule, and the pointer is
+        // deliberately not an exception: hovering cannot summon what the
+        // user chose not to have. The strip, the sent light, a glance with
+        // something to say, and a genuine notice still show
+        // (`ChalantRole.islandHidden`, pinned by tests).
+        if ChalantRole.current == .dictation {
+            return ChalantRole.islandHidden(
+                collapsed: face.state == .collapsed,
+                toastShowing: model.glanceToast != nil,
+                sentLightShowing: sentLightVisible,
+                somethingWantsYou: model.somethingWantsYou)
+        }
+        return (autoHideIsland || (face.style == .pill && face.fullscreenBelow))
             && face.state == .collapsed
             && !face.pointerNear
             && model.glanceToast == nil

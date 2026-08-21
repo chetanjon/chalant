@@ -11,7 +11,10 @@ final class WelcomeTourTests: XCTestCase {
     /// without the engine the tour is the four cards it always was, and the
     /// "debug welcome <n>" hook clamps to the same count.
     func testTheDictationCardExistsOnlyWhereDictationDoes() {
-        XCTAssertEqual(WelcomeView.stepCount, Dictation.isSupported ? 5 : 4)
+        // Six on a dictating Mac since the role card leads the tour (one
+        // app, two faces; 2026-08-20); still four where dictation does not
+        // exist and the question would be meaningless.
+        XCTAssertEqual(WelcomeView.stepCount, Dictation.isSupported ? 6 : 4)
     }
 
     /// The card names the same gesture Settings does, because both read it
