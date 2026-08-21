@@ -59,7 +59,13 @@ final class ClipboardStore: ObservableObject {
     }
 
     private var timer: Timer?
-    private var lastChangeCount = NSPasteboard.general.changeCount
+    private var lastChangeCount: Int
+
+    /// The board this store watches and writes. Always the general
+    /// pasteboard in production; a test passes its own named board so
+    /// the suite neither touches nor depends on the machine's real
+    /// clipboard.
+    private let pasteboard: NSPasteboard
 
     /// Standard flags password managers and other "don't persist this"
     /// tools set on a sensitive copy. Chalant never stores anything
@@ -79,8 +85,10 @@ final class ClipboardStore: ObservableObject {
     /// install's history.
     private let clipsDir: URL
 
-    init(clipsDirectory: URL? = nil) {
+    init(clipsDirectory: URL? = nil, pasteboard: NSPasteboard = .general) {
         clipsDir = clipsDirectory ?? Self.defaultClipsDirectory()
+        self.pasteboard = pasteboard
+        lastChangeCount = pasteboard.changeCount
         loadIndex()
     }
 
@@ -103,8 +111,9 @@ final class ClipboardStore: ObservableObject {
         timer?.invalidate()
     }
 
-    private func poll() {
-        let pasteboard = NSPasteboard.general
+    /// Internal, not private, so a test can drive one capture pass
+    /// directly instead of waiting out the timer.
+    func poll() {
         guard pasteboard.changeCount != lastChangeCount else { return }
         lastChangeCount = pasteboard.changeCount
 
@@ -191,7 +200,6 @@ final class ClipboardStore: ObservableObject {
     }
 
     func copyBack(_ clip: Clip) {
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         if let paths = clip.filePaths, !paths.isEmpty {
             pasteboard.writeObjects(paths.map { NSURL(fileURLWithPath: $0) })
@@ -200,6 +208,13 @@ final class ClipboardStore: ObservableObject {
         } else if let url = clip.imageURL, let image = NSImage(contentsOf: url) {
             pasteboard.writeObjects([image])
         }
+        // Copying back is a restore, not a copy: the poller must not
+        // archive our own write as a brand-new clip, which put the
+        // same content at the top again (worst for images, which have
+        // no consecutive-repeat guard and minted a fresh row and PNG
+        // every time). Marking the change as already seen covers
+        // exactly this one write; the next foreign copy lands as usual.
+        lastChangeCount = pasteboard.changeCount
     }
 
     func remove(_ clip: Clip) {
