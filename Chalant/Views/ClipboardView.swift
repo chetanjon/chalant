@@ -222,12 +222,11 @@ private struct ClipRow: View {
                             .perform(withItems: items)
                     }
                 }
-                // Text can go to the answer surface; an image can't.
-                if let text = clip.text {
-                    IconActionButton(symbol: "chalant.mark", label: "Ask about this", tint: accent) {
-                        model.askAbout(name: "clipboard", text: text)
-                    }
-                }
+                // No "Ask about this" here, by the founder's call
+                // (2026-08-20): the jump to the Ask surface read as
+                // "the pane switched for no reason", twice. A clip
+                // row's jobs are keeping and copying back; the Shelf
+                // and Notes keep their ask buttons.
                 IconActionButton(symbol: "xmark", label: "Remove this clip", dim: true) {
                     clipboard.remove(clip)
                 }
