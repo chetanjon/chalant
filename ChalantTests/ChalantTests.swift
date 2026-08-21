@@ -1106,6 +1106,78 @@ final class ChalantTests: XCTestCase {
         XCTAssertFalse(ClipboardStore.isSensitive([.string]))
     }
 
+    /// A scratch pasteboard for one test, so the suite neither touches
+    /// nor depends on the machine's real clipboard.
+    private func scratchPasteboard() -> NSPasteboard {
+        NSPasteboard(name: NSPasteboard.Name("chalant-clip-test-\(UUID().uuidString)"))
+    }
+
+    func testCopyBackIsNotArchivedAsANewClip() {
+        // Pressing Copy on a row writes the pasteboard, and the poller
+        // must treat that write as already seen: archiving it again
+        // put the same content back at the top as a brand-new clip.
+        // An older row makes the honest arrangement, because a copy-back
+        // of the newest row was already masked by the repeat guard.
+        let dir = clipboardScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let board = scratchPasteboard()
+        defer { board.releaseGlobally() }
+        let store = ClipboardStore(clipsDirectory: dir, pasteboard: board)
+        store.addText("older")
+        store.addText("newest")
+
+        guard let older = store.clips.last else { return XCTFail("no clips") }
+        store.copyBack(older)
+        store.poll()
+
+        XCTAssertEqual(store.clips.count, 2)
+        // The write itself still happened; only the archiving didn't.
+        XCTAssertEqual(board.string(forType: .string), "older")
+    }
+
+    func testCopyBackOfAScreenshotDoesNotMintASecondRow() {
+        // The reported shape: images have no consecutive-repeat guard,
+        // so every copy-back minted a fresh row and a fresh PNG.
+        let dir = clipboardScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let board = scratchPasteboard()
+        defer { board.releaseGlobally() }
+        let store = ClipboardStore(clipsDirectory: dir, pasteboard: board)
+        let image = NSImage(size: NSSize(width: 4, height: 4), flipped: false) { rect in
+            NSColor.red.setFill()
+            rect.fill()
+            return true
+        }
+        XCTAssertTrue(store.addImage(image))
+
+        guard let row = store.clips.first else { return XCTFail("no clips") }
+        store.copyBack(row)
+        store.poll()
+
+        XCTAssertEqual(store.clips.count, 1)
+    }
+
+    func testPollStillHearsAForeignCopyAfterACopyBack() {
+        // Suppression covers exactly one write, ours: the next copy
+        // from anywhere else must land as usual.
+        let dir = clipboardScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let board = scratchPasteboard()
+        defer { board.releaseGlobally() }
+        let store = ClipboardStore(clipsDirectory: dir, pasteboard: board)
+        store.addText("mine")
+        guard let mine = store.clips.first else { return XCTFail("no clips") }
+        store.copyBack(mine)
+        store.poll()
+
+        board.clearContents()
+        board.setString("someone else's copy", forType: .string)
+        store.poll()
+
+        XCTAssertEqual(store.clips.first?.text, "someone else's copy")
+        XCTAssertEqual(store.clips.count, 2)
+    }
+
     // MARK: Calendar permission state (a grant should never need a relaunch)
 
     func testPermissionDecisionMapsFullAccessToGranted() {
