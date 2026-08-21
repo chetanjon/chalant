@@ -661,7 +661,7 @@ final class DictationController {
             let role = LandingProbe.focusedRole()
             if LandingRoles.verdict(role: role) == .doesNot {
                 await inserter.leaveOnClipboard(text)
-                surface.say("Nowhere to type. What you said is on the clipboard.")
+                surface.say("Nowhere to type. What you said is in your clips.")
                 Self.log.notice(
                     "no landing spot (role \(role ?? "none", privacy: .public)); words left on the clipboard")
             } else {
@@ -693,9 +693,9 @@ final class DictationController {
                 let who = holder.map { " (\($0))" } ?? ""
                 surface.say("A password field has the keyboard\(who). What you said is on the clipboard.")
             case .refused(reason: .targetChanged):
-                surface.say("Focus moved while you spoke. What you said is on the clipboard.")
+                surface.say("Focus moved while you spoke. What you said is in your clips.")
             case .leftOnClipboard:
-                surface.say("Couldn't type there. What you said is on the clipboard.")
+                surface.say("Couldn't type there. What you said is in your clips.")
             default:
                 break
             }

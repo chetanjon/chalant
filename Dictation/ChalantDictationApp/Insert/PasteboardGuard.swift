@@ -69,17 +69,31 @@ actor PasteboardGuard {
         return Snapshot(items: captured, changeCount: board.changeCount)
     }
 
-    /// Put the dictated text on the clipboard, marked transient.
-    /// Returns the change count afterwards, so a paste can be verified.
-    @discardableResult
-    func place(_ text: String) -> Int {
-        let board = NSPasteboard.general
-        board.clearContents()
+    /// The one pasteboard item `place` writes. Pure, so a test can
+    /// pin which writes carry the transient mark without touching the
+    /// live pasteboard.
+    nonisolated static func item(for text: String, transient: Bool) -> NSPasteboardItem {
         let item = NSPasteboardItem()
         item.setString(text, forType: .string)
-        // Empty data, not absent: the marker's presence is the signal.
-        item.setData(Data(), forType: Self.transientType)
-        board.writeObjects([item])
+        if transient {
+            // Empty data, not absent: the marker's presence is the signal.
+            item.setData(Data(), forType: Self.transientType)
+        }
+        return item
+    }
+
+    /// Put the dictated text on the clipboard. Marked transient by
+    /// default, which is right for every write whose paste we perform
+    /// ourselves: no clipboard history should archive our mechanics.
+    /// A write that hands the words BACK to the user (the
+    /// nowhere-to-type rescue) passes `transient: false`, so the
+    /// island's Clipboard tab archives it like any real copy.
+    /// Returns the change count afterwards, so a paste can be verified.
+    @discardableResult
+    func place(_ text: String, transient: Bool = true) -> Int {
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.writeObjects([Self.item(for: text, transient: transient)])
         return board.changeCount
     }
 

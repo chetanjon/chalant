@@ -37,8 +37,15 @@ actor InsertionChain: TextInserter {
     /// Words handed back rather than typed: placed on the clipboard for the
     /// user to ⌘V wherever they meant to be. The rescue path for an insertion
     /// that "succeeded" into somewhere that takes no text.
+    ///
+    /// Not transient, deliberately: these words are for keeping, so the
+    /// island's Clipboard tab archives them like any real copy and they
+    /// survive the next thing the user copies ("where is the text of what
+    /// i spoke": the founder, 2026-08-20, after this exact loss). The
+    /// secure-input refusal in `insert` keeps the mark: words spoken into
+    /// a password context stay out of visible history.
     func leaveOnClipboard(_ text: String) async {
-        await pasteboard.place(text)
+        await pasteboard.place(text, transient: false)
     }
 
     func insert(_ text: String, into target: InsertionTarget) async -> InsertionOutcome {
@@ -89,9 +96,14 @@ actor InsertionChain: TextInserter {
                 )
                 // The words stay on the clipboard rather than being restored
                 // away: refusing must not also discard what the user said.
+                // Re-placed without the transient mark: handed-back words
+                // are keepers, so the Clipboard tab archives them (and the
+                // padding for the lost cursor context is dropped).
+                await pasteboard.place(text, transient: false)
                 return .refused(reason: .targetChanged)
             case .unknown:
                 Self.log.error("cannot identify the front app; refusing")
+                await pasteboard.place(text, transient: false)
                 return .refused(reason: .targetChanged)
             }
 
@@ -107,8 +119,10 @@ actor InsertionChain: TextInserter {
 
         // The floor. Part 0 §0.3 makes this "a first-class outcome with good
         // UX, not an apology": the words are on the clipboard and the user is
-        // told in one sentence what to do about it.
+        // told in one sentence what to do about it. Re-placed as a keeper so
+        // the Clipboard tab archives them too.
         Self.log.error("all tiers failed for \(bundleID, privacy: .public); text left on clipboard")
+        await pasteboard.place(text, transient: false)
         return .leftOnClipboard(reason: "Press ⌘V to paste it.")
     }
 

@@ -880,3 +880,22 @@ utterance must land refined with polish wait <= 0.73 s while dictating into a
 BACKGROUND-app target (VS Code), which exercises the latency-critical
 activity against App Nap coalescing. Automated: InputChoiceTests pin the
 virtual-device exile and the pin exception.
+
+## 2026-08-20 — rescued words are keepers (fix/rescue-keeps-the-words)
+
+Not yet exercised live. Born of a real loss the same evening: the founder
+dictated at a bare window ("where is the text of what i spoke"), the words
+went to the pasteboard transient-marked, and the island's Clipboard tab,
+the one place a person looks, skipped them by design. Handed-back words now
+carry no transient mark, so the pane archives them like any real copy.
+Protocol rows for the founder's next session: (1) click the desktop, hold
+Option, speak → toast "Nowhere to type. What you said is in your clips.",
+AND the words appear as the top row of the island's Clipboard tab within a
+second, AND they survive copying something else afterwards; (2) focus a
+password field, dictate → toast still says "on the clipboard" and the words
+must NOT appear in the Clipboard tab (transient kept, on purpose);
+(3) normal dictation into VS Code → inserted as before, and NOTHING new
+appears in the Clipboard tab (the paste mechanics stay masked; the user's
+old clipboard is restored). Automated: PasteboardGuard item tests pin which
+writes carry the mark; ClipboardStore tests pin that unmasked writes are
+archived and masked ones are skipped.
