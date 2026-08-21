@@ -70,6 +70,9 @@ final class DictationController {
     /// common case, a short tail after tidy-ahead, and gives up before the wait
     /// is felt.
     static let refineBudget: Duration = .milliseconds(650)
+    /// The caller's hard ceiling: the budget plus a small grace for the hop
+    /// back. Kept beside `refineBudget` so the two can never drift apart.
+    static let budgetWithGrace: Double = 0.73
     private var swapGeneration = 0
     private let activity = UserActivityWatch()
     /// Turns a real day of dictating into the spontaneous half of the corpus.
@@ -567,12 +570,34 @@ final class DictationController {
                             shaped, profile: AppProfile(bundleID: bundleID),
                             within: Self.refineBudget))
                 }
+                // TWO deadlines, on different executors, both driven by raw
+                // dispatch timers that no Swift executor can starve on the
+                // way in. Every subtler deadline so far (cooperative-pool
+                // sleep, main-actor sleep, zero tolerance, utility hearing,
+                // latency-critical activity) woke at EXACTLY the moment the
+                // model finished (2.46 s for a 0.73 s sleep, 2026-08-20,
+                // matching the model's own cold time to the millisecond), so
+                // something starves the WAKE, not the timer. Whichever leg
+                // fires first ends the wait; a leg that wakes late says so
+                // and names its executor, so the next log read convicts one.
                 group.addTask { @MainActor in
-                    // The deadline lives on the main actor's executor, which
-                    // Whisper's CoreML work cannot starve: the cooperative
-                    // pool version fired seconds late under hearing load
-                    // (measured 2026-08-20), which made the budget a fiction.
-                    try? await Task.sleep(for: Self.refineBudget + .milliseconds(80), tolerance: .zero)
+                    let armed = Date()
+                    await DictationController.hardDeadline(seconds: Self.budgetWithGrace)
+                    let waited = Date().timeIntervalSince(armed)
+                    if waited > Self.budgetWithGrace + 0.2 {
+                        Self.log.notice(
+                            "deadline wake starved on the MAIN actor: \(waited, privacy: .public)s for \(Self.budgetWithGrace, privacy: .public)s")
+                    }
+                    return .budgetExpired
+                }
+                group.addTask {
+                    let armed = Date()
+                    await DictationController.hardDeadline(seconds: Self.budgetWithGrace)
+                    let waited = Date().timeIntervalSince(armed)
+                    if waited > Self.budgetWithGrace + 0.2 {
+                        Self.log.notice(
+                            "deadline wake starved on the POOL: \(waited, privacy: .public)s for \(Self.budgetWithGrace, privacy: .public)s")
+                    }
                     return .budgetExpired
                 }
                 let first = await group.next() ?? .budgetExpired
@@ -780,6 +805,24 @@ final class DictationController {
     /// Whatever may still be running from the previous utterance stops here:
     /// a hearing that has not come back yet must not swap the sentence after
     /// this one. The activity watch is disarmed with it.
+    /// A deadline no Swift executor can starve on the way in: a raw dispatch
+    /// timer on a userInteractive global queue fires the continuation. Only
+    /// the resume still travels through the awaiting task's executor, which
+    /// is exactly what the paired "deadline wake starved" lines measure.
+    /// The timer keeps itself alive through its own handler and fires once.
+    nonisolated static func hardDeadline(seconds: Double) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInteractive))
+            timer.schedule(deadline: .now() + seconds, leeway: .nanoseconds(1))
+            timer.setEventHandler {
+                timer.setEventHandler {}
+                timer.cancel()
+                continuation.resume()
+            }
+            timer.resume()
+        }
+    }
+
     private func beginUtteranceActivity() {
         endUtteranceActivity()
         utteranceActivity = ProcessInfo.processInfo.beginActivity(
