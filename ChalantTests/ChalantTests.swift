@@ -1157,6 +1157,41 @@ final class ChalantTests: XCTestCase {
         XCTAssertEqual(store.clips.count, 1)
     }
 
+    func testRescuePasteboardItemCarriesNoTransientMarkAndPasteItemsDo() {
+        // Mid-insert pastes are marked transient so no clipboard
+        // history archives our mechanics. Words handed back for
+        // keeping must NOT carry the mark, or the one place a person
+        // looks for them skips them.
+        let marker = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
+        let kept = PasteboardGuard.item(for: "spoken", transient: false)
+        let masked = PasteboardGuard.item(for: "mid-insert", transient: true)
+        XCTAssertFalse(kept.types.contains(marker))
+        XCTAssertTrue(masked.types.contains(marker))
+        XCTAssertEqual(kept.string(forType: .string), "spoken")
+    }
+
+    func testRescuedWordsLandInClipHistoryAndMaskedWritesDoNot() {
+        // The founder's case (2026-08-20 17:36): dictated at a bare
+        // window, words left on the clipboard, and the Clipboard tab
+        // never showed them. A rescue write is a keeper: the pane
+        // archives it like any real copy. A masked write still isn't.
+        let dir = clipboardScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let board = scratchPasteboard()
+        defer { board.releaseGlobally() }
+        let store = ClipboardStore(clipsDirectory: dir, pasteboard: board)
+
+        board.clearContents()
+        board.writeObjects([PasteboardGuard.item(for: "what I spoke", transient: false)])
+        store.poll()
+        XCTAssertEqual(store.clips.first?.text, "what I spoke")
+
+        board.clearContents()
+        board.writeObjects([PasteboardGuard.item(for: "swap mechanics", transient: true)])
+        store.poll()
+        XCTAssertEqual(store.clips.count, 1)
+    }
+
     func testPollStillHearsAForeignCopyAfterACopyBack() {
         // Suppression covers exactly one write, ours: the next copy
         // from anywhere else must land as usual.
