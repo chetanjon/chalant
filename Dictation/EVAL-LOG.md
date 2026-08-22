@@ -1038,3 +1038,46 @@ the guard on all nine speculations during the hold ("the model repeated
 itself" ×8, then the missing name), so even a perfect deadline lands it
 raw. Whether that is the synthetic voice or the passage is a question for
 real rows.
+
+## 2026-08-21 — PROTECTED-SPAN MUTATION RATE, FIRST MEASUREMENT: 0/61 as shipped; 0, 0 and 1 of 61 ungated (`feat/protected-span-rate`)
+
+The directive's §4.1 metric, measurable for the first time: Set C annotated
+with 76 protected spans (`corpus/setC.json`, founder-approved), the raw
+en-US ASR text kept verbatim (`corpus/setC-asr-en_US.jsonl`), a CLI that
+runs each string through the shipping text path (`tools/textpath`: the
+controller's deterministic order, empty vocabulary, then
+`FoundationModelsPolisher.polish` with the shipping prompt, framing and
+`FidelityGuard`, no release budget), and a scorer for the five rules
+(`corpus-kit/span-score.py`). Stamp on every run: commit `3ca798a`, prompt
+SHA-256 `e97958cb280f…`, model `instruct_3b.fm_api_generic_3b?variant=
+generic_sparse` version `15.0.0.13.102990`, macOS 27.0.
+
+| run | rows to the model | spans present | mutated | rate | what changed |
+|---|---|---|---|---|---|
+| gated, as shipped (40-char line) | 10 of 30 | 61 | **0** | **0.0000** | nothing |
+| ungated, pass 1 | 30 | 61 | 0 | 0.0000 | C14 comma before "not" |
+| ungated, pass 2 | 30 | 61 | 0 | 0.0000 | C14 comma before "not" |
+| ungated, pass 3 | 30 | 61 | **1** | **0.0164** | C14 comma; **C08 "can't" → "cannot"** (label `contraction`, stage `model`) |
+
+Case drift 0 in every run; negation counts unchanged in every row ("cannot"
+counted as a negation, stated in the scorer). **The model is not fully
+deterministic**: C08 came back as said twice and expanded once in three
+passes, so the ungated rate is 0 to 1 of 61 under this prompt, never a
+single number. Rejected by the guard on all three ungated passes: C12
+(`It's/user/Chatan/projects.`, `stillTheSameMessage`): ships as dictated,
+no span touched. The deterministic stage changed C18, C23, C27 (doubled
+openings removed) and touched no span.
+
+**ASR misses, out of scope here and reported separately: 12 rows, 15
+spans.** C03 (3:15, 3:50), C05 (Sara), C07 ($1,200 heard as $1200), C12
+(the path), C13 (the email), C14 (build number heard as bill number), C17
+(9:30, 10:15), C18 (API heard as ABI), C22 (40 heard as "4 tea"), C24
+(TextInjector), C25 (timeout heard as timer), C29 ($9.99, $99 heard as 999
+and 99). The founder expected about nine; the three beyond that (C05, C18,
+C24) are in the raw text, not in the scorer.
+
+What this does NOT say: Set C is scripted and mostly under the 40-character
+line; 20 of 30 rows never reach the model as shipped. The rate on real
+spontaneous dictation is the number the schema-3 row exists to give, and no
+row of that kind exists yet (this build is not installed: no signing
+identity on the Mac today).

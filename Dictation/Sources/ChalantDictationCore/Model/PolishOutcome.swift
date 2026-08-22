@@ -66,4 +66,28 @@ public struct PolishOutcome: Sendable, Equatable {
     public var refinedAtOnce: Bool {
         result == .landed && chunks > 0 && failedChunks < chunks
     }
+
+    /// The model's text for the corpus row: only when some chunk actually
+    /// came back from it. When every chunk shipped as dictated the joined
+    /// text is the input again, and the row must say so with a reason
+    /// rather than pass the input off as a reply.
+    public var modelText: String? {
+        result == .landed && chunks > 0 && failedChunks < chunks ? text : nil
+    }
+
+    /// The corpus row's `modelReason` for this outcome: "landed", "gated",
+    /// "skipped:<why>", "budgetExpired:inner", or, when every chunk shipped
+    /// as dictated, the first chunk's own reason ("rejected:<rule>",
+    /// "failed:<error>"). The caller adds "budgetExpired:caller" itself,
+    /// because that outcome never arrives.
+    public var modelReason: String {
+        switch result {
+        case .landed:
+            return modelText != nil ? "landed" : (chunkReasons.first ?? "rejected:unknown")
+        case .budgetExpiredInner: return "budgetExpired:inner"
+        case .modelUnavailable: return "skipped:unavailable"
+        case .belowMinimum: return "gated"
+        case .empty: return "skipped:empty"
+        }
+    }
 }

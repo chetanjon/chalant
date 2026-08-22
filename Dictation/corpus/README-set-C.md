@@ -57,3 +57,22 @@ identifiers) is illustrative; the founder's rulings on 2026-08-21 extend it:
 
 Mutation rate = mutated / present, across all rows. Spans absent from the raw
 ASR are ASR misses, listed by row, never counted as mutations.
+
+## Reproducing the number
+
+```bash
+Dictation/tools/textpath/build.sh          # Core as a module + the shipping polisher
+cd Dictation
+./build/tools/textpath corpus/setC-asr-en_US.jsonl corpus/runs/setC-gated.jsonl --label "setC gated"
+./build/tools/textpath corpus/setC-asr-en_US.jsonl corpus/runs/setC-ungated-1.jsonl --ungated --label "setC ungated pass 1"
+python3 corpus-kit/span-score.py corpus/setC.json corpus/runs/setC-gated.jsonl
+python3 corpus-kit/span-score.py --selftest
+```
+
+`textpath` runs the controller's path (empty vocabulary, no release budget)
+and writes schema-3 rows with a first-line stamp: commit, SHA-256 of the
+prompt, the model asset and version the daemon loaded. **Runs under
+different stamps are different experiments and are never averaged.** The
+saved runs in `corpus/runs/` are the first measurement (2026-08-21); the
+scorer reads the same field names off `captured.jsonl`, so the number can
+be taken off real dictations with an annotations file keyed by row id.

@@ -38,6 +38,16 @@ actor FoundationModelsPolisher: Polisher {
     /// new one costs nothing worth measuring.
     private var warmed: LanguageModelSession?
 
+    /// The 40-character line under which the model is not asked
+    /// (`CleanupPrompt.minimumCharactersForCleanup`). An instance value so
+    /// an offline run (`tools/textpath --ungated`) can send every Set C row
+    /// to the model through this exact path; the app never changes it.
+    private let gateCharacters: Int
+
+    init(gateCharacters: Int = CleanupPrompt.minimumCharactersForCleanup) {
+        self.gateCharacters = gateCharacters
+    }
+
     /// Warm the model at launch rather than on first use.
     ///
     /// **Part 0 §0.5 puts `prewarm()` on the shift gesture, and that has been
@@ -191,7 +201,7 @@ actor FoundationModelsPolisher: Polisher {
         // Option B (founder, 2026-08-16): short utterances ship as dictated.
         // The model does nothing useful under 40 characters and costs half a
         // second there; the measured case is on `CleanupPrompt.worthCleaning`.
-        guard CleanupPrompt.worthCleaning(trimmed) else {
+        guard trimmed.count > gateCharacters else {
             Self.log.info("cleanup skipped: \(trimmed.count, privacy: .public) chars, under the line")
             return outcome(.belowMinimum)
         }

@@ -608,23 +608,8 @@ final class DictationController {
                 warmChunks = outcome.warmChunks
                 failedChunks = outcome.failedChunks
                 modelChunks = outcome.chunkReasons
-                switch outcome.result {
-                case .landed:
-                    // The model's text only when some chunk came back from
-                    // it; when every chunk shipped as dictated the "output"
-                    // is the input rejoined, and the first chunk's reason
-                    // (rejected:<rule>, failed:<error>) is the honest field.
-                    if outcome.failedChunks < outcome.chunks {
-                        modelOutput = outcome.text
-                        modelReason = "landed"
-                    } else {
-                        modelReason = outcome.chunkReasons.first ?? "rejected:unknown"
-                    }
-                case .budgetExpiredInner: modelReason = "budgetExpired:inner"
-                case .modelUnavailable: modelReason = "skipped:unavailable"
-                case .belowMinimum: modelReason = "gated"
-                case .empty: modelReason = "skipped:empty"
-                }
+                modelOutput = outcome.modelText
+                modelReason = outcome.modelReason
                 if let refined = outcome.text, !refined.isEmpty {
                     text = refined
                     // Honest now (phase 0): landed AND at least one chunk
