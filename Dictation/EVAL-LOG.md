@@ -973,3 +973,68 @@ kept) deterministically on every path including raw landings and the
 hearing pass. Measured: the pass touches 1 of 380 historical corpus rows
 (high precision by design; the historical set predates deliberate repeat
 testing). 241 Core tests, 6 new.
+
+## 2026-08-21 — THE STARVATION VERDICT: nothing was starved. The waits could not return. (`fix/the-budget-is-real`)
+
+The first schema-2 row, from a synthetic hold on 1.26.0 (harness
+`verify-dictation.sh --cold`, 183 chars, one 14 s sentence, TextEdit):
+
+| field | value |
+|---|---|
+| polishSeconds | **1.697 s** against the 0.73 s hard cap |
+| polishOutcome | budgetExpiredCaller |
+| refinedAtOnce / refinedChanged | false / false |
+| holdSeconds / inputPeak / keyDownHeard / fedBuffers | 14.18 / 0.43 / true / 139 |
+| insert | tier 1, 0.166 s |
+| hearing line | swapped, 3.42 s later, 183 → 182 chars |
+
+The log around it: the urgent key-up piece's model reply (a guard
+rejection, "a name went missing: Priya") is stamped 18:11:53.647167 and
+the polisher's "cleanup not ready within budget ... 1.697046s elapsed
+here" 18:11:53.647236, **seventy microseconds apart**, while neither
+deadline leg (main actor, pool, raw dispatch timers, the 1.25.1 probe)
+logged a late wake. Same shape as every row since 08-18.
+
+**Measured the other way, in a bare process (`tools/mainstall`): the
+model framework starves nothing.** A 20 ms main-queue ticker and a raw
+thread posting main-queue blocks and detached tasks every 20 ms, across
+warm responds, with a 300 ms `Task.sleep` started inside the respond:
+
+| responds in flight | longest respond | main hop max | pool hop max | sleep(300 ms) woke after |
+|---|---|---|---|---|
+| 1 | 0.95 s / 0.98 s | 2 ms / 1 ms | 2 ms / 1 ms | 301 ms / 301 ms |
+| 2 | 1.75 s | 26 ms | 26 ms | 305 ms |
+| 3 | 2.53 s | 8 ms | 8 ms | 301 ms |
+
+(Side fact: concurrent responds serialize in the daemon, which is why the
+key-up piece took 1.87 s: it queued behind the previous tail speculation.)
+
+**The mechanism, reproduced in isolation:** the polisher's bounded wait,
+verbatim, a task group of {await task.value, sleep}, against a task that
+takes 3 s with a 200 ms budget, **returned nil after 3.04 s**. A task
+group does not return until every child has finished, and a child that
+awaits another task's value cannot be cancelled. The sleep fired at 200
+ms, `next()` answered, and the group sat on the value child until the
+task was done. The controller's outer wait had the same shape around the
+polish child, so its two dispatch-timer legs fired at 0.73 s, logged
+nothing (they had not been late), and the group waited for the polish,
+which was waiting for the model. Six deadline variants since 08-18 were
+aimed at timers that were never late.
+
+Fix: `Deadline.value(of:within:)` in Core, one continuation raced between
+a dispatch timer and an observer task; the task is never cancelled, so
+late pieces still land in the cache for the hearing pass. `DeadlineTests`
+pins it (the expiry case returns in 0.10 s where it took 3 s). Both waits
+use it; the two-executor race and `hardDeadline` are gone. Not yet
+exercised live: no signing identity on the Mac today.
+
+Also fixed off the same row: a budget miss erased the cold-start facts
+(`polishColdStart: false`, `secondsSinceLastPolish: -1` on a process that
+had never polished). They are fixed at key-down and are now read before
+the wait.
+
+What the row does NOT say yet: this sentence's tail chunk was rejected by
+the guard on all nine speculations during the hold ("the model repeated
+itself" ×8, then the missing name), so even a perfect deadline lands it
+raw. Whether that is the synthetic voice or the passage is a question for
+real rows.
