@@ -585,6 +585,13 @@ final class DictationController {
             // polisher's cache for the hearing pass to reuse.
             let polisher = self.polisher
             let bundleID = target.bundleID ?? ""
+            // Known since key-down, and taken now so a budget miss cannot
+            // erase them from the row: the first schema-2 row reported a
+            // never-polished process as warm because the outcome that
+            // carries these never arrived.
+            let facts = await polisher.coldStartFacts
+            polishColdStart = facts.coldStart
+            sinceLastPolish = facts.secondsSinceLastPolish ?? -1
             let polishTask = Task {
                 await polisher.polish(
                     shaped, profile: AppProfile(bundleID: bundleID),
@@ -595,8 +602,6 @@ final class DictationController {
                 chunkCount = outcome.chunks
                 warmChunks = outcome.warmChunks
                 failedChunks = outcome.failedChunks
-                polishColdStart = outcome.coldStart
-                sinceLastPolish = outcome.secondsSinceLastPolish ?? -1
                 if let refined = outcome.text, !refined.isEmpty {
                     text = refined
                     // Honest now (phase 0): landed AND at least one chunk

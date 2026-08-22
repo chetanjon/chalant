@@ -83,6 +83,18 @@ actor FoundationModelsPolisher: Polisher {
         gapAtUtteranceStart = lastRespondCompletedAt.map { Date().timeIntervalSince($0) }
     }
 
+    /// The cold-start facts of the utterance in progress, as fixed at
+    /// `beginUtterance`. The same two values ride every `PolishOutcome`,
+    /// but an outcome only reaches the caller when the polish beats the
+    /// budget, and the first schema-2 row (2026-08-21 18:11) showed what
+    /// that costs: a process that had never polished landed raw after a
+    /// budget miss and its row said `polishColdStart: false`, the default.
+    /// The rows that miss the budget are the ones the speed work reads,
+    /// so the caller takes these before it starts waiting.
+    var coldStartFacts: (coldStart: Bool, secondsSinceLastPolish: Double?) {
+        (utteranceStartedCold, gapAtUtteranceStart)
+    }
+
     /// Tidy, in the background, every chunk of `text` so far: the closed
     /// chunks, which will not change as the speaker goes on, and the tail
     /// chunk as it stands right now, speculatively. Called on a timer during
