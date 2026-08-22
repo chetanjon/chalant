@@ -30,6 +30,29 @@ public enum FidelityGuard {
         /// Always says which of the four it was. A guard that silently ships
         /// raw is undiagnosable, and this one fires on a path nobody sees.
         case violated(String)
+
+        /// The check that fired, by name, for the corpus row's
+        /// `modelReason` ("rejected:didNotStutter"). A real dictation
+        /// rejected nine times in a row on 2026-08-21 left no way to tell
+        /// whether the model stuttered or the rule misfired; the name is
+        /// the first half of that answer. Nil when the verdict is `ok`.
+        public var rule: String? {
+            guard case .violated(let reason) = self else { return nil }
+            return FidelityGuard.rule(forReason: reason)
+        }
+    }
+
+    /// Each check opens its reason with fixed words; this reads them back.
+    /// Kept beside the checks so a reworded reason is a failing test
+    /// (`FidelityGuardTests`), not a silent "unknown".
+    static func rule(forReason reason: String) -> String {
+        if reason.hasPrefix("the model returned nothing") { return "emptyOutput" }
+        if reason.hasPrefix("a number") { return "numbersSurvived" }
+        if reason.hasPrefix("a negation") { return "negationsSurvived" }
+        if reason.hasPrefix("a name") { return "namesSurvived" }
+        if reason.hasPrefix("the model repeated itself") { return "didNotStutter" }
+        if reason.hasPrefix("the output is a reply") { return "stillTheSameMessage" }
+        return "unknown"
     }
 
     /// How much of the original's substance must survive for the output to be a

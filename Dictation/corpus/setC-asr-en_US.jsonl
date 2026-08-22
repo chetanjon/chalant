@@ -1,0 +1,30 @@
+{"id": "C01", "raw": "Do not deploy this to production until Monday."}
+{"id": "C02", "raw": "Send 15, not 50"}
+{"id": "C03", "raw": "Eating, the meeting moved to 315, not 350"}
+{"id": "C04", "raw": "Delete the staging database. Never the production one."}
+{"id": "C05", "raw": "Email Sarah about it, not Sarah."}
+{"id": "C06", "raw": "The invoice came to $120."}
+{"id": "C07", "raw": "The other invoice was $1200."}
+{"id": "C08", "raw": "I can't make it on Thursday."}
+{"id": "C09", "raw": "I can make it on Thursday."}
+{"id": "C10", "raw": "Do not force push to main."}
+{"id": "C11", "raw": "Drop the users table on the local copy only."}
+{"id": "C12", "raw": "It's/user/Chatan/projects."}
+{"id": "C13", "raw": "My email is Junalagadda 8800@gmail.com."}
+{"id": "C14", "raw": "The bill number is 153 not 135."}
+{"id": "C15", "raw": "He said, and I quote, this will never work."}
+{"id": "C16", "raw": "Never merge that branch without a review."}
+{"id": "C17", "raw": "Move the stand-up from 93, 932, 1015."}
+{"id": "C18", "raw": "The the ABI key ends in 472."}
+{"id": "C19", "raw": "Don't cancel the subscription yet."}
+{"id": "C20", "raw": "Cancel the subscription today."}
+{"id": "C21", "raw": "Ship it to the Kizu group, not the Chalant one."}
+{"id": "C22", "raw": "There are 4 tea attendees, not 14"}
+{"id": "C23", "raw": "Reply to reply to Aidan and do not copy anyone else."}
+{"id": "C24", "raw": "The file is text injector. swift, capital T capital I."}
+{"id": "C25", "raw": "Set the timer to 2.5 seconds."}
+{"id": "C26", "raw": "We are not raising the price."}
+{"id": "C27", "raw": "The the deadline is the 21st, not the 12th."}
+{"id": "C28", "raw": "Revoke his access, not hers."}
+{"id": "C29", "raw": "It costs 999 a month, not 99."}
+{"id": "C30", "raw": "Keep the old version, do not overwrite it."}

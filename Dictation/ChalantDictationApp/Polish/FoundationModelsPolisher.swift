@@ -38,6 +38,16 @@ actor FoundationModelsPolisher: Polisher {
     /// new one costs nothing worth measuring.
     private var warmed: LanguageModelSession?
 
+    /// The 40-character line under which the model is not asked
+    /// (`CleanupPrompt.minimumCharactersForCleanup`). An instance value so
+    /// an offline run (`tools/textpath --ungated`) can send every Set C row
+    /// to the model through this exact path; the app never changes it.
+    private let gateCharacters: Int
+
+    init(gateCharacters: Int = CleanupPrompt.minimumCharactersForCleanup) {
+        self.gateCharacters = gateCharacters
+    }
+
     /// Warm the model at launch rather than on first use.
     ///
     /// **Part 0 §0.5 puts `prewarm()` on the shift gesture, and that has been
@@ -63,8 +73,28 @@ actor FoundationModelsPolisher: Polisher {
     /// use to the next, and the cache must never grow all day. Each piece
     /// carries whether it FAILED (shipped as dictated), because the honest
     /// refined-at-once flag needs to know when the reply is the input rejoined.
-    private var tidiedPieces: [String: (text: String, failed: Bool)] = [:]
-    private var piecesInFlight: [String: Task<(text: String, failed: Bool), Never>] = [:]
+    private var tidiedPieces: [String: Piece] = [:]
+    private var piecesInFlight: [String: Task<Piece, Never>] = [:]
+
+    /// One chunk back from the model: its text (the input itself when it
+    /// failed), whether it failed, and why in the corpus row's words:
+    /// "landed", "rejected:<rule>", "failed:<error>".
+    struct Piece: Sendable {
+        let text: String
+        let failed: Bool
+        let reason: String
+
+        init(text: String, failed: Bool, reason: String) {
+            self.text = text
+            self.failed = failed
+            self.reason = reason
+        }
+
+        /// A chunk that ships as dictated, with why.
+        init(piece: String, failed reason: String) {
+            self.init(text: piece, failed: true, reason: reason)
+        }
+    }
 
     /// When the last model reply completed, ever, in this process. Set in
     /// `finished`, so pretidy replies count too. Nil until the first reply:
@@ -137,7 +167,7 @@ actor FoundationModelsPolisher: Polisher {
     /// The tail speculation in flight, if any: only one at a time.
     private var tailInFlight: String?
 
-    private func finished(piece: String, result: (text: String, failed: Bool)) {
+    private func finished(piece: String, result: Piece) {
         tidiedPieces[piece] = result
         piecesInFlight[piece] = nil
         if tailInFlight == piece { tailInFlight = nil }
@@ -158,11 +188,11 @@ actor FoundationModelsPolisher: Polisher {
     /// running past the budget and land in the cache, so the swap's own call
     /// picks them up rather than starting over.
     func polish(_ text: String, profile: AppProfile, within budget: Duration?) async -> PolishOutcome {
-        func outcome(_ result: PolishOutcome.Result, text: String? = nil, chunks: Int = 0, warm: Int = 0, failed: Int = 0) -> PolishOutcome {
+        func outcome(_ result: PolishOutcome.Result, text: String? = nil, chunks: Int = 0, warm: Int = 0, failed: Int = 0, reasons: [String] = []) -> PolishOutcome {
             PolishOutcome(
                 result: result, text: text, chunks: chunks, warmChunks: warm,
                 failedChunks: failed, coldStart: utteranceStartedCold,
-                secondsSinceLastPolish: gapAtUtteranceStart)
+                secondsSinceLastPolish: gapAtUtteranceStart, chunkReasons: reasons)
         }
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -171,7 +201,7 @@ actor FoundationModelsPolisher: Polisher {
         // Option B (founder, 2026-08-16): short utterances ship as dictated.
         // The model does nothing useful under 40 characters and costs half a
         // second there; the measured case is on `CleanupPrompt.worthCleaning`.
-        guard CleanupPrompt.worthCleaning(trimmed) else {
+        guard trimmed.count > gateCharacters else {
             Self.log.info("cleanup skipped: \(trimmed.count, privacy: .public) chars, under the line")
             return outcome(.belowMinimum)
         }
@@ -201,15 +231,17 @@ actor FoundationModelsPolisher: Polisher {
         var out: [String] = []
         var warm = 0
         var failed = 0
+        var reasons: [String] = []
 
         for piece in pieces {
             if let done = tidiedPieces[piece] {
                 out.append(done.text)
                 if done.failed { failed += 1 }
+                reasons.append(done.reason)
                 warm += 1
                 continue
             }
-            let task: Task<(text: String, failed: Bool), Never>
+            let task: Task<Piece, Never>
             if let running = piecesInFlight[piece] {
                 task = running
                 warm += 1
@@ -235,14 +267,16 @@ actor FoundationModelsPolisher: Polisher {
                     // here or on the way back to the caller.
                     Self.log.notice(
                         "cleanup not ready within budget: \(trimmed.count, privacy: .public) chars, \(pieces.count, privacy: .public) chunk(s), \(warm, privacy: .public) warm, \(started.duration(to: .now).seconds, privacy: .public)s elapsed here")
-                    return outcome(.budgetExpiredInner, chunks: pieces.count, warm: warm, failed: failed)
+                    return outcome(.budgetExpiredInner, chunks: pieces.count, warm: warm, failed: failed, reasons: reasons)
                 }
                 out.append(value.text)
                 if value.failed { failed += 1 }
+                reasons.append(value.reason)
             } else {
                 let value = await task.value
                 out.append(value.text)
                 if value.failed { failed += 1 }
+                reasons.append(value.reason)
             }
         }
 
@@ -255,14 +289,14 @@ actor FoundationModelsPolisher: Polisher {
             """)
         return outcome(
             .landed, text: out.joined(separator: " "),
-            chunks: pieces.count, warm: warm, failed: failed)
+            chunks: pieces.count, warm: warm, failed: failed, reasons: reasons)
     }
 
     /// One piece through the model, unwrapped, ending kept, guarded. Every
     /// failure returns the piece as dictated, marked `failed` so the honest
     /// refined-at-once flag can tell a cleaned reply from the input handed
     /// back. One session per piece, never shared: see `warmed`.
-    private static func tidy(piece: String) async -> (text: String, failed: Bool) {
+    private static func tidy(piece: String) async -> Piece {
         let session = LanguageModelSession(instructions: CleanupPrompt.instructions(for: piece))
         let reply: String
         do {
@@ -278,7 +312,7 @@ actor FoundationModelsPolisher: Polisher {
             // how the shared-session context overflow went unnoticed.
             log.error(
                 "cleanup failed on a chunk, shipping that chunk as dictated: \(String(describing: error), privacy: .public)")
-            return (piece, failed: true)
+            return Piece(piece: piece, failed: "failed:\(errorClass(error))")
         }
 
         let cleaned = CleanupPrompt.keepingEnding(of: piece, in: CleanupPrompt.unwrap(reply))
@@ -286,11 +320,20 @@ actor FoundationModelsPolisher: Polisher {
         // Lengths and reasons, never content. Part 1 §2: transcripts never
         // enter logs, and this path exists precisely when the model got the
         // content wrong.
-        if case .violated(let reason) = FidelityGuard.check(raw: piece, cleaned: cleaned) {
+        let verdict = FidelityGuard.check(raw: piece, cleaned: cleaned)
+        if case .violated(let reason) = verdict {
             log.error("cleanup rejected a chunk: \(reason, privacy: .public)")
-            return (piece, failed: true)
+            return Piece(piece: piece, failed: "rejected:\(verdict.rule ?? "unknown")")
         }
-        return (cleaned, failed: false)
+        return Piece(text: cleaned, failed: false, reason: "landed")
+    }
+
+    /// The error's case name without its payload ("guardrailViolation",
+    /// "exceededContextWindowSize"), or "timeout" for the ceiling above.
+    private static func errorClass(_ error: Error) -> String {
+        if error is CancellationError { return "timeout" }
+        let described = String(describing: error)
+        return String(described.prefix { $0 != "(" && $0 != ":" })
     }
 
     /// A timeout that actually abandons the work.
