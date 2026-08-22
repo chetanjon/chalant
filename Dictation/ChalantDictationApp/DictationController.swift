@@ -72,7 +72,7 @@ final class DictationController {
     static let refineBudget: Duration = .milliseconds(650)
     /// The caller's hard ceiling: the budget plus a small grace for the hop
     /// back. Kept beside `refineBudget` so the two can never drift apart.
-    static let budgetWithGrace: Double = 0.73
+    static let budgetWithGrace: Duration = .milliseconds(730)
     private var swapGeneration = 0
     private let activity = UserActivityWatch()
     /// Turns a real day of dictating into the spontaneous half of the corpus.
@@ -571,60 +571,26 @@ final class DictationController {
         var sinceLastPolish: Double = -1
         if Cleanup.isEnabled(), !shaped.isEmpty, let target {
             let waitStart = Date()
-            // The budget is enforced HERE, not only inside the polisher. The
-            // inner deadline races on the cooperative pool, and Whisper now
-            // hears during this exact window (1.24.0 starts it at finalize),
-            // so a starved timer could stretch a 0.65 s promise to the
-            // measured 0.9-2.5 s waits (log, 2026-08-18). Whatever happens
-            // below, the words land when the budget says so, with a small
-            // grace for the hop back; pieces that finish late still land in
-            // the polisher's cache for the hearing pass to reuse.
-            enum Landed { case polished(PolishOutcome), budgetExpired }
+            // The budget is enforced HERE, not only inside the polisher, and
+            // for three days it was not enforced anywhere: both waits were
+            // task groups, and a task group does not return until every
+            // child is done, so the "deadline" fired on time and the group
+            // then sat on the polish child until the model replied. Every
+            // release wait from 2026-08-18 to 08-21 ended within microseconds
+            // of the model's reply (2.46 s for a 0.73 s cap on 08-20, 1.697 s
+            // on 08-21) and it read as executor starvation; six deadline
+            // variants were aimed at timers that had never been late. See
+            // `Deadline`. The polish runs as its own task that nobody waits
+            // for past the cap: pieces that finish late still land in the
+            // polisher's cache for the hearing pass to reuse.
             let polisher = self.polisher
             let bundleID = target.bundleID ?? ""
-            let landed = await withTaskGroup(of: Landed.self) { group -> Landed in
-                group.addTask {
-                    .polished(
-                        await polisher.polish(
-                            shaped, profile: AppProfile(bundleID: bundleID),
-                            within: Self.refineBudget))
-                }
-                // TWO deadlines, on different executors, both driven by raw
-                // dispatch timers that no Swift executor can starve on the
-                // way in. Every subtler deadline so far (cooperative-pool
-                // sleep, main-actor sleep, zero tolerance, utility hearing,
-                // latency-critical activity) woke at EXACTLY the moment the
-                // model finished (2.46 s for a 0.73 s sleep, 2026-08-20,
-                // matching the model's own cold time to the millisecond), so
-                // something starves the WAKE, not the timer. Whichever leg
-                // fires first ends the wait; a leg that wakes late says so
-                // and names its executor, so the next log read convicts one.
-                group.addTask { @MainActor in
-                    let armed = Date()
-                    await DictationController.hardDeadline(seconds: Self.budgetWithGrace)
-                    let waited = Date().timeIntervalSince(armed)
-                    if waited > Self.budgetWithGrace + 0.2 {
-                        Self.log.notice(
-                            "deadline wake starved on the MAIN actor: \(waited, privacy: .public)s for \(Self.budgetWithGrace, privacy: .public)s")
-                    }
-                    return .budgetExpired
-                }
-                group.addTask {
-                    let armed = Date()
-                    await DictationController.hardDeadline(seconds: Self.budgetWithGrace)
-                    let waited = Date().timeIntervalSince(armed)
-                    if waited > Self.budgetWithGrace + 0.2 {
-                        Self.log.notice(
-                            "deadline wake starved on the POOL: \(waited, privacy: .public)s for \(Self.budgetWithGrace, privacy: .public)s")
-                    }
-                    return .budgetExpired
-                }
-                let first = await group.next() ?? .budgetExpired
-                group.cancelAll()
-                return first
+            let polishTask = Task {
+                await polisher.polish(
+                    shaped, profile: AppProfile(bundleID: bundleID),
+                    within: Self.refineBudget)
             }
-            switch landed {
-            case .polished(let outcome):
+            if let outcome = await Deadline.value(of: polishTask, within: Self.budgetWithGrace) {
                 polishOutcomeName = outcome.result.rawValue
                 chunkCount = outcome.chunks
                 warmChunks = outcome.warmChunks
@@ -644,7 +610,7 @@ final class DictationController {
                     // own notice says where the time went.
                     Self.log.notice("cleanup missed its inner budget; the words land as said")
                 }
-            case .budgetExpired:
+            } else {
                 polishOutcomeName = "budgetExpiredCaller"
                 Self.log.notice("budget expired at the caller; the words land as said")
             }
@@ -858,19 +824,6 @@ final class DictationController {
     /// the resume still travels through the awaiting task's executor, which
     /// is exactly what the paired "deadline wake starved" lines measure.
     /// The timer keeps itself alive through its own handler and fires once.
-    nonisolated static func hardDeadline(seconds: Double) async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInteractive))
-            timer.schedule(deadline: .now() + seconds, leeway: .nanoseconds(1))
-            timer.setEventHandler {
-                timer.setEventHandler {}
-                timer.cancel()
-                continuation.resume()
-            }
-            timer.resume()
-        }
-    }
-
     private func beginUtteranceActivity() {
         endUtteranceActivity()
         utteranceActivity = ProcessInfo.processInfo.beginActivity(
