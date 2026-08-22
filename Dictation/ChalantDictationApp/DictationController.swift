@@ -569,6 +569,11 @@ final class DictationController {
         var failedChunks = 0
         var polishColdStart = false
         var sinceLastPolish: Double = -1
+        // The texts of the path (schema 3): what the model gave back, or
+        // why it gave nothing, in the row's own words.
+        var modelOutput: String?
+        var modelReason = shaped.isEmpty ? "skipped:empty" : (Cleanup.isEnabled() ? "skipped:noTarget" : "skipped:off")
+        var modelChunks: [String] = []
         if Cleanup.isEnabled(), !shaped.isEmpty, let target {
             let waitStart = Date()
             // The budget is enforced HERE, not only inside the polisher, and
@@ -602,6 +607,24 @@ final class DictationController {
                 chunkCount = outcome.chunks
                 warmChunks = outcome.warmChunks
                 failedChunks = outcome.failedChunks
+                modelChunks = outcome.chunkReasons
+                switch outcome.result {
+                case .landed:
+                    // The model's text only when some chunk came back from
+                    // it; when every chunk shipped as dictated the "output"
+                    // is the input rejoined, and the first chunk's reason
+                    // (rejected:<rule>, failed:<error>) is the honest field.
+                    if outcome.failedChunks < outcome.chunks {
+                        modelOutput = outcome.text
+                        modelReason = "landed"
+                    } else {
+                        modelReason = outcome.chunkReasons.first ?? "rejected:unknown"
+                    }
+                case .budgetExpiredInner: modelReason = "budgetExpired:inner"
+                case .modelUnavailable: modelReason = "skipped:unavailable"
+                case .belowMinimum: modelReason = "gated"
+                case .empty: modelReason = "skipped:empty"
+                }
                 if let refined = outcome.text, !refined.isEmpty {
                     text = refined
                     // Honest now (phase 0): landed AND at least one chunk
@@ -617,6 +640,7 @@ final class DictationController {
                 }
             } else {
                 polishOutcomeName = "budgetExpiredCaller"
+                modelReason = "budgetExpired:caller"
                 Self.log.notice("budget expired at the caller; the words land as said")
             }
             timings.polish = Date().timeIntervalSince(waitStart)
@@ -646,6 +670,19 @@ final class DictationController {
         let outcome = await inserter.insert(text, into: target)
         timings.insertion = Date().timeIntervalSince(insertStart)
 
+        // What actually reached the app, and if nothing did, why.
+        let insertOutcomeName: String
+        var inserted: String?
+        switch outcome {
+        case .inserted(let tier):
+            inserted = text
+            insertOutcomeName = "inserted:\(tier)"
+        case .leftOnClipboard(let reason):
+            insertOutcomeName = "leftOnClipboard:\(reason)"
+        case .refused(let reason):
+            insertOutcomeName = "refused:\(reason)"
+        }
+
         // The row goes out the moment the outcome is known, BEFORE the
         // hearing starts, so the hearing's decision seconds later can be
         // appended against this row's id (`CorpusCapture.annotate`).
@@ -667,7 +704,15 @@ final class DictationController {
             failedChunks: failedChunks,
             refinedChanged: refinedChanged,
             polishColdStart: polishColdStart,
-            secondsSinceLastPolish: sinceLastPolish)
+            secondsSinceLastPolish: sinceLastPolish,
+            texts: CorpusCapture.Texts(
+                asrRaw: raw,
+                afterDeterministic: shaped,
+                modelOutput: modelOutput,
+                modelReason: modelReason,
+                modelChunks: modelChunks,
+                inserted: inserted,
+                insertOutcome: insertOutcomeName))
 
         // Now watch what they do to it. Only when the text actually landed in
         // the document: text left on the clipboard was never inserted, so

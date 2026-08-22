@@ -25,6 +25,23 @@ struct FidelityGuardTests {
         check(raw, cleaned) == .ok
     }
 
+    /// The corpus row names the rule that rejected a chunk
+    /// ("rejected:didNotStutter"), so every check must answer to a name
+    /// and `ok` to none.
+    @Test func everyViolationNamesItsRule() {
+        #expect(check("Send it today.", "Send it today.").rule == nil)
+        #expect(check("hello there friend", "").rule == "emptyOutput")
+        #expect(check("Send 15, not 50.", "Send 15.").rule == "numbersSurvived")
+        #expect(check("Do not ship it.", "Ship it.").rule == "negationsSurvived")
+        #expect(check("Tell Sarah and Aidan.", "Tell Sarah.").rule == "namesSurvived")
+        #expect(
+            check("Move the stand-up from 93, 932, 1015", "Move the stand- Move the stand-up from 93, 932, 1015").rule
+                == "didNotStutter")
+        #expect(
+            check("please send the quarterly report to the finance team", "Here is a poem about spring flowers blooming.").rule
+                == "stillTheSameMessage")
+    }
+
     // MARK: - What the model is allowed to do
 
     /// The whole point of the 2026-08-14 reversal. If this fails, the guard is

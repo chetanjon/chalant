@@ -39,10 +39,16 @@ public struct PolishOutcome: Sendable, Equatable {
     public var coldStart: Bool
     /// Seconds since the last completed model reply, nil when never.
     public var secondsSinceLastPolish: Double?
+    /// One entry per chunk the model was asked about, in order: "landed",
+    /// "rejected:<rule>" (the `FidelityGuard` check that fired) or
+    /// "failed:<error>". The corpus row keeps these verbatim so a rejected
+    /// real dictation says which rule rejected it (2026-08-21, Task 3).
+    public var chunkReasons: [String]
 
     public init(
         result: Result, text: String?, chunks: Int, warmChunks: Int,
-        failedChunks: Int, coldStart: Bool, secondsSinceLastPolish: Double?
+        failedChunks: Int, coldStart: Bool, secondsSinceLastPolish: Double?,
+        chunkReasons: [String] = []
     ) {
         self.result = result
         self.text = text
@@ -51,6 +57,7 @@ public struct PolishOutcome: Sendable, Equatable {
         self.failedChunks = failedChunks
         self.coldStart = coldStart
         self.secondsSinceLastPolish = secondsSinceLastPolish
+        self.chunkReasons = chunkReasons
     }
 
     /// The honest flag: the model landed inside the budget AND at least

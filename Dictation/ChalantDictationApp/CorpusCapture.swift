@@ -42,19 +42,31 @@ actor CorpusCapture {
             .appendingPathComponent("Desktop/chalant-corpus/captured")
     }
 
+    /// Where this instance writes, and which defaults hold its switch.
+    /// The app uses the Desktop folder and standard defaults; a test hands
+    /// in a temporary folder and its own suite so a row can be written and
+    /// read back without touching the founder's corpus (2026-08-21).
+    private let folder: URL
+    private let defaults: UserDefaults
+
+    init(folder: URL = CorpusCapture.folder, defaults: UserDefaults = .standard) {
+        self.folder = folder
+        self.defaults = defaults
+    }
+
     private var pending: (id: String, audio: URL, startedAt: Date, bundleID: String?)?
 
     /// Begin an utterance. Returns where the audio should be written, or nil
     /// when capture is off, which is the normal case.
     func begin(bundleID: String?, at now: Date = Date()) -> URL? {
-        guard Self.isEnabled() else { return nil }
+        guard Self.isEnabled(in: defaults) else { return nil }
         try? FileManager.default.createDirectory(
-            at: Self.folder, withIntermediateDirectories: true)
+            at: folder, withIntermediateDirectories: true)
 
         // Sortable, unique, and readable in a Finder window without a tool.
         let stamp = Self.stampFormatter.string(from: now)
         let id = "cap-\(stamp)"
-        let audio = Self.folder.appendingPathComponent("\(id).caf")
+        let audio = folder.appendingPathComponent("\(id).caf")
         pending = (id: id, audio: audio, startedAt: now, bundleID: bundleID)
         return audio
     }
@@ -67,6 +79,26 @@ actor CorpusCapture {
     /// `desired` column stays empty on purpose: only the person who spoke can
     /// say what they meant, and Part 4 is firm that a corpus labelled from the
     /// machine's own guess is a story you tell yourself.
+    /// The four texts of the path (schema 3, 2026-08-21): `asrRaw` is the
+    /// transcriber's own text, `afterDeterministic` the text after the
+    /// deterministic passes and list shaping (what the model is shown, and
+    /// what lands when it is not), `modelOutput` the model's text when any
+    /// chunk came back from it (nil otherwise, and `modelReason` says why:
+    /// "gated", "skipped:<why>", "rejected:<rule>", "failed:<error>",
+    /// "budgetExpired:<inner|caller>"), `inserted` the string actually
+    /// handed to the target app (nil when nothing was, and `insertOutcome`
+    /// says why). `output` stays as the legacy alias of `inserted` that
+    /// the scoring tools already read.
+    struct Texts {
+        var asrRaw: String
+        var afterDeterministic: String
+        var modelOutput: String?
+        var modelReason: String
+        var modelChunks: [String]
+        var inserted: String?
+        var insertOutcome: String
+    }
+
     @discardableResult
     func finish(
         output: String, fedBuffers: Int, finalize: TimeInterval?, insert: TimeInterval?,
@@ -74,7 +106,7 @@ actor CorpusCapture {
         holdSeconds: TimeInterval = 0, inputPeak: Double = 0, keyDownHeard: Bool = true,
         polishOutcome: String = "", chunkCount: Int = 0, warmChunks: Int = 0,
         failedChunks: Int = 0, refinedChanged: Bool = false, polishColdStart: Bool = false,
-        secondsSinceLastPolish: Double = -1
+        secondsSinceLastPolish: Double = -1, texts: Texts? = nil
     ) -> String? {
         guard let p = pending else { return nil }
         pending = nil
@@ -87,8 +119,11 @@ actor CorpusCapture {
         // could read it). schema 2 (2026-08-21): the campaign fields joined
         // and `refinedAtOnce` became honest, so rows before and after must
         // be tellable apart when rates are computed across the seam.
-        let row: [String: Any] = [
-            "schema": 2,
+        // schema 3 (2026-08-21, later): the four texts of the path joined
+        // (`Texts`), so the protected-span mutation rate can be read off
+        // real dictations rather than only off Set C.
+        var row: [String: Any] = [
+            "schema": 3,
             "id": p.id,
             "audio": "captured/\(p.id).caf",
             "recorded": ISO8601DateFormatter().string(from: p.startedAt),
@@ -116,6 +151,15 @@ actor CorpusCapture {
             "secondsSinceLastPolish": secondsSinceLastPolish,
             "note": "",
         ]
+        if let texts {
+            row["asrRaw"] = texts.asrRaw
+            row["afterDeterministic"] = texts.afterDeterministic
+            row["modelOutput"] = texts.modelOutput ?? NSNull()
+            row["modelReason"] = texts.modelReason
+            row["modelChunks"] = texts.modelChunks
+            row["inserted"] = texts.inserted ?? NSNull()
+            row["insertOutcome"] = texts.insertOutcome
+        }
         append(row)
         Self.log.info("captured \(p.id, privacy: .public) (\(output.count, privacy: .public) chars)")
         return p.id
@@ -127,7 +171,7 @@ actor CorpusCapture {
     func annotate(
         id: String, decision: String, seconds: TimeInterval, charsBefore: Int, charsAfter: Int
     ) {
-        guard Self.isEnabled() else { return }
+        guard Self.isEnabled(in: defaults) else { return }
         append([
             "id": id,
             "kind": "hearing",
@@ -143,7 +187,7 @@ actor CorpusCapture {
               var line = String(data: data, encoding: .utf8) else { return }
         line += "\n"
 
-        let manifest = Self.folder.appendingPathComponent("captured.jsonl")
+        let manifest = folder.appendingPathComponent("captured.jsonl")
         if let handle = try? FileHandle(forWritingTo: manifest) {
             defer { try? handle.close() }
             _ = try? handle.seekToEnd()
