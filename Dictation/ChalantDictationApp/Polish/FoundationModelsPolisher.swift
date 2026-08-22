@@ -83,6 +83,18 @@ actor FoundationModelsPolisher: Polisher {
         gapAtUtteranceStart = lastRespondCompletedAt.map { Date().timeIntervalSince($0) }
     }
 
+    /// The cold-start facts of the utterance in progress, as fixed at
+    /// `beginUtterance`. The same two values ride every `PolishOutcome`,
+    /// but an outcome only reaches the caller when the polish beats the
+    /// budget, and the first schema-2 row (2026-08-21 18:11) showed what
+    /// that costs: a process that had never polished landed raw after a
+    /// budget miss and its row said `polishColdStart: false`, the default.
+    /// The rows that miss the budget are the ones the speed work reads,
+    /// so the caller takes these before it starts waiting.
+    var coldStartFacts: (coldStart: Bool, secondsSinceLastPolish: Double?) {
+        (utteranceStartedCold, gapAtUtteranceStart)
+    }
+
     /// Tidy, in the background, every chunk of `text` so far: the closed
     /// chunks, which will not change as the speaker goes on, and the tail
     /// chunk as it stands right now, speculatively. Called on a timer during
@@ -211,7 +223,12 @@ actor FoundationModelsPolisher: Polisher {
             }
             if let deadline {
                 let remaining = ContinuousClock.now.duration(to: deadline)
-                guard remaining > .zero, let value = await Self.value(of: task, within: remaining) else {
+                // `Deadline.value` gives up on WAITING, never on the work:
+                // the piece keeps running and lands in `tidiedPieces` for
+                // the hearing pass. The wait this replaced (a task group of
+                // {await task.value, sleep}) could not return before the
+                // piece finished, whatever the budget said: see `Deadline`.
+                guard remaining > .zero, let value = await Deadline.value(of: task, within: remaining) else {
                     // The elapsed figure is the point: the caller measured
                     // waits of 0.9 to 2.5 s against a 0.65 s budget (log,
                     // 2026-08-18), and this says whether the overshoot is in
@@ -239,20 +256,6 @@ actor FoundationModelsPolisher: Polisher {
         return outcome(
             .landed, text: out.joined(separator: " "),
             chunks: pieces.count, warm: warm, failed: failed)
-    }
-
-    /// The task's value if it finishes within `limit`, else nil; the task
-    /// itself keeps running.
-    private static func value<T: Sendable>(of task: Task<T, Never>, within limit: Duration) async -> T? {
-        await withTaskGroup(of: T?.self) { group in
-            group.addTask { await task.value }
-            // Explicit zero tolerance: the default lets the system coalesce
-            // the wake, and this timer IS the budget.
-            group.addTask { try? await Task.sleep(for: limit, tolerance: .zero); return nil }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
-        }
     }
 
     /// One piece through the model, unwrapped, ending kept, guarded. Every

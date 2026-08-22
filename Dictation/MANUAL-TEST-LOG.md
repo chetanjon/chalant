@@ -917,3 +917,19 @@ userActed / ...); (3) speak 10 corpus takes containing deliberate
 self-corrections ("scratch that", "no wait, Wednesday"): phase 4's ground
 truth, collected now while capture is on. Automated: PolishOutcomeTests
 pins the refined-at-once truth table.
+
+## 2026-08-21 — the budget is real (fix/the-budget-is-real)
+
+Not yet exercised live (no signing identity on the Mac today). Automated:
+`DeadlineTests` (the bounded wait returns at the budget against a task
+that never finishes in time; a value inside the budget comes back at
+once; the task is not cancelled). Protocol rows for the founder, on the
+installed build: (1) dictate one ~30-word sentence: the corpus row's
+polishSeconds must be ≤ 0.73 whatever the model did (refined text landed
+or `budgetExpiredCaller`/`budgetExpiredInner`), never 1.7 or 2.5;
+(2) dictate three more: every row ≤ 0.73, and at least one with
+`refinedAtOnce: true` when the sentence had fillers; (3) with Better
+hearing on, a late cleanup must still show up: a row with
+`budgetExpired*` followed by a `kind:"hearing"` line, proving the work
+continued after the wait gave up. Hands-off alternative:
+`build/harness/verify-dictation.sh` (no `--cold` needed) prints the row.
