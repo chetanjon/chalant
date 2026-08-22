@@ -858,11 +858,14 @@ final class DictationController {
         // nobody meant to say.
         // Restatement runs LAST, on the cleanest text, so a repeated
         // sentence matches its twin even when only one copy carried an um.
-        let deterministic = Restatement.collapsing(
-            Fillers.removing(
-                Disfluency.collapsingRepetitions(
-                    Guardrail.trimmingPunctuationRun(
-                        resolved.map(\.text).joined(separator: " ")))))
+        // Contrast runs after the fillers are gone, so "153 um not 135"
+        // still reads as a value against a value (2026-08-22).
+        let deterministic = Contrast.commaBeforeNot(
+            Restatement.collapsing(
+                Fillers.removing(
+                    Disfluency.collapsingRepetitions(
+                        Guardrail.trimmingPunctuationRun(
+                            resolved.map(\.text).joined(separator: " "))))))
         return deterministic
     }
 

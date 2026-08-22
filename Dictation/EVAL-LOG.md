@@ -1215,3 +1215,36 @@ on all 28 rows where both landed; C12 rejected by the guard in both; C17
 landed in shadow (0.79 s) and missed the budget in live
 (`budgetExpired:inner`). Shadow's median model time 0.507 s, recorded on
 the row's shadow line and never waited for.
+
+## 2026-08-22 — the two free edits: "ah" and the comma before a contrastive "not" (`feat/model-into-shadow`, prompt 5 task 2)
+
+Both edits the model was credited with on 2026-08-22 ("what does the model
+buy?"), made deterministically. `Fillers.noise` gains "ah". New Core pass
+`Contrast.commaBeforeNot`: a comma before "not" only when it sits between
+two value tokens (a number, a number word, a capitalised mid-sentence word,
+a possessive pronoun; the right one may follow "the", "a", "an"); ordinary
+negation is never a match. It runs after Fillers and Restatement in
+`deterministicText`.
+
+**Dry run on real speech first** (`tools/passprobe`, read-only over the
+391 utterance rows in the founder's `captured.jsonl`): the comma pass would
+change **0 rows**. All 38 mid-sentence "not"s in real dictation follow an
+auxiliary or a pronoun ("are not", "it's not", "do not", "I'm not"); a value
+contrast has not occurred in real speech yet. "ah" occurs in 0 real rows.
+Nothing to tighten, nothing touched.
+
+90 rows, model off (`textpath --off`), against the #46 deterministic column:
+
+| set | #46 deterministic | now | rows changed |
+|---|---|---|---|
+| C | 18.22 (41) | **17.78 (40)** | C14 `153 not 135` → `153, not 135` (the comma pass) |
+| D | 93.65 (177) | **91.01 (172)** | D-R2-a `postpone, ah, Ennani` → `postpone Ennani`; D-U04 `Naaku, Ah, File,` → `Naaku File,` (both "ah") |
+| E | 37.86 (92) | 37.86 (92) | none |
+| all | 47.18 (310) | **46.27 (304)** | |
+
+Six corrections recovered deterministically, against the model's net four
+(46.58). Protected-span rate on the off run: **0/61**. One honest note on
+D-U04: its "Ah" was the Telugu word "aa" ("that"), which the en-US ASR
+rendered as an English filler; the score still improved because "Ah" never
+matched "aa", but in code-switched speech "ah" can be a word. English-only is
+the campaign's scope, and the row says so.

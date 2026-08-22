@@ -36,6 +36,8 @@ let ungated = args.contains("--ungated")
 // which is the shadow run. Used to confirm the two modes produce the same
 // model text, and to count how often live would have landed raw instead.
 let live = args.contains("--live")
+// --off is the off mode: no model at all, the deterministic text is final.
+let off = args.contains("--off")
 let liveBudget: Duration = .milliseconds(650)
 var label = ""
 if let i = args.firstIndex(of: "--label"), i + 1 < args.count { label = args[i + 1] }
@@ -88,11 +90,12 @@ func deterministic(_ raw: String) -> String {
     let corrected = TermMatcher.applyingAliases(tokens: tokens, aliases: [:])
     let whole = TermMatcher.joiningSpans(tokens: corrected, terms: [])
     let resolved = TermMatcher.resolving(tokens: whole, terms: [])
-    let text = Restatement.collapsing(
-        Fillers.removing(
-            Disfluency.collapsingRepetitions(
-                Guardrail.trimmingPunctuationRun(
-                    resolved.map(\.text).joined(separator: " ")))))
+    let text = Contrast.commaBeforeNot(
+        Restatement.collapsing(
+            Fillers.removing(
+                Disfluency.collapsingRepetitions(
+                    Guardrail.trimmingPunctuationRun(
+                        resolved.map(\.text).joined(separator: " "))))))
     return Listing.format(text)
 }
 
@@ -114,17 +117,20 @@ for (n, row) in rows.enumerated() {
     let shaped = deterministic(row.raw)
     await polisher.beginUtterance()
     let started = ContinuousClock.now
-    let outcome = await polisher.polish(shaped, profile: AppProfile(bundleID: "com.apple.TextEdit"), within: live ? liveBudget : nil)
-    let seconds = started.duration(to: .now)
+    let outcome: PolishOutcome = off
+        ? PolishOutcome(result: .empty, text: nil, chunks: 0, warmChunks: 0, failedChunks: 0, coldStart: false, secondsSinceLastPolish: nil)
+        : await polisher.polish(shaped, profile: AppProfile(bundleID: "com.apple.TextEdit"), within: live ? liveBudget : nil)
+    let seconds = off ? Duration.zero : started.duration(to: .now)
     // The controller lands `outcome.text` whenever it is non-empty and the
     // result landed, else the shaped text; same here.
     var final = shaped
     if outcome.result == .landed, let refined = outcome.text, !refined.isEmpty { final = refined }
-    let reason = outcome.modelReason
+    let reason = off ? "skipped:off" : outcome.modelReason
     switch reason {
     case "landed": landed += 1
     case "gated": gated += 1
-    default: if reason.hasPrefix("rejected") { rejected += 1 } else { failed += 1 }
+    default:
+        if reason.hasPrefix("rejected") { rejected += 1 } else if reason.hasPrefix("failed") { failed += 1 }
     }
     let record: [String: Any] = [
         "id": row.id,
@@ -164,7 +170,7 @@ let meta: [String: Any] = [
     "gated": !ungated,
     "gateCharacters": ungated ? -1 : CleanupPrompt.minimumCharactersForCleanup,
     "vocabulary": "empty",
-    "budget": live ? "live (650 ms)" : "none (shadow)",
+    "budget": off ? "off (no model)" : (live ? "live (650 ms)" : "none (shadow)"),
     "macOS": ProcessInfo.processInfo.operatingSystemVersionString,
     "startedAt": startedAt,
     "rows": rows.count,

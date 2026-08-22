@@ -25,7 +25,9 @@ import Foundation
 public enum Fillers {
 
     /// Never a real word in dictated English. Safe to remove anywhere.
-    private static let noise: Set<String> = ["uh", "um", "erm", "uhh", "umm", "hmm", "mmm"]
+    /// "ah" joined on 2026-08-22: measured across 90 scripted rows, it was
+    /// the one filler the model removed that this pass had not (D-R2-a).
+    private static let noise: Set<String> = ["uh", "um", "erm", "uhh", "umm", "hmm", "mmm", "ah"]
 
     /// Discourse markers, removed only when the speaker's own punctuation
     /// shows they were an aside: comma before *and* after.
