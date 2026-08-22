@@ -127,6 +127,10 @@ for (n, row) in rows.enumerated() {
         "modelOutput": outcome.modelText ?? NSNull(),
         "modelReason": reason,
         "modelChunks": outcome.chunkReasons,
+        // The model's reply per chunk even when the guard rejected it, so a
+        // rejection can be judged beside its source. Offline only: the
+        // corpus row stores null for a rejected chunk.
+        "modelReplies": outcome.chunkReplies,
         "inserted": final,
         "output": final,
         "polishOutcome": outcome.result.rawValue,

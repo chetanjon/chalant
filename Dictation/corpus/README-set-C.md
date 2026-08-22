@@ -76,3 +76,8 @@ different stamps are different experiments and are never averaged.** The
 saved runs in `corpus/runs/` are the first measurement (2026-08-21); the
 scorer reads the same field names off `captured.jsonl`, so the number can
 be taken off real dictations with an annotations file keyed by row id.
+
+`setD-asr-en_US.jsonl` (from `manifest.en_US.jsonl`) and `setE-asr-en_US.jsonl`
+(from `build/harness/ear/apple-E.tsv`, the Apple en-US transcripts of the Set E
+clips made 2026-08-18) are the false-rejection inputs for guard rules; the
+`*-rule6-*` run files in `corpus/runs/` are their first use (2026-08-22).

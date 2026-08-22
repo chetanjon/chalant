@@ -44,11 +44,17 @@ public struct PolishOutcome: Sendable, Equatable {
     /// "failed:<error>". The corpus row keeps these verbatim so a rejected
     /// real dictation says which rule rejected it (2026-08-21, Task 3).
     public var chunkReasons: [String]
+    /// The model's reply per chunk after unwrapping, INCLUDING replies the
+    /// guard rejected (empty when the call itself failed). Never written to
+    /// the corpus row (a rejected reply is null there, by the founder's
+    /// ruling); kept so the offline measurement can show a rejected reply
+    /// beside its source and judge the guard (2026-08-22).
+    public var chunkReplies: [String]
 
     public init(
         result: Result, text: String?, chunks: Int, warmChunks: Int,
         failedChunks: Int, coldStart: Bool, secondsSinceLastPolish: Double?,
-        chunkReasons: [String] = []
+        chunkReasons: [String] = [], chunkReplies: [String] = []
     ) {
         self.result = result
         self.text = text
@@ -58,6 +64,7 @@ public struct PolishOutcome: Sendable, Equatable {
         self.coldStart = coldStart
         self.secondsSinceLastPolish = secondsSinceLastPolish
         self.chunkReasons = chunkReasons
+        self.chunkReplies = chunkReplies
     }
 
     /// The honest flag: the model landed inside the budget AND at least

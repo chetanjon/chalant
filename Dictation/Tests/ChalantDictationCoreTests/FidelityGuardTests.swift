@@ -25,6 +25,43 @@ struct FidelityGuardTests {
         check(raw, cleaned) == .ok
     }
 
+    // MARK: - Nothing new (rule six, 2026-08-22)
+
+    /// Every token in the output must come from the input, and no more
+    /// often. Fewer is fine: that is what tidying is.
+    @Test func aWordTheSpeakerNeverSaidIsAViolation() {
+        #expect(!ok("Send the files today.", "Send the three files today."))
+        #expect(!ok("We got to be perfect.", "We must be perfect."))
+        #expect(check("Send the files today.", "Send the three files today.").rule == "noNewTokens")
+    }
+
+    @Test func aWordSaidOnceMayNotAppearTwice() {
+        #expect(!ok("Move the stand-up from 9:30.", "Move the Move the stand-up from 9:30."))
+    }
+
+    @Test func droppingWordsIsAllowed() {
+        #expect(ok("so um I think we should ship it", "I think we should ship it."))
+        #expect(ok("send fifteen, not fifty", "Send fifteen, not fifty."))
+    }
+
+    @Test func caseAndPunctuationAreNotNewTokens() {
+        #expect(ok("do not deploy this to production", "Do not deploy this to production."))
+        #expect(ok("The other invoice was $1200.", "The other invoice was $1,200."))
+        #expect(ok("it's fine, they're here", "It's fine; they're here."))
+        // A curly apostrophe from the model is the same word.
+        #expect(ok("I can't make it Thursday", "I can\u{2019}t make it Thursday."))
+    }
+
+    @Test func contractionsAndExpansionsAreNewTokens() {
+        #expect(!ok("I can't make it Thursday", "I cannot make it on Thursday."))
+        #expect(!ok("do not send that", "Don't send that."))
+    }
+
+    @Test func listMarkersAreNotTokens() {
+        #expect(ok("first move the review second ship the draft", "- Move the review.\n- Ship the draft."))
+        #expect(ok("number one move the review number two ship the draft", "1. Move the review.\n2. Ship the draft."))
+    }
+
     /// The corpus row names the rule that rejected a chunk
     /// ("rejected:didNotStutter"), so every check must answer to a name
     /// and `ok` to none.
@@ -40,20 +77,26 @@ struct FidelityGuardTests {
         #expect(
             check("please send the quarterly report to the finance team", "Here is a poem about spring flowers blooming.").rule
                 == "stillTheSameMessage")
+        #expect(check("Send the files today.", "Send the three files today.").rule == "noNewTokens")
     }
 
     // MARK: - What the model is allowed to do
 
     /// The whole point of the 2026-08-14 reversal. If this fails, the guard is
     /// too tight and the feature cannot exist.
-    @Test("rewording is allowed, that is what the model is for")
+    /// **Reversed on 2026-08-22 by rule six (`noNewTokens`):** tidying may
+    /// drop words, never add them. The free rewording this test used to
+    /// allow ("the thing" to "this", "get a sec" to "have a moment") is
+    /// exactly what the protected-span measurement could not see, so it is
+    /// now a rejection; the first case, which only removes, still passes.
+    @Test("tidying may drop words but never add them")
     func allowsRewording() {
         #expect(ok(
             "so I think we should probably ship it on Monday I guess",
             "I think we should ship it on Monday."))
-        #expect(ok(
+        #expect(check(
             "can you send the thing to Sarah when you get a sec",
-            "Could you send this to Sarah when you have a moment?"))
+            "Could you send this to Sarah when you have a moment?").rule == "noNewTokens")
     }
 
     @Test("punctuation and casing may change freely")
@@ -128,12 +171,14 @@ struct FidelityGuardTests {
         #expect(!ok("She doesn't want the update.", "She wants the update."))
     }
 
-    /// Rewriting one negation into another form of the same negation is fine.
-    /// The guard counts negation, not spelling.
-    @Test("the same negation said differently survives")
+    /// The NEGATION rule counts negation, not spelling: "can't" to "cannot"
+    /// is the same negation to it. Since rule six (2026-08-22) the pair is
+    /// still rejected, as a new word rather than a lost negation, which is
+    /// the founder's ruling that a contraction or expansion is a mutation.
+    @Test("the same negation said differently is not a lost negation")
     func allowsRewordedNegation() {
-        #expect(ok("I can't make it Thursday", "I cannot make it on Thursday."))
-        #expect(ok("do not send that", "Don't send that."))
+        #expect(check("I can't make it Thursday", "I cannot make it on Thursday.").rule == "noNewTokens")
+        #expect(check("do not send that", "Don't send that.").rule == "noNewTokens")
     }
 
     // MARK: - Names
@@ -145,10 +190,14 @@ struct FidelityGuardTests {
     }
 
     /// A name repeated then pronominalised is ordinary English, not a lie. The
-    /// check is presence, never count, or every natural rewrite trips it.
+    /// NAME check is presence, never count, or every natural rewrite trips
+    /// it. (The pronoun "she" is a new word, so since rule six the rewrite
+    /// is rejected on that ground alone; this pins that the name rule is
+    /// not the one that fires.)
     @Test("a name mentioned twice may be said once")
     func allowsPronouns() {
-        #expect(ok("Tell Sarah that Sarah is late.", "Tell Sarah she is late."))
+        #expect(check("Tell Sarah that Sarah is late.", "Tell Sarah she is late.").rule == "noNewTokens")
+        #expect(ok("Tell Sarah that Sarah is late.", "Tell Sarah that is late."))
     }
 
     /// **Caught on 42 real spontaneous utterances, not by thinking about it.**
@@ -156,17 +205,22 @@ struct FidelityGuardTests {
     /// which is capitalised and not opening the sentence, and the guard threw
     /// away a good cleanup with "a name went missing: Im". A rewrite is
     /// entitled to turn "I'm not sure" into "I am not sure".
+    /// Since rule six the expansion itself is rejected, as a new word; what
+    /// this test pins is that the NAME rule stays out of it.
     @Test("the first person is not a proper noun")
     func ignoresFirstPerson() {
-        #expect(ok("well I'm not sure about that", "Well, I am not sure about that."))
-        #expect(ok("I've told them and I'll do it", "I have told them and I will do it."))
+        #expect(check("well I'm not sure about that", "Well, I am not sure about that.").rule == "noNewTokens")
+        #expect(check("I've told them and I'll do it", "I have told them and I will do it.").rule == "noNewTokens")
+        #expect(ok("well I'm not sure about that", "Well, I'm not sure about that."))
     }
 
     @Test("the first word of a sentence is not treated as a name")
     func ignoresSentenceCase() {
         // "Send" is only capitalised because it opens the sentence; a rewrite
-        // that starts differently must not read as a dropped name.
-        #expect(ok("Send the files.", "The files are on their way."))
+        // that starts differently must not read as a dropped name. (The
+        // rewrite itself is a rule-six rejection since 2026-08-22.)
+        #expect(check("Send the files.", "The files are on their way.").rule == "noNewTokens")
+        #expect(ok("Send the files.", "Send the files"))
     }
 
     // MARK: - The model doing something other than cleaning up
@@ -194,9 +248,10 @@ struct FidelityGuardTests {
     /// 2 §8's injection preamble, plus a `@Generable` struct with one guided
     /// field, which cannot carry conversational framing at all. If this ever
     /// needs closing, it needs a semantic check rather than a stricter number.
-    @Test("an answer that reuses the question's words is NOT caught")
+    /// Closed by rule six (2026-08-22): "Paris" was never said.
+    @Test("an answer that reuses the question's words is caught as a new word")
     func knownGapReusedNouns() {
-        #expect(ok("what is the capital of France", "The capital of France is Paris."))
+        #expect(check("what is the capital of France", "The capital of France is Paris.").rule == "noNewTokens")
     }
 
     @Test("conversational framing around the answer is still not a cleanup")

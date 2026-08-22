@@ -1081,3 +1081,71 @@ line; 20 of 30 rows never reach the model as shipped. The rate on real
 spontaneous dictation is the number the schema-3 row exists to give, and no
 row of that kind exists yet (this build is not installed: no signing
 identity on the Mac today).
+
+## 2026-08-22 — CLOSING THE TWO GAPS: greedy decoding, and a sixth guard rule that adds nothing (`feat/close-the-two-gaps`)
+
+Both measured with the #44 harness (`tools/textpath`, `corpus-kit/span-score.py`),
+same stamp as before except the commit: model `instruct_3b.fm_api_generic_3b?
+variant=generic_sparse` `15.0.0.13.102990`, prompt SHA-256 `e97958cb280f…`
+(`CleanupPrompt` untouched).
+
+### 1. Greedy decoding (`GenerationOptions(sampling: .greedy)` on every polish call)
+
+The API exists (macOS 26.0+, `GenerationOptions.SamplingMode.greedy`). Ungated
+Set C, three passes: every text field identical across the passes (the run
+files hash alike once the per-row timing is dropped; `4fcd08b9…`), C08 no longer
+flips ("I can't make it on Thursday." on all three), rate **0/61** on all three,
+the same single rejection (C12, `stillTheSameMessage`) and the same single edit
+(C14's comma) as the #44 sampled runs. Diffed against #44: no edit appeared or
+disappeared; the only change is the flip going away. Timing unchanged (median
+0.54 s per call against 0.61 s).
+
+### 2. Rule six, `noNewTokens`: every output token must come from the input, no more often
+
+Tokens lowercased, apostrophes kept inside words (curly read as straight),
+everything else that is not a letter or digit stripped, list markers removed
+first like the other rules. Fewer tokens is fine; any new token or any count
+higher than the input is `rejected:noNewTokens`. No exceptions list. Runs last,
+so the older rules keep naming what they catch. Seven tests that encoded the
+2026-08-14 "rewords freely" positioning now assert the reversal (contraction,
+expansion, synonym, pronoun-for-name and the reused-words reply are all new
+words now); the deletions they also tested still pass.
+
+**(a) Set C, ungated, greedy, three passes:** rate **0/61** on all three, text
+identical across passes, rejections unchanged: C12 only (`stillTheSameMessage`,
+which fires before rule six). Rule six rejected nothing on Set C.
+
+**(b) False-rejection cost on D and E, ungated, one greedy pass each.** Rule six
+runs after the older five, so every `rejected:noNewTokens` below is a row the
+old guard would have let land.
+
+| set | rows | landed | rejected by rule six | rejected by older rules | failed (framework refusal) |
+|---|---|---|---|---|---|
+| D (Telugu/Hindi/Marathi code-switch through en-US ASR) | 30 | 22 | **3 (10.0%)** | 3 (`namesSurvived`) | 2 |
+| E (the founder's vocabulary) | 30 | 28 | **2 (6.7%)** | 0 | 0 |
+
+The five rule-six rejections, source (after the deterministic pass, which
+changed none of them) against the model's reply:
+
+| id | afterDeterministic | model reply | what the model did |
+|---|---|---|---|
+| D-R1-a | Chalant Lo was dictation, punishes, tunda. | Chalant Lo was dictation, **punishment**, tunda. | swapped a word (the ASR was already nonsense here; truth "pani chestunda") |
+| D-U08 | Gangotri Nundi call vachindi. | Gangotri Nundi **called**. | rewrote two words into a new one |
+| D-R2-c | Ravi Ki Chebu meeting postpone Indane. | Ravi Ki Chebu meeting **postponed to** Indane. | added two words |
+| E02 | Ask Athram, weather friction lens is ready for Gangotri. | Ask Athram, **whether** friction lens is ready for Gangotri. | fixed the ASR's homophone; the truth IS "whether" |
+| E20 | Claude code writes straight into the Chalant Island. That's nice, one of that. | …That's nice, one of **those**. | changed a word the ASR got wrong; truth has no such clause at all |
+
+So of five: three are the model adding or swapping words (the rule's purpose),
+one (E02) is a correct repair of an ASR error that the rule blocks because it
+cannot know it is correct, one (E20) is a plausible edit of a phrase the
+speaker never said. In the 50 landed rows the model's edits were deletions,
+punctuation and case only (D: 4 rows, E: 2 rows), all passing rule six.
+
+**(c) Redundancy, stated, nothing removed.** `didNotStutter`: redundant in
+practice (a repeat raises a token's count; the only escape is a compensating
+drop of the same word elsewhere). `numbersSurvived`: the "appeared" half is
+redundant (a new figure is a new token); the "went missing" half is not, rule
+six allows drops. `negationsSurvived`: same split, "appeared" redundant, "went
+missing" not. `namesSurvived`: not redundant (it catches drops; it fired on 3 D
+rows today). `stillTheSameMessage`: redundant for replies that bring new words,
+not for replies made of fewer source words. `emptyOutput`: not redundant.
