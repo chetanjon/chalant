@@ -917,3 +917,22 @@ userActed / ...); (3) speak 10 corpus takes containing deliberate
 self-corrections ("scratch that", "no wait, Wednesday"): phase 4's ground
 truth, collected now while capture is on. Automated: PolishOutcomeTests
 pins the refined-at-once truth table.
+
+## 2026-08-21 — prewarm at key-down (feat/prewarm-at-keydown, campaign phase 1a)
+
+Not yet exercised live. Offline evidence in EVAL-LOG (same date): the
+system unloads the cleanup model five minutes after its last use; a
+`prewarm()` at key-down reloads it behind the hold in under 1 s, and a
+fresh session then responds in ~1.1 s instead of ~2.5 s. Protocol rows for
+the founder: (1) leave Chalant alone for six minutes (no dictation), then
+dictate one ~30-word sentence into TextEdit: it must land refined or, if
+raw, the corpus row's polishSeconds must be near 1.1 s, not 2.5 s;
+(2) straight after, a burst of three short dictations: all warm (polish
+under 1 s each); (3) `/usr/bin/log show --last 10m --info --predicate
+'process == "modelmanagerd" AND eventMessage CONTAINS "instruct_3b"'` shows
+"Loading asset" within ~50 ms of the hold's "keyDown entered" line, before
+any pretidy. Hands-off alternative: `build/harness/verify-dictation.sh
+--cold` waits for the unload and for 60 s of keyboard quiet, drives one
+synthetic hold into a fresh TextEdit document, and prints the row and
+both logs. Automated: none possible (the hook is shell code around the OS
+model daemon; the polisher is owned by the controller with no seam).

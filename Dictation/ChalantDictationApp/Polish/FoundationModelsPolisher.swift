@@ -38,7 +38,7 @@ actor FoundationModelsPolisher: Polisher {
     /// new one costs nothing worth measuring.
     private var warmed: LanguageModelSession?
 
-    /// Warm the model at launch rather than on first use.
+    /// Warm the model at launch, and again at every key-down.
     ///
     /// **Part 0 §0.5 puts `prewarm()` on the shift gesture, and that has been
     /// the wrong trigger since 2026-08-14**, when cleanup stopped being an
@@ -46,6 +46,19 @@ actor FoundationModelsPolisher: Polisher {
     /// belongs beside the other first-use cliffs: the measured cold call is
     /// 2.4s against a 0.99s warm median, and that difference lands entirely on
     /// whichever sentence the user happens to dictate first.
+    ///
+    /// **Launch is not enough, measured 2026-08-21 (EVAL-LOG):** the model is
+    /// loaded by the system's `modelmanagerd`, shared by every process, and
+    /// **unloaded five minutes after its last use**. A launch prewarm buys
+    /// five minutes; after any longer pause the next polish pays the cold
+    /// load again (2.49 s against 0.9 s, fresh process, shipping prompt).
+    /// So `keyDown` calls this too: the hold is the load's hiding place, a
+    /// polish-worthy utterance is over 40 characters and so over ~3 s of
+    /// speech, and the cached reload takes 0.9 s. A prewarm on one session
+    /// warms the fresh session each piece actually responds on, because the
+    /// warmth lives in the system, not the session. When the model is
+    /// already loaded the request is a no-op in the daemon ("Not loading
+    /// asset"), so every key-down can afford it.
     func warmUp() {
         guard case .available = SystemLanguageModel.default.availability else { return }
         let session = warmed ?? LanguageModelSession(instructions: CleanupPrompt.instructionsPlain)
