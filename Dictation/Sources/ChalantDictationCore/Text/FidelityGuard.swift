@@ -52,6 +52,7 @@ public enum FidelityGuard {
         if reason.hasPrefix("a name") { return "namesSurvived" }
         if reason.hasPrefix("the model repeated itself") { return "didNotStutter" }
         if reason.hasPrefix("the output is a reply") { return "stillTheSameMessage" }
+        if reason.hasPrefix("a word appeared") { return "noNewTokens" }
         return "unknown"
     }
 
@@ -88,7 +89,7 @@ public enum FidelityGuard {
         if let reason = namesSurvived(rawTrimmed, cleanTrimmed) { return .violated(reason) }
         if let reason = didNotStutter(rawTrimmed, cleanTrimmed) { return .violated(reason) }
         if let reason = stillTheSameMessage(rawTrimmed, cleanTrimmed) { return .violated(reason) }
-
+        if let reason = nothingNew(rawTrimmed, cleanTrimmed) { return .violated(reason) }
         return .ok
     }
 
@@ -319,6 +320,48 @@ public enum FidelityGuard {
     /// would let an injected answer look like a faithful cleanup.
     private static func content(_ word: String) -> Bool {
         !word.isEmpty && !TermMatcher.stopwords.contains(word) && word.count > 1
+    }
+
+    // MARK: - Nothing new
+
+    /// Rule six (founder, 2026-08-22): every token in the output must come
+    /// from the input, and no more often. Fewer is fine, that is what
+    /// tidying is; anything else is a word the speaker never said. Tokens
+    /// are lowercased, apostrophes kept inside a word, every other
+    /// character that is not a letter or digit stripped, so case,
+    /// punctuation and number formatting ("$1200" to "$1,200") are not
+    /// new tokens, and a contraction or expansion ("can't" to "cannot")
+    /// is. No exceptions list to start: its false-rejection cost is
+    /// measured on Sets C, D and E in the EVAL-LOG entry of the same day.
+    /// It runs last so the older rules keep naming what they catch.
+    private static func nothingNew(_ raw: String, _ cleaned: String) -> String? {
+        var budget: [String: Int] = [:]
+        for token in bareTokens(in: raw) { budget[token, default: 0] += 1 }
+        for token in bareTokens(in: cleaned) {
+            guard let left = budget[token], left > 0 else {
+                return "a word appeared that was not said: \(token)"
+            }
+            budget[token] = left - 1
+        }
+        return nil
+    }
+
+    /// The comparable form of every word: lowercased, letters and digits
+    /// only, apostrophes allowed inside the word (curly ones read as
+    /// straight), empty words dropped.
+    static func bareTokens(in text: String) -> [String] {
+        words(in: text).compactMap { word -> String? in
+            var core = ""
+            for character in word.lowercased() {
+                if character.isLetter || character.isNumber {
+                    core.append(character)
+                } else if character == "'" || character == "\u{2019}" || character == "\u{2018}" {
+                    core.append("'")
+                }
+            }
+            let trimmed = core.trimmingCharacters(in: CharacterSet(charactersIn: "'"))
+            return trimmed.isEmpty ? nil : trimmed
+        }
     }
 
     // MARK: - Shared

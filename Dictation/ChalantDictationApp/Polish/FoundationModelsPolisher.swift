@@ -83,16 +83,20 @@ actor FoundationModelsPolisher: Polisher {
         let text: String
         let failed: Bool
         let reason: String
+        /// The model's unwrapped reply, even when rejected; empty when the
+        /// call failed. For the offline measurement only.
+        let reply: String
 
-        init(text: String, failed: Bool, reason: String) {
+        init(text: String, failed: Bool, reason: String, reply: String) {
             self.text = text
             self.failed = failed
             self.reason = reason
+            self.reply = reply
         }
 
         /// A chunk that ships as dictated, with why.
-        init(piece: String, failed reason: String) {
-            self.init(text: piece, failed: true, reason: reason)
+        init(piece: String, failed reason: String, reply: String = "") {
+            self.init(text: piece, failed: true, reason: reason, reply: reply)
         }
     }
 
@@ -188,11 +192,11 @@ actor FoundationModelsPolisher: Polisher {
     /// running past the budget and land in the cache, so the swap's own call
     /// picks them up rather than starting over.
     func polish(_ text: String, profile: AppProfile, within budget: Duration?) async -> PolishOutcome {
-        func outcome(_ result: PolishOutcome.Result, text: String? = nil, chunks: Int = 0, warm: Int = 0, failed: Int = 0, reasons: [String] = []) -> PolishOutcome {
+        func outcome(_ result: PolishOutcome.Result, text: String? = nil, chunks: Int = 0, warm: Int = 0, failed: Int = 0, reasons: [String] = [], replies: [String] = []) -> PolishOutcome {
             PolishOutcome(
                 result: result, text: text, chunks: chunks, warmChunks: warm,
                 failedChunks: failed, coldStart: utteranceStartedCold,
-                secondsSinceLastPolish: gapAtUtteranceStart, chunkReasons: reasons)
+                secondsSinceLastPolish: gapAtUtteranceStart, chunkReasons: reasons, chunkReplies: replies)
         }
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -232,12 +236,14 @@ actor FoundationModelsPolisher: Polisher {
         var warm = 0
         var failed = 0
         var reasons: [String] = []
+        var replies: [String] = []
 
         for piece in pieces {
             if let done = tidiedPieces[piece] {
                 out.append(done.text)
                 if done.failed { failed += 1 }
                 reasons.append(done.reason)
+                replies.append(done.reply)
                 warm += 1
                 continue
             }
@@ -267,16 +273,18 @@ actor FoundationModelsPolisher: Polisher {
                     // here or on the way back to the caller.
                     Self.log.notice(
                         "cleanup not ready within budget: \(trimmed.count, privacy: .public) chars, \(pieces.count, privacy: .public) chunk(s), \(warm, privacy: .public) warm, \(started.duration(to: .now).seconds, privacy: .public)s elapsed here")
-                    return outcome(.budgetExpiredInner, chunks: pieces.count, warm: warm, failed: failed, reasons: reasons)
+                    return outcome(.budgetExpiredInner, chunks: pieces.count, warm: warm, failed: failed, reasons: reasons, replies: replies)
                 }
                 out.append(value.text)
                 if value.failed { failed += 1 }
                 reasons.append(value.reason)
+                replies.append(value.reply)
             } else {
                 let value = await task.value
                 out.append(value.text)
                 if value.failed { failed += 1 }
                 reasons.append(value.reason)
+                replies.append(value.reply)
             }
         }
 
@@ -289,19 +297,28 @@ actor FoundationModelsPolisher: Polisher {
             """)
         return outcome(
             .landed, text: out.joined(separator: " "),
-            chunks: pieces.count, warm: warm, failed: failed, reasons: reasons)
+            chunks: pieces.count, warm: warm, failed: failed, reasons: reasons, replies: replies)
     }
 
     /// One piece through the model, unwrapped, ending kept, guarded. Every
     /// failure returns the piece as dictated, marked `failed` so the honest
     /// refined-at-once flag can tell a cleaned reply from the input handed
     /// back. One session per piece, never shared: see `warmed`.
+    /// Greedy decoding for every polish call. The default sampling is
+    /// random: on 2026-08-21 the same Set C row came back as said twice and
+    /// expanded once ("can't" to "cannot") in three passes of the shipping
+    /// path, so the protected-span mutation rate was a range rather than a
+    /// number and no corpus run could be reproduced. Greedy takes the most
+    /// likely token every step: the same input gives the same reply, which
+    /// is what a cleanup pass measured by a corpus has to do.
+    private static let decoding = GenerationOptions(sampling: .greedy)
+
     private static func tidy(piece: String) async -> Piece {
         let session = LanguageModelSession(instructions: CleanupPrompt.instructions(for: piece))
         let reply: String
         do {
             reply = try await withTimeout(timeout) {
-                try await session.respond(to: CleanupPrompt.framing(piece)).content
+                try await session.respond(to: CleanupPrompt.framing(piece), options: decoding).content
             }
         } catch {
             // Includes guardrail refusals, which Part 0 §0.7 makes an
@@ -323,9 +340,9 @@ actor FoundationModelsPolisher: Polisher {
         let verdict = FidelityGuard.check(raw: piece, cleaned: cleaned)
         if case .violated(let reason) = verdict {
             log.error("cleanup rejected a chunk: \(reason, privacy: .public)")
-            return Piece(piece: piece, failed: "rejected:\(verdict.rule ?? "unknown")")
+            return Piece(piece: piece, failed: "rejected:\(verdict.rule ?? "unknown")", reply: cleaned)
         }
-        return Piece(text: cleaned, failed: false, reason: "landed")
+        return Piece(text: cleaned, failed: false, reason: "landed", reply: cleaned)
     }
 
     /// The error's case name without its payload ("guardrailViolation",
