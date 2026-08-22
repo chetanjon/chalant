@@ -81,3 +81,16 @@ be taken off real dictations with an annotations file keyed by row id.
 (from `build/harness/ear/apple-E.tsv`, the Apple en-US transcripts of the Set E
 clips made 2026-08-18) are the false-rejection inputs for guard rules; the
 `*-rule6-*` run files in `corpus/runs/` are their first use (2026-08-22).
+
+## Set F, messy speech (UNRECORDED)
+
+`prompts-F.tsv` and `setF.json` (2026-08-22): 30 scripted utterances with
+mid-sentence fillers, false starts, one self-correction each (a marker word,
+a correction of a correction, or only a pause), restarts, trailing "um", and
+a few value contrasts. `truth` is the corrected intent; `protected_spans`
+hold the corrected values and never the retracted ones; `corrected` and
+`retracted` list the replacement and the withdrawn values, which
+`span-score.py` reports as their own counts (a self-correction handled
+correctly = corrected present, retracted absent), never inside the mutation
+rate. **Not recorded yet**: the founder records it with the Set C harness
+(`SECS=10 ./voiceprobe ./audio-F prompts-F.tsv`, lid open, built-in mic).

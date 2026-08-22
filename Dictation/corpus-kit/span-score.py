@@ -36,7 +36,15 @@ edit), and "cannot" counts as one negation (it is "can" + "not", so an
 expansion of "can't" does not read as a dropped negation).
 
 Mutation rate = mutated / present across all rows. Spans absent from the
-input are ASR misses, listed by row, never counted as mutations. Each
+input are ASR misses, listed by row, never counted as mutations.
+
+Self-corrections (Set F, 2026-08-22): an annotation row may carry
+`retracted` (values the speaker withdrew) and `corrected` (what replaced
+them). Per run the scorer reports, as its own counts and never inside the
+rate: retracted values the ASR heard (present in the input), retracted
+values that survived into the output, corrected values present in the
+output, and rows handled correctly (every corrected value present AND every
+retracted value absent from the output). Each
 mutation also names the stage where the span first went missing
 (deterministic: asrRaw -> afterDeterministic; model: afterDeterministic
 -> modelOutput; final: anything after), when those fields are present.
@@ -134,6 +142,8 @@ def score(annotations, outputs):
         "rows": 0, "rows_with_output": 0, "present": 0, "mutated": 0, "case_drift": 0,
         "by_label": Counter(), "by_stage": Counter(), "mutations": [], "asr_misses": OrderedDict(),
         "missing_output_rows": [], "model_reasons": Counter(), "rows_sent_to_model": 0,
+        "retraction_rows": 0, "retracted_total": 0, "retracted_heard": 0, "retracted_survived": 0,
+        "corrected_total": 0, "corrected_present": 0, "handled_correctly": 0, "retractions": [],
     }
     for ann in annotations:
         result["rows"] += 1
@@ -183,6 +193,23 @@ def score(annotations, outputs):
             result["mutations"].append({"id": ann["id"], "input": text_in, "output": text_out,
                                         "output_field": out_key, "modelReason": reason,
                                         "mutations": row_mutations})
+        retracted, corrected = ann.get("retracted", []), ann.get("corrected", [])
+        if retracted or corrected:
+            result["retraction_rows"] += 1
+            heard = [v for v in retracted if count(v, text_in) > 0]
+            survived = [v for v in retracted if count(v, text_out) > 0]
+            present = [v for v in corrected if count(v, text_out) > 0]
+            result["retracted_total"] += len(retracted)
+            result["retracted_heard"] += len(heard)
+            result["retracted_survived"] += len(survived)
+            result["corrected_total"] += len(corrected)
+            result["corrected_present"] += len(present)
+            ok = len(present) == len(corrected) and not survived
+            if ok:
+                result["handled_correctly"] += 1
+            result["retractions"].append({"id": ann["id"], "retracted": retracted, "heard": heard,
+                                          "survived": survived, "corrected": corrected,
+                                          "corrected_present": present, "handled": ok, "output": text_out})
     result["rate"] = (result["mutated"] / result["present"]) if result["present"] else 0.0
     return result
 
@@ -238,6 +265,18 @@ def selftest():
     merged, _ = load_outputs(f.name)
     assert merged["S"]["modelReason"] == "landed" and merged["S"]["polishSeconds"] == 0.6 and merged["S"]["shadow"]
     assert merged["S"]["inserted"] == "Send it."   # the words that landed are untouched by the merge
+    fann = [{"id": "F", "protected_spans": ["Wednesday"], "corrected": ["Wednesday"], "retracted": ["Tuesday"]}]
+    fout = {"F": {"asrRaw": "send it Tuesday, no, Wednesday", "inserted": "Send it Tuesday, no, Wednesday."}}
+    fr = score(fann, fout)
+    assert fr["retraction_rows"] == 1 and fr["retracted_heard"] == 1 and fr["retracted_survived"] == 1
+    assert fr["corrected_present"] == 1 and fr["handled_correctly"] == 0 and fr["mutated"] == 0
+    fout["F"]["inserted"] = "Send it Wednesday."
+    fr = score(fann, fout)
+    assert fr["retracted_survived"] == 0 and fr["handled_correctly"] == 1
+    # Under rule 5 the marker "no" is a negation token, so a repair that
+    # removes it reads as "negation dropped" (1 mutation). Stated here so the
+    # founder's decision on the marker is taken with the number in view.
+    assert fr["mutated"] == 1 and fr["by_label"] == {"negation dropped": 1}
     ann = [{"id": "X", "protected_spans": ["Do not", "Monday", "$1,200"]}]
     out = {"X": {"asrRaw": "Do not ship until Monday, it was $1200",
                  "afterDeterministic": "Do not ship until Monday, it was $1200",
@@ -280,6 +319,16 @@ def main():
     print("by label: " + (", ".join(f"{k} {v}" for k, v in sorted(result["by_label"].items())) or "none"))
     print("by stage: " + (", ".join(f"{k} {v}" for k, v in sorted(result["by_stage"].items())) or "none"))
     print(f"case drift (not in the rate): {result['case_drift']}")
+    if result["retraction_rows"]:
+        print(f"self-corrections (not in the rate): {result['retraction_rows']} rows; "
+              f"retracted values {result['retracted_total']}, heard by the ASR {result['retracted_heard']}, "
+              f"SURVIVED into the output {result['retracted_survived']}; corrected values present "
+              f"{result['corrected_present']} of {result['corrected_total']}; rows handled correctly "
+              f"{result['handled_correctly']} of {result['retraction_rows']}")
+        for entry in result["retractions"]:
+            if not entry["handled"]:
+                print(f"  {entry['id']}: retracted {entry['retracted']} survived {entry['survived']}; "
+                      f"corrected {entry['corrected']} present {entry['corrected_present']} | {entry['output']}")
     print("ASR misses (spans absent from asrRaw; not cleanup findings):")
     if result["asr_misses"]:
         for rid, spans in result["asr_misses"].items():

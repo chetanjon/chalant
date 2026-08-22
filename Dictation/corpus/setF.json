@@ -1,0 +1,538 @@
+[
+  {
+    "id": "F01",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F01.caf",
+    "truth": "Send the invoice on Wednesday, and copy Sarah.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "Wednesday",
+      "Sarah"
+    ],
+    "corrected": [
+      "Wednesday"
+    ],
+    "retracted": [
+      "Tuesday"
+    ],
+    "notes": "marker 'no'; day replaced by day"
+  },
+  {
+    "id": "F02",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F02.caf",
+    "truth": "Send it to Sarah before the standup.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "Sarah"
+    ],
+    "corrected": [
+      "Sarah"
+    ],
+    "retracted": [
+      "Priya"
+    ],
+    "notes": "marker 'sorry'; name replaced by name, both protected-looking"
+  },
+  {
+    "id": "F03",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F03.caf",
+    "truth": "The build number is 135.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "build number",
+      "135"
+    ],
+    "corrected": [
+      "135"
+    ],
+    "retracted": [
+      "153"
+    ],
+    "notes": "filler inside a number; number replaced by number"
+  },
+  {
+    "id": "F04",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F04.caf",
+    "truth": "The deploy to staging finished at 3:15, not 3:50.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "staging",
+      "3:15",
+      "not",
+      "3:50"
+    ],
+    "corrected": [
+      "staging"
+    ],
+    "retracted": [
+      "production"
+    ],
+    "notes": "false start that restarts the sentence; value contrast"
+  },
+  {
+    "id": "F05",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F05.caf",
+    "truth": "Move the meeting to Thursday.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "Thursday"
+    ],
+    "corrected": [
+      "Thursday"
+    ],
+    "retracted": [
+      "Monday",
+      "Tuesday"
+    ],
+    "notes": "correction of a correction"
+  },
+  {
+    "id": "F06",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F06.caf",
+    "truth": "Send it Wednesday, and do not wait for Aidan.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "Wednesday",
+      "do not",
+      "Aidan"
+    ],
+    "corrected": [
+      "Wednesday"
+    ],
+    "retracted": [
+      "Tuesday"
+    ],
+    "notes": "retraction with no marker word, only a pause"
+  },
+  {
+    "id": "F07",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F07.caf",
+    "truth": "The invoice came to $1,200.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "$1,200"
+    ],
+    "corrected": [
+      "$1,200"
+    ],
+    "retracted": [
+      "$120"
+    ],
+    "notes": "money replaced by money, ten times apart"
+  },
+  {
+    "id": "F08",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F08.caf",
+    "truth": "Do not deploy it until Sarah signs off.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "Do not",
+      "deploy",
+      "Sarah"
+    ],
+    "corrected": [],
+    "retracted": [
+      "production"
+    ],
+    "notes": "a negation arrives by correction; the negation count carries the rest"
+  },
+  {
+    "id": "F09",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F09.caf",
+    "truth": "Ping Gangothri about the icons.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "Gangothri"
+    ],
+    "corrected": [
+      "Gangothri"
+    ],
+    "retracted": [
+      "Aatram"
+    ],
+    "notes": "marker 'I mean'; restated tail; trailing um"
+  },
+  {
+    "id": "F10",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F10.caf",
+    "truth": "Ask Aidan to review the Vercel config.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "Aidan",
+      "Vercel"
+    ],
+    "corrected": [
+      "Aidan"
+    ],
+    "retracted": [
+      "Chetan"
+    ],
+    "notes": "fillers around names; name replaced by name"
+  },
+  {
+    "id": "F11",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F11.caf",
+    "truth": "The number is 40, not 14.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "40",
+      "not",
+      "14"
+    ],
+    "corrected": [
+      "40"
+    ],
+    "retracted": [
+      "50"
+    ],
+    "notes": "value contrast without its comma (the Contrast pass's case); number replaced by number"
+  },
+  {
+    "id": "F12",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F12.caf",
+    "truth": "Tell Sara that the demo moved.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "Sara"
+    ],
+    "corrected": [
+      "Sara"
+    ],
+    "retracted": [
+      "Sarah"
+    ],
+    "notes": "near-identical names, the retracted one is the ASR's favourite"
+  },
+  {
+    "id": "F13",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F13.caf",
+    "truth": "The API key ends in 472, not 427.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "API",
+      "472",
+      "not",
+      "427"
+    ],
+    "corrected": [
+      "472"
+    ],
+    "retracted": [
+      "473"
+    ],
+    "notes": "restart of the sentence; number replaced by number; value contrast"
+  },
+  {
+    "id": "F14",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F14.caf",
+    "truth": "Keep the subscription and cancel the trial.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "Keep",
+      "subscription",
+      "cancel",
+      "trial"
+    ],
+    "corrected": [],
+    "retracted": [
+      "today"
+    ],
+    "notes": "marker 'scratch that'; the withdrawn clause shares words with the kept one"
+  },
+  {
+    "id": "F15",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F15.caf",
+    "truth": "The standup moves to 10:15 tomorrow.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "10:15"
+    ],
+    "corrected": [
+      "10:15"
+    ],
+    "retracted": [
+      "9:30"
+    ],
+    "notes": "time replaced by time"
+  },
+  {
+    "id": "F16",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F16.caf",
+    "truth": "Open the PostHog dashboard and check the auth logs.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "PostHog"
+    ],
+    "corrected": [
+      "PostHog"
+    ],
+    "retracted": [
+      "Supabase"
+    ],
+    "notes": "filler before a name; product replaced by product"
+  },
+  {
+    "id": "F17",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F17.caf",
+    "truth": "We are not raising the price next month.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "not"
+    ],
+    "corrected": [],
+    "retracted": [],
+    "notes": "the whole sentence restated with a negation; nothing withdrawn but the affirmative"
+  },
+  {
+    "id": "F18",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F18.caf",
+    "truth": "It costs $19.99 a month, not $99.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "$19.99",
+      "a month",
+      "not",
+      "$99"
+    ],
+    "corrected": [
+      "$19.99"
+    ],
+    "retracted": [
+      "$9.99"
+    ],
+    "notes": "marker 'make that'; money replaced by money; value contrast"
+  },
+  {
+    "id": "F19",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F19.caf",
+    "truth": "Email Chetan about the release.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "Chetan"
+    ],
+    "corrected": [
+      "Chetan"
+    ],
+    "retracted": [
+      "Jonnalagadda"
+    ],
+    "notes": "filler and a stumble inside a name; name replaced by name"
+  },
+  {
+    "id": "F20",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F20.caf",
+    "truth": "The deadline is the 21st, not the 12th.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "21st",
+      "not",
+      "12th"
+    ],
+    "corrected": [
+      "21st"
+    ],
+    "retracted": [
+      "20th"
+    ],
+    "notes": "ordinal replaced by ordinal; value contrast"
+  },
+  {
+    "id": "F21",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F21.caf",
+    "truth": "I can't make it on Friday.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "can't",
+      "Friday"
+    ],
+    "corrected": [
+      "Friday"
+    ],
+    "retracted": [
+      "Thursday"
+    ],
+    "notes": "false start restarting the sentence; day replaced; trailing um"
+  },
+  {
+    "id": "F22",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F22.caf",
+    "truth": "Delete the staging database, never the production one.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "Delete",
+      "staging",
+      "never",
+      "production"
+    ],
+    "corrected": [
+      "staging"
+    ],
+    "retracted": [],
+    "notes": "the withdrawn value is restated inside the contrast, so nothing is listed as retracted"
+  },
+  {
+    "id": "F23",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F23.caf",
+    "truth": "Revoke his access, not hers.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "Revoke",
+      "his",
+      "not",
+      "hers"
+    ],
+    "corrected": [
+      "his"
+    ],
+    "retracted": [],
+    "notes": "pronoun replaced by pronoun; the withdrawn one lives on in the contrast"
+  },
+  {
+    "id": "F24",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F24.caf",
+    "truth": "Set the timeout to 2.5 seconds.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "timeout",
+      "2.5 seconds"
+    ],
+    "corrected": [
+      "2.5 seconds"
+    ],
+    "retracted": [
+      "3"
+    ],
+    "notes": "correction of a correction that lands back on the first value"
+  },
+  {
+    "id": "F25",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F25.caf",
+    "truth": "Ask Aatram whether FrictionLens is ready.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "Aatram",
+      "FrictionLens"
+    ],
+    "corrected": [
+      "Aatram"
+    ],
+    "retracted": [
+      "Aidan"
+    ],
+    "notes": "name replaced by a rarer name"
+  },
+  {
+    "id": "F26",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F26.caf",
+    "truth": "Ship 1.26 to the Kizu group, not the Chalant one.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "1.26",
+      "Kizu",
+      "not",
+      "Chalant"
+    ],
+    "corrected": [
+      "1.26"
+    ],
+    "retracted": [
+      "1.25"
+    ],
+    "notes": "version replaced by version; value contrast"
+  },
+  {
+    "id": "F27",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F27.caf",
+    "truth": "My email is jonnalagadda8800@gmail.com",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "jonnalagadda8800@gmail.com"
+    ],
+    "corrected": [
+      "jonnalagadda8800@gmail.com"
+    ],
+    "retracted": [
+      "chetan@gmail.com"
+    ],
+    "notes": "email replaced by email; the ASR will fight this one"
+  },
+  {
+    "id": "F28",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F28.caf",
+    "truth": "Do not force push to main; open a PR.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "Do not",
+      "force push",
+      "main"
+    ],
+    "corrected": [],
+    "retracted": [],
+    "notes": "an operation withdrawn by a negation; trailing um"
+  },
+  {
+    "id": "F29",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F29.caf",
+    "truth": "The room is 412, not 420.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "412",
+      "not",
+      "420"
+    ],
+    "corrected": [
+      "412"
+    ],
+    "retracted": [
+      "410"
+    ],
+    "notes": "marker 'rather'; number replaced by number; value contrast"
+  },
+  {
+    "id": "F30",
+    "audio": "~/Desktop/chalant-corpus/audio-F/F30.caf",
+    "truth": "Loop in Priya and Aidan on the Vercel deploy.",
+    "set": "F",
+    "rare_terms": [],
+    "protected_spans": [
+      "Priya",
+      "Aidan",
+      "Vercel"
+    ],
+    "corrected": [
+      "Aidan"
+    ],
+    "retracted": [
+      "Sarah"
+    ],
+    "notes": "retraction with no marker word; one of two names replaced; trailing um"
+  }
+]
