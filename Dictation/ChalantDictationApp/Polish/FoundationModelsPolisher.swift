@@ -296,12 +296,21 @@ actor FoundationModelsPolisher: Polisher {
     /// failure returns the piece as dictated, marked `failed` so the honest
     /// refined-at-once flag can tell a cleaned reply from the input handed
     /// back. One session per piece, never shared: see `warmed`.
+    /// Greedy decoding for every polish call. The default sampling is
+    /// random: on 2026-08-21 the same Set C row came back as said twice and
+    /// expanded once ("can't" to "cannot") in three passes of the shipping
+    /// path, so the protected-span mutation rate was a range rather than a
+    /// number and no corpus run could be reproduced. Greedy takes the most
+    /// likely token every step: the same input gives the same reply, which
+    /// is what a cleanup pass measured by a corpus has to do.
+    private static let decoding = GenerationOptions(sampling: .greedy)
+
     private static func tidy(piece: String) async -> Piece {
         let session = LanguageModelSession(instructions: CleanupPrompt.instructions(for: piece))
         let reply: String
         do {
             reply = try await withTimeout(timeout) {
-                try await session.respond(to: CleanupPrompt.framing(piece)).content
+                try await session.respond(to: CleanupPrompt.framing(piece), options: decoding).content
             }
         } catch {
             // Includes guardrail refusals, which Part 0 §0.7 makes an
