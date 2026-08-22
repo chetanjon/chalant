@@ -24,7 +24,25 @@ struct GeneralSection: View {
     // not a nicety to add afterwards.
     @AppStorage(CorrectionObserver.enabledKey) private var learnCorrections = true
     // On, per the 2026-08-14 decision. Costs ~1s per utterance; see `Cleanup`.
-    @AppStorage(Cleanup.enabledKey) private var cleanup = true
+    @AppStorage(Cleanup.modeKey) private var cleanupMode = Cleanup.Mode.shadow.rawValue
+
+    /// One sentence per position, so the row says what it does.
+    private var cleanupNote: String {
+        switch Cleanup.Mode(rawValue: cleanupMode) ?? .shadow {
+        case .off:
+            return "Your words land as you said them, on this Mac, and nothing reads them afterwards."
+        case .shadow:
+            return "Your words land as you said them, at once. Afterwards the on-device model "
+                + "reads the same words and writes what it would have changed into your corpus "
+                + "file, so its judgment can be checked. Nothing on the page ever changes."
+        case .live:
+            return "The on-device model tidies your words before they land: ums and false starts "
+                + "gone, punctuation fixed. It can take up to about a second after you let go; "
+                + "if it is not ready by then, the words land as said and stay. Names, numbers "
+                + "and every \"not\" are checked, and anything it changed that it should not "
+                + "have is thrown away."
+        }
+    }
     // Off, and it downloads nothing until it is on: a 606 MB model, memory
     // while loaded, more battery per sentence. See `BetterHearing`.
     @AppStorage(BetterHearing.enabledKey) private var betterHearing = false
@@ -170,19 +188,19 @@ struct GeneralSection: View {
                         + "Accessibility. It needs both: one to notice the key, one to place the text."
                     )
                     SettingDivider()
-                    // A switch because this is not simply better: it trades
-                    // roughly a second for a tidier sentence, and that is a
-                    // trade someone is entitled to decline.
-                    SettingToggle(label: "Tidy what I said", isOn: $cleanup)
-                    SettingNote(
-                        "Your words land tidied, on this Mac: ums and false starts gone, "
-                        + "punctuation fixed, a spoken list made into a list. Most of the tidying "
-                        + "happens while you talk; the rest takes about half a second after you "
-                        + "let go. If it is not ready by then, the words land as said and stay: "
-                        + "nothing on the page changes after it lands. Names, numbers and every "
-                        + "\"not\" are checked, and anything it changed that it should not have "
-                        + "is thrown away."
-                    )
+                    // Three positions, not a switch (2026-08-22): the model
+                    // measured as not worth a wait, so by default it reads
+                    // what landed and never touches it. Live is the old path
+                    // for anyone who wants the tidy and will pay the wait.
+                    SettingPicker(
+                        label: "Tidy what I said",
+                        selection: $cleanupMode,
+                        options: [
+                            ("Off", Cleanup.Mode.off.rawValue),
+                            ("Shadow", Cleanup.Mode.shadow.rawValue),
+                            ("Live", Cleanup.Mode.live.rawValue),
+                        ])
+                    SettingNote(cleanupNote)
 
                     SettingDivider()
                     // A switch, and off, because it costs something real

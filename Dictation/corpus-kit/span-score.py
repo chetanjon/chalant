@@ -9,7 +9,8 @@ annotations: rows in STAGE1_DIRECTIVE.md §2.3 format ({"id", "truth",
 outputs: one JSON object per line with the corpus row's schema-3 names.
   Input text is `asrRaw`. Output text is the first non-null of `inserted`,
   `output`, `modelOutput`, `afterDeterministic`. Lines whose "kind" is
-  "meta" or "hearing" are skipped. Rows are joined on `id`; annotated rows
+  "meta" or "hearing" are skipped; a "shadow" line (the model's reply
+  written after its row, in shadow mode) is merged into its row. Rows are joined on `id`; annotated rows
   with no output row are reported, never silently dropped. Runs unchanged
   on a tools/textpath run file and on ~/Desktop/chalant-corpus/captured/
   captured.jsonl.
@@ -200,6 +201,17 @@ def load_outputs(path):
                 continue
             if row.get("kind") == "hearing" or "id" not in row:
                 continue
+            if row.get("kind") == "shadow":
+                # The shadow run's reply, appended after its row: the model's
+                # output, reason, chunk reasons and own time become the row's.
+                target = rows.get(row["id"])
+                if target is not None:
+                    for key in ("modelOutput", "modelReason", "modelChunks", "polishSeconds",
+                                "polishColdStart", "secondsSinceLastPolish"):
+                        if key in row:
+                            target[key] = row[key]
+                    target["shadow"] = True
+                continue
             rows[row["id"]] = row
     return rows, meta
 
@@ -216,6 +228,16 @@ def selftest():
     assert label_for("do not", "do not deploy", "don't deploy") == ("contraction", "don't")
     assert label_for("$1,200", "was $1,200", "was $1200") == ("format-only", "$1200")
     assert label_for("Monday", "until Monday", "until Tuesday") == ("content", "absent")
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as f:
+        f.write(json.dumps({"id": "S", "asrRaw": "send it", "afterDeterministic": "Send it.", "modelOutput": None,
+                            "modelReason": "shadow:pending", "inserted": "Send it.", "polishSeconds": 0}) + "\n")
+        f.write(json.dumps({"id": "S", "kind": "shadow", "modelOutput": "Send it.", "modelReason": "landed",
+                            "modelChunks": ["landed"], "polishSeconds": 0.6}) + "\n")
+        f.write(json.dumps({"id": "S", "kind": "hearing", "decision": "unchanged"}) + "\n")
+    merged, _ = load_outputs(f.name)
+    assert merged["S"]["modelReason"] == "landed" and merged["S"]["polishSeconds"] == 0.6 and merged["S"]["shadow"]
+    assert merged["S"]["inserted"] == "Send it."   # the words that landed are untouched by the merge
     ann = [{"id": "X", "protected_spans": ["Do not", "Monday", "$1,200"]}]
     out = {"X": {"asrRaw": "Do not ship until Monday, it was $1200",
                  "afterDeterministic": "Do not ship until Monday, it was $1200",

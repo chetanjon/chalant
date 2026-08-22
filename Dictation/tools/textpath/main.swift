@@ -27,10 +27,16 @@ struct Raw: Decodable { let id: String; let raw: String }
 
 let args = CommandLine.arguments
 guard args.count > 2 else {
-    FileHandle.standardError.write(Data("usage: textpath <raw.jsonl> <out.jsonl> [--ungated] [--label <text>]\n".utf8))
+    FileHandle.standardError.write(Data("usage: textpath <raw.jsonl> <out.jsonl> [--ungated] [--live] [--label <text>]\n".utf8))
     exit(2)
 }
 let ungated = args.contains("--ungated")
+// --live waits the release budget the way DictationController does in live
+// mode (0.65 s, its `refineBudget`); without it the call has no budget,
+// which is the shadow run. Used to confirm the two modes produce the same
+// model text, and to count how often live would have landed raw instead.
+let live = args.contains("--live")
+let liveBudget: Duration = .milliseconds(650)
 var label = ""
 if let i = args.firstIndex(of: "--label"), i + 1 < args.count { label = args[i + 1] }
 
@@ -108,7 +114,7 @@ for (n, row) in rows.enumerated() {
     let shaped = deterministic(row.raw)
     await polisher.beginUtterance()
     let started = ContinuousClock.now
-    let outcome = await polisher.polish(shaped, profile: AppProfile(bundleID: "com.apple.TextEdit"), within: nil)
+    let outcome = await polisher.polish(shaped, profile: AppProfile(bundleID: "com.apple.TextEdit"), within: live ? liveBudget : nil)
     let seconds = started.duration(to: .now)
     // The controller lands `outcome.text` whenever it is non-empty and the
     // result landed, else the shaped text; same here.
@@ -158,7 +164,7 @@ let meta: [String: Any] = [
     "gated": !ungated,
     "gateCharacters": ungated ? -1 : CleanupPrompt.minimumCharactersForCleanup,
     "vocabulary": "empty",
-    "budget": "none",
+    "budget": live ? "live (650 ms)" : "none (shadow)",
     "macOS": ProcessInfo.processInfo.operatingSystemVersionString,
     "startedAt": startedAt,
     "rows": rows.count,

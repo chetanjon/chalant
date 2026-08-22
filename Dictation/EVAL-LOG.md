@@ -1206,3 +1206,12 @@ measurable.
 0.6 s per call, over budget on 28% of calls, to recover 4 corrections in 310
 and add 1, and every edit it made was a comma, a case change, or one word
 deleted.**
+
+## 2026-08-22 — shadow equals live, minus the wait (`feat/model-into-shadow`)
+
+`tools/textpath` on Set C, greedy, ungated, the shadow call (no budget)
+against the live call (the 0.65 s `refineBudget`): identical `modelOutput`
+on all 28 rows where both landed; C12 rejected by the guard in both; C17
+landed in shadow (0.79 s) and missed the budget in live
+(`budgetExpired:inner`). Shadow's median model time 0.507 s, recorded on
+the row's shadow line and never waited for.

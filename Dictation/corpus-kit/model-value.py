@@ -86,11 +86,21 @@ def classify_edits(before, after):
 
 
 def load_run(path):
-    rows = []
+    rows, by_id = [], {}
     for line in open(path):
         r = json.loads(line)
-        if r.get("kind") != "meta":
-            rows.append(r)
+        kind = r.get("kind")
+        if kind == "meta" or kind == "hearing":
+            continue
+        if kind == "shadow":
+            target = by_id.get(r.get("id"))
+            if target is not None:
+                for key in ("modelOutput", "modelReason", "modelChunks", "polishSeconds"):
+                    if key in r:
+                        target[key] = r[key]
+            continue
+        rows.append(r)
+        by_id[r.get("id")] = r
     return rows
 
 

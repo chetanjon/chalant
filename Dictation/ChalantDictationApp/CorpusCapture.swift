@@ -182,6 +182,30 @@ actor CorpusCapture {
         ])
     }
 
+    /// The shadow run's reply, appended against the row it belongs to (the
+    /// row itself was written at insertion with `modelReason` "shadow:pending",
+    /// because the words are already on the page by the time the model
+    /// answers). The scorers merge this line into its row by id: the
+    /// output, the reason, the chunk reasons and the model's own time
+    /// become the row's `modelOutput`, `modelReason`, `modelChunks` and
+    /// `polishSeconds`; the path's own wait was zero by construction.
+    func annotateShadow(
+        id: String, output: String?, reason: String, chunks: [String], seconds: TimeInterval,
+        coldStart: Bool, secondsSinceLastPolish: Double?
+    ) {
+        guard Self.isEnabled(in: defaults) else { return }
+        append([
+            "id": id,
+            "kind": "shadow",
+            "modelOutput": output ?? NSNull(),
+            "modelReason": reason,
+            "modelChunks": chunks,
+            "polishSeconds": seconds,
+            "polishColdStart": coldStart,
+            "secondsSinceLastPolish": secondsSinceLastPolish ?? -1,
+        ])
+    }
+
     private func append(_ row: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: row),
               var line = String(data: data, encoding: .utf8) else { return }
