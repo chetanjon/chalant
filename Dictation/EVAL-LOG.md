@@ -1149,3 +1149,60 @@ six allows drops. `negationsSurvived`: same split, "appeared" redundant, "went
 missing" not. `namesSurvived`: not redundant (it catches drops; it fired on 3 D
 rows today). `stillTheSameMessage`: redundant for replies that bring new words,
 not for replies made of fewer source words. `emptyOutput`: not redundant.
+
+## 2026-08-22 — WHAT DOES THE MODEL BUY? Sets C, D, E (90 rows), greedy, rule six in force (`measure/what-the-model-buys`)
+
+Measurement only. `tools/textpath` ungated and gated over all 90 rows;
+`corpus-kit/model-value.py` scores `afterDeterministic` and `final` (the
+model's text where it landed, the deterministic text where gated, rejected or
+refused) against the truth with score.py's corrections per 100 words, and
+classifies every edit the model made. Per-row table:
+`corpus/runs/what-the-model-buys-2026-08-22.jsonl`. Stamp: commit `f05e197`,
+prompt `e97958cb280f…`, model `instruct_3b… generic_sparse 15.0.0.13.102990`.
+
+### 1. Value
+
+| set | rows | words | corrections/100w, deterministic | corrections/100w, final | closer | equal | farther |
+|---|---|---|---|---|---|---|---|
+| C | 30 | 225 | 18.22 (41) | 17.78 (40) | 1 | 29 | 0 |
+| D | 30 | 189 | 93.65 (177) | 92.59 (175) | 2 | 27 | 1 |
+| E | 30 | 243 | 37.86 (92) | 37.45 (91) | 1 | 29 | 0 |
+| all | 90 | 657 | **47.18 (310)** | **46.58 (306)** | 4 | 85 | 1 |
+
+Closer (every one): C14 `153 not 135` → `153, not 135` (a comma the ASR dropped);
+D-U01 a stray `Drop.` at the end removed; D-R2-a `ah,` removed; E25 a comma
+before `all` removed. Farther: D-U05 `status Enti?` → `status, Enti?` (a comma
+added where the truth has none). Four corrections out of 310 recovered, one
+added: the model moves the score by 0.6 per 100 words on 90 rows.
+
+### 2. What the model does (11 edits, 7 rows, of 79 landed)
+
+| class | edits | could the deterministic stage have done it? |
+|---|---|---|
+| filler/repeat deletion | 0 | (nothing to do: Disfluency and Fillers had already taken the `The the`, `Reply to reply to`, doubled openings) |
+| other deletion | 2 (`Drop.`, `ah`) | partly. `ah` is not in `Fillers.noise` (uh, um, erm, uhh, umm, hmm, mmm); adding it is one line. `Drop.` is an ASR hallucination at the end of a sentence; no pass targets that and none should guess. |
+| punctuation | 4 (+, ×2, −, ×2) | no. No deterministic pass adds or removes commas; commas come from the ASR, and the prompt's "remove commas that only mark a pause" is the only comma logic in the path. |
+| case | 5 in 2 rows (`Aur Hai Ho Kya` → lowercase; `The demo` → `the demo`) | no. No case pass exists beyond sentence-initial capitalisation in Fillers and names in TermMatcher; the ASR capitalises code-switched words as if they were names. |
+| other | 0 | rule six makes this class empty by construction |
+
+### 3. Cost
+
+Polish per call, 90 ungated rows, greedy: **median 0.603 s, p95 0.963 s, max
+2.015 s; 25 of 90 calls (28%) over the 0.65 s release budget** (C 6, D 10, E 9).
+The audit's L6 proxy over the same 20 real rows (2026-08-21): as measured median
+1.594 s / p95 3.019 s; with polish at the greedy median on the rows that
+polished, **0.943 s / 1.326 s**; with the model removed, **0.340 s / 0.723 s**.
+
+### 4. The 40-character line
+
+Gated, 47 of 90 rows reached the model (C 10, D 12, E 25). It changed three of
+them (D-U01 `Drop.`, D-R2-a `ah,`, E25 a comma) and was rejected or refused on
+five (D-R1-a rule six, D-R1-b and D-R4-c framework refusals, E02 and E20 rule
+six). Of the 43 rows at or under 40 characters, the ungated model moved one
+closer (C14's comma) and one farther (D-U05's comma): the line costs nothing
+measurable.
+
+**On these 90 rows the model is not earning its latency: it spends a median
+0.6 s per call, over budget on 28% of calls, to recover 4 corrections in 310
+and add 1, and every edit it made was a comma, a case change, or one word
+deleted.**
