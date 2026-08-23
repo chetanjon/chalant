@@ -1248,3 +1248,69 @@ D-U04: its "Ah" was the Telugu word "aa" ("that"), which the en-US ASR
 rendered as an English filler; the score still improved because "Ah" never
 matched "aa", but in code-switched speech "ah" can be a word. English-only is
 the campaign's scope, and the row says so.
+
+## 2026-08-22 — DOES THE MODEL REPAIR SPEECH? Set F, recorded, 30 rows (`measure/does-the-model-repair`)
+
+Set F recorded by the founder (voiceprobe, built-in mic, 17:42-17:50),
+transcribed with the same Apple en-US tool as Set C, kept verbatim in
+`corpus/setF-asr-en_US.jsonl`. Three runs of `tools/textpath`, greedy:
+off, live ungated (0.65 s budget, rule six), shadow (no budget). Stamp:
+commit `85804a3`, prompt `e97958cb280f…`, model `instruct_3b … 15.0.0.13.102990`.
+
+### Headline
+
+| run | rows handled correctly | retractions heard / survived | span rate | corrections/100w |
+|---|---|---|---|---|
+| raw ASR | | 19 of 27 heard | | 103.07 (235) |
+| off | 3 of 28 | 19 / 19 | 0/52 | 95.18 (217) |
+| live ungated | 3 of 28 | 19 / 19 | 0/52 | 93.86 (214) |
+| shadow | **4 of 28** | 19 / **18** | 0/52 | **83.33 (190)** |
+
+The three "handled" rows in off are F22 and F23 (nothing retracted) and F19
+(the ASR never heard "Jonnalagadda"). ASR misses: 19 spans in 14 rows, names
+and number formats (Gangothri → "Gango 3", Vercel → "vessel", PostHog →
+"post hog", Kizu → "Kizo", Aatram → "Atram", 3:15 → "315", $1,200 → "$1200",
+1.26 → "126"); 8 of the 27 retracted values were never heard either.
+
+### Who repaired what (shadow, per row)
+
+Of 22 rows with a self-correction the ASR actually heard: **Restatement
+repaired 0, the model repaired 4, neither 14**; 4 rows had nothing to
+retract and 8 more had their retraction mangled by the ASR. The model's
+four: F04 ("to production, scratch that, the deploy to staging" → the
+staging clause; landed, 14 → 6 corrections), F07 ("$120 sorry $1200" →
+"$1200"), F10 ("Ask Chetan? No, ask Aidan" → "Ask Aidan"), F21 (dropped
+"on Thursday. No,"). **Three of the four were rejected by the guard** and
+never landed: F07 by `numbersSurvived` (the retracted $120 "went missing"),
+F10 and F21 by `negationsSurvived` (the marker "No" counted as a lost
+negation). Four more correct repairs met the same two rules: F15 (930 →
+1015), F16 (the marker "No"), F22 ("no, no"), F26 (125 → 126). So the guard
+blocked seven correct repairs and caught two wrong ones: F30 kept the
+retracted "Sarah" and dropped "Aidan" (`namesSurvived`, rightly) and F03
+added "it is" (`noNewTokens`, rightly). Live landed only 3 of 30: 22 missed
+the 0.65 s budget.
+
+What Restatement would have needed for the model's four: it collapses only
+a whole sentence said twice. F04 needs "clause, scratch that, clause" (cut
+everything from the clause start to the marker); F07 needs "value, sorry,
+value" (keep the later value of the same kind); F10 needs "phrase? No,
+phrase" (restart after a marker); F21 needs "on X. No, on Y" (same
+preposition, keep the later object). All four are the repair-marker grammar
+of the campaign's phase 4, none of which exists.
+
+What the model did on the 21 rows that landed: removed false starts and
+restarts (F12 "Tell Sarah tell Sarah", F13 "hang on. The API key ends in",
+F27 "My email, my email"), removed a marker without its clause (F14 kept
+"Cancel the subscription today" and dropped "Scratch that."), the F04
+repair, a comma dropped (F02), and one row worse: F24 gained a comma
+(7 → 8). It touched no protected span: rate 0/52 on every run.
+
+### Cost
+
+Shadow, per call: **median 0.684 s, p95 1.089 s, 18 of 30 over the 0.65 s
+budget** (median utterance 11 words). Live landed 3 of 30 inside the budget.
+
+**On messy speech the model repairs too little to go back on the path: 4
+of 19 heard self-corrections, 3 of them then killed by its own guard, at
+0.68 s a call with 60% of calls over budget; the repairs it does make are
+the phase 4 marker grammar, which belongs in a deterministic pass.**
