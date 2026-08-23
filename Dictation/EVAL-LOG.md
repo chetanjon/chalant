@@ -1314,3 +1314,53 @@ budget** (median utterance 11 words). Live landed 3 of 30 inside the budget.
 of 19 heard self-corrections, 3 of them then killed by its own guard, at
 0.68 s a call with 60% of calls over budget; the repairs it does make are
 the phase 4 marker grammar, which belongs in a deterministic pass.**
+
+## 2026-08-22 — REPAIR MARKERS, DETERMINISTICALLY: Set F off, 95.18 → 44.74 (`feat/repair-markers`, prompt 7 tasks 1 and 2)
+
+New Core pass `Repair` (grammar in its header, ruled by the founder before
+any code: VALUE / PHRASE / CLAUSE over the markers no, no wait, no no,
+sorry, I mean, scratch that, wait, actually, make that, rather; `wait`
+alone VALUE-only with punctuation both sides; pronouns a fourth value
+shape; the echo rule on either side of LEFT; fillers transparent; runs
+BEFORE Fillers). `Restatement` gains the prefix restart (later run kept).
+
+**Dry run on real speech first** (`tools/passprobe`, read-only, the 391
+rows of the founder's `captured.jsonl`): `Repair` would change **0 rows**
+(real dictation so far has no marker-shaped self-correction). The prefix
+rule as ruled (gap of four) changed 21 rows and about half were not
+restarts: coordination ("local or can be hybrid", "turn it on and turn it
+off", "he was sad, and he called") and lists ("in terms of effects, in terms
+of sound, in terms of music"). Tightened until only self-corrections moved:
+gap of two (every Set F restart fits), no conjunction in the gap or opening
+the run, the second copy after a comma or directly after the first, a third
+copy within the window on either side means a list. Result: **13 rows**,
+all stutters or restarts ("I don't, I don't", "as well as well as", "I was,
+I was", "where it may, where it gives", "Look at this, look at, look at",
+"it will you know, it will"), plus the old whole-sentence rule's one row.
+
+**Set F, model off** (same raw ASR as #48):
+
+| | #48 off | now |
+|---|---|---|
+| rows handled correctly | 3 of 28 | **16 of 28** |
+| retractions heard / survived | 19 / 19 | 19 / **4** |
+| corrected values present | 17 of 26 | 17 of 26 |
+| protected-span mutation rate | 0/52 | **0/52** |
+| corrections per 100 words | 95.18 (217) | **44.74 (102)** |
+
+What fired, per row: VALUE on F01, F02, F03, F05 (twice), F07, F10 (echo
+"ask"), F11, F12 (echo "tell"), F13, F15, F20, F21 (echo "on"), F23 (echo
+"access"), F24 (first marker only), F27, F29; PHRASE on F17, F19, F22, F26;
+CLAUSE on F04, F14; the prefix restart on F21 ("I can't make it. I, okay,")
+and F30 ("Priya, and Sarah, Priya, and"). The four survivors are the
+grammar's stated edges: F06 (a pause with no marker), F08 (a restart that
+does not repeat the clause's opening), F12 (the ASR wrote "Sarah" for both
+names), F24 (the second marker is a bare "wait." with punctuation on one
+side only; the first firing leaves "3" as the surviving value, so this row
+got worse by one word). F27's VALUE is the documented partial repair
+("Chetan at Jonalagada 8800 at gmail.com"). The remaining corrections are
+the ASR's (19 spans in 14 rows never arrived) and "hang on." (not a marker).
+
+**Sets C, D, E, model off:** 0 rows changed against the #47 deterministic
+baseline; Set C rate 0/61. Compare the model in shadow on the same set
+(#48): 83.33 corrections per 100 words, 4 of 28 handled, at 0.68 s a call.

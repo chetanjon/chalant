@@ -93,9 +93,10 @@ func deterministic(_ raw: String) -> String {
     let text = Contrast.commaBeforeNot(
         Restatement.collapsing(
             Fillers.removing(
-                Disfluency.collapsingRepetitions(
-                    Guardrail.trimmingPunctuationRun(
-                        resolved.map(\.text).joined(separator: " "))))))
+                Repair.repairing(
+                    Disfluency.collapsingRepetitions(
+                        Guardrail.trimmingPunctuationRun(
+                            resolved.map(\.text).joined(separator: " ")))))))
     return Listing.format(text)
 }
 
