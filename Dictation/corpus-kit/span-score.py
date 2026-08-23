@@ -25,11 +25,21 @@ The rules (founder, 2026-08-21; Dictation/corpus/README-set-C.md):
     after stripping commas, spaces and currency symbols is labelled
     `format-only`. Both feed the rate.
  4. whole-word matching at boundaries (start/end of text, whitespace,
-    punctuation); present if the span occurs >= 1 time in the input;
-    mutated if its count in the output is lower than in the input.
+    punctuation); present if the span occurs >= 1 time in the input. The
+    span's allowed count in the output is the range [min(input count,
+    truth count), input count] (founder, 2026-08-22): below the floor is a
+    mutation (labelled as rules 2 and 3 say), above the input count is a
+    mutation too (labelled `content`, "duplicated"). A restart repair that
+    drops the second "deploy" is therefore free; without a truth the floor
+    is the input count.
  5. negation tokens (not, no, never, n't as a suffix, without, nor) are
-    counted in input and output per row; any difference is a mutation,
-    labelled `negation added` / `negation dropped`.
+    counted per row; the output's count must fall within [min(input,
+    truth), input]: below is `negation dropped`, above is `negation added`.
+    A marker "no" the truth does not have is free to remove; F11's "not"
+    is not.
+ For both, a row whose truth count exceeds its input count is reported
+ separately as the ASR dropping a span or a negation: a finding, never a
+ mutation.
 Two small reading conventions, stated so they can be argued with: U+2019
 is read as an apostrophe before matching (an encoding detail, not an
 edit), and "cannot" counts as one negation (it is "can" + "not", so an
@@ -144,6 +154,7 @@ def score(annotations, outputs):
         "missing_output_rows": [], "model_reasons": Counter(), "rows_sent_to_model": 0,
         "retraction_rows": 0, "retracted_total": 0, "retracted_heard": 0, "retracted_survived": 0,
         "corrected_total": 0, "corrected_present": 0, "handled_correctly": 0, "retractions": [],
+        "asr_dropped": [],
     }
     for ann in annotations:
         result["rows"] += 1
@@ -161,6 +172,7 @@ def score(annotations, outputs):
         result["model_reasons"][reason] += 1
         if reason and not (reason == "gated" or reason.startswith("skipped")):
             result["rows_sent_to_model"] += 1
+        truth = ann.get("truth")
         row_mutations = []
         for span in ann.get("protected_spans", []):
             n_in = count(span, text_in)
@@ -169,7 +181,11 @@ def score(annotations, outputs):
                 continue
             result["present"] += 1
             n_out = count(span, text_out)
-            if n_out < n_in:
+            n_truth = count(span, truth) if truth is not None else n_in
+            floor = min(n_in, n_truth)
+            if n_truth > n_in:
+                result["asr_dropped"].append({"id": ann["id"], "what": span, "input": n_in, "truth": n_truth})
+            if n_out < floor:
                 result["mutated"] += 1
                 label, after = label_for(span, text_in, text_out)
                 stage = stage_of(span, row)
@@ -177,10 +193,22 @@ def score(annotations, outputs):
                 result["by_stage"][stage] += 1
                 row_mutations.append({"span": span, "label": label, "before": span, "after": after,
                                       "count_in": n_in, "count_out": n_out, "stage": stage})
+            elif n_out > n_in:
+                result["mutated"] += 1
+                stage = stage_of(span, row)
+                result["by_label"]["content"] += 1
+                result["by_stage"][stage] += 1
+                row_mutations.append({"span": span, "label": "content", "before": span,
+                                      "after": f"duplicated ({n_out} > {n_in})",
+                                      "count_in": n_in, "count_out": n_out, "stage": stage})
             elif count(span, text_out, True) < count(span, text_in, True):
                 result["case_drift"] += 1
         neg_in, neg_out = negations(text_in), negations(text_out)
-        if neg_in != neg_out:
+        neg_truth = negations(truth) if truth is not None else neg_in
+        neg_floor = min(neg_in, neg_truth)
+        if neg_truth > neg_in:
+            result["asr_dropped"].append({"id": ann["id"], "what": "(negation)", "input": neg_in, "truth": neg_truth})
+        if neg_out < neg_floor or neg_out > neg_in:
             label = "negation added" if neg_out > neg_in else "negation dropped"
             stage = stage_of(None, row, kind="negation")
             result["mutated"] += 1
@@ -265,18 +293,31 @@ def selftest():
     merged, _ = load_outputs(f.name)
     assert merged["S"]["modelReason"] == "landed" and merged["S"]["polishSeconds"] == 0.6 and merged["S"]["shadow"]
     assert merged["S"]["inserted"] == "Send it."   # the words that landed are untouched by the merge
-    fann = [{"id": "F", "protected_spans": ["Wednesday"], "corrected": ["Wednesday"], "retracted": ["Tuesday"]}]
+    fann = [{"id": "F", "truth": "Send it Wednesday.", "protected_spans": ["Wednesday"],
+             "corrected": ["Wednesday"], "retracted": ["Tuesday"]}]
     fout = {"F": {"asrRaw": "send it Tuesday, no, Wednesday", "inserted": "Send it Tuesday, no, Wednesday."}}
     fr = score(fann, fout)
     assert fr["retraction_rows"] == 1 and fr["retracted_heard"] == 1 and fr["retracted_survived"] == 1
     assert fr["corrected_present"] == 1 and fr["handled_correctly"] == 0 and fr["mutated"] == 0
     fout["F"]["inserted"] = "Send it Wednesday."
     fr = score(fann, fout)
-    assert fr["retracted_survived"] == 0 and fr["handled_correctly"] == 1
-    # Under rule 5 the marker "no" is a negation token, so a repair that
-    # removes it reads as "negation dropped" (1 mutation). Stated here so the
-    # founder's decision on the marker is taken with the number in view.
-    assert fr["mutated"] == 1 and fr["by_label"] == {"negation dropped": 1}
+    # Rule 5 as ruled (2026-08-22): the marker "no" is not in the truth, so
+    # the floor is 0 and removing it is free.
+    assert fr["retracted_survived"] == 0 and fr["handled_correctly"] == 1 and fr["mutated"] == 0
+    # Rule 4 as ruled: a restart repair may drop the second "deploy" (floor
+    # is the truth's count); a third copy is a mutation; losing F11's "not"
+    # (truth has it) is a dropped negation.
+    rann = [{"id": "R", "truth": "Do not deploy it until Sarah signs off.", "protected_spans": ["deploy", "Do not"]}]
+    rin = "Deploy it to production, wait, no, do not deploy it until Sarah signs off."
+    assert score(rann, {"R": {"asrRaw": rin, "inserted": "Do not deploy it until Sarah signs off."}})["mutated"] == 0
+    assert score(rann, {"R": {"asrRaw": rin, "inserted": "Deploy deploy, do not deploy it until Sarah signs off."}})["mutated"] == 1
+    nann = [{"id": "N", "truth": "The number is 40, not 14.", "protected_spans": ["40", "not", "14"]}]
+    nr = score(nann, {"N": {"asrRaw": "The number is 50, sorry, 40 not 14.", "inserted": "The number is 40 14."}})
+    assert nr["by_label"]["negation dropped"] == 1 and nr["by_label"]["content"] == 1
+    # The ASR dropping an occurrence is a finding, not a mutation.
+    dann = [{"id": "D", "truth": "Sarah told Sarah.", "protected_spans": ["Sarah"]}]
+    dr = score(dann, {"D": {"asrRaw": "Sarah told her.", "inserted": "Sarah told her."}})
+    assert dr["mutated"] == 0 and dr["asr_dropped"] == [{"id": "D", "what": "Sarah", "input": 1, "truth": 2}]
     ann = [{"id": "X", "protected_spans": ["Do not", "Monday", "$1,200"]}]
     out = {"X": {"asrRaw": "Do not ship until Monday, it was $1200",
                  "afterDeterministic": "Do not ship until Monday, it was $1200",
@@ -319,6 +360,10 @@ def main():
     print("by label: " + (", ".join(f"{k} {v}" for k, v in sorted(result["by_label"].items())) or "none"))
     print("by stage: " + (", ".join(f"{k} {v}" for k, v in sorted(result["by_stage"].items())) or "none"))
     print(f"case drift (not in the rate): {result['case_drift']}")
+    if result["asr_dropped"]:
+        print("ASR dropped an occurrence (truth count above input count; a finding, not a mutation):")
+        for d in result["asr_dropped"]:
+            print(f"  {d['id']}: {d['what']!r} input {d['input']}, truth {d['truth']}")
     if result["retraction_rows"]:
         print(f"self-corrections (not in the rate): {result['retraction_rows']} rows; "
               f"retracted values {result['retracted_total']}, heard by the ASR {result['retracted_heard']}, "

@@ -485,17 +485,16 @@
   {
     "id": "F28",
     "audio": "~/Desktop/chalant-corpus/audio-F/F28.caf",
-    "truth": "Do not force push to main; open a PR.",
+    "truth": "Do not force push; open a PR.",
     "set": "F",
     "rare_terms": [],
     "protected_spans": [
       "Do not",
-      "force push",
-      "main"
+      "force push"
     ],
     "corrected": [],
     "retracted": [],
-    "notes": "an operation withdrawn by a negation; trailing um"
+    "notes": "an operation withdrawn by a negation; the restart replaces the whole clause; trailing um"
   },
   {
     "id": "F29",
