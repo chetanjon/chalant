@@ -24,6 +24,7 @@ for line in try String(contentsOfFile: args[1], encoding: .utf8).split(separator
     switch pass {
     case "contrast": after = Contrast.commaBeforeNot(text)
     case "fillers": after = Fillers.removing(text)
+    case "ellipses": after = Guardrail.settlingEllipses(text)
     default: after = text
     }
     if after != text {

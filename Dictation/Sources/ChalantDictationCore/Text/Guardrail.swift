@@ -38,6 +38,48 @@ public enum Guardrail {
     /// One trailing mark is kept, because "Hello." and "What?" are ordinary and
     /// a guardrail that eats real punctuation is worse than the bug it fixes.
     /// Everything after the first is a run, and a run is the failure.
+    /// The transcriber's pause dots, settled into punctuation the speaker
+    /// could have meant.
+    ///
+    /// Apple's engine writes "..." (sometimes the single "…") wherever the
+    /// speaker trails off or pauses, and the founder ruled it off the page
+    /// (2026-08-23: "when I am not talking, it was putting dots. I don't
+    /// want that"): a pause is not punctuation anyone chose. The settlement
+    /// is deterministic and small: before a capitalised letter, a full stop
+    /// (a restart reads as a new sentence, wherever the capital came from);
+    /// before a lowercase letter, a comma (the thought continued); at the
+    /// end, a full stop. A single period is never touched, so decimals,
+    /// paths, versions and real full stops pass through byte for byte.
+    public static func settlingEllipses(_ text: String) -> String {
+        guard text.contains("...") || text.contains("\u{2026}") else { return text }
+        var out = ""
+        let chars = Array(text)
+        var i = 0
+        while i < chars.count {
+            let isRun = chars[i] == "\u{2026}" || (chars[i] == "." && i + 1 < chars.count && chars[i + 1] == ".")
+            guard isRun else {
+                out.append(chars[i])
+                i += 1
+                continue
+            }
+            while i < chars.count, chars[i] == "." || chars[i] == "\u{2026}" { i += 1 }
+            var next = i
+            while next < chars.count, chars[next] == " " { next += 1 }
+            if next >= chars.count {
+                out.append(".")
+                i = next
+            } else if chars[next].isLetter {
+                out.append(chars[next].isUppercase ? ". " : ", ")
+                i = next
+            } else {
+                // Dots pressed against other punctuation ("...?"): the other
+                // mark was the engine's real ending; the dots just go.
+                i = next
+            }
+        }
+        return out
+    }
+
     public static func trimmingPunctuationRun(_ text: String) -> String {
         let tokens = text.split(separator: " ", omittingEmptySubsequences: true)
         guard !tokens.isEmpty else { return text }

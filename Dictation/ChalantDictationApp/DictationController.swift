@@ -892,8 +892,9 @@ final class DictationController {
             Restatement.collapsing(
                 Fillers.removing(
                     Disfluency.collapsingRepetitions(
-                        Guardrail.trimmingPunctuationRun(
-                            resolved.map(\.text).joined(separator: " "))))))
+                        Guardrail.settlingEllipses(
+                            Guardrail.trimmingPunctuationRun(
+                            resolved.map(\.text).joined(separator: " ")))))))
         return deterministic
     }
 
