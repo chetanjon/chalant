@@ -39,16 +39,25 @@ public enum InputChoice {
         /// the moment it proves it can hear.
         public let isJack: Bool
         public let isSystemDefault: Bool
+        /// A phone or tablet offering itself over Continuity (CoreAudio
+        /// transport 'ccwd'/'ccwl'). It becomes the system default the
+        /// moment it appears and vanishes when the phone sleeps or leaves:
+        /// on 2026-08-23 the founder's iPhone did exactly that as "Cj
+        /// Microphone" and every hold after it heard nothing. Identified by
+        /// transport, never by name: a phone's mic is named after its owner.
+        public let isPhoneLink: Bool
 
         public init(
             uid: String, name: String, isBuiltInMic: Bool = false,
-            isJack: Bool = false, isSystemDefault: Bool = false
+            isJack: Bool = false, isSystemDefault: Bool = false,
+            isPhoneLink: Bool = false
         ) {
             self.uid = uid
             self.name = name
             self.isBuiltInMic = isBuiltInMic
             self.isJack = isJack
             self.isSystemDefault = isSystemDefault
+            self.isPhoneLink = isPhoneLink
         }
     }
 
@@ -68,7 +77,12 @@ public enum InputChoice {
             ordered.append(device)
         }
 
-        let heard = devices.filter { !silent.contains($0.uid) && !isKnownVirtual(name: $0.name) }
+        // A phone's Continuity mic is exiled from AUTOMATIC choice exactly
+        // like the conferencing loopbacks: it follows the phone, not the
+        // person at the Mac. A pin still wins below.
+        let heard = devices.filter {
+            !silent.contains($0.uid) && !isKnownVirtual(name: $0.name) && !$0.isPhoneLink
+        }
 
         // The user's own choice, while it is still delivering audio. A pin
         // is an instruction, so a pinned virtual device is honored; only

@@ -38,6 +38,13 @@ enum AudioDevices {
             let isJack =
                 uid.localizedCaseInsensitiveContains("headphone")
                 || name.localizedCaseInsensitiveContains("external microphone")
+            // Continuity capture: an iPhone or iPad lending its microphone.
+            // The transport is the only honest identifier; the NAME is the
+            // owner's ("Cj Microphone", 2026-08-23) and can never be matched.
+            let transport = transportType(id)
+            let isPhoneLink =
+                transport == kAudioDeviceTransportTypeContinuityCaptureWired
+                || transport == kAudioDeviceTransportTypeContinuityCaptureWireless
             return Attached(
                 id: id,
                 device: InputChoice.Device(
@@ -45,7 +52,8 @@ enum AudioDevices {
                     name: name,
                     isBuiltInMic: uid == "BuiltInMicrophoneDevice",
                     isJack: isJack,
-                    isSystemDefault: id == defaultID))
+                    isSystemDefault: id == defaultID,
+                    isPhoneLink: isPhoneLink))
         }
     }
 
@@ -122,6 +130,17 @@ enum AudioDevices {
         guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr
         else { return "" }
         return value as String
+    }
+
+    private static func transportType(_ id: AudioDeviceID) -> UInt32 {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr else { return 0 }
+        return value
     }
 
     private static func uid(_ id: AudioDeviceID) -> String {

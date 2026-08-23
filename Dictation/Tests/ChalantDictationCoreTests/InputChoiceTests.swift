@@ -160,4 +160,24 @@ struct InputChoiceTests {
     func anySoundVetoes() {
         #expect(!InputChoice.isDead(peak: .leastNonzeroMagnitude, silentFor: 3600))
     }
+
+    /// 2026-08-23: the founder's iPhone offered itself over Continuity as
+    /// "Cj Microphone", became the system default, won the automatic
+    /// choice, then vanished and left the ear deaf. A phone is never an
+    /// automatic answer to "which microphone"; a pin still is.
+    @Test("a phone's Continuity mic is never chosen automatically, but a pin wins")
+    func phoneLinkSinksUnlessPinned() {
+        let phone = InputChoice.Device(
+            uid: "continuity-1", name: "Cj Microphone", isSystemDefault: true, isPhoneLink: true)
+        let builtIn = InputChoice.Device(
+            uid: "BuiltInMicrophoneDevice", name: "MacBook Air Microphone", isBuiltInMic: true)
+        let ordered = InputChoice.order([phone, builtIn], pinnedUID: nil, silent: [])
+        #expect(ordered.first?.uid == builtIn.uid)
+        #expect(ordered.last?.uid == phone.uid)
+        let pinned = InputChoice.order([phone, builtIn], pinnedUID: "continuity-1", silent: [])
+        #expect(pinned.first?.uid == phone.uid)
+        // A phone that is also the only device still comes last on paper but
+        // is the one that gets tried: everything appears exactly once.
+        #expect(InputChoice.order([phone], pinnedUID: nil, silent: []).count == 1)
+    }
 }
