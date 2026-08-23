@@ -143,7 +143,7 @@ actor FoundationModelsPolisher: Polisher {
     /// one often is. It buys the model the finalization time (0.05 to 0.4 s
     /// measured) as a head start.
     func pretidy(_ text: String, urgent: Bool = false) {
-        guard Cleanup.isEnabled(), case .available = SystemLanguageModel.default.availability else { return }
+        guard Cleanup.mode() == .live, case .available = SystemLanguageModel.default.availability else { return }
         let all = CleanupPrompt.chunks(text)
         guard !all.isEmpty else { return }
         let closed = Array(all.dropLast())

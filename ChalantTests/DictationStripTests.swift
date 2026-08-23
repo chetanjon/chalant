@@ -247,16 +247,15 @@ final class DictationStripTests: XCTestCase {
 
     // MARK: - Tidy is on by default, off the path the user feels
 
-    /// The tidy pass runs after the insert and swaps in place (spec
-    /// 2026-08-17, "Instant, then tidied in place"), so it no longer costs the
-    /// user a second, and it is on unless switched off. Uses its own suite:
-    /// the test host is the real app, so `.standard` here is the founder's
-    /// preferences.
-    func testTidyIsOnUnlessSwitchedOff() {
+    /// Since 2026-08-22 the model runs in shadow unless switched: the words
+    /// land as said and the model is only read back from the corpus row.
+    /// `CleanupModeTests` pins the three positions and the migration; this
+    /// keeps the strip's own assumption honest: nothing waits by default.
+    func testTidyIsShadowUnlessSwitched() {
         let suite = UserDefaults(suiteName: "chalant.tests.\(UUID().uuidString)")!
-        XCTAssertTrue(Cleanup.isEnabled(in: suite))
-        Cleanup.setEnabled(false, in: suite)
-        XCTAssertFalse(Cleanup.isEnabled(in: suite))
+        XCTAssertEqual(Cleanup.mode(in: suite), .shadow)
+        Cleanup.setMode(.live, in: suite)
+        XCTAssertEqual(Cleanup.mode(in: suite), .live)
     }
 
     // MARK: - The strip is sized and shaped for speed (Slipstream)

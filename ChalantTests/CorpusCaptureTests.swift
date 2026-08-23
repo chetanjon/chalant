@@ -64,6 +64,35 @@ final class CorpusCaptureTests: XCTestCase {
         XCTAssertEqual(row["output"] as? String, "Send 15, not 50.")
     }
 
+    func testAShadowRunAppendsItsOwnLineAgainstTheRow() async throws {
+        let corpus = CorpusCapture(folder: folder, defaults: defaults)
+        _ = await corpus.begin(bundleID: "com.apple.Notes")
+        let written = await corpus.finish(
+            output: "Send fifteen, not fifty.",
+            fedBuffers: 40, finalize: 0.1, insert: 0.02, polish: 0,
+            polishOutcome: "shadow",
+            texts: CorpusCapture.Texts(
+                asrRaw: "send fifteen not fifty", afterDeterministic: "Send fifteen, not fifty.",
+                modelOutput: nil, modelReason: "shadow:pending", modelChunks: [],
+                inserted: "Send fifteen, not fifty.", insertOutcome: "inserted:systemEvents"))
+        let id = try XCTUnwrap(written)
+        await corpus.annotateShadow(
+            id: id, output: "Send 15, not 50.", reason: "landed", chunks: ["landed"],
+            seconds: 0.61, coldStart: true, secondsSinceLastPolish: nil)
+
+        let lines = try rows()
+        XCTAssertEqual(lines.count, 2)
+        XCTAssertEqual(lines[0]["modelReason"] as? String, "shadow:pending")
+        XCTAssertEqual(lines[0]["polishSeconds"] as? Double, 0, "the path's own wait is zero in shadow")
+        let shadow = lines[1]
+        XCTAssertEqual(shadow["kind"] as? String, "shadow")
+        XCTAssertEqual(shadow["id"] as? String, id)
+        XCTAssertEqual(shadow["modelOutput"] as? String, "Send 15, not 50.")
+        XCTAssertEqual(shadow["modelReason"] as? String, "landed")
+        XCTAssertEqual(shadow["polishSeconds"] as? Double, 0.61, "the model's own time rides the shadow line")
+        XCTAssertEqual(shadow["polishColdStart"] as? Bool, true)
+    }
+
     func testARejectedChunkLeavesNullTextAndNamesTheRule() async throws {
         let corpus = CorpusCapture(folder: folder, defaults: defaults)
         _ = await corpus.begin(bundleID: "com.microsoft.VSCode")

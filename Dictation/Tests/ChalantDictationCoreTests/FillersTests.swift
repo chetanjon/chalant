@@ -16,6 +16,15 @@ struct FillersTests {
     /// The rule the data settled: `like` is a filler only when a comma follows
     /// it. Two of these four are real words and removing them breaks the
     /// sentence.
+    @Test("ah is noise too")
+    func ahIsNoise() {
+        // Measured 2026-08-22 (EVAL-LOG "what does the model buy"): the one
+        // filler the model removed that this pass had not, D-R2-a's "ah,".
+        // The pause comma in front of it dies with it, the standing rule.
+        #expect(Fillers.removing("Ravi, Ki Cheppu, meeting, postpone, ah, Ennani.") == "Ravi, Ki Cheppu, meeting, postpone Ennani.")
+        #expect(Fillers.removing("Ah, send it Monday") == "Send it Monday")
+    }
+
     @Test("like is a filler only when a comma follows it")
     func knowsWhichLikeIsWhich() {
         // real words, must survive

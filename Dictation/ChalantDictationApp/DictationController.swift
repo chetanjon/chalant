@@ -156,7 +156,7 @@ final class DictationController {
         // 2026-08-14 when cleanup became the default path, so it would never
         // have fired and the whole 1.4s would have landed on whichever sentence
         // the user happened to dictate first.
-        if Cleanup.isEnabled() {
+        if Cleanup.mode() != .off {
             await polisher.warmUp()
         }
         // The better ear, if the switch is on: download if needed, load, warm.
@@ -400,7 +400,9 @@ final class DictationController {
     /// path uses, so the pieces match exactly at release and are already done.
     private func startPretidy(_ transcriber: AppleTranscriber) {
         pretidyTask?.cancel()
-        guard Cleanup.isEnabled() else { return }
+        // Tidy-ahead exists to shorten a wait the release will make; in
+        // shadow there is no wait, so nothing runs during the hold.
+        guard Cleanup.mode() == .live else { return }
         pretidyTask = Task { [weak self, transcriber] in
             guard let self else { return }
             await self.polisher.beginUtterance()
@@ -471,7 +473,7 @@ final class DictationController {
         // finalization: the finalized text is very often these same words, so
         // the model gets finalization's 0.05 to 0.4 s as a head start on the
         // very piece the release will wait for.
-        if Cleanup.isEnabled() {
+        if Cleanup.mode() == .live {
             let live = await transcriber.liveTokens
             if !live.isEmpty {
                 let text = await deterministicText(from: live)
@@ -563,7 +565,11 @@ final class DictationController {
         var refinedAtOnce = false
         // The facts behind the row (campaign phase 0): why the polish landed
         // or didn't, and the counters the speed work steers by.
-        var polishOutcomeName = shaped.isEmpty ? "empty" : (Cleanup.isEnabled() ? "" : "off")
+        // Off: nothing runs. Shadow: nothing waits; the model runs after
+        // the words land and reaches only the corpus row (below). Live: the
+        // release waits for it.
+        let mode = Cleanup.mode()
+        var polishOutcomeName = shaped.isEmpty ? "empty" : (mode == .live ? "" : mode.rawValue)
         var chunkCount = 0
         var warmChunks = 0
         var failedChunks = 0
@@ -572,9 +578,11 @@ final class DictationController {
         // The texts of the path (schema 3): what the model gave back, or
         // why it gave nothing, in the row's own words.
         var modelOutput: String?
-        var modelReason = shaped.isEmpty ? "skipped:empty" : (Cleanup.isEnabled() ? "skipped:noTarget" : "skipped:off")
+        var modelReason = shaped.isEmpty
+            ? "skipped:empty"
+            : (mode == .live ? "skipped:noTarget" : (mode == .shadow ? "shadow:pending" : "skipped:off"))
         var modelChunks: [String] = []
-        if Cleanup.isEnabled(), !shaped.isEmpty, let target {
+        if mode == .live, !shaped.isEmpty, let target {
             let waitStart = Date()
             // The budget is enforced HERE, not only inside the polisher, and
             // for three days it was not enforced anywhere: both waits were
@@ -739,7 +747,7 @@ final class DictationController {
                     samples: hearingSamples, heard: raw, outcome: outcome, target: target,
                     insertedAt: insertedAt,
                     utteranceSeconds: Double(hearingSamples.count) / 16_000,
-                    corpusRow: corpusRow)
+                    corpusRow: corpusRow, mode: mode)
             }
         } else if case .inserted = outcome {
             // Rescued above; the toast has already spoken.
@@ -759,6 +767,15 @@ final class DictationController {
             default:
                 break
             }
+        }
+
+        // Shadow: the model runs now, once, over the text that landed, and
+        // its reply reaches the corpus row and nothing else. After the second
+        // hearing, when there is one, so the two models never share the ANE
+        // and the time recorded is the model's own. Utility priority: nothing
+        // the user feels is behind it.
+        if mode == .shadow, !shaped.isEmpty, let corpusRow {
+            startShadowPolish(of: shaped, bundleID: target.bundleID ?? "", corpusRow: corpusRow, after: hearingTask)
         }
 
         // Lengths and durations only. Part 1 §2: transcripts never enter logs.
@@ -841,11 +858,14 @@ final class DictationController {
         // nobody meant to say.
         // Restatement runs LAST, on the cleanest text, so a repeated
         // sentence matches its twin even when only one copy carried an um.
-        let deterministic = Restatement.collapsing(
-            Fillers.removing(
-                Disfluency.collapsingRepetitions(
-                    Guardrail.trimmingPunctuationRun(
-                        resolved.map(\.text).joined(separator: " ")))))
+        // Contrast runs after the fillers are gone, so "153 um not 135"
+        // still reads as a value against a value (2026-08-22).
+        let deterministic = Contrast.commaBeforeNot(
+            Restatement.collapsing(
+                Fillers.removing(
+                    Disfluency.collapsingRepetitions(
+                        Guardrail.trimmingPunctuationRun(
+                            resolved.map(\.text).joined(separator: " "))))))
         return deterministic
     }
 
@@ -895,7 +915,30 @@ final class DictationController {
     /// `heard` is the first ear's raw text: it picks the names the second ear
     /// reads before it listens (`Names.forHearing`), which is what took the
     /// names set from 29.9% to 10.0% word error on this Mac.
-    private func startHearingSwap(samples: [Float], heard firstHearing: String, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date, utteranceSeconds: TimeInterval, corpusRow: String? = nil) {
+    /// The shadow run: `polish` with no budget over the whole text, as
+    /// `tools/textpath` does it, so the row carries exactly what a live
+    /// release would have landed had it waited. Never inserted, never
+    /// swapped, never shown; the row line it appends is the only trace.
+    private func startShadowPolish(of shaped: String, bundleID: String, corpusRow: String, after hearing: Task<Void, Never>?) {
+        let polisher = self.polisher
+        let corpus = self.corpus
+        Task(priority: .utility) {
+            if let hearing { _ = await hearing.value }
+            await polisher.beginUtterance()
+            let facts = await polisher.coldStartFacts
+            let started = Date()
+            let outcome = await polisher.polish(shaped, profile: AppProfile(bundleID: bundleID), within: nil)
+            let seconds = Date().timeIntervalSince(started)
+            await corpus.annotateShadow(
+                id: corpusRow, output: outcome.modelText, reason: outcome.modelReason,
+                chunks: outcome.chunkReasons, seconds: seconds,
+                coldStart: facts.coldStart, secondsSinceLastPolish: facts.secondsSinceLastPolish)
+            Self.log.notice(
+                "shadow: \(outcome.modelReason, privacy: .public) in \(seconds, privacy: .public)s over \(shaped.count, privacy: .public) chars")
+        }
+    }
+
+    private func startHearingSwap(samples: [Float], heard firstHearing: String, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date, utteranceSeconds: TimeInterval, corpusRow: String? = nil, mode: Cleanup.Mode) {
         hearingTask?.cancel()
         let generation = swapGeneration
         activity.arm()
@@ -933,8 +976,11 @@ final class DictationController {
                 return
             }
             let cleaned = Listing.format(BetterHearing.deterministic(heard))
-            let tidied = (try? await self.polisher.polish(cleaned, profile: AppProfile(bundleID: target.bundleID ?? "")))
-                ?? cleaned
+            // The model touches the second hearing only in live. In shadow
+            // and off it is never shown, and that includes the swap.
+            let tidied = mode == .live
+                ? ((try? await self.polisher.polish(cleaned, profile: AppProfile(bundleID: target.bundleID ?? ""))) ?? cleaned)
+                : cleaned
             guard !Task.isCancelled, generation == self.swapGeneration else { return }
             let front = NSWorkspace.shared.frontmostApplication
             let situation = SwapPolicy.Situation(
