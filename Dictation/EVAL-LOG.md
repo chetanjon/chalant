@@ -1364,3 +1364,11 @@ the ASR's (19 spans in 14 rows never arrived) and "hang on." (not a marker).
 **Sets C, D, E, model off:** 0 rows changed against the #47 deterministic
 baseline; Set C rate 0/61. Compare the model in shadow on the same set
 (#48): 83.33 corrections per 100 words, 4 of 28 handled, at 0.68 s a call.
+
+**Chain atomicity (ruled after the numbers above):** markers that share a
+value resolve together or not at all. F24's chain ("No," then a bare
+"wait." with punctuation on one side) now ships verbatim instead of
+half-repairing to "3". Re-run: the same 13 real rows; Set F handled 16 of
+28 (F24 was never counted as handled, its "3" survived either way),
+retractions surviving 4, rate 0/52, corrections per 100 words **46.05
+(105)**: F24 back at its raw seven costs three. C, D, E still 0 changed.

@@ -36,10 +36,23 @@ struct RepairTests {
         #expect(Repair.repairing("The build is, um, 153, no, uh, 135.") == "The build is, um, 135.")
     }
 
+    @Test("a chain resolves entirely or not at all")
+    func chainAtomicity() {
+        // F24 as the ASR wrote it: "No," then a bare "wait." with punctuation
+        // on one side only. The second marker has no valid shape, so the
+        // whole chain ships verbatim rather than half-repairing to "3".
+        #expect(Repair.repairing("Set the time out to 2.5. No, 3 wait. 2.5 seconds.") == "Set the time out to 2.5. No, 3 wait. 2.5 seconds.")
+        // The same chain with punctuation on both sides of "wait" is whole.
+        #expect(Repair.repairing("Set the timeout to 2.5, no, 3, wait, 2.5 seconds.") == "Set the timeout to 2.5 seconds.")
+        // A chain whose last marker has nothing on its right ships verbatim.
+        #expect(Repair.repairing("Move it to Monday, no, Tuesday, actually.") == "Move it to Monday, no, Tuesday, actually.")
+    }
+
     @Test("wait alone fires only as VALUE with punctuation on both sides")
     func waitAlone() {
         #expect(Repair.repairing("Set the timeout to 3, wait, 2.5 seconds.") == "Set the timeout to 2.5 seconds.")
         #expect(Repair.repairing("Set the time out to 3 wait. 2.5 seconds.") == "Set the time out to 3 wait. 2.5 seconds.")
+        #expect(Repair.repairing("Set the time out to 3, wait, 2.5 seconds.") == "Set the time out to 2.5 seconds.")
         #expect(Repair.repairing("Do not wait for Aidan.") == "Do not wait for Aidan.")
         // With punctuation on both sides it is VALUE, and "ask" is the echo.
         #expect(Repair.repairing("Ask Chetan, wait, ask Aidan.") == "Ask Aidan.")

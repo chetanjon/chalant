@@ -189,7 +189,27 @@ public enum Repair {
                 continue
             }
             if marker.containsScratch, let edit = clause(for: marker, in: tokens) { return edit }
-            if let edit = value(for: marker, in: tokens) { return edit }
+            if let (edit, right) = value(for: marker, in: tokens) {
+                // Chain atomicity (ruling, 2026-08-22): markers that share a
+                // value ("2.5. No, 3 wait. 2.5") resolve together or not at
+                // all. Every later link is checked on the same tokens before
+                // the first is applied; one link without a valid shape and
+                // the whole chain ships verbatim.
+                var cursor = right
+                var chainEnd = marker.end
+                var whole = true
+                while let nextStart = nextContent(after: cursor, in: tokens), let next = self.marker(at: nextStart, in: tokens) {
+                    chainEnd = next.end
+                    guard let (_, nextRight) = value(for: next, in: tokens) else {
+                        whole = false
+                        break
+                    }
+                    cursor = nextRight
+                }
+                if whole { return edit }
+                i = chainEnd
+                continue
+            }
             if !marker.isBareWait, let edit = phrase(for: marker, in: tokens) { return edit }
             i = marker.end
         }
@@ -229,7 +249,9 @@ public enum Repair {
         return Edit(remove: start..<marker.end, capitalizeAfter: opensSentence(start, in: tokens), shape: "CLAUSE")
     }
 
-    private static func value(for marker: Marker, in tokens: [String]) -> Edit? {
+    /// The VALUE edit and the index of RIGHT (the value that stays), so a
+    /// chain can be walked from it.
+    private static func value(for marker: Marker, in tokens: [String]) -> (Edit, Int)? {
         guard let before = previousContent(before: marker.start, in: tokens) else { return nil }
         var left = before
         var echoAfter: Int?
@@ -263,7 +285,7 @@ public enum Repair {
             guard let following = nextContent(after: right, in: tokens),
                   word(tokens[following]) == word(tokens[echoAfter]) else { return nil }
         }
-        return Edit(remove: left..<firstKept, capitalizeAfter: opensSentence(left, in: tokens), shape: "VALUE")
+        return (Edit(remove: left..<firstKept, capitalizeAfter: opensSentence(left, in: tokens), shape: "VALUE"), right)
     }
 
     private static func phrase(for marker: Marker, in tokens: [String]) -> Edit? {
