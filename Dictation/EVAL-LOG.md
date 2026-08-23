@@ -1372,3 +1372,32 @@ half-repairing to "3". Re-run: the same 13 real rows; Set F handled 16 of
 28 (F24 was never counted as handled, its "3" survived either way),
 retractions surviving 4, rate 0/52, corrections per 100 words **46.05
 (105)**: F24 back at its raw seven costs three. C, D, E still 0 changed.
+
+### Task 3: the guard stops counting a marker "no" as a negation
+
+`FidelityGuard.negationsSurvived` now takes the scorer's rule: the output's
+negation count must fall within [input minus the "no" markers `Repair`
+identified, input]. Identified = matched as a marker AND given a valid
+shape, applied or chain-abandoned (`Repair.identifiedNegationMarkers`);
+"no" as a determiner has no shape and still counts. Tests pin a marker
+removed (free), a determiner removed (rejected), and the two Set F rows
+where the names rule is now the wall ("Chetan", and "Thursday" read as a
+name).
+
+Shadow on Set F, rejections before and after:
+
+| | before (#48: no Repair, plain count) | after (Repair in front + the range) |
+|---|---|---|
+| rejected | 9: negationsSurvived 4, numbersSurvived 3, noNewTokens 1, namesSurvived 1 | **1: F16 negationsSurvived** |
+| model changed the text | 21 rows | 3 rows (F02 a comma, F13 the "hang on." restart, F24 a comma) |
+| handled / survived / rate | 4 of 28 / 18 / 0/52 | 16 of 28 / 4 / 0/52 |
+
+Stated plainly: eight of the nine rejections vanished because `Repair` now
+removes the markers before the model sees the text, so the model has
+nothing to repair and echoes the repaired text; the range itself was not
+exercised on this set (no row where the model removed a marker Repair had
+identified but left). F16's "No," has no valid shape (the restart "the
+post hog dashboard" does not repeat the clause's opening), so the rule
+still calls the model's removal of it a lost negation. Median model time
+0.649 s. The corpus record of the model is now honest about markers; what
+lands is unchanged (shadow).

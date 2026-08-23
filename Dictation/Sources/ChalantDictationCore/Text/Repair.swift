@@ -128,6 +128,42 @@ public enum Repair {
         repair(text).fired
     }
 
+    /// How many "no" tokens in `text` sit inside a marker this pass
+    /// identified: matched as a marker AND given a valid shape, whether the
+    /// repair was applied or its chain was abandoned. `FidelityGuard`'s
+    /// negation rule subtracts them from what the model's output must keep
+    /// (founder's ruling, prompt 7 task 3, 2026-08-22): a marker "No" the
+    /// model removes is not a lost negation. "no" as a determiner ("no
+    /// more", "no time") has no shape and is never counted.
+    public static func identifiedNegationMarkers(in text: String) -> Int {
+        let tokens = text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+        guard tokens.count >= 3 else { return 0 }
+        var count = 0
+        var i = 0
+        while i < tokens.count {
+            guard let marker = marker(at: i, in: tokens) else {
+                i += 1
+                continue
+            }
+            var identified = false
+            if marker.containsScratch, clause(for: marker, in: tokens) != nil { identified = true }
+            else if let (_, right) = value(for: marker, in: tokens) {
+                identified = true
+                // The chain's later links count on their own merits.
+                var cursor = right
+                while let nextStart = nextContent(after: cursor, in: tokens), let next = self.marker(at: nextStart, in: tokens) {
+                    i = next.end
+                    guard let (_, nextRight) = value(for: next, in: tokens) else { break }
+                    count += next.words.filter { $0 == "no" }.count
+                    cursor = nextRight
+                }
+            } else if !marker.isBareWait, phrase(for: marker, in: tokens) != nil { identified = true }
+            if identified { count += marker.words.filter { $0 == "no" }.count }
+            i = max(i, marker.end)
+        }
+        return count
+    }
+
     private static func repair(_ text: String) -> (text: String, fired: [Fired]) {
         var tokens = text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
         guard tokens.count >= 3 else { return (text, []) }
