@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import CoreAudio
 import ChalantDictationCore
 import Foundation
 import os
@@ -187,14 +188,33 @@ final class DictationController {
             forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self else { return }
-                await self.audio.devicesChanged()
-                if let ear = await self.audio.currentDevice {
-                    Self.log.info("input devices changed; now on \(ear.name, privacy: .public)")
-                }
-                self.onStateChange?()
+                await self?.inputTopologyChanged()
             }
         }
+        // The engine's own notification fires only when ITS configuration
+        // changes. A device the engine is not using can appear (the phone
+        // at 14:28 on 2026-08-23) or the device it IS bound to can vanish
+        // (the same phone, minutes later) without a word from AVFoundation,
+        // and the ear stays bound to a ghost until the next hold. CoreAudio
+        // says it straight away: listen to the device list and the default
+        // input on the hardware object itself.
+        var devices = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var defaultInput = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                await self?.inputTopologyChanged()
+            }
+        }
+        AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &devices, .main, listener)
+        AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &defaultInput, .main, listener)
 
         healthTimer?.invalidate()
         let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -209,6 +229,14 @@ final class DictationController {
 
     /// The name of the ear currently live, for the panel and the menu bar. A
     /// wrong microphone must never be a mystery: that mystery cost an evening.
+    private func inputTopologyChanged() async {
+        await audio.devicesChanged()
+        if let ear = await audio.currentDevice {
+            Self.log.info("input devices changed; now on \(ear.name, privacy: .public)")
+        }
+        onStateChange?()
+    }
+
     func liveInputName() async -> String? {
         await audio.currentDevice?.name
     }
@@ -882,8 +910,9 @@ final class DictationController {
                 Fillers.removing(
                     Repair.repairing(
                         Disfluency.collapsingRepetitions(
-                            Guardrail.trimmingPunctuationRun(
-                                resolved.map(\.text).joined(separator: " ")))))))
+                            Guardrail.settlingEllipses(
+                                Guardrail.trimmingPunctuationRun(
+                                    resolved.map(\.text).joined(separator: " "))))))))
         return deterministic
     }
 

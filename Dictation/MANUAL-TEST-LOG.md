@@ -973,3 +973,17 @@ second or two; (2) switch to Live: the 1.26.0 behaviour (tidy-ahead during
 the hold, up to 0.73 s wait, refined text lands); (3) switch to Off: no
 shadow line, no model call in the polish log; (4) with Better hearing on, in
 Shadow the swap only ever uses the second hearing's deterministic text.
+
+## 2026-08-23 — ear follows the device list; phone mics exiled (fix/ear-and-ellipses)
+
+Not yet exercised live (certificate). Automated: InputChoiceTests (a
+phone-link device never wins automatically, a pin still takes it),
+GuardrailTests (the dots settle; clean text byte-for-byte). No unit seam
+for the CoreAudio listeners (shell): protocol rows for the founder on the
+installed build: (1) with the iPhone nearby and awake, make it the
+system input (or let Continuity offer it), then dictate: the ear must NOT
+be on the phone (log line "now on ..." names a real mic); (2) while the
+app is running, unplug or disconnect the current microphone: within a
+second the log shows "input devices changed; now on <another mic>" with
+no hold needed; (3) dictate a sentence and trail off before releasing:
+no "..." lands; the text ends with a period.

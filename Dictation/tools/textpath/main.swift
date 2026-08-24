@@ -95,8 +95,9 @@ func deterministic(_ raw: String) -> String {
             Fillers.removing(
                 Repair.repairing(
                     Disfluency.collapsingRepetitions(
-                        Guardrail.trimmingPunctuationRun(
-                            resolved.map(\.text).joined(separator: " ")))))))
+                        Guardrail.settlingEllipses(
+                            Guardrail.trimmingPunctuationRun(
+                                resolved.map(\.text).joined(separator: " "))))))))
     return Listing.format(text)
 }
 

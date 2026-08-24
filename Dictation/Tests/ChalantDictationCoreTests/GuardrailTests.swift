@@ -47,6 +47,32 @@ struct GuardrailTests {
         #expect(out == "It is done .")
     }
 
+    /// The transcriber writes "..." wherever the speaker trails off or
+    /// pauses, and the founder does not want it on the page (2026-08-23,
+    /// "when I am not talking, it was putting dots"): a pause is not
+    /// punctuation the speaker chose. Before a capitalised word or at the
+    /// end it settles to a full stop; before a lowercase word, a comma.
+    @Test("the pause dots settle into punctuation the speaker could have meant")
+    func ellipsesSettle() {
+        #expect(Guardrail.settlingEllipses("It's working now because my keyboard...") == "It's working now because my keyboard.")
+        #expect(Guardrail.settlingEllipses("I have a dream that one day... Thota people will be respected") == "I have a dream that one day. Thota people will be respected")
+        #expect(Guardrail.settlingEllipses("I be like... updated one so that I can...") == "I be like, updated one so that I can.")
+        #expect(Guardrail.settlingEllipses("You... Malvak, character is the name") == "You. Malvak, character is the name")
+        // A capitalised word after the dots reads as a restart, wherever
+        // the capital came from: the full stop is right either way.
+        #expect(Guardrail.settlingEllipses("Send it Tuesday… Wednesday works too") == "Send it Tuesday. Wednesday works too")
+    }
+
+    @Test("real punctuation and clean text pass through the dots rule untouched")
+    func ellipsesLeaveCleanTextAlone() {
+        for text in [
+            "Send 15, not 50.", "The file is at /Users/chetan/projects.", "It costs $9.99 a month.",
+            "Version 1.26 shipped.", "Wait. What?", "",
+        ] {
+            #expect(Guardrail.settlingEllipses(text) == text, "touched: \(text)")
+        }
+    }
+
     @Test("empty and whitespace survive untouched")
     func handlesNothing() {
         #expect(Guardrail.trimmingPunctuationRun("") == "")

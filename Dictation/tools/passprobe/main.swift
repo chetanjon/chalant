@@ -7,7 +7,7 @@ import Foundation
 // corpus file (read-only) and prints each row it would change, before and
 // after. Scripted sets cannot say whether a pass is tight enough; the
 // founder's real dictations can (2026-08-22, prompt 5 task 2).
-//   pass: contrast | fillers | repair | restatement | repair+restatement
+//   pass: contrast | fillers | ellipses | repair | restatement | repair+restatement | repair-trace
 let args = CommandLine.arguments
 guard args.count > 3 else {
     FileHandle.standardError.write(Data("usage: passprobe <jsonl> <field> <contrast|fillers>\n".utf8))
@@ -24,6 +24,7 @@ for line in try String(contentsOfFile: args[1], encoding: .utf8).split(separator
     switch pass {
     case "contrast": after = Contrast.commaBeforeNot(text)
     case "fillers": after = Fillers.removing(text)
+    case "ellipses": after = Guardrail.settlingEllipses(text)
     case "repair": after = Repair.repairing(text)
     case "restatement": after = Restatement.collapsing(text)
     // The two new passes in their shipping order, on text that already

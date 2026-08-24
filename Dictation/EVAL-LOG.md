@@ -1450,3 +1450,27 @@ post hog dashboard" does not repeat the clause's opening), so the rule
 still calls the model's removal of it a lost negation. Median model time
 0.649 s. The corpus record of the model is now honest about markers; what
 lands is unchanged (shadow).
+
+## 2026-08-23 — the ear stops following ghosts, and the pause dots settle (`fix/ear-and-ellipses`)
+
+Born from a live failure: at 14:28 the founder's iPhone offered itself
+over Continuity as "Cj Microphone", became the system default, won the
+automatic choice, then vanished; every hold after it heard nothing, and
+no notification told the ear (AVAudioEngineConfigurationChange fires only
+for the engine's own configuration). Three changes, one commit each:
+
+1. `InputChoice.Device.isPhoneLink` (CoreAudio transport 'ccwd'/'ccwl'):
+   a phone's mic is exiled from automatic choice like the conferencing
+   loopbacks; a pin still wins. The name can never identify it: it is
+   named after the owner.
+2. Two CoreAudio listeners on the hardware object (device list, default
+   input) route into the existing `devicesChanged()`, which already
+   rebuilds when the bound device vanished or something better appeared.
+3. `Guardrail.settlingEllipses`: the transcriber's pause dots ("...",
+   "…") settle deterministically: full stop before a capitalised letter
+   or at the end, comma before a lowercase letter; a single period is
+   never touched. Founder's ruling 2026-08-23: "when I am not talking,
+   it was putting dots. I don't want that." Dry run over the 396 real
+   rows: **17 changed, every one the pause pattern**, no decimal, path
+   or version touched; two read stiffly ("the movie was. Marvelously
+   shot") but truthfully, and better than dots.
