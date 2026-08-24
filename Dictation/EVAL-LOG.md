@@ -974,6 +974,55 @@ hearing pass. Measured: the pass touches 1 of 380 historical corpus rows
 (high precision by design; the historical set predates deliberate repeat
 testing). 241 Core tests, 6 new.
 
+## 2026-08-21 — the model goes cold five minutes after last use (`feat/prewarm-at-keydown`, campaign phase 1a)
+
+Phase 1a's lever (prewarm the cleanup model at every key-down) was written
+down on the strength of one number: a cold first call of 2.4 s against a
+0.99 s warm median (2026-08-16 above). That run measured a first call with
+NO prewarm at all, so nothing had shown that a `prewarm()` on one session
+warms the FRESH session each piece actually responds on, or how long a
+warm-up lasts. Part 1 §3 bans optimising before measuring, so:
+`tools/warmprobe`, one fresh process per run, the shipping prompt and
+framing compiled from Core, a ~38-word filler-laden synthetic passage.
+
+**Warmth is not per process, and the system takes it away on a timer.**
+Apple's `modelmanagerd` loads the 3B model for every client and unloads it
+five minutes after its last use, read straight from its own log: Chalant's
+launch prewarm loaded it at 16:24:44 (3.8 s, first load since boot) and it
+was unloaded at 16:29:49 ("unloadIfNecessary ... Unloading asset
+instruct_3b"); the probe's runs at 17:15 were unloaded at 17:20:42 and the
+next at 17:25:57 and 17:31:16, five minutes to the second each time. A reload from the
+page cache takes 0.75 to 0.9 s; the first load after boot 3.8 s.
+
+What a fresh process pays, one run per line, timings of the FIRST respond:
+
+| model state at the respond | first respond | next respond |
+|---|---|---|
+| cold, no prewarm (the 1.26.0 first utterance after a 5 min pause) | **2.487 s / 2.550 s** | 0.894 s / 0.913 s |
+| cold, prewarm on a separate session, then 1 s wait (a short hold) | **1.077 s** | 0.924 s |
+| cold, prewarm on a separate session, then 3 s wait | **1.107 s** | 0.925 s |
+| warm (another process responded 2 s earlier) | 0.923 s / 1.000 s | 0.906 s / 0.930 s |
+
+The `prewarm()` call itself returns in 5 to 28 ms and the daemon logs
+"Loading asset" 16 ms later, so the load runs entirely behind the hold. A
+prewarm on one session warms a fresh session in the same process: the
+warmth lives in the daemon, not the session. When already loaded the daemon
+answers "Not loading asset": a repeated prewarm costs nothing.
+
+So the launch prewarm (1.16.x) was covering only the first five minutes
+after launch, and every dictation after a longer pause has been paying
+~1.6 s extra at the one moment the user is waiting: the 17:36 conviction
+row (polish 2.456 s, one minute after a relaunch whose prewarm had already
+expired by the time of the previous hold's silence, or simply unused) fits.
+Phase 1a: `keyDown` calls `polisher.warmUp()`; a polish-worthy utterance
+is over 40 characters, so over ~3 s of speech, and the reload is under 1 s.
+Expected on the founder's rows: polishSeconds on cold-after-a-pause
+utterances drops from ~2.5 s to ~1.1 s (the 0.65 s budget still decides
+whether the refined text lands at once; this removes the cold penalty, not
+the model's own time). Phase 1b (a keep-warm timer while the ear is warm)
+is now known to need a period under five minutes if it is ever built; with
+1a hiding the reload inside the hold, it may not be needed at all.
+
 ## 2026-08-21 — THE STARVATION VERDICT: nothing was starved. The waits could not return. (`fix/the-budget-is-real`)
 
 The first schema-2 row, from a synthetic hold on 1.26.0 (harness
@@ -1314,6 +1363,93 @@ budget** (median utterance 11 words). Live landed 3 of 30 inside the budget.
 of 19 heard self-corrections, 3 of them then killed by its own guard, at
 0.68 s a call with 60% of calls over budget; the repairs it does make are
 the phase 4 marker grammar, which belongs in a deterministic pass.**
+
+## 2026-08-22 — REPAIR MARKERS, DETERMINISTICALLY: Set F off, 95.18 → 44.74 (`feat/repair-markers`, prompt 7 tasks 1 and 2)
+
+New Core pass `Repair` (grammar in its header, ruled by the founder before
+any code: VALUE / PHRASE / CLAUSE over the markers no, no wait, no no,
+sorry, I mean, scratch that, wait, actually, make that, rather; `wait`
+alone VALUE-only with punctuation both sides; pronouns a fourth value
+shape; the echo rule on either side of LEFT; fillers transparent; runs
+BEFORE Fillers). `Restatement` gains the prefix restart (later run kept).
+
+**Dry run on real speech first** (`tools/passprobe`, read-only, the 391
+rows of the founder's `captured.jsonl`): `Repair` would change **0 rows**
+(real dictation so far has no marker-shaped self-correction). The prefix
+rule as ruled (gap of four) changed 21 rows and about half were not
+restarts: coordination ("local or can be hybrid", "turn it on and turn it
+off", "he was sad, and he called") and lists ("in terms of effects, in terms
+of sound, in terms of music"). Tightened until only self-corrections moved:
+gap of two (every Set F restart fits), no conjunction in the gap or opening
+the run, the second copy after a comma or directly after the first, a third
+copy within the window on either side means a list. Result: **13 rows**,
+all stutters or restarts ("I don't, I don't", "as well as well as", "I was,
+I was", "where it may, where it gives", "Look at this, look at, look at",
+"it will you know, it will"), plus the old whole-sentence rule's one row.
+
+**Set F, model off** (same raw ASR as #48):
+
+| | #48 off | now |
+|---|---|---|
+| rows handled correctly | 3 of 28 | **16 of 28** |
+| retractions heard / survived | 19 / 19 | 19 / **4** |
+| corrected values present | 17 of 26 | 17 of 26 |
+| protected-span mutation rate | 0/52 | **0/52** |
+| corrections per 100 words | 95.18 (217) | **44.74 (102)** |
+
+What fired, per row: VALUE on F01, F02, F03, F05 (twice), F07, F10 (echo
+"ask"), F11, F12 (echo "tell"), F13, F15, F20, F21 (echo "on"), F23 (echo
+"access"), F24 (first marker only), F27, F29; PHRASE on F17, F19, F22, F26;
+CLAUSE on F04, F14; the prefix restart on F21 ("I can't make it. I, okay,")
+and F30 ("Priya, and Sarah, Priya, and"). The four survivors are the
+grammar's stated edges: F06 (a pause with no marker), F08 (a restart that
+does not repeat the clause's opening), F12 (the ASR wrote "Sarah" for both
+names), F24 (the second marker is a bare "wait." with punctuation on one
+side only; the first firing leaves "3" as the surviving value, so this row
+got worse by one word). F27's VALUE is the documented partial repair
+("Chetan at Jonalagada 8800 at gmail.com"). The remaining corrections are
+the ASR's (19 spans in 14 rows never arrived) and "hang on." (not a marker).
+
+**Sets C, D, E, model off:** 0 rows changed against the #47 deterministic
+baseline; Set C rate 0/61. Compare the model in shadow on the same set
+(#48): 83.33 corrections per 100 words, 4 of 28 handled, at 0.68 s a call.
+
+**Chain atomicity (ruled after the numbers above):** markers that share a
+value resolve together or not at all. F24's chain ("No," then a bare
+"wait." with punctuation on one side) now ships verbatim instead of
+half-repairing to "3". Re-run: the same 13 real rows; Set F handled 16 of
+28 (F24 was never counted as handled, its "3" survived either way),
+retractions surviving 4, rate 0/52, corrections per 100 words **46.05
+(105)**: F24 back at its raw seven costs three. C, D, E still 0 changed.
+
+### Task 3: the guard stops counting a marker "no" as a negation
+
+`FidelityGuard.negationsSurvived` now takes the scorer's rule: the output's
+negation count must fall within [input minus the "no" markers `Repair`
+identified, input]. Identified = matched as a marker AND given a valid
+shape, applied or chain-abandoned (`Repair.identifiedNegationMarkers`);
+"no" as a determiner has no shape and still counts. Tests pin a marker
+removed (free), a determiner removed (rejected), and the two Set F rows
+where the names rule is now the wall ("Chetan", and "Thursday" read as a
+name).
+
+Shadow on Set F, rejections before and after:
+
+| | before (#48: no Repair, plain count) | after (Repair in front + the range) |
+|---|---|---|
+| rejected | 9: negationsSurvived 4, numbersSurvived 3, noNewTokens 1, namesSurvived 1 | **1: F16 negationsSurvived** |
+| model changed the text | 21 rows | 3 rows (F02 a comma, F13 the "hang on." restart, F24 a comma) |
+| handled / survived / rate | 4 of 28 / 18 / 0/52 | 16 of 28 / 4 / 0/52 |
+
+Stated plainly: eight of the nine rejections vanished because `Repair` now
+removes the markers before the model sees the text, so the model has
+nothing to repair and echoes the repaired text; the range itself was not
+exercised on this set (no row where the model removed a marker Repair had
+identified but left). F16's "No," has no valid shape (the restart "the
+post hog dashboard" does not repeat the clause's opening), so the rule
+still calls the model's removal of it a lost negation. Median model time
+0.649 s. The corpus record of the model is now honest about markers; what
+lands is unchanged (shadow).
 
 ## 2026-08-23 — the ear stops following ghosts, and the pause dots settle (`fix/ear-and-ellipses`)
 

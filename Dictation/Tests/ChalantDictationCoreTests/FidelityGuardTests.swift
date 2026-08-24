@@ -62,6 +62,39 @@ struct FidelityGuardTests {
         #expect(ok("number one move the review number two ship the draft", "1. Move the review.\n2. Ship the draft."))
     }
 
+    // MARK: - Markers are not negations (prompt 7 task 3, 2026-08-22)
+
+    /// The scorer's rule, given to the guard: the output's negation count
+    /// must fall within [input minus the "no" markers Repair identified,
+    /// input]. A marker the model removes is not a lost negation; a real
+    /// "not" still is. On Set F in shadow the old rule rejected four
+    /// correct repairs for their marker "No".
+    @Test("a marker no the model removed is not a lost negation")
+    func markerNoIsFree() {
+        #expect(ok("Delete the production database, no, no. Delete the staging database.", "Delete the staging database."))
+        #expect(ok("Send it on Tuesday, no, Wednesday, and copy Sarah.", "Send it on Wednesday, and copy Sarah.") == false
+            ? check("Send it on Tuesday, no, Wednesday, and copy Sarah.", "Send it on Wednesday, and copy Sarah.").rule != "negationsSurvived"
+            : true)
+        // The negation rule stands aside; what still stops these two is the
+        // NAME rule, which reads the retracted "Chetan" and the day
+        // "Thursday" as names that went missing. Task 3's scope ends at
+        // the negation rule; the names rule is the next wall, on record.
+        #expect(check("Ask Chetan? No, ask Aidan to review it.", "Ask Aidan to review it.").rule == "namesSurvived")
+        #expect(check("I can't make it on Thursday. No, on Friday.", "I can't make it on Friday.").rule == "namesSurvived")
+        // A chain Repair could not resolve still identified its "No": the
+        // negation rule lets the model's full repair through, and only the
+        // dropped "3" (the numbers rule, earlier in the chain) stops it.
+        #expect(check("Set the time out to 2.5. No, 3 wait. 2.5 seconds.", "Set the time out to 2.5 seconds.").rule == "numbersSurvived")
+    }
+
+    @Test("a no that is not a marker is still a negation")
+    func determinerNoStays() {
+        #expect(!ok("Send 15, no more.", "Send 15 more."))
+        #expect(!ok("There is no time.", "There is time."))
+        #expect(!ok("No, we are not raising the price.", "We are raising the price."))
+        #expect(check("The number is 40, not 14.", "The number is 40, 14.").rule == "negationsSurvived")
+    }
+
     /// The corpus row names the rule that rejected a chunk
     /// ("rejected:didNotStutter"), so every check must answer to a name
     /// and `ok` to none.

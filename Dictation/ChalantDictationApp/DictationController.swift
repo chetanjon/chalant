@@ -263,6 +263,20 @@ final class DictationController {
             return
         }
 
+        // The cleanup model warms NOW, behind the speech, not at release.
+        // The system unloads it five minutes after its last use (measured
+        // 2026-08-21, EVAL-LOG), so the launch prewarm covers only the first
+        // five minutes and every dictation after a longer pause used to pay
+        // the cold load (2.49 s against 0.9 s) at the one moment the user is
+        // waiting. The hold hides it: a polish-worthy utterance is over ~3 s
+        // of speech and the reload takes 0.9 s. A no-op when already warm.
+        // Shadow runs the model too, just after the words land instead of
+        // before, so this warms in every mode but off, where there is no
+        // model to warm.
+        if Cleanup.mode() != .off {
+            Task { await polisher.warmUp() }
+        }
+
         guard assetState.isReady else {
             Self.log.error("ignoring key: assets are not ready")
             key.setupFailed()
@@ -886,15 +900,19 @@ final class DictationController {
         // nobody meant to say.
         // Restatement runs LAST, on the cleanest text, so a repeated
         // sentence matches its twin even when only one copy carried an um.
-        // Contrast runs after the fillers are gone, so "153 um not 135"
-        // still reads as a value against a value (2026-08-22).
+        // Repair runs BEFORE Fillers (it needs "I mean" as a marker and
+        // treats fillers as transparent) and before Restatement, whose
+        // prefix rule then sees a clean restart. Contrast runs after the
+        // fillers are gone, so "153 um not 135" still reads as a value
+        // against a value (2026-08-22).
         let deterministic = Contrast.commaBeforeNot(
             Restatement.collapsing(
                 Fillers.removing(
-                    Disfluency.collapsingRepetitions(
-                        Guardrail.settlingEllipses(
-                            Guardrail.trimmingPunctuationRun(
-                            resolved.map(\.text).joined(separator: " ")))))))
+                    Repair.repairing(
+                        Disfluency.collapsingRepetitions(
+                            Guardrail.settlingEllipses(
+                                Guardrail.trimmingPunctuationRun(
+                                    resolved.map(\.text).joined(separator: " "))))))))
         return deterministic
     }
 

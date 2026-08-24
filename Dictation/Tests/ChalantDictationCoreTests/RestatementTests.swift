@@ -55,3 +55,30 @@ struct RestatementTests {
         }
     }
 }
+
+/// The prefix-restart rule (2026-08-22, ruling 4): a run of at least two
+/// tokens said twice in one sentence, the second within four tokens of the
+/// first run's end, continuing differently: the later run stays.
+struct RestatementPrefixTests {
+    @Test("a restarted run keeps its later copy")
+    func prefixRestart() {
+        #expect(Restatement.collapsing("Lupin, Priya, and Sarah, Priya, and Aidan on the Versal deploy.") == "Lupin, Priya, and Aidan on the Versal deploy.")
+        #expect(Restatement.collapsing("I can't make it. I, okay, I can't make it on Friday.") == "I can't make it on Friday.")
+        #expect(Restatement.collapsing("My email, my email is Chetan at Gmail.") == "My email is Chetan at Gmail.")
+        // The first run did not end its sentence ("hang on." did), so this
+        // is two sentences to the rule and ships as said: "hang on" is not
+        // a marker. Repair still fixes its value pair.
+        #expect(Restatement.collapsing("API, the API key ends in, hang on. The API key ends in 472, not 427.") == "API, the API key ends in, hang on. The API key ends in 472, not 427.")
+        #expect(Restatement.collapsing("So the build is 153, no, the build is 135.") == "So the build is 135.")
+    }
+
+    @Test("a single repeated token is not a run, and exact repeats keep the first copy")
+    func prefixLimits() {
+        #expect(Restatement.collapsing("Tell Sarah Sarah is late.") == "Tell Sarah Sarah is late.")
+        #expect(Restatement.collapsing("Yes. Yes.") == "Yes. Yes.")
+        #expect(Restatement.collapsing("We need the data. We need the data.") == "We need the data.")
+        #expect(Restatement.collapsing("Day by day it gets better, and day by day we ship.") == "Day by day it gets better, and day by day we ship.")
+        #expect(Restatement.collapsing("First we ship. Then we tell everyone. Then we rest.") == "First we ship. Then we tell everyone. Then we rest.")
+        #expect(Restatement.collapsing("I need to go to the bank. I should visit the bank today.") == "I need to go to the bank. I should visit the bank today.")
+    }
+}

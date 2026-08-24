@@ -240,10 +240,14 @@ public enum FidelityGuard {
     private static func negationsSurvived(_ raw: String, _ cleaned: String) -> String? {
         let before = negations(in: raw)
         let after = negations(in: cleaned)
-        guard before != after else { return nil }
-        return before > after
-            ? "a negation went missing, which reverses the meaning"
-            : "a negation appeared that was not said, which reverses the meaning"
+        // The scorer's rule, given to the guard (founder, 2026-08-22): the
+        // output's count must fall within [input minus the "no" markers
+        // Repair identified, input]. On Set F in shadow the plain count had
+        // rejected four correct repairs for the marker "No" they removed.
+        let expected = before - Repair.identifiedNegationMarkers(in: raw)
+        if after < expected { return "a negation went missing, which reverses the meaning" }
+        if after > before { return "a negation appeared that was not said, which reverses the meaning" }
+        return nil
     }
 
     private static let negationWords: Set<String> = [
