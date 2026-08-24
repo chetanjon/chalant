@@ -872,14 +872,18 @@ final class DictationController {
         // nobody meant to say.
         // Restatement runs LAST, on the cleanest text, so a repeated
         // sentence matches its twin even when only one copy carried an um.
-        // Contrast runs after the fillers are gone, so "153 um not 135"
-        // still reads as a value against a value (2026-08-22).
+        // Repair runs BEFORE Fillers (it needs "I mean" as a marker and
+        // treats fillers as transparent) and before Restatement, whose
+        // prefix rule then sees a clean restart. Contrast runs after the
+        // fillers are gone, so "153 um not 135" still reads as a value
+        // against a value (2026-08-22).
         let deterministic = Contrast.commaBeforeNot(
             Restatement.collapsing(
                 Fillers.removing(
-                    Disfluency.collapsingRepetitions(
-                        Guardrail.trimmingPunctuationRun(
-                            resolved.map(\.text).joined(separator: " "))))))
+                    Repair.repairing(
+                        Disfluency.collapsingRepetitions(
+                            Guardrail.trimmingPunctuationRun(
+                                resolved.map(\.text).joined(separator: " ")))))))
         return deterministic
     }
 
