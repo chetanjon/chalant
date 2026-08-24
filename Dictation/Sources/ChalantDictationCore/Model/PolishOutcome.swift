@@ -39,10 +39,22 @@ public struct PolishOutcome: Sendable, Equatable {
     public var coldStart: Bool
     /// Seconds since the last completed model reply, nil when never.
     public var secondsSinceLastPolish: Double?
+    /// One entry per chunk the model was asked about, in order: "landed",
+    /// "rejected:<rule>" (the `FidelityGuard` check that fired) or
+    /// "failed:<error>". The corpus row keeps these verbatim so a rejected
+    /// real dictation says which rule rejected it (2026-08-21, Task 3).
+    public var chunkReasons: [String]
+    /// The model's reply per chunk after unwrapping, INCLUDING replies the
+    /// guard rejected (empty when the call itself failed). Never written to
+    /// the corpus row (a rejected reply is null there, by the founder's
+    /// ruling); kept so the offline measurement can show a rejected reply
+    /// beside its source and judge the guard (2026-08-22).
+    public var chunkReplies: [String]
 
     public init(
         result: Result, text: String?, chunks: Int, warmChunks: Int,
-        failedChunks: Int, coldStart: Bool, secondsSinceLastPolish: Double?
+        failedChunks: Int, coldStart: Bool, secondsSinceLastPolish: Double?,
+        chunkReasons: [String] = [], chunkReplies: [String] = []
     ) {
         self.result = result
         self.text = text
@@ -51,6 +63,8 @@ public struct PolishOutcome: Sendable, Equatable {
         self.failedChunks = failedChunks
         self.coldStart = coldStart
         self.secondsSinceLastPolish = secondsSinceLastPolish
+        self.chunkReasons = chunkReasons
+        self.chunkReplies = chunkReplies
     }
 
     /// The honest flag: the model landed inside the budget AND at least
@@ -58,5 +72,29 @@ public struct PolishOutcome: Sendable, Equatable {
     /// dictated.
     public var refinedAtOnce: Bool {
         result == .landed && chunks > 0 && failedChunks < chunks
+    }
+
+    /// The model's text for the corpus row: only when some chunk actually
+    /// came back from it. When every chunk shipped as dictated the joined
+    /// text is the input again, and the row must say so with a reason
+    /// rather than pass the input off as a reply.
+    public var modelText: String? {
+        result == .landed && chunks > 0 && failedChunks < chunks ? text : nil
+    }
+
+    /// The corpus row's `modelReason` for this outcome: "landed", "gated",
+    /// "skipped:<why>", "budgetExpired:inner", or, when every chunk shipped
+    /// as dictated, the first chunk's own reason ("rejected:<rule>",
+    /// "failed:<error>"). The caller adds "budgetExpired:caller" itself,
+    /// because that outcome never arrives.
+    public var modelReason: String {
+        switch result {
+        case .landed:
+            return modelText != nil ? "landed" : (chunkReasons.first ?? "rejected:unknown")
+        case .budgetExpiredInner: return "budgetExpired:inner"
+        case .modelUnavailable: return "skipped:unavailable"
+        case .belowMinimum: return "gated"
+        case .empty: return "skipped:empty"
+        }
     }
 }

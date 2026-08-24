@@ -1022,3 +1022,344 @@ whether the refined text lands at once; this removes the cold penalty, not
 the model's own time). Phase 1b (a keep-warm timer while the ear is warm)
 is now known to need a period under five minutes if it is ever built; with
 1a hiding the reload inside the hold, it may not be needed at all.
+
+## 2026-08-21 — THE STARVATION VERDICT: nothing was starved. The waits could not return. (`fix/the-budget-is-real`)
+
+The first schema-2 row, from a synthetic hold on 1.26.0 (harness
+`verify-dictation.sh --cold`, 183 chars, one 14 s sentence, TextEdit):
+
+| field | value |
+|---|---|
+| polishSeconds | **1.697 s** against the 0.73 s hard cap |
+| polishOutcome | budgetExpiredCaller |
+| refinedAtOnce / refinedChanged | false / false |
+| holdSeconds / inputPeak / keyDownHeard / fedBuffers | 14.18 / 0.43 / true / 139 |
+| insert | tier 1, 0.166 s |
+| hearing line | swapped, 3.42 s later, 183 → 182 chars |
+
+The log around it: the urgent key-up piece's model reply (a guard
+rejection, "a name went missing: Priya") is stamped 18:11:53.647167 and
+the polisher's "cleanup not ready within budget ... 1.697046s elapsed
+here" 18:11:53.647236, **seventy microseconds apart**, while neither
+deadline leg (main actor, pool, raw dispatch timers, the 1.25.1 probe)
+logged a late wake. Same shape as every row since 08-18.
+
+**Measured the other way, in a bare process (`tools/mainstall`): the
+model framework starves nothing.** A 20 ms main-queue ticker and a raw
+thread posting main-queue blocks and detached tasks every 20 ms, across
+warm responds, with a 300 ms `Task.sleep` started inside the respond:
+
+| responds in flight | longest respond | main hop max | pool hop max | sleep(300 ms) woke after |
+|---|---|---|---|---|
+| 1 | 0.95 s / 0.98 s | 2 ms / 1 ms | 2 ms / 1 ms | 301 ms / 301 ms |
+| 2 | 1.75 s | 26 ms | 26 ms | 305 ms |
+| 3 | 2.53 s | 8 ms | 8 ms | 301 ms |
+
+(Side fact: concurrent responds serialize in the daemon, which is why the
+key-up piece took 1.87 s: it queued behind the previous tail speculation.)
+
+**The mechanism, reproduced in isolation:** the polisher's bounded wait,
+verbatim, a task group of {await task.value, sleep}, against a task that
+takes 3 s with a 200 ms budget, **returned nil after 3.04 s**. A task
+group does not return until every child has finished, and a child that
+awaits another task's value cannot be cancelled. The sleep fired at 200
+ms, `next()` answered, and the group sat on the value child until the
+task was done. The controller's outer wait had the same shape around the
+polish child, so its two dispatch-timer legs fired at 0.73 s, logged
+nothing (they had not been late), and the group waited for the polish,
+which was waiting for the model. Six deadline variants since 08-18 were
+aimed at timers that were never late.
+
+Fix: `Deadline.value(of:within:)` in Core, one continuation raced between
+a dispatch timer and an observer task; the task is never cancelled, so
+late pieces still land in the cache for the hearing pass. `DeadlineTests`
+pins it (the expiry case returns in 0.10 s where it took 3 s). Both waits
+use it; the two-executor race and `hardDeadline` are gone. Not yet
+exercised live: no signing identity on the Mac today.
+
+Also fixed off the same row: a budget miss erased the cold-start facts
+(`polishColdStart: false`, `secondsSinceLastPolish: -1` on a process that
+had never polished). They are fixed at key-down and are now read before
+the wait.
+
+What the row does NOT say yet: this sentence's tail chunk was rejected by
+the guard on all nine speculations during the hold ("the model repeated
+itself" ×8, then the missing name), so even a perfect deadline lands it
+raw. Whether that is the synthetic voice or the passage is a question for
+real rows.
+
+## 2026-08-21 — PROTECTED-SPAN MUTATION RATE, FIRST MEASUREMENT: 0/61 as shipped; 0, 0 and 1 of 61 ungated (`feat/protected-span-rate`)
+
+The directive's §4.1 metric, measurable for the first time: Set C annotated
+with 76 protected spans (`corpus/setC.json`, founder-approved), the raw
+en-US ASR text kept verbatim (`corpus/setC-asr-en_US.jsonl`), a CLI that
+runs each string through the shipping text path (`tools/textpath`: the
+controller's deterministic order, empty vocabulary, then
+`FoundationModelsPolisher.polish` with the shipping prompt, framing and
+`FidelityGuard`, no release budget), and a scorer for the five rules
+(`corpus-kit/span-score.py`). Stamp on every run: commit `3ca798a`, prompt
+SHA-256 `e97958cb280f…`, model `instruct_3b.fm_api_generic_3b?variant=
+generic_sparse` version `15.0.0.13.102990`, macOS 27.0.
+
+| run | rows to the model | spans present | mutated | rate | what changed |
+|---|---|---|---|---|---|
+| gated, as shipped (40-char line) | 10 of 30 | 61 | **0** | **0.0000** | nothing |
+| ungated, pass 1 | 30 | 61 | 0 | 0.0000 | C14 comma before "not" |
+| ungated, pass 2 | 30 | 61 | 0 | 0.0000 | C14 comma before "not" |
+| ungated, pass 3 | 30 | 61 | **1** | **0.0164** | C14 comma; **C08 "can't" → "cannot"** (label `contraction`, stage `model`) |
+
+Case drift 0 in every run; negation counts unchanged in every row ("cannot"
+counted as a negation, stated in the scorer). **The model is not fully
+deterministic**: C08 came back as said twice and expanded once in three
+passes, so the ungated rate is 0 to 1 of 61 under this prompt, never a
+single number. Rejected by the guard on all three ungated passes: C12
+(`It's/user/Chatan/projects.`, `stillTheSameMessage`): ships as dictated,
+no span touched. The deterministic stage changed C18, C23, C27 (doubled
+openings removed) and touched no span.
+
+**ASR misses, out of scope here and reported separately: 12 rows, 15
+spans.** C03 (3:15, 3:50), C05 (Sara), C07 ($1,200 heard as $1200), C12
+(the path), C13 (the email), C14 (build number heard as bill number), C17
+(9:30, 10:15), C18 (API heard as ABI), C22 (40 heard as "4 tea"), C24
+(TextInjector), C25 (timeout heard as timer), C29 ($9.99, $99 heard as 999
+and 99). The founder expected about nine; the three beyond that (C05, C18,
+C24) are in the raw text, not in the scorer.
+
+What this does NOT say: Set C is scripted and mostly under the 40-character
+line; 20 of 30 rows never reach the model as shipped. The rate on real
+spontaneous dictation is the number the schema-3 row exists to give, and no
+row of that kind exists yet (this build is not installed: no signing
+identity on the Mac today).
+
+## 2026-08-22 — CLOSING THE TWO GAPS: greedy decoding, and a sixth guard rule that adds nothing (`feat/close-the-two-gaps`)
+
+Both measured with the #44 harness (`tools/textpath`, `corpus-kit/span-score.py`),
+same stamp as before except the commit: model `instruct_3b.fm_api_generic_3b?
+variant=generic_sparse` `15.0.0.13.102990`, prompt SHA-256 `e97958cb280f…`
+(`CleanupPrompt` untouched).
+
+### 1. Greedy decoding (`GenerationOptions(sampling: .greedy)` on every polish call)
+
+The API exists (macOS 26.0+, `GenerationOptions.SamplingMode.greedy`). Ungated
+Set C, three passes: every text field identical across the passes (the run
+files hash alike once the per-row timing is dropped; `4fcd08b9…`), C08 no longer
+flips ("I can't make it on Thursday." on all three), rate **0/61** on all three,
+the same single rejection (C12, `stillTheSameMessage`) and the same single edit
+(C14's comma) as the #44 sampled runs. Diffed against #44: no edit appeared or
+disappeared; the only change is the flip going away. Timing unchanged (median
+0.54 s per call against 0.61 s).
+
+### 2. Rule six, `noNewTokens`: every output token must come from the input, no more often
+
+Tokens lowercased, apostrophes kept inside words (curly read as straight),
+everything else that is not a letter or digit stripped, list markers removed
+first like the other rules. Fewer tokens is fine; any new token or any count
+higher than the input is `rejected:noNewTokens`. No exceptions list. Runs last,
+so the older rules keep naming what they catch. Seven tests that encoded the
+2026-08-14 "rewords freely" positioning now assert the reversal (contraction,
+expansion, synonym, pronoun-for-name and the reused-words reply are all new
+words now); the deletions they also tested still pass.
+
+**(a) Set C, ungated, greedy, three passes:** rate **0/61** on all three, text
+identical across passes, rejections unchanged: C12 only (`stillTheSameMessage`,
+which fires before rule six). Rule six rejected nothing on Set C.
+
+**(b) False-rejection cost on D and E, ungated, one greedy pass each.** Rule six
+runs after the older five, so every `rejected:noNewTokens` below is a row the
+old guard would have let land.
+
+| set | rows | landed | rejected by rule six | rejected by older rules | failed (framework refusal) |
+|---|---|---|---|---|---|
+| D (Telugu/Hindi/Marathi code-switch through en-US ASR) | 30 | 22 | **3 (10.0%)** | 3 (`namesSurvived`) | 2 |
+| E (the founder's vocabulary) | 30 | 28 | **2 (6.7%)** | 0 | 0 |
+
+The five rule-six rejections, source (after the deterministic pass, which
+changed none of them) against the model's reply:
+
+| id | afterDeterministic | model reply | what the model did |
+|---|---|---|---|
+| D-R1-a | Chalant Lo was dictation, punishes, tunda. | Chalant Lo was dictation, **punishment**, tunda. | swapped a word (the ASR was already nonsense here; truth "pani chestunda") |
+| D-U08 | Gangotri Nundi call vachindi. | Gangotri Nundi **called**. | rewrote two words into a new one |
+| D-R2-c | Ravi Ki Chebu meeting postpone Indane. | Ravi Ki Chebu meeting **postponed to** Indane. | added two words |
+| E02 | Ask Athram, weather friction lens is ready for Gangotri. | Ask Athram, **whether** friction lens is ready for Gangotri. | fixed the ASR's homophone; the truth IS "whether" |
+| E20 | Claude code writes straight into the Chalant Island. That's nice, one of that. | …That's nice, one of **those**. | changed a word the ASR got wrong; truth has no such clause at all |
+
+So of five: three are the model adding or swapping words (the rule's purpose),
+one (E02) is a correct repair of an ASR error that the rule blocks because it
+cannot know it is correct, one (E20) is a plausible edit of a phrase the
+speaker never said. In the 50 landed rows the model's edits were deletions,
+punctuation and case only (D: 4 rows, E: 2 rows), all passing rule six.
+
+**(c) Redundancy, stated, nothing removed.** `didNotStutter`: redundant in
+practice (a repeat raises a token's count; the only escape is a compensating
+drop of the same word elsewhere). `numbersSurvived`: the "appeared" half is
+redundant (a new figure is a new token); the "went missing" half is not, rule
+six allows drops. `negationsSurvived`: same split, "appeared" redundant, "went
+missing" not. `namesSurvived`: not redundant (it catches drops; it fired on 3 D
+rows today). `stillTheSameMessage`: redundant for replies that bring new words,
+not for replies made of fewer source words. `emptyOutput`: not redundant.
+
+## 2026-08-22 — WHAT DOES THE MODEL BUY? Sets C, D, E (90 rows), greedy, rule six in force (`measure/what-the-model-buys`)
+
+Measurement only. `tools/textpath` ungated and gated over all 90 rows;
+`corpus-kit/model-value.py` scores `afterDeterministic` and `final` (the
+model's text where it landed, the deterministic text where gated, rejected or
+refused) against the truth with score.py's corrections per 100 words, and
+classifies every edit the model made. Per-row table:
+`corpus/runs/what-the-model-buys-2026-08-22.jsonl`. Stamp: commit `f05e197`,
+prompt `e97958cb280f…`, model `instruct_3b… generic_sparse 15.0.0.13.102990`.
+
+### 1. Value
+
+| set | rows | words | corrections/100w, deterministic | corrections/100w, final | closer | equal | farther |
+|---|---|---|---|---|---|---|---|
+| C | 30 | 225 | 18.22 (41) | 17.78 (40) | 1 | 29 | 0 |
+| D | 30 | 189 | 93.65 (177) | 92.59 (175) | 2 | 27 | 1 |
+| E | 30 | 243 | 37.86 (92) | 37.45 (91) | 1 | 29 | 0 |
+| all | 90 | 657 | **47.18 (310)** | **46.58 (306)** | 4 | 85 | 1 |
+
+Closer (every one): C14 `153 not 135` → `153, not 135` (a comma the ASR dropped);
+D-U01 a stray `Drop.` at the end removed; D-R2-a `ah,` removed; E25 a comma
+before `all` removed. Farther: D-U05 `status Enti?` → `status, Enti?` (a comma
+added where the truth has none). Four corrections out of 310 recovered, one
+added: the model moves the score by 0.6 per 100 words on 90 rows.
+
+### 2. What the model does (11 edits, 7 rows, of 79 landed)
+
+| class | edits | could the deterministic stage have done it? |
+|---|---|---|
+| filler/repeat deletion | 0 | (nothing to do: Disfluency and Fillers had already taken the `The the`, `Reply to reply to`, doubled openings) |
+| other deletion | 2 (`Drop.`, `ah`) | partly. `ah` is not in `Fillers.noise` (uh, um, erm, uhh, umm, hmm, mmm); adding it is one line. `Drop.` is an ASR hallucination at the end of a sentence; no pass targets that and none should guess. |
+| punctuation | 4 (+, ×2, −, ×2) | no. No deterministic pass adds or removes commas; commas come from the ASR, and the prompt's "remove commas that only mark a pause" is the only comma logic in the path. |
+| case | 5 in 2 rows (`Aur Hai Ho Kya` → lowercase; `The demo` → `the demo`) | no. No case pass exists beyond sentence-initial capitalisation in Fillers and names in TermMatcher; the ASR capitalises code-switched words as if they were names. |
+| other | 0 | rule six makes this class empty by construction |
+
+### 3. Cost
+
+Polish per call, 90 ungated rows, greedy: **median 0.603 s, p95 0.963 s, max
+2.015 s; 25 of 90 calls (28%) over the 0.65 s release budget** (C 6, D 10, E 9).
+The audit's L6 proxy over the same 20 real rows (2026-08-21): as measured median
+1.594 s / p95 3.019 s; with polish at the greedy median on the rows that
+polished, **0.943 s / 1.326 s**; with the model removed, **0.340 s / 0.723 s**.
+
+### 4. The 40-character line
+
+Gated, 47 of 90 rows reached the model (C 10, D 12, E 25). It changed three of
+them (D-U01 `Drop.`, D-R2-a `ah,`, E25 a comma) and was rejected or refused on
+five (D-R1-a rule six, D-R1-b and D-R4-c framework refusals, E02 and E20 rule
+six). Of the 43 rows at or under 40 characters, the ungated model moved one
+closer (C14's comma) and one farther (D-U05's comma): the line costs nothing
+measurable.
+
+**On these 90 rows the model is not earning its latency: it spends a median
+0.6 s per call, over budget on 28% of calls, to recover 4 corrections in 310
+and add 1, and every edit it made was a comma, a case change, or one word
+deleted.**
+
+## 2026-08-22 — shadow equals live, minus the wait (`feat/model-into-shadow`)
+
+`tools/textpath` on Set C, greedy, ungated, the shadow call (no budget)
+against the live call (the 0.65 s `refineBudget`): identical `modelOutput`
+on all 28 rows where both landed; C12 rejected by the guard in both; C17
+landed in shadow (0.79 s) and missed the budget in live
+(`budgetExpired:inner`). Shadow's median model time 0.507 s, recorded on
+the row's shadow line and never waited for.
+
+## 2026-08-22 — the two free edits: "ah" and the comma before a contrastive "not" (`feat/model-into-shadow`, prompt 5 task 2)
+
+Both edits the model was credited with on 2026-08-22 ("what does the model
+buy?"), made deterministically. `Fillers.noise` gains "ah". New Core pass
+`Contrast.commaBeforeNot`: a comma before "not" only when it sits between
+two value tokens (a number, a number word, a capitalised mid-sentence word,
+a possessive pronoun; the right one may follow "the", "a", "an"); ordinary
+negation is never a match. It runs after Fillers and Restatement in
+`deterministicText`.
+
+**Dry run on real speech first** (`tools/passprobe`, read-only over the
+391 utterance rows in the founder's `captured.jsonl`): the comma pass would
+change **0 rows**. All 38 mid-sentence "not"s in real dictation follow an
+auxiliary or a pronoun ("are not", "it's not", "do not", "I'm not"); a value
+contrast has not occurred in real speech yet. "ah" occurs in 0 real rows.
+Nothing to tighten, nothing touched.
+
+90 rows, model off (`textpath --off`), against the #46 deterministic column:
+
+| set | #46 deterministic | now | rows changed |
+|---|---|---|---|
+| C | 18.22 (41) | **17.78 (40)** | C14 `153 not 135` → `153, not 135` (the comma pass) |
+| D | 93.65 (177) | **91.01 (172)** | D-R2-a `postpone, ah, Ennani` → `postpone Ennani`; D-U04 `Naaku, Ah, File,` → `Naaku File,` (both "ah") |
+| E | 37.86 (92) | 37.86 (92) | none |
+| all | 47.18 (310) | **46.27 (304)** | |
+
+Six corrections recovered deterministically, against the model's net four
+(46.58). Protected-span rate on the off run: **0/61**. One honest note on
+D-U04: its "Ah" was the Telugu word "aa" ("that"), which the en-US ASR
+rendered as an English filler; the score still improved because "Ah" never
+matched "aa", but in code-switched speech "ah" can be a word. English-only is
+the campaign's scope, and the row says so.
+
+## 2026-08-22 — DOES THE MODEL REPAIR SPEECH? Set F, recorded, 30 rows (`measure/does-the-model-repair`)
+
+Set F recorded by the founder (voiceprobe, built-in mic, 17:42-17:50),
+transcribed with the same Apple en-US tool as Set C, kept verbatim in
+`corpus/setF-asr-en_US.jsonl`. Three runs of `tools/textpath`, greedy:
+off, live ungated (0.65 s budget, rule six), shadow (no budget). Stamp:
+commit `85804a3`, prompt `e97958cb280f…`, model `instruct_3b … 15.0.0.13.102990`.
+
+### Headline
+
+| run | rows handled correctly | retractions heard / survived | span rate | corrections/100w |
+|---|---|---|---|---|
+| raw ASR | | 19 of 27 heard | | 103.07 (235) |
+| off | 3 of 28 | 19 / 19 | 0/52 | 95.18 (217) |
+| live ungated | 3 of 28 | 19 / 19 | 0/52 | 93.86 (214) |
+| shadow | **4 of 28** | 19 / **18** | 0/52 | **83.33 (190)** |
+
+The three "handled" rows in off are F22 and F23 (nothing retracted) and F19
+(the ASR never heard "Jonnalagadda"). ASR misses: 19 spans in 14 rows, names
+and number formats (Gangothri → "Gango 3", Vercel → "vessel", PostHog →
+"post hog", Kizu → "Kizo", Aatram → "Atram", 3:15 → "315", $1,200 → "$1200",
+1.26 → "126"); 8 of the 27 retracted values were never heard either.
+
+### Who repaired what (shadow, per row)
+
+Of 22 rows with a self-correction the ASR actually heard: **Restatement
+repaired 0, the model repaired 4, neither 14**; 4 rows had nothing to
+retract and 8 more had their retraction mangled by the ASR. The model's
+four: F04 ("to production, scratch that, the deploy to staging" → the
+staging clause; landed, 14 → 6 corrections), F07 ("$120 sorry $1200" →
+"$1200"), F10 ("Ask Chetan? No, ask Aidan" → "Ask Aidan"), F21 (dropped
+"on Thursday. No,"). **Three of the four were rejected by the guard** and
+never landed: F07 by `numbersSurvived` (the retracted $120 "went missing"),
+F10 and F21 by `negationsSurvived` (the marker "No" counted as a lost
+negation). Four more correct repairs met the same two rules: F15 (930 →
+1015), F16 (the marker "No"), F22 ("no, no"), F26 (125 → 126). So the guard
+blocked seven correct repairs and caught two wrong ones: F30 kept the
+retracted "Sarah" and dropped "Aidan" (`namesSurvived`, rightly) and F03
+added "it is" (`noNewTokens`, rightly). Live landed only 3 of 30: 22 missed
+the 0.65 s budget.
+
+What Restatement would have needed for the model's four: it collapses only
+a whole sentence said twice. F04 needs "clause, scratch that, clause" (cut
+everything from the clause start to the marker); F07 needs "value, sorry,
+value" (keep the later value of the same kind); F10 needs "phrase? No,
+phrase" (restart after a marker); F21 needs "on X. No, on Y" (same
+preposition, keep the later object). All four are the repair-marker grammar
+of the campaign's phase 4, none of which exists.
+
+What the model did on the 21 rows that landed: removed false starts and
+restarts (F12 "Tell Sarah tell Sarah", F13 "hang on. The API key ends in",
+F27 "My email, my email"), removed a marker without its clause (F14 kept
+"Cancel the subscription today" and dropped "Scratch that."), the F04
+repair, a comma dropped (F02), and one row worse: F24 gained a comma
+(7 → 8). It touched no protected span: rate 0/52 on every run.
+
+### Cost
+
+Shadow, per call: **median 0.684 s, p95 1.089 s, 18 of 30 over the 0.65 s
+budget** (median utterance 11 words). Live landed 3 of 30 inside the budget.
+
+**On messy speech the model repairs too little to go back on the path: 4
+of 19 heard self-corrections, 3 of them then killed by its own guard, at
+0.68 s a call with 60% of calls over budget; the repairs it does make are
+the phase 4 marker grammar, which belongs in a deterministic pass.**

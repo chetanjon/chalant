@@ -72,7 +72,7 @@ final class DictationController {
     static let refineBudget: Duration = .milliseconds(650)
     /// The caller's hard ceiling: the budget plus a small grace for the hop
     /// back. Kept beside `refineBudget` so the two can never drift apart.
-    static let budgetWithGrace: Double = 0.73
+    static let budgetWithGrace: Duration = .milliseconds(730)
     private var swapGeneration = 0
     private let activity = UserActivityWatch()
     /// Turns a real day of dictating into the spontaneous half of the corpus.
@@ -156,7 +156,7 @@ final class DictationController {
         // 2026-08-14 when cleanup became the default path, so it would never
         // have fired and the whole 1.4s would have landed on whichever sentence
         // the user happened to dictate first.
-        if Cleanup.isEnabled() {
+        if Cleanup.mode() != .off {
             await polisher.warmUp()
         }
         // The better ear, if the switch is on: download if needed, load, warm.
@@ -242,7 +242,10 @@ final class DictationController {
         // the cold load (2.49 s against 0.9 s) at the one moment the user is
         // waiting. The hold hides it: a polish-worthy utterance is over ~3 s
         // of speech and the reload takes 0.9 s. A no-op when already warm.
-        if Cleanup.isEnabled() {
+        // Shadow runs the model too, just after the words land instead of
+        // before, so this warms in every mode but off, where there is no
+        // model to warm.
+        if Cleanup.mode() != .off {
             Task { await polisher.warmUp() }
         }
 
@@ -411,7 +414,9 @@ final class DictationController {
     /// path uses, so the pieces match exactly at release and are already done.
     private func startPretidy(_ transcriber: AppleTranscriber) {
         pretidyTask?.cancel()
-        guard Cleanup.isEnabled() else { return }
+        // Tidy-ahead exists to shorten a wait the release will make; in
+        // shadow there is no wait, so nothing runs during the hold.
+        guard Cleanup.mode() == .live else { return }
         pretidyTask = Task { [weak self, transcriber] in
             guard let self else { return }
             await self.polisher.beginUtterance()
@@ -482,7 +487,7 @@ final class DictationController {
         // finalization: the finalized text is very often these same words, so
         // the model gets finalization's 0.05 to 0.4 s as a head start on the
         // very piece the release will wait for.
-        if Cleanup.isEnabled() {
+        if Cleanup.mode() == .live {
             let live = await transcriber.liveTokens
             if !live.isEmpty {
                 let text = await deterministicText(from: live)
@@ -574,74 +579,59 @@ final class DictationController {
         var refinedAtOnce = false
         // The facts behind the row (campaign phase 0): why the polish landed
         // or didn't, and the counters the speed work steers by.
-        var polishOutcomeName = shaped.isEmpty ? "empty" : (Cleanup.isEnabled() ? "" : "off")
+        // Off: nothing runs. Shadow: nothing waits; the model runs after
+        // the words land and reaches only the corpus row (below). Live: the
+        // release waits for it.
+        let mode = Cleanup.mode()
+        var polishOutcomeName = shaped.isEmpty ? "empty" : (mode == .live ? "" : mode.rawValue)
         var chunkCount = 0
         var warmChunks = 0
         var failedChunks = 0
         var polishColdStart = false
         var sinceLastPolish: Double = -1
-        if Cleanup.isEnabled(), !shaped.isEmpty, let target {
+        // The texts of the path (schema 3): what the model gave back, or
+        // why it gave nothing, in the row's own words.
+        var modelOutput: String?
+        var modelReason = shaped.isEmpty
+            ? "skipped:empty"
+            : (mode == .live ? "skipped:noTarget" : (mode == .shadow ? "shadow:pending" : "skipped:off"))
+        var modelChunks: [String] = []
+        if mode == .live, !shaped.isEmpty, let target {
             let waitStart = Date()
-            // The budget is enforced HERE, not only inside the polisher. The
-            // inner deadline races on the cooperative pool, and Whisper now
-            // hears during this exact window (1.24.0 starts it at finalize),
-            // so a starved timer could stretch a 0.65 s promise to the
-            // measured 0.9-2.5 s waits (log, 2026-08-18). Whatever happens
-            // below, the words land when the budget says so, with a small
-            // grace for the hop back; pieces that finish late still land in
-            // the polisher's cache for the hearing pass to reuse.
-            enum Landed { case polished(PolishOutcome), budgetExpired }
+            // The budget is enforced HERE, not only inside the polisher, and
+            // for three days it was not enforced anywhere: both waits were
+            // task groups, and a task group does not return until every
+            // child is done, so the "deadline" fired on time and the group
+            // then sat on the polish child until the model replied. Every
+            // release wait from 2026-08-18 to 08-21 ended within microseconds
+            // of the model's reply (2.46 s for a 0.73 s cap on 08-20, 1.697 s
+            // on 08-21) and it read as executor starvation; six deadline
+            // variants were aimed at timers that had never been late. See
+            // `Deadline`. The polish runs as its own task that nobody waits
+            // for past the cap: pieces that finish late still land in the
+            // polisher's cache for the hearing pass to reuse.
             let polisher = self.polisher
             let bundleID = target.bundleID ?? ""
-            let landed = await withTaskGroup(of: Landed.self) { group -> Landed in
-                group.addTask {
-                    .polished(
-                        await polisher.polish(
-                            shaped, profile: AppProfile(bundleID: bundleID),
-                            within: Self.refineBudget))
-                }
-                // TWO deadlines, on different executors, both driven by raw
-                // dispatch timers that no Swift executor can starve on the
-                // way in. Every subtler deadline so far (cooperative-pool
-                // sleep, main-actor sleep, zero tolerance, utility hearing,
-                // latency-critical activity) woke at EXACTLY the moment the
-                // model finished (2.46 s for a 0.73 s sleep, 2026-08-20,
-                // matching the model's own cold time to the millisecond), so
-                // something starves the WAKE, not the timer. Whichever leg
-                // fires first ends the wait; a leg that wakes late says so
-                // and names its executor, so the next log read convicts one.
-                group.addTask { @MainActor in
-                    let armed = Date()
-                    await DictationController.hardDeadline(seconds: Self.budgetWithGrace)
-                    let waited = Date().timeIntervalSince(armed)
-                    if waited > Self.budgetWithGrace + 0.2 {
-                        Self.log.notice(
-                            "deadline wake starved on the MAIN actor: \(waited, privacy: .public)s for \(Self.budgetWithGrace, privacy: .public)s")
-                    }
-                    return .budgetExpired
-                }
-                group.addTask {
-                    let armed = Date()
-                    await DictationController.hardDeadline(seconds: Self.budgetWithGrace)
-                    let waited = Date().timeIntervalSince(armed)
-                    if waited > Self.budgetWithGrace + 0.2 {
-                        Self.log.notice(
-                            "deadline wake starved on the POOL: \(waited, privacy: .public)s for \(Self.budgetWithGrace, privacy: .public)s")
-                    }
-                    return .budgetExpired
-                }
-                let first = await group.next() ?? .budgetExpired
-                group.cancelAll()
-                return first
+            // Known since key-down, and taken now so a budget miss cannot
+            // erase them from the row: the first schema-2 row reported a
+            // never-polished process as warm because the outcome that
+            // carries these never arrived.
+            let facts = await polisher.coldStartFacts
+            polishColdStart = facts.coldStart
+            sinceLastPolish = facts.secondsSinceLastPolish ?? -1
+            let polishTask = Task {
+                await polisher.polish(
+                    shaped, profile: AppProfile(bundleID: bundleID),
+                    within: Self.refineBudget)
             }
-            switch landed {
-            case .polished(let outcome):
+            if let outcome = await Deadline.value(of: polishTask, within: Self.budgetWithGrace) {
                 polishOutcomeName = outcome.result.rawValue
                 chunkCount = outcome.chunks
                 warmChunks = outcome.warmChunks
                 failedChunks = outcome.failedChunks
-                polishColdStart = outcome.coldStart
-                sinceLastPolish = outcome.secondsSinceLastPolish ?? -1
+                modelChunks = outcome.chunkReasons
+                modelOutput = outcome.modelText
+                modelReason = outcome.modelReason
                 if let refined = outcome.text, !refined.isEmpty {
                     text = refined
                     // Honest now (phase 0): landed AND at least one chunk
@@ -655,8 +645,9 @@ final class DictationController {
                     // own notice says where the time went.
                     Self.log.notice("cleanup missed its inner budget; the words land as said")
                 }
-            case .budgetExpired:
+            } else {
                 polishOutcomeName = "budgetExpiredCaller"
+                modelReason = "budgetExpired:caller"
                 Self.log.notice("budget expired at the caller; the words land as said")
             }
             timings.polish = Date().timeIntervalSince(waitStart)
@@ -686,6 +677,19 @@ final class DictationController {
         let outcome = await inserter.insert(text, into: target)
         timings.insertion = Date().timeIntervalSince(insertStart)
 
+        // What actually reached the app, and if nothing did, why.
+        let insertOutcomeName: String
+        var inserted: String?
+        switch outcome {
+        case .inserted(let tier):
+            inserted = text
+            insertOutcomeName = "inserted:\(tier)"
+        case .leftOnClipboard(let reason):
+            insertOutcomeName = "leftOnClipboard:\(reason)"
+        case .refused(let reason):
+            insertOutcomeName = "refused:\(reason)"
+        }
+
         // The row goes out the moment the outcome is known, BEFORE the
         // hearing starts, so the hearing's decision seconds later can be
         // appended against this row's id (`CorpusCapture.annotate`).
@@ -707,7 +711,15 @@ final class DictationController {
             failedChunks: failedChunks,
             refinedChanged: refinedChanged,
             polishColdStart: polishColdStart,
-            secondsSinceLastPolish: sinceLastPolish)
+            secondsSinceLastPolish: sinceLastPolish,
+            texts: CorpusCapture.Texts(
+                asrRaw: raw,
+                afterDeterministic: shaped,
+                modelOutput: modelOutput,
+                modelReason: modelReason,
+                modelChunks: modelChunks,
+                inserted: inserted,
+                insertOutcome: insertOutcomeName))
 
         // Now watch what they do to it. Only when the text actually landed in
         // the document: text left on the clipboard was never inserted, so
@@ -749,7 +761,7 @@ final class DictationController {
                     samples: hearingSamples, heard: raw, outcome: outcome, target: target,
                     insertedAt: insertedAt,
                     utteranceSeconds: Double(hearingSamples.count) / 16_000,
-                    corpusRow: corpusRow)
+                    corpusRow: corpusRow, mode: mode)
             }
         } else if case .inserted = outcome {
             // Rescued above; the toast has already spoken.
@@ -769,6 +781,15 @@ final class DictationController {
             default:
                 break
             }
+        }
+
+        // Shadow: the model runs now, once, over the text that landed, and
+        // its reply reaches the corpus row and nothing else. After the second
+        // hearing, when there is one, so the two models never share the ANE
+        // and the time recorded is the model's own. Utility priority: nothing
+        // the user feels is behind it.
+        if mode == .shadow, !shaped.isEmpty, let corpusRow {
+            startShadowPolish(of: shaped, bundleID: target.bundleID ?? "", corpusRow: corpusRow, after: hearingTask)
         }
 
         // Lengths and durations only. Part 1 §2: transcripts never enter logs.
@@ -851,11 +872,14 @@ final class DictationController {
         // nobody meant to say.
         // Restatement runs LAST, on the cleanest text, so a repeated
         // sentence matches its twin even when only one copy carried an um.
-        let deterministic = Restatement.collapsing(
-            Fillers.removing(
-                Disfluency.collapsingRepetitions(
-                    Guardrail.trimmingPunctuationRun(
-                        resolved.map(\.text).joined(separator: " ")))))
+        // Contrast runs after the fillers are gone, so "153 um not 135"
+        // still reads as a value against a value (2026-08-22).
+        let deterministic = Contrast.commaBeforeNot(
+            Restatement.collapsing(
+                Fillers.removing(
+                    Disfluency.collapsingRepetitions(
+                        Guardrail.trimmingPunctuationRun(
+                            resolved.map(\.text).joined(separator: " "))))))
         return deterministic
     }
 
@@ -869,19 +893,6 @@ final class DictationController {
     /// the resume still travels through the awaiting task's executor, which
     /// is exactly what the paired "deadline wake starved" lines measure.
     /// The timer keeps itself alive through its own handler and fires once.
-    nonisolated static func hardDeadline(seconds: Double) async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInteractive))
-            timer.schedule(deadline: .now() + seconds, leeway: .nanoseconds(1))
-            timer.setEventHandler {
-                timer.setEventHandler {}
-                timer.cancel()
-                continuation.resume()
-            }
-            timer.resume()
-        }
-    }
-
     private func beginUtteranceActivity() {
         endUtteranceActivity()
         utteranceActivity = ProcessInfo.processInfo.beginActivity(
@@ -918,7 +929,30 @@ final class DictationController {
     /// `heard` is the first ear's raw text: it picks the names the second ear
     /// reads before it listens (`Names.forHearing`), which is what took the
     /// names set from 29.9% to 10.0% word error on this Mac.
-    private func startHearingSwap(samples: [Float], heard firstHearing: String, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date, utteranceSeconds: TimeInterval, corpusRow: String? = nil) {
+    /// The shadow run: `polish` with no budget over the whole text, as
+    /// `tools/textpath` does it, so the row carries exactly what a live
+    /// release would have landed had it waited. Never inserted, never
+    /// swapped, never shown; the row line it appends is the only trace.
+    private func startShadowPolish(of shaped: String, bundleID: String, corpusRow: String, after hearing: Task<Void, Never>?) {
+        let polisher = self.polisher
+        let corpus = self.corpus
+        Task(priority: .utility) {
+            if let hearing { _ = await hearing.value }
+            await polisher.beginUtterance()
+            let facts = await polisher.coldStartFacts
+            let started = Date()
+            let outcome = await polisher.polish(shaped, profile: AppProfile(bundleID: bundleID), within: nil)
+            let seconds = Date().timeIntervalSince(started)
+            await corpus.annotateShadow(
+                id: corpusRow, output: outcome.modelText, reason: outcome.modelReason,
+                chunks: outcome.chunkReasons, seconds: seconds,
+                coldStart: facts.coldStart, secondsSinceLastPolish: facts.secondsSinceLastPolish)
+            Self.log.notice(
+                "shadow: \(outcome.modelReason, privacy: .public) in \(seconds, privacy: .public)s over \(shaped.count, privacy: .public) chars")
+        }
+    }
+
+    private func startHearingSwap(samples: [Float], heard firstHearing: String, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date, utteranceSeconds: TimeInterval, corpusRow: String? = nil, mode: Cleanup.Mode) {
         hearingTask?.cancel()
         let generation = swapGeneration
         activity.arm()
@@ -956,8 +990,11 @@ final class DictationController {
                 return
             }
             let cleaned = Listing.format(BetterHearing.deterministic(heard))
-            let tidied = (try? await self.polisher.polish(cleaned, profile: AppProfile(bundleID: target.bundleID ?? "")))
-                ?? cleaned
+            // The model touches the second hearing only in live. In shadow
+            // and off it is never shown, and that includes the swap.
+            let tidied = mode == .live
+                ? ((try? await self.polisher.polish(cleaned, profile: AppProfile(bundleID: target.bundleID ?? ""))) ?? cleaned)
+                : cleaned
             guard !Task.isCancelled, generation == self.swapGeneration else { return }
             let front = NSWorkspace.shared.frontmostApplication
             let situation = SwapPolicy.Situation(

@@ -1,0 +1,392 @@
+[
+  {
+    "id": "C01",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C01.caf",
+    "truth": "Do not deploy this to production until Monday.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "Do not",
+      "deploy",
+      "production",
+      "Monday"
+    ],
+    "notes": "negation plus operation plus environment plus day"
+  },
+  {
+    "id": "C02",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C02.caf",
+    "truth": "Send 15, not 50.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "15",
+      "not",
+      "50"
+    ],
+    "notes": "close numbers with a negation"
+  },
+  {
+    "id": "C03",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C03.caf",
+    "truth": "The meeting moved to 3:15, not 3:50.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "3:15",
+      "not",
+      "3:50"
+    ],
+    "notes": "close times with a negation"
+  },
+  {
+    "id": "C04",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C04.caf",
+    "truth": "Delete the staging database, never the production one.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "Delete",
+      "staging",
+      "never",
+      "production"
+    ],
+    "notes": "destructive operation, environments, negation"
+  },
+  {
+    "id": "C05",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C05.caf",
+    "truth": "Email Sarah about it, not Sara.",
+    "set": "C",
+    "rare_terms": [
+      "Sarah",
+      "Sara"
+    ],
+    "protected_spans": [
+      "Sarah",
+      "not",
+      "Sara"
+    ],
+    "notes": "near-identical names"
+  },
+  {
+    "id": "C06",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C06.caf",
+    "truth": "The invoice came to $120.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "$120"
+    ],
+    "notes": "money"
+  },
+  {
+    "id": "C07",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C07.caf",
+    "truth": "The other invoice was $1,200.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "$1,200"
+    ],
+    "notes": "money, ten times C06; the thousands separator is part of the span"
+  },
+  {
+    "id": "C08",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C08.caf",
+    "truth": "I can't make it on Thursday.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "can't",
+      "Thursday"
+    ],
+    "notes": "contracted negation plus day; pairs with C09"
+  },
+  {
+    "id": "C09",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C09.caf",
+    "truth": "I can make it on Thursday.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "Thursday"
+    ],
+    "notes": "the positive twin of C08; the negation-count rule guards the absence"
+  },
+  {
+    "id": "C10",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C10.caf",
+    "truth": "Do not force push to main.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "Do not",
+      "force push",
+      "main"
+    ],
+    "notes": "negation plus destructive operation plus branch identifier"
+  },
+  {
+    "id": "C11",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C11.caf",
+    "truth": "Drop the users table on the local copy only.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "Drop",
+      "users table",
+      "local copy",
+      "only"
+    ],
+    "notes": "destructive operation, identifier, target, restrictor"
+  },
+  {
+    "id": "C12",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C12.caf",
+    "truth": "It's /Users/chetan/projects",
+    "set": "C",
+    "rare_terms": [
+      "chetan"
+    ],
+    "protected_spans": [
+      "/Users/chetan/projects"
+    ],
+    "notes": "path"
+  },
+  {
+    "id": "C13",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C13.caf",
+    "truth": "My email is jonnalagadda8800@gmail.com",
+    "set": "C",
+    "rare_terms": [
+      "jonnalagadda8800"
+    ],
+    "protected_spans": [
+      "jonnalagadda8800@gmail.com"
+    ],
+    "notes": "email"
+  },
+  {
+    "id": "C14",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C14.caf",
+    "truth": "The build number is 153, not 135.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "build number",
+      "153",
+      "not",
+      "135"
+    ],
+    "notes": "identifier plus transposed numbers with a negation"
+  },
+  {
+    "id": "C15",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C15.caf",
+    "truth": "He said, and I quote, this will never work.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "never"
+    ],
+    "notes": "negation inside reported speech; the quoting instruction is not protected"
+  },
+  {
+    "id": "C16",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C16.caf",
+    "truth": "Never merge that branch without a review.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "Never",
+      "merge",
+      "without"
+    ],
+    "notes": "two negations plus an operation"
+  },
+  {
+    "id": "C17",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C17.caf",
+    "truth": "Move the standup from 9:30 to 10:15.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "9:30",
+      "10:15"
+    ],
+    "notes": "two times"
+  },
+  {
+    "id": "C18",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C18.caf",
+    "truth": "The API key ends in 472.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "API",
+      "472"
+    ],
+    "notes": "identifier plus number"
+  },
+  {
+    "id": "C19",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C19.caf",
+    "truth": "Don't cancel the subscription yet.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "Don't",
+      "cancel",
+      "yet"
+    ],
+    "notes": "contracted negation, operation, temporal scope; pairs with C20"
+  },
+  {
+    "id": "C20",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C20.caf",
+    "truth": "Cancel the subscription today.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "Cancel",
+      "today"
+    ],
+    "notes": "the positive twin of C19; the negation-count rule guards the absence"
+  },
+  {
+    "id": "C21",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C21.caf",
+    "truth": "Ship it to the Kizu group, not the Chalant one.",
+    "set": "C",
+    "rare_terms": [
+      "Kizu",
+      "Chalant"
+    ],
+    "protected_spans": [
+      "Kizu",
+      "not",
+      "Chalant"
+    ],
+    "notes": "product names with a negation"
+  },
+  {
+    "id": "C22",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C22.caf",
+    "truth": "There were 40 attendees, not 14.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "40",
+      "not",
+      "14"
+    ],
+    "notes": "reversed digits with a negation"
+  },
+  {
+    "id": "C23",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C23.caf",
+    "truth": "Reply to Aidan, and do not copy anyone else.",
+    "set": "C",
+    "rare_terms": [
+      "Aidan"
+    ],
+    "protected_spans": [
+      "Aidan",
+      "do not",
+      "anyone else"
+    ],
+    "notes": "name, negation, scope"
+  },
+  {
+    "id": "C24",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C24.caf",
+    "truth": "The file is TextInjector dot swift, capital T capital I.",
+    "set": "C",
+    "rare_terms": [
+      "TextInjector"
+    ],
+    "protected_spans": [
+      "TextInjector",
+      "swift"
+    ],
+    "notes": "identifier and extension; the spelling instructions are not protected, so a code mode may render 'dot swift' as '.swift'"
+  },
+  {
+    "id": "C25",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C25.caf",
+    "truth": "Set the timeout to 2.5 seconds.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "timeout",
+      "2.5 seconds"
+    ],
+    "notes": "identifier plus decimal with its unit"
+  },
+  {
+    "id": "C26",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C26.caf",
+    "truth": "We are not raising the price.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "not"
+    ],
+    "notes": "bare negation; the negation-count rule carries it"
+  },
+  {
+    "id": "C27",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C27.caf",
+    "truth": "The deadline is the 21st, not the 12th.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "21st",
+      "not",
+      "12th"
+    ],
+    "notes": "transposed ordinal dates with a negation"
+  },
+  {
+    "id": "C28",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C28.caf",
+    "truth": "Revoke his access, not hers.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "Revoke",
+      "his",
+      "not",
+      "hers"
+    ],
+    "notes": "operation plus pronouns with a negation"
+  },
+  {
+    "id": "C29",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C29.caf",
+    "truth": "It costs $9.99 a month, not $99.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "$9.99",
+      "a month",
+      "not",
+      "$99"
+    ],
+    "notes": "money with a period and a negation"
+  },
+  {
+    "id": "C30",
+    "audio": "~/Desktop/chalant-corpus/audio-C/C30.caf",
+    "truth": "Keep the old version, do not overwrite it.",
+    "set": "C",
+    "rare_terms": [],
+    "protected_spans": [
+      "old version",
+      "do not",
+      "overwrite"
+    ],
+    "notes": "identifier, negation, destructive operation"
+  }
+]

@@ -936,3 +936,40 @@ any pretidy. Hands-off alternative: `build/harness/verify-dictation.sh
 synthetic hold into a fresh TextEdit document, and prints the row and
 both logs. Automated: none possible (the hook is shell code around the OS
 model daemon; the polisher is owned by the controller with no seam).
+
+## 2026-08-21 — the budget is real (fix/the-budget-is-real)
+
+Not yet exercised live (no signing identity on the Mac today). Automated:
+`DeadlineTests` (the bounded wait returns at the budget against a task
+that never finishes in time; a value inside the budget comes back at
+once; the task is not cancelled). Protocol rows for the founder, on the
+installed build: (1) dictate one ~30-word sentence: the corpus row's
+polishSeconds must be ≤ 0.73 whatever the model did (refined text landed
+or `budgetExpiredCaller`/`budgetExpiredInner`), never 1.7 or 2.5;
+(2) dictate three more: every row ≤ 0.73, and at least one with
+`refinedAtOnce: true` when the sentence had fillers; (3) with Better
+hearing on, a late cleanup must still show up: a row with
+`budgetExpired*` followed by a `kind:"hearing"` line, proving the work
+continued after the wait gave up. Hands-off alternative:
+`build/harness/verify-dictation.sh` (no `--cold` needed) prints the row.
+
+## 2026-08-22 — shadow mode (feat/model-into-shadow, prompt 5 task 1)
+
+Not yet exercised live (no signing identity on the Mac). The cleanup switch
+is a three-way mode, default SHADOW: the words land as said with no wait,
+the model runs once afterwards over the same text, and its reply reaches
+only the corpus row. Automated: `CleanupModeTests` (default, migration of
+the old switch, persistence), `CorpusCaptureTests` (the row carries
+`modelReason` "shadow:pending" and `polishSeconds` 0; the shadow line that
+follows carries the model's output, reason and its own time), Core suite
+green. Harness: shadow and live produce identical `modelOutput` on every
+Set C row where both landed (28 of 28); live missed its budget on C17 where
+shadow recorded the answer. Protocol rows for the founder on the installed
+build: (1) Settings shows "Tidy what I said" at Shadow; dictate one
+sentence: it lands at once, the log's utterance line says "raw after 0 s
+wait", the corpus row says `"modelReason":"shadow:pending"` and a
+`"kind":"shadow"` line with the model's text and time follows within a
+second or two; (2) switch to Live: the 1.26.0 behaviour (tidy-ahead during
+the hold, up to 0.73 s wait, refined text lands); (3) switch to Off: no
+shadow line, no model call in the polish log; (4) with Better hearing on, in
+Shadow the swap only ever uses the second hearing's deterministic text.

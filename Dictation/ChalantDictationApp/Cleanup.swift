@@ -1,43 +1,55 @@
 import Foundation
 
-/// Whether the on-device model tidies what you dictated.
+/// Where the on-device model stands relative to the words you dictated.
 ///
-/// **On by default, and off the path the user feels (evening of 2026-08-17):
-/// the words land at once and the model's version replaces them in place a
-/// second later, only if it changed something and the user has not touched
-/// the document since. See `DictationController.startTidiedSwap` and
-/// `SwapPolicy`.** For a few hours that day it was off by default: it was on
-/// by default from 2026-08-14
-/// (the founder's decision, taken twice: cleaned output like Wispr, "because
-/// people can just talk whatever they want"). Then, on the first evening they
-/// dictated with a strip that lights up and says "sent", they felt the wait:
-/// "the text is coming after two, three seconds." Measured on their own six
-/// dictations that hour: 1.1 to 1.9 s for anything the model touched, 0.1 s
-/// for anything it skipped, and prewarming the per-utterance session during
-/// the hold measured no better (fresh 0.88 s median, prewarmed 1.03 s). Nothing
-/// left to shave, so the choice was speed or tidy, and they chose "instant, as
-/// I said it". The switch stays for anyone who wants tidy back.
+/// Three positions since 2026-08-22, and the default is SHADOW:
 ///
-/// **A switch at all, against law 6's "defaults over switches", for the same
-/// reason `CorpusCapture` gets one: this is not a feature that is simply
-/// better.** Measured 2026-08-16 on 42 real utterances, it costs ~1s at p50 and
-/// 2.1s at p95, does nothing to half of real speech, and removes roughly half
-/// the fillers in the rest. Trading a second of someone's time for a tidier
-/// sentence is a trade they are entitled to decline, and dictation without it
-/// is 0.05-0.23s end to end.
+/// - `off`: the model never runs.
+/// - `shadow`: the words land as said, at once. Afterwards the model runs
+///   once over the same text and its reply goes into the corpus row (the
+///   output, the reason, the time it took) and nowhere else: never inserted,
+///   never swapped in, never shown. The row is how the model is judged.
+/// - `live`: the path as it shipped from 1.19.0 to 1.26.0: the model runs
+///   while you hold the key and the release waits up to 0.65 s for its
+///   reply; if it is ready and the guard passes, the tidied text lands.
 ///
-/// The alternative to a switch was routing: clean only the utterances that
-/// needed it. **Measured and rejected** (AUC 0.602, a coin flip), because
-/// confidence measures whether the engine HEARD right while cleanup fixes what
-/// the speaker SAID.
+/// Why shadow is the default: measured on 2026-08-22 over 90 scripted rows
+/// (EVAL-LOG "WHAT DOES THE MODEL BUY?"), the model recovered 4 corrections
+/// of 310 and added 1, every edit it made was a comma, a case change or one
+/// deleted word, and it cost a median 0.6 s per call with 28% of calls over
+/// the budget. That is not worth a wait on the path the user feels, and the
+/// decision to put it back can only be taken from rows where it ran and was
+/// read: shadow produces exactly those rows at no cost to the user.
+///
+/// History of the switch this replaced: on by default from 2026-08-14 (the
+/// founder, twice: cleaned output like Wispr, "because people can just talk
+/// whatever they want"), then instant-then-tidied-in-place (2026-08-17), then
+/// land-once with a 0.65 s wait (2026-08-19). Routing (clean only what needs
+/// it) was measured and rejected: confidence measures whether the engine
+/// HEARD right while cleanup fixes what the speaker SAID (AUC 0.602).
 enum Cleanup {
-    static let enabledKey = "dictationCleanup"
-
-    static func isEnabled(in defaults: UserDefaults = .standard) -> Bool {
-        defaults.object(forKey: enabledKey) as? Bool ?? true
+    enum Mode: String, CaseIterable {
+        case off
+        case shadow
+        case live
     }
 
-    static func setEnabled(_ on: Bool, in defaults: UserDefaults = .standard) {
-        defaults.set(on, forKey: enabledKey)
+    static let modeKey = "dictationCleanupMode"
+    /// The Bool switch of 1.14.0 to 1.26.0, read only to migrate: a switch
+    /// turned off stays off; on, or never touched, becomes shadow.
+    static let enabledKey = "dictationCleanup"
+
+    static func mode(in defaults: UserDefaults = .standard) -> Mode {
+        if let raw = defaults.string(forKey: modeKey), let mode = Mode(rawValue: raw) {
+            return mode
+        }
+        if let old = defaults.object(forKey: enabledKey) as? Bool, old == false {
+            return .off
+        }
+        return .shadow
+    }
+
+    static func setMode(_ mode: Mode, in defaults: UserDefaults = .standard) {
+        defaults.set(mode.rawValue, forKey: modeKey)
     }
 }
