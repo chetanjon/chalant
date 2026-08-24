@@ -974,6 +974,55 @@ hearing pass. Measured: the pass touches 1 of 380 historical corpus rows
 (high precision by design; the historical set predates deliberate repeat
 testing). 241 Core tests, 6 new.
 
+## 2026-08-21 — the model goes cold five minutes after last use (`feat/prewarm-at-keydown`, campaign phase 1a)
+
+Phase 1a's lever (prewarm the cleanup model at every key-down) was written
+down on the strength of one number: a cold first call of 2.4 s against a
+0.99 s warm median (2026-08-16 above). That run measured a first call with
+NO prewarm at all, so nothing had shown that a `prewarm()` on one session
+warms the FRESH session each piece actually responds on, or how long a
+warm-up lasts. Part 1 §3 bans optimising before measuring, so:
+`tools/warmprobe`, one fresh process per run, the shipping prompt and
+framing compiled from Core, a ~38-word filler-laden synthetic passage.
+
+**Warmth is not per process, and the system takes it away on a timer.**
+Apple's `modelmanagerd` loads the 3B model for every client and unloads it
+five minutes after its last use, read straight from its own log: Chalant's
+launch prewarm loaded it at 16:24:44 (3.8 s, first load since boot) and it
+was unloaded at 16:29:49 ("unloadIfNecessary ... Unloading asset
+instruct_3b"); the probe's runs at 17:15 were unloaded at 17:20:42 and the
+next at 17:25:57 and 17:31:16, five minutes to the second each time. A reload from the
+page cache takes 0.75 to 0.9 s; the first load after boot 3.8 s.
+
+What a fresh process pays, one run per line, timings of the FIRST respond:
+
+| model state at the respond | first respond | next respond |
+|---|---|---|
+| cold, no prewarm (the 1.26.0 first utterance after a 5 min pause) | **2.487 s / 2.550 s** | 0.894 s / 0.913 s |
+| cold, prewarm on a separate session, then 1 s wait (a short hold) | **1.077 s** | 0.924 s |
+| cold, prewarm on a separate session, then 3 s wait | **1.107 s** | 0.925 s |
+| warm (another process responded 2 s earlier) | 0.923 s / 1.000 s | 0.906 s / 0.930 s |
+
+The `prewarm()` call itself returns in 5 to 28 ms and the daemon logs
+"Loading asset" 16 ms later, so the load runs entirely behind the hold. A
+prewarm on one session warms a fresh session in the same process: the
+warmth lives in the daemon, not the session. When already loaded the daemon
+answers "Not loading asset": a repeated prewarm costs nothing.
+
+So the launch prewarm (1.16.x) was covering only the first five minutes
+after launch, and every dictation after a longer pause has been paying
+~1.6 s extra at the one moment the user is waiting: the 17:36 conviction
+row (polish 2.456 s, one minute after a relaunch whose prewarm had already
+expired by the time of the previous hold's silence, or simply unused) fits.
+Phase 1a: `keyDown` calls `polisher.warmUp()`; a polish-worthy utterance
+is over 40 characters, so over ~3 s of speech, and the reload is under 1 s.
+Expected on the founder's rows: polishSeconds on cold-after-a-pause
+utterances drops from ~2.5 s to ~1.1 s (the 0.65 s budget still decides
+whether the refined text lands at once; this removes the cold penalty, not
+the model's own time). Phase 1b (a keep-warm timer while the ear is warm)
+is now known to need a period under five minutes if it is ever built; with
+1a hiding the reload inside the hold, it may not be needed at all.
+
 ## 2026-08-21 — THE STARVATION VERDICT: nothing was starved. The waits could not return. (`fix/the-budget-is-real`)
 
 The first schema-2 row, from a synthetic hold on 1.26.0 (harness

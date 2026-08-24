@@ -235,6 +235,20 @@ final class DictationController {
             return
         }
 
+        // The cleanup model warms NOW, behind the speech, not at release.
+        // The system unloads it five minutes after its last use (measured
+        // 2026-08-21, EVAL-LOG), so the launch prewarm covers only the first
+        // five minutes and every dictation after a longer pause used to pay
+        // the cold load (2.49 s against 0.9 s) at the one moment the user is
+        // waiting. The hold hides it: a polish-worthy utterance is over ~3 s
+        // of speech and the reload takes 0.9 s. A no-op when already warm.
+        // Shadow runs the model too, just after the words land instead of
+        // before, so this warms in every mode but off, where there is no
+        // model to warm.
+        if Cleanup.mode() != .off {
+            Task { await polisher.warmUp() }
+        }
+
         guard assetState.isReady else {
             Self.log.error("ignoring key: assets are not ready")
             key.setupFailed()
