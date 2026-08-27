@@ -84,7 +84,7 @@ targets:
         # daily UpdateChecker (Sparkle's own scheduler off, no consent
         # dialog); Sparkle acts only when the user asks to install.
         SUFeedURL: https://chetanjon.github.io/chalant/appcast.xml
-        SUPublicEDKey: HS35RsdFpfDTLuf/jX4Cnv7YLzzC72iXqlyPkbYfAzE=
+        SUPublicEDKey: zGkziBnChyV4FL72qKbSpXTybySJ9+4wOzbWXodsQmM=
         SUEnableAutomaticChecks: false
         LSUIElement: true
         NSHighResolutionCapable: true
