@@ -60,6 +60,17 @@ struct DictationStripLight: NSViewRepresentable {
         private let glow = CAShapeLayer()
         private let core = CAShapeLayer()
         private let spread = CAGradientLayer()
+        /// The white heart of the lit edge rides in its own container so
+        /// its window can sit NARROWER than the glow's: past the heart's
+        /// ends the accent alone lights the edge, and the stretch melts
+        /// into color instead of dying to grey (the jewel, 2026-08-27).
+        private let coreContainer = CALayer()
+        private let coreSpread = CAGradientLayer()
+        /// The still glass: one fine hairline on the outline, one breath
+        /// of light along the top. Constants, not voices.
+        private let edge = CAShapeLayer()
+        private let sheen = CAShapeLayer()
+        private let sheenMask = CAGradientLayer()
         private let poolContainer = CALayer()
         private let poolMask = CAShapeLayer()
         private let poolGlow = CAGradientLayer()
@@ -83,6 +94,9 @@ struct DictationStripLight: NSViewRepresentable {
         var spreadMask: CAGradientLayer { spread }
         var poolLayer: CAGradientLayer { poolGlow }
         var glints: [CAGradientLayer] { glintLayers }
+        var coreSpreadMask: CAGradientLayer { coreSpread }
+        var edgeLayer: CAShapeLayer { edge }
+        var sheenLayer: CAShapeLayer { sheen }
 
         func apply(
             shape: IslandShape, accent: NSColor, level: CGFloat, fill: CGFloat,
@@ -142,6 +156,8 @@ struct DictationStripLight: NSViewRepresentable {
             CATransaction.begin()
             CATransaction.setAnimationDuration(0.1)
             spread.locations = Self.spreadLocations(fill: fill, stripWidth: size.width)
+            coreSpread.locations = Self.spreadLocations(
+                fill: fill * DictationStripLevel.coreWindow, stripWidth: size.width)
             CATransaction.commit()
 
             CATransaction.begin()
@@ -178,7 +194,28 @@ struct DictationStripLight: NSViewRepresentable {
             ]
             container.masksToBounds = false
             container.mask = spread
-            for stroke in strokeLayers { container.addSublayer(stroke) }
+            container.addSublayer(glow)
+            coreSpread.startPoint = CGPoint(x: 0, y: 0.5)
+            coreSpread.endPoint = CGPoint(x: 1, y: 0.5)
+            coreSpread.colors = spread.colors
+            coreContainer.masksToBounds = false
+            coreContainer.mask = coreSpread
+            coreContainer.addSublayer(core)
+            container.addSublayer(coreContainer)
+
+            edge.fillColor = nil
+            edge.lineWidth = 1
+            edge.strokeColor = NSColor.white.cgColor
+            edge.opacity = Float(DictationStripLevel.edgeHairline)
+            sheen.fillColor = nil
+            sheen.lineWidth = 1
+            sheen.strokeColor = NSColor.white.cgColor
+            sheen.opacity = Float(DictationStripLevel.sheenLight)
+            sheenMask.startPoint = CGPoint(x: 0.5, y: 0)
+            sheenMask.endPoint = CGPoint(x: 0.5, y: 1)
+            sheenMask.colors = [NSColor.white.cgColor, NSColor.clear.cgColor]
+            sheenMask.locations = [0, 0.4]
+            sheen.mask = sheenMask
 
             for blob in [poolGlow, poolGlow2] {
                 blob.type = .radial
@@ -206,6 +243,8 @@ struct DictationStripLight: NSViewRepresentable {
 
             layer?.masksToBounds = false
             layer?.addSublayer(poolContainer)
+            layer?.addSublayer(edge)
+            layer?.addSublayer(sheen)
             layer?.addSublayer(container)
             for glint in glintLayers { layer?.addSublayer(glint) }
         }
@@ -242,8 +281,17 @@ struct DictationStripLight: NSViewRepresentable {
                 )
                 glint.position = CGPoint(x: bounds.midX, y: glintY)
             }
+            coreContainer.frame = container.bounds
+            edge.frame = bounds
+            let edgeInset = edge.lineWidth / 2
+            let edgePath = currentShape.path(in: bounds.insetBy(dx: edgeInset, dy: edgeInset)).cgPath
+            edge.path = edgePath
+            sheen.frame = bounds
+            sheen.path = edgePath
+            sheenMask.frame = bounds
             let s = Self.spill
             spread.frame = bounds.insetBy(dx: -s, dy: -s)
+            coreSpread.frame = bounds.insetBy(dx: -s, dy: -s)
         }
 
         /// A syllable landed: a pair of glints races the top edge outward

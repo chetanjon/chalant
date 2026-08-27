@@ -215,7 +215,7 @@ enum DictationStripLevel {
     static func pool(level: CGFloat, pulse: CGFloat, pace: CGFloat) -> Pool {
         let l = clamp(level)
         return Pool(
-            radius: 0.55 + l * 0.95,
+            radius: 0.50 + l * 0.85,
             stretch: 1.7 + (1.6 + clamp(pace) * 0.8) * l,
             opacity: min(1, Double(0.05 + l * 0.46 + clamp(pulse) * 0.12))
         )
@@ -259,6 +259,24 @@ enum DictationStripLevel {
     /// under the screen top the way the resting pill floats. Smaller and
     /// premium was the same day's earlier word; 1.23.1 shipped at 320 × 32
     /// and still read big.
+    /// The polish, ruled from the founder's mockup 2026-08-27. The lit
+    /// edge keeps a white HEART narrower than the accent glow: the heart's
+    /// share of the lit window, so the stretch melts into the accent at
+    /// its ends. The glass carries one fine hairline on its outline and a
+    /// breath of light along its top; both still, neither follows the
+    /// voice: nothing on this strip travels except on a syllable.
+    static let coreWindow: CGFloat = 0.72
+    static let edgeHairline: Double = 0.08
+    static let sheenLight: Double = 0.12
+    /// The strip floats off the wallpaper: the body's soft under-shadow
+    /// while dictating.
+    static let floatShadowOpacity: Double = 0.5
+    static let floatShadowRadius: CGFloat = 12
+    static let floatShadowDrop: CGFloat = 7
+    /// How deep the dictating glass tints: a hair darker than the veiled
+    /// island, so the strip reads as a solid object over any wallpaper.
+    static let glassDepth: Double = 0.45
+
     static let stripWidth: CGFloat = 260
     static let stripHeight: CGFloat = 28
     static var stripSize: CGSize { CGSize(width: stripWidth, height: stripHeight) }

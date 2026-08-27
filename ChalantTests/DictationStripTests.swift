@@ -482,4 +482,56 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(model.dictationLevel, 0)
         XCTAssertNil(model.expandedDisplayID)
     }
+
+    /// The polish, ruled from the founder's mockup 2026-08-27: the lit
+    /// edge keeps a white heart NARROWER than the accent glow, so the
+    /// stretch melts into the accent color at its ends instead of dying
+    /// to grey. The heart's share of the lit window is a pinned token.
+    func testTheCoreHeartIsNarrowerThanTheGlow() {
+        XCTAssertEqual(DictationStripLevel.coreWindow, 0.72, accuracy: 0.0001)
+        let host = DictationStripLight.LightHostView(frame: CGRect(x: 0, y: 0, width: 320, height: 32))
+        let shape = IslandShape(eave: 0, bottomRadius: 11.52, belly: 0, topRadius: 11.52)
+        let size = CGSize(width: 320, height: 32)
+        host.apply(shape: shape, accent: .white, level: 0.8, fill: 0.8, pulse: 0, pace: 0, beat: 0, sway: 0, size: size)
+        func window(_ layer: CAGradientLayer) -> Double {
+            guard let stops = layer.locations, stops.count == 5 else { return -1 }
+            return stops[3].doubleValue - stops[1].doubleValue
+        }
+        let glowWindow = window(host.spreadMask)
+        let heartWindow = window(host.coreSpreadMask)
+        XCTAssertGreaterThan(glowWindow, 0)
+        XCTAssertGreaterThan(heartWindow, 0)
+        XCTAssertLessThan(heartWindow, glowWindow, "the white heart must sit inside the accent stretch")
+    }
+
+    /// The glass gains a still edge and a still sheen: one fine hairline on
+    /// the outline, one breath of light along the top. Both are constants,
+    /// both are quiet, and neither may move: nothing on this strip travels
+    /// except on a syllable (the founder, 2026-08-20).
+    func testTheGlassEdgeAndSheenAreQuietAndStill() {
+        XCTAssertEqual(DictationStripLevel.edgeHairline, 0.08, accuracy: 0.0001)
+        XCTAssertEqual(DictationStripLevel.sheenLight, 0.12, accuracy: 0.0001)
+        let host = DictationStripLight.LightHostView(frame: CGRect(x: 0, y: 0, width: 320, height: 32))
+        let shape = IslandShape(eave: 0, bottomRadius: 11.52, belly: 0, topRadius: 11.52)
+        let size = CGSize(width: 320, height: 32)
+        host.apply(shape: shape, accent: .white, level: 1, fill: 1, pulse: 1, pace: 1, beat: 0, sway: 0, size: size)
+        XCTAssertEqual(Double(host.edgeLayer.opacity), DictationStripLevel.edgeHairline, accuracy: 0.001)
+        XCTAssertEqual(Double(host.sheenLayer.opacity), DictationStripLevel.sheenLight, accuracy: 0.001)
+        XCTAssertNotNil(host.edgeLayer.path, "the hairline strokes the strip's own outline")
+        XCTAssertNotNil(host.sheenLayer.path)
+        XCTAssertNotNil(host.sheenLayer.mask, "the sheen lives only along the top of the glass")
+        host.apply(shape: shape, accent: .white, level: 0, fill: 0, pulse: 0, pace: 0, beat: 0, sway: 0, size: size)
+        XCTAssertEqual(Double(host.edgeLayer.opacity), DictationStripLevel.edgeHairline, accuracy: 0.001,
+                       "the edge does not follow the voice")
+        XCTAssertEqual(Double(host.sheenLayer.opacity), DictationStripLevel.sheenLight, accuracy: 0.001,
+                       "the sheen does not follow the voice")
+    }
+
+    /// The pool sits tighter to the floor than it did, so the light reads
+    /// as a jewel rather than a wash: 0.50 of the height at silence,
+    /// 1.35 at full voice (was 0.55 and 1.50).
+    func testThePoolSitsTighterThanItDid() {
+        XCTAssertEqual(DictationStripLevel.pool(level: 0, pulse: 0, pace: 0).radius, 0.50, accuracy: 0.001)
+        XCTAssertEqual(DictationStripLevel.pool(level: 1, pulse: 0, pace: 0).radius, 1.35, accuracy: 0.001)
+    }
 }

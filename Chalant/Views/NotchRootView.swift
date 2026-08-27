@@ -383,6 +383,10 @@ struct NotchRootView: View {
     private var bodyClarity: String { islandMaterial == "glass" ? glassClarity : "veiled" }
 
     private var glassTint: Double {
+        // The dictating strip's glass sits a hair deeper than the veiled
+        // island (the founder's polish, 2026-08-27), so it reads as a
+        // solid object over any wallpaper.
+        if face.state == .dictating { return DictationStripLevel.glassDepth }
         switch bodyClarity {
         case "veiled": return 0.35
         case "clear": return 0.06
@@ -441,6 +445,14 @@ struct NotchRootView: View {
                 .fill(Color.black)
                 .opacity(glassBody && face.state != .collapsed ? openSmoke : 1)
         }
+        // While dictating the strip floats: one soft shadow beneath the
+        // glass, still, part of the 2026-08-27 polish.
+        .shadow(
+            color: .black.opacity(
+                face.state == .dictating ? DictationStripLevel.floatShadowOpacity : 0),
+            radius: DictationStripLevel.floatShadowRadius,
+            x: 0, y: DictationStripLevel.floatShadowDrop
+        )
     }
 
     var body: some View {
