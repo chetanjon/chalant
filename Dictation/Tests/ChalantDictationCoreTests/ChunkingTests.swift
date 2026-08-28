@@ -95,4 +95,57 @@ struct ChunkingTests {
         let pieces = CleanupPrompt.chunks(text.trimmingCharacters(in: .whitespaces))
         #expect(pieces.first?.contains("$9.99 and the meeting is at 3.15") == true)
     }
+    // MARK: - Pieces close at every finished sentence (2026-08-27)
+
+    /// **The live test that forced this** (rows cap-20260827-1905*): with
+    /// pieces filling to 40 words, a four-sentence dictation made two pieces,
+    /// only one was closed early enough to be cleaned while the founder was
+    /// still talking, and the release's 0.65 s window expired on the rest:
+    /// polish landed 0 of 4 times. A piece now closes at a sentence end as
+    /// soon as it is worth cleaning on its own (`minimumCharactersForCleanup`),
+    /// so by release everything but the tail is already clean, and the tail
+    /// is one sentence, which the window fits (0.45 to 0.65 s measured).
+    @Test("pieces close at every finished sentence once worth cleaning")
+    func piecesCloseAtSentences() {
+        let text = "I looked at the resume again this morning and I think the summary section is too long. "
+            + "We should cut it down to three lines. "
+            + "Also the project descriptions need real numbers in them, not just words. "
+            + "Send me the new version when you are done."
+        let pieces = CleanupPrompt.chunks(text)
+        #expect(pieces.count == 3)
+        #expect(pieces.first == "I looked at the resume again this morning and I think the summary section is too long.")
+        #expect(pieces.last == "Send me the new version when you are done.")
+        // The tail the release waits on is one short sentence, not half the text.
+        #expect((pieces.last?.split(whereSeparator: \.isWhitespace).count ?? 99) <= 13)
+    }
+
+    /// A sentence too small to clean alone rides with the next one, so no
+    /// piece below the worth-cleaning floor is ever sent to the model.
+    @Test("a tiny sentence merges forward")
+    func tinySentenceMerges() {
+        let text = "Not just words. Send me the new version when you are done."
+        #expect(CleanupPrompt.chunks(text) == [text])
+    }
+
+    /// The clean-while-talking contract: text only ever grows at the end, so
+    /// a piece once closed must never move. Every closed piece of a prefix is
+    /// a closed piece of the longer text, byte for byte.
+    @Test("closed pieces never move as the speaker goes on")
+    func closedPiecesAreStable() {
+        // No ordinals: "first, second, third" reads as a spoken list to
+        // `looksLikeList`, and a list is deliberately one piece, never
+        // pre-tidied. The stability contract is for ordinary running speech.
+        let full = "The morning light comes into the kitchen very slowly today. "
+            + "We talked about the resume over coffee for quite a while. "
+            + "Something about the summary section still reads far too long. "
+            + "And the tail is still growing"
+        var previous: [String] = []
+        for end in stride(from: 40, through: full.count, by: 7) {
+            let prefix = String(full.prefix(end))
+            let closed = CleanupPrompt.closedChunks(prefix)
+            #expect(Array(closed.prefix(previous.count)) == previous)
+            if closed.count > previous.count { previous = closed }
+        }
+    }
+
 }
