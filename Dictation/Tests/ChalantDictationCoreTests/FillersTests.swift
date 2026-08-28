@@ -104,4 +104,25 @@ struct FillersTests {
         #expect(out.contains("completely local one"))
         #expect(out.contains("See,"))
     }
+    /// **The run-on the founder felt, 2026-08-27** (cap-20260827-131438):
+    /// "on the top, like, we need" lost the filler AND both commas, welding
+    /// two clauses into "on the top we need". When the word after the filler
+    /// opens a new clause, one comma has to survive the removal. When it
+    /// does not, both commas still die: the 2026-08-20 ruling ("because,
+    /// you know, the" comes back "because the") is unchanged.
+    @Test("a filler between two clauses leaves one comma behind")
+    func keepsTheBoundaryComma() {
+        #expect(
+            Fillers.removing("as I'm talking on the top, like, we need to improve the design.")
+                == "as I'm talking on the top, we need to improve the design.")
+        #expect(
+            Fillers.removing("we should go, um, I think we should stay")
+                == "we should go, I think we should stay")
+        // Not a clause boundary: both commas still die with the filler.
+        #expect(
+            Fillers.removing("I just want, you know, to make the UI changes")
+                == "I just want to make the UI changes")
+        #expect(Fillers.removing("because, you know, the music") == "because the music")
+    }
+
 }

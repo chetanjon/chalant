@@ -53,13 +53,13 @@ public enum Fillers {
                 precededByComma: endsWithComma(kept.last),
                 atStart: kept.isEmpty || endsSentence(kept.last))
             {
-                droppingPauseComma(&kept)
+                droppingPauseComma(&kept, unlessClauseFollows: tokens[safe: i + width])
                 i += width
                 continue
             }
             let bare = strip(tokens[i])
             if noise.contains(bare) {
-                droppingPauseComma(&kept)
+                droppingPauseComma(&kept, unlessClauseFollows: tokens[safe: i + 1])
                 i += 1
                 continue
             }
@@ -71,7 +71,7 @@ public enum Fillers {
             // is why nothing is inherited here.
             let nextIsNoise = i + 1 < tokens.count && noise.contains(strip(tokens[i + 1]))
             if bare == "like", tokens[i].hasSuffix(",") || nextIsNoise {
-                droppingPauseComma(&kept)
+                droppingPauseComma(&kept, unlessClauseFollows: tokens[safe: i + 1])
                 i += 1
                 continue
             }
@@ -119,10 +119,32 @@ public enum Fillers {
     /// puts a comma at every pause, and stranding it after the filler is
     /// removed was the single ugliest class in the corpus. A full stop is
     /// never touched.
-    private static func droppingPauseComma(_ kept: inout [String]) {
+    private static func droppingPauseComma(
+        _ kept: inout [String], unlessClauseFollows next: String? = nil
+    ) {
         guard let last = kept.last, last.hasSuffix(",") else { return }
+        if let next, clauseOpeners.contains(strip(next)) { return }
         kept[kept.count - 1] = String(last.dropLast())
     }
+
+    /// Words that begin a new clause when they follow a removed filler.
+    ///
+    /// **2026-08-27, from the founder's own screen** (cap-20260827-131438):
+    /// "as I'm talking on the top, like, we need to improve the design" came
+    /// back "on the top we need", the filler gone and BOTH its commas with
+    /// it, two clauses welded into the run-on the founder then complained
+    /// about. The 2026-08-20 ruling stands for everything else: "because,
+    /// you know, the music" still comes back "because the music", because
+    /// "the" continues the clause. But when the next word is a subject
+    /// starting a new clause, the comma before the filler was a real
+    /// boundary, and one comma survives.
+    private static let clauseOpeners: Set<String> = [
+        "i", "we", "you", "he", "she", "it", "they",
+        "i'm", "i'll", "i've", "i'd", "we're", "we'll", "we've", "we'd",
+        "you're", "you'll", "you've", "you'd", "he's", "he'll", "he'd",
+        "she's", "she'll", "she'd", "it's", "it'll", "it'd",
+        "they're", "they'll", "they've", "they'd", "there's", "let's",
+    ]
 
     /// Put the sentence back together after words were taken out of it.
     ///
@@ -161,5 +183,11 @@ public enum Fillers {
             j += 1
         }
         return String(chars)
+    }
+}
+
+extension Array {
+    fileprivate subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }

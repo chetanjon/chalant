@@ -142,4 +142,44 @@ struct TermMatcherTests {
             #expect(!d.reason.isEmpty)
         }
     }
+    // MARK: - The words that are never candidates
+
+    /// **2026-08-27, measured on the founder's own dictations:** "and all of
+    /// that" landed as "and all of Thota", and "The movie was Marvelously
+    /// short" landed as "Marvelously Sharat". Both are contact names, both
+    /// cleared the similarity floor at 1.00 (Double Metaphone reduces the
+    /// pairs identically), both passed the length guard, and the wired
+    /// earphone mic supplied the low confidence that opened the gate. Every
+    /// guard worked as designed and the sentence still got worse: sound and
+    /// length cannot separate "short" from "Sharat", ever.
+    ///
+    /// So the rule: an everyday English word is never rewritten on sound
+    /// alone, at ANY confidence. The 2026-08-15 sweep's eight true repairs
+    /// all had non-words on the heard side (Kisu, versal, Challant,
+    /// Jonalagata), so this guard costs zero measured wins. A name the
+    /// engine writes as a real word is the alias path's job, taught by the
+    /// user's own correction, exactly like "challenge" -> Chalant.
+    @Test("an everyday word is never rewritten into a name")
+    func everydayWordsAreSafe() {
+        let thota = TermMatcher.resolve(heard: "that", confidence: 0.10, terms: ["Thota"])
+        #expect(thota.replacement == nil)
+        let sharat = TermMatcher.resolve(heard: "short", confidence: 0.10, terms: ["Sharat"])
+        #expect(sharat.replacement == nil)
+        // Case does not weaken the guard.
+        let capital = TermMatcher.resolve(heard: "Short", confidence: 0.10, terms: ["Sharat"])
+        #expect(capital.replacement == nil)
+    }
+
+    /// The repairs the sweep measured must all still fire: their heard sides
+    /// are not words, so the guard never sees them.
+    @Test("non-words still get repaired")
+    func nonWordsStillRepair() {
+        #expect(
+            TermMatcher.resolve(heard: "versal", confidence: 0.20, terms: ["Vercel"])
+                .replacement == "Vercel")
+        #expect(
+            TermMatcher.resolve(heard: "Kisu", confidence: 0.20, terms: Self.vocabulary)
+                .replacement == "Kizu")
+    }
+
 }

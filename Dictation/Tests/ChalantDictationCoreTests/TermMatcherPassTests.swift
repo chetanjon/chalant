@@ -129,11 +129,19 @@ struct TermMatcherPassTests {
     /// `ravi` is 4, a 33% difference, while every true repair on the same
     /// corpus differed by at most 17%: `Challant`/`chalant`, `versal`/`vercel`,
     /// `Etram`/`aatram`, `Jonalagata`/`jonnalagadda`, `Kisu`/`kizu`.
+    /// Since 2026-08-27 "review" is refused one guard earlier: it is an
+    /// everyday word (see `EverydayWords`), so the matcher never reaches the
+    /// length comparison for it. The behavior the corpus demanded is
+    /// unchanged: the word survives. The length mechanism itself is pinned
+    /// separately below, because it still protects every uncommon word.
     @Test("a term too different in length is refused however identical it sounds")
     func lengthGuard() {
         let decision = TermMatcher.resolve(heard: "review", confidence: 0.47, terms: ["Ravi"])
         #expect(decision.replacement == nil)
-        #expect(decision.reason.contains("length"))
+        // The mechanism, pinned directly: identical sound, 33% apart in
+        // length, refused; the true repairs' spreads all pass.
+        #expect(!TermMatcher.withinLength("review", "Ravi"))
+        #expect(TermMatcher.withinLength("Kisu", "Kizu"))
     }
 
     @Test("the real repairs all sit inside the length guard")

@@ -1540,3 +1540,45 @@ second ear's work never reaches the screen.
 Not measurable from this corpus: corrections per 100 words against intent
 (desired and verbatim are empty on every captured row), so everything above
 is structure and chain attribution, not accuracy against a reference.
+## 2026-08-27 (evening): the two small fixes (`fix/names-and-commas`)
+
+The founder chose causes 1 and 3 of the measurement above: "both small
+fixes first." One behavior change per commit, both pure Core, 273 tests
+green (4 new).
+
+### Task 1: a contact name can never eat an everyday word
+
+`TermMatcher.resolve` gains a hard refusal ahead of the confidence gate:
+a heard word on the new ~950-word `EverydayWords` list is never rewritten
+on sound alone. "that"/"Thota" and "short"/"Sharat" both sit at phonetic
+similarity 1.00 and inside the 25% length tolerance, so no floor could
+ever have separated them; ordinariness is the only axis that does. Cost
+verified zero: the 2026-08-15 sweep's eight true repairs all have
+non-words on the heard side and all still fire (pinned). The alias path
+is deliberately untouched, so a name heard as a real word remains
+learnable from the user's own typed correction. The corpus score cannot
+move from a checkout (vocabulary is empty by design), so the guard is
+pinned by unit tests rather than a score delta.
+
+### Task 2: a filler dying between two clauses leaves one comma
+
+`Fillers.droppingPauseComma` now keeps the earlier comma when the word
+after the removed filler opens a clause (subject pronouns and their
+contractions, `clauseOpeners`). Dry-run, old pass against new, passprobe
+over the real corpus:
+
+| set | rows changed | reading |
+|---|---|---|
+| 19 schema-3 raw rows | **1** | the target: "on the top, we need to improve the design." |
+| 415 landed outputs | **3** | all better; two are old bugs where the eager comma-drop had BLOCKED a downstream "you know" removal ("close you know, I don't" now "close, I don't") |
+| scripted set C | 0 | the 08-20 sparse-commas ruling holds |
+| scripted set D | 0 | same |
+
+The cascade in the two "blocked aside" rows is worth naming: keeping the
+boundary comma preserves exactly the punctuation evidence the aside rule
+gates on, so removing fillers left-to-right stops destroying its own
+downstream conditions.
+
+Not addressed here, still queued from the measurement: the shadow polish
+(cause 2, needs the prewarm/budget arc) and the ear's noUndoHere discards
+(cause 4).
