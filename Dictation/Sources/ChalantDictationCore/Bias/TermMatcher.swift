@@ -294,6 +294,36 @@ public enum TermMatcher {
         }
     }
 
+    /// Apply what the second ear taught: exact substitutions for words the
+    /// engine itself doubted.
+    ///
+    /// **The evidence order matters (2026-08-28).** The phonetic pass below
+    /// guesses from sound similarity and so wears the 0.90 floor and the
+    /// length guard. An ear-taught pair needs neither: a second model
+    /// LISTENED TO THE AUDIO and heard the other word, twice, which is the
+    /// acoustic verification Part 1 §1 always wanted. What remains is the
+    /// same two refusals every substitution owes: the engine must have been
+    /// unsure of the word it wrote (confidence below the floor; nil is
+    /// unknown and untouchable), and an everyday English word is never
+    /// rewritten (the shield that stopped "that" becoming "Thota" stands
+    /// against the ear too: "summer" stays "summer" even taught, because
+    /// rewriting common words on any model's word is how trust dies).
+    public static func applyingEarCorrections(
+        tokens: [Token], corrections: [String: String],
+        confidenceFloor: Double = TermMatcher.confidenceFloor
+    ) -> [Token] {
+        guard !corrections.isEmpty else { return tokens }
+        return tokens.map { token in
+            let (prefix, core, suffix) = split(token.text)
+            guard !core.isEmpty, !notCandidates.contains(core.lowercased()) else { return token }
+            guard !core.contains(where: \.isNumber) else { return token }
+            guard let confidence = token.confidence, confidence < confidenceFloor else { return token }
+            guard !EverydayWords.contains(core) else { return token }
+            guard let meant = corrections[core.lowercased()] else { return token }
+            return Token(text: prefix + meant + suffix, confidence: token.confidence, range: token.range)
+        }
+    }
+
     /// Function words that may never be part of a joined span.
     ///
     /// **Part 5 §3 named this before it was needed** (`stopwordSpanSimilarity

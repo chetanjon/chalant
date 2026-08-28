@@ -1787,3 +1787,49 @@ right now, because it's 3 AM today. And today there is a festival."
 (no comma); short sentences never qualify. 284 tests green (10 new
 across Breaks and its guard). passprobe gained a "breaks" pass;
 textpath mirrors the chain.
+
+## 2026-08-28 (afternoon): the ear teaches what it cannot swap (`feat/teaching-ear`)
+
+Stage 1 first, over every hearing row ever recorded: the ear ran 46
+times; 4 swaps (Comet and TextEdit, where undo-and-repaste is safe),
+10 unchanged, 4 userActed, and **28 refusals, every single one
+noUndoHere in VS Code, 25 of them carrying a real correction**
+("inverse" for "invoice" twice among them). The refusal is right and
+stays: the founder dictates into the Claude prompt in VS Code's
+terminal panel, where a repaste would double the text, and Electron
+cannot tell that panel from the editor.
+
+So the ear stops asking for the page and starts teaching the pipeline.
+One behavior, three seams:
+
+1. **The Ledger counts ear sightings apart** (`earSightings`, files
+   from before the field read back as zero). Two hearings of the same
+   pair before anything fires (`earSightingsBeforeTrust = 2`), always:
+   a model hearing a model earns no one-shot trust, not even for a
+   capitalized name. The ear NEVER creates an exact alias, and a pair
+   the user deleted stays forgotten to the ear too.
+2. **`TermMatcher.applyingEarCorrections`**: an ear-taught pair is an
+   exact substitution with no similarity floor and no length guard: the
+   acoustic verification Part 1 §1 always wanted already happened, a
+   second model listened to the audio, twice. What remains is the two
+   refusals every substitution owes: the engine must have doubted the
+   word it wrote (confidence below 0.6; nil untouchable), and the
+   everyday-words shield stands against the ear too ("summer" stays
+   "summer", the shield that stopped "Thota" is not for sale). Runs
+   right after the aliases, before the phonetic passes.
+3. **Every completed hearing teaches**, swap or no swap: the ear's
+   pre-polish text against what landed, through `Correction.learnings`,
+   the same word-pair guards the user's own edits pass (max 3 changed
+   words, no digits, no function words, must sound alike). The hearing
+   corpus row now records `hearingOutput`, so every lesson is
+   auditable row by row.
+
+The shape this buys: the first "inverse" lands wrong and is a lesson;
+the second lands wrong and completes the evidence; the third and every
+one after lands as "invoice" before the founder ever sees the mistake,
+in every app, with zero after-landing changes. Known limits, stated:
+a pair whose heard side is an everyday word stays unfixable by design
+(that is the shield working), and a hearing that returns fewer words
+than landed teaches nothing (alignment needs at least as many).
+
+294 Core tests green (9 new), app suite green.

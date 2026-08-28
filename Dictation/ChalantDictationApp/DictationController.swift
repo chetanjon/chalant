@@ -892,12 +892,20 @@ final class DictationController {
         let learned = await LearnedTerms.shared.aliases()
         let corrected = TermMatcher.applyingAliases(tokens: tokens, aliases: learned)
 
+        // Then what the second ear taught (2026-08-28): exact substitutions
+        // for words the engine doubted, earned by two hearings of the same
+        // pair. This is the ear's real door into the text: the swap it is
+        // refused in VS Code (and everywhere else, eventually) it delivers
+        // here instead, BEFORE the words land, in every app.
+        let earTaught = await LearnedTerms.shared.earCorrections()
+        let earFixed = TermMatcher.applyingEarCorrections(tokens: corrected, corrections: earTaught)
+
         // Then the phonetic passes, over the hand-kept list plus everything
         // learned, plus the contacts that sound like something in this
         // utterance (`Names`). Spans before single words, while every token
         // is present.
         let vocabulary = await Names.forMatching(heard: tokens.map(\.text).joined(separator: " "))
-        let whole = TermMatcher.joiningSpans(tokens: corrected, terms: vocabulary)
+        let whole = TermMatcher.joiningSpans(tokens: earFixed, terms: vocabulary)
         let resolved = TermMatcher.resolving(tokens: whole, terms: vocabulary)
 
         // Three stages, in order, all pure and all in Core: refuse what is not
@@ -1047,6 +1055,16 @@ final class DictationController {
                 bundleID: target.bundleID, source: .hearing,
                 utteranceSeconds: utteranceSeconds)
             self.activity.disarm()
+            // Whatever the swap decides, the lesson is kept (2026-08-28):
+            // 46 hearings had produced 28 refused swaps, all in VS Code,
+            // 25 carrying a real correction the app then threw away. The
+            // ear's pre-polish text against what landed, through the same
+            // word-pair guards the user's own edits go through; after two
+            // hearings of a pair, the fix fires at landing instead
+            // (`applyingEarCorrections`), and no swap is needed at all.
+            for pair in Correction.learnings(inserted: landed, nowReads: cleaned) {
+                await LearnedTerms.shared.recordHeardByEar(pair)
+            }
             switch SwapPolicy.decide(situation) {
             case .keep(let reason):
                 Self.log.notice("hearing kept: \(reason.rawValue, privacy: .public) after \(Date().timeIntervalSince(insertedAt), privacy: .public)s")
@@ -1054,7 +1072,8 @@ final class DictationController {
                     await self.corpus.annotate(
                         id: corpusRow, decision: reason.rawValue,
                         seconds: Date().timeIntervalSince(insertedAt),
-                        charsBefore: landed.count, charsAfter: tidied.count)
+                        charsBefore: landed.count, charsAfter: tidied.count,
+                        heard: cleaned)
                 }
             case .swap:
                 self.activity.expectOwnKeystrokes()
@@ -1069,7 +1088,8 @@ final class DictationController {
                     await self.corpus.annotate(
                         id: corpusRow, decision: swapped ? "swapped" : "swapFailed",
                         seconds: Date().timeIntervalSince(insertedAt),
-                        charsBefore: landed.count, charsAfter: tidied.count)
+                        charsBefore: landed.count, charsAfter: tidied.count,
+                        heard: cleaned)
                 }
             }
             self.hearingTask = nil

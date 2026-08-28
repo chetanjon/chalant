@@ -179,4 +179,43 @@ struct TermMatcherPassTests {
         ]
         #expect(TermMatcher.resolving(tokens: input, terms: Self.terms).count == input.count)
     }
+    // MARK: - What the ear taught (2026-08-28)
+
+    /// An ear-taught pair is an exact, confidence-gated substitution: the
+    /// acoustic evidence already happened (a second model heard the audio),
+    /// so no similarity floor stands in the way, but the engine must have
+    /// been unsure, and an everyday word is still never touched.
+    @Test("an ear-taught pair fixes an unsure word at landing")
+    func earCorrectionApplies() {
+        let out = TermMatcher.applyingEarCorrections(
+            tokens: [token("Send", 0.9), token("the", 0.9), token("inverse", 0.3), token("on", 0.9), token("Friday.", 0.9)],
+            corrections: ["inverse": "invoice"])
+        #expect(text(out) == "Send the invoice on Friday.")
+    }
+
+    @Test("a confident word is never touched, even taught")
+    func earCorrectionRespectsConfidence() {
+        let out = TermMatcher.applyingEarCorrections(
+            tokens: [token("inverse", 0.95)], corrections: ["inverse": "invoice"])
+        #expect(text(out) == "inverse")
+        // No confidence attached: no evidence, no touch.
+        let bare = TermMatcher.applyingEarCorrections(
+            tokens: [token("inverse", nil)], corrections: ["inverse": "invoice"])
+        #expect(text(bare) == "inverse")
+    }
+
+    @Test("an everyday word stays itself whatever the ear says")
+    func earCorrectionRespectsEverydayWords() {
+        let out = TermMatcher.applyingEarCorrections(
+            tokens: [token("summer", 0.2)], corrections: ["summer": "summary"])
+        #expect(text(out) == "summer")
+    }
+
+    @Test("punctuation rides through an ear correction")
+    func earCorrectionKeepsPunctuation() {
+        let out = TermMatcher.applyingEarCorrections(
+            tokens: [token("(inverse),", 0.2)], corrections: ["inverse": "invoice"])
+        #expect(text(out) == "(invoice),")
+    }
+
 }

@@ -65,6 +65,23 @@ actor LearnedTerms {
         return ledger.trusted(at: day)
     }
 
+    /// What the second ear taught: exact substitutions for words the engine
+    /// doubted. Two hearings before anything fires; the matcher adds the
+    /// confidence gate and the everyday-words shield on top.
+    func earCorrections(on day: Correction.Day = LearnedTerms.today()) -> [String: String] {
+        load()
+        return ledger.earCorrections(at: day)
+    }
+
+    /// A lesson from a hearing the swap could not (or did not need to)
+    /// deliver: the pair only, never the sentence it was in.
+    func recordHeardByEar(_ pair: Correction.Pair) {
+        load()
+        ledger.record(pair, at: Self.today(), heardIsWord: true, source: .ear)
+        save()
+        Self.log.info("ear taught a pair (\(pair.heard.count, privacy: .public) -> \(pair.meant.count, privacy: .public) chars)")
+    }
+
     /// `heardIsWord`: whether the misheard token is an ordinary dictionary
     /// word, which decides whether the exact rewrite is trusted from the first
     /// sighting or the second (`Correction.Ledger.sightingsBeforeAliasing`).
