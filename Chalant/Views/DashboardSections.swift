@@ -48,6 +48,17 @@ struct GeneralSection: View {
     @AppStorage(BetterHearing.enabledKey) private var betterHearing = false
     @ObservedObject private var hearingStatus = HearingStatus.shared
 
+    /// "You run 1.32.0 · checked just now", or "· looking…" mid-check;
+    /// with checking switched off, the version alone, which is all the
+    /// row can honestly say.
+    private var updateStateLine: String {
+        let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        guard updateCheckOn else { return "You run \(current)" }
+        if updates.checking && updates.lastChecked == nil { return "You run \(current) · looking…" }
+        if updates.latest != nil { return "You run \(current)" }
+        return "You run \(current) · checked \(UpdateChecker.ago(updates.lastChecked))"
+    }
+
     @State private var launchAtLogin = false
     /// The mics on offer right now, refreshed each time this section
     /// appears; (name, uid) pairs for the Microphone picker.
@@ -69,9 +80,9 @@ struct GeneralSection: View {
                 ))
                 SettingDivider()
                 SettingToggle(label: "Check for new versions", isOn: $updateCheckOn)
-                SettingNote("Once a day, quietly. Chalant never installs anything without you asking.")
+                SettingNote("Once a day, quietly, and again each time you open this page. Chalant never installs anything without you asking.")
+                SettingDivider()
                 if let latest = updates.latest {
-                    SettingDivider()
                     // A real push button beside the state it acts on,
                     // not tinted text: same lesson as the tour button
                     // below (nothing said plain text could be clicked).
@@ -80,6 +91,17 @@ struct GeneralSection: View {
                         .controlSize(.regular)
                         .tint(Theme.controlTint)
                 }
+                // The row that answers when you look (2026-08-28). The old
+                // row existed only once an update was KNOWN, and the daily
+                // check cannot know a release published after it fired:
+                // twice in one night that hid a fresh release. Opening this
+                // page is the ask, so the page asks (`sectionOpened`,
+                // throttled) and the line always tells the truth: version,
+                // and when it last looked. Law 4: the numbers ride in mono.
+                Text(updateStateLine)
+                    .font(Theme.Fonts.captionMono)
+                    .foregroundStyle(Theme.textTertiary)
+                    .padding(.top, updates.latest == nil ? 0 : Theme.Space.xs)
                 SettingDivider()
                 SettingToggle(label: "Show in Dock", isOn: Binding(
                     get: { showInDock },
@@ -277,6 +299,8 @@ struct GeneralSection: View {
             }
         }
         .onAppear {
+            // Opening the page is the ask: re-check, throttled inside.
+            updates.sectionOpened()
             launchAtLogin = SMAppService.mainApp.status == .enabled
             var devices = SystemVolume.inputDevices()
                 .filter { !$0.uid.isEmpty }

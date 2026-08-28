@@ -17,6 +17,13 @@ final class UpdateChecker: ObservableObject {
     /// A newer version's number, when one exists; Settings shows it.
     @Published private(set) var latest: String?
 
+    /// True while a check is on the wire; the row says "looking".
+    @Published private(set) var checking = false
+    /// When the last check ANSWERED (success only); the row tells the
+    /// truth about staleness with it. Session-scoped on purpose: the
+    /// row's section checks on open, so this is fresh whenever seen.
+    @Published private(set) var lastChecked: Date?
+
     /// Fires once per new version, for the glance.
     var onNewVersion: ((String) -> Void)?
 
@@ -63,10 +70,42 @@ final class UpdateChecker: ObservableObject {
         return (version, json)
     }
 
+    /// The section's own ask: opening General re-checks, throttled so a
+    /// user flipping between sections does not hammer anyone. Born
+    /// 2026-08-28 ("the update row that answers when you look"): the
+    /// daily timer cannot see a release published after it fired, and
+    /// twice in one night that blindness hid a fresh release from the
+    /// founder. Opening the page IS the ask, so the page asks.
+    func sectionOpened() {
+        guard Self.shouldCheck(onOpenAt: Date(), lastChecked: lastChecked) else { return }
+        Task { [weak self] in await self?.check() }
+    }
+
+    /// The throttle, pure so a test can pin it: check when never
+    /// checked, or when the last answer is older than two minutes.
+    static func shouldCheck(onOpenAt now: Date, lastChecked: Date?) -> Bool {
+        guard let lastChecked else { return true }
+        return now.timeIntervalSince(lastChecked) > 120
+    }
+
+    /// The row's staleness, in words a person says. Mono digits ride
+    /// beside it in the row; this stays plain.
+    static func ago(_ date: Date?, now: Date = Date()) -> String {
+        guard let date else { return "not yet" }
+        let seconds = now.timeIntervalSince(date)
+        if seconds < 90 { return "just now" }
+        if seconds < 3600 { return "\(Int(seconds / 60)) min ago" }
+        if seconds < 86_400 { return "\(Int(seconds / 3600)) h ago" }
+        return "\(Int(seconds / 86_400)) d ago"
+    }
+
     /// `pretendCurrent` lets Debug builds rehearse the stale path.
     func check(pretendCurrent: String? = nil) async {
         guard Self.enabled else { return }
+        checking = true
+        defer { checking = false }
         guard let (remote, _) = await fetchLatestRelease() else { return }
+        lastChecked = Date()
         let current = pretendCurrent
             ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0")
         guard Self.isNewer(remote, than: current) else {
