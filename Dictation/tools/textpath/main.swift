@@ -90,14 +90,14 @@ func deterministic(_ raw: String) -> String {
     let corrected = TermMatcher.applyingAliases(tokens: tokens, aliases: [:])
     let whole = TermMatcher.joiningSpans(tokens: corrected, terms: [])
     let resolved = TermMatcher.resolving(tokens: whole, terms: [])
-    let text = Contrast.commaBeforeNot(
+    let text = Breaks.sentencing(Contrast.commaBeforeNot(
         Restatement.collapsing(
             Fillers.removing(
                 Repair.repairing(
                     Disfluency.collapsingRepetitions(
                         Guardrail.settlingEllipses(
                             Guardrail.trimmingPunctuationRun(
-                                resolved.map(\.text).joined(separator: " "))))))))
+                                resolved.map(\.text).joined(separator: " ")))))))))
     return Listing.format(text)
 }
 
