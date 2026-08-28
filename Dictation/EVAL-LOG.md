@@ -1475,6 +1475,71 @@ for the engine's own configuration). Three changes, one commit each:
    or version touched; two read stiffly ("the movie was. Marvelously
    shot") but truthfully, and better than dots.
 
+## 2026-08-27: where the full stops went (measurement only, no code changed)
+
+Founder, dictated on 1.27.0 the afternoon it went live: "there are no full
+stops or commas, and it's not cleaning up properly." Numbers before changes.
+The read: 415 capture rows through 2026-08-27, of which 19 are schema-3 rows
+recorded today with the whole chain (asrRaw, afterDeterministic, inserted,
+and the shadow model's answer), plus 24 hearing rows and 19 shadow rows.
+The complaint sentence itself is row cap-20260827-131459-513, "commerce"
+included.
+
+**Ending full stops are not the problem.** Rows of 8+ words that end with
+terminal punctuation: 99.4% before 08-20, 100% since. The complaint lives
+INSIDE long utterances: sentence breaks and commas within a dictation, and
+what the cleanup does to them. That number has been falling in every era:
+
+| rows of 8+ words           | rows | commas/100w | breaks/100w | run-ons (25+w, no break) |
+|----------------------------|------|-------------|-------------|--------------------------|
+| before 08-20 sparse-commas | 158  | 9.56        | 5.31        | 7% (3/45)                |
+| 08-20 to 08-26 (1.23-1.26) | 47   | 8.07        | 4.21        | 18% (4/22)               |
+| 08-27 (1.27.0, shadow)     | 7    | 5.75        | 2.87        | 33% (1/3, small n)       |
+
+Four causes, each measured, each with a different fix:
+
+**1. The deterministic layer removes almost half the commas and never adds a
+break.** On today's 19 rows: raw 22 commas in, 12 out; breaks 5 in, 5 out.
+Most removals are the 08-20 ruling working as designed (filler commas). But
+cap-...131438 shows the manufacturing of a run-on: "on the top, like, we
+need" lost the filler AND both boundary commas, landing "as I'm talking on
+the top we need to improve the design": two clauses fused with nothing
+between them. When a filler dies BETWEEN clauses, no boundary survives it.
+
+**2. The layer that would restore structure is in shadow and, when it
+answers, over budget.** All 19 rows landed with modelReason shadow:pending.
+The shadow record: 12 gated (under the 40-char gate, by design), 2 rejected
+(noNewTokens), 5 answers. Three of the five are exactly the fix the founder
+asked for and none of them landed: cap-...131438's answer restores the break
+Fillers destroyed ("...the way it is showing. On the top, we need to improve
+the design."); cap-...132534 collapses the "I mean" tail to "aesthetic,
+visually." Every answer took 0.82 to 2.24 s: all five past the 0.73 s live
+budget, so flipping shadow to live today would land approximately none of
+them. The prewarm and budget protocols queued in MANUAL-TEST-LOG are the
+gate on this fix.
+
+**3. Cleanup actively corrupted 2 of 19 utterances: contact names ate
+ordinary words.** cap-...125457: "and all of that, do a deep check" landed
+as "and all of Thota, do a deep check". cap-...131131: "The movie was
+Marvelously short." landed as "Marvelously Sharat." (founder retried twice;
+the retries passed clean). Neither pair is in learned-terms.json: this is
+Names.forMatching feeding the phonetic matcher, whose single-word gate opens
+on low per-token confidence, and the wired-earphone mic supplies the low
+confidence. The 08-15 sweep measured 0 corruptions in 90 utterances on this
+pass; today's mic changes the balance. "That" and "short" are among the most
+common words in English, and a contact name must never win them.
+
+**4. The mishears are the microphone's, and the ear that could fix them
+throws its work away.** "commerce" for "commas" and "inverse" for "invoice"
+are raw ASR on the earphone mic (the invoice retry five minutes later heard
+right). The hearing pass ran 24 times: 13 noUndoHere (a correction computed,
+then discarded because the app has no safe undo: VS Code and Comet are where
+the founder lives), 4 swapped, 5 unchanged, 2 userActed. More than half the
+second ear's work never reaches the screen.
+
+Not measurable from this corpus: corrections per 100 words against intent
+(desired and verbatim are empty on every captured row), so everything above
+is structure and chain attribution, not accuracy against a reference.
 ## 2026-08-27 (evening): the two small fixes (`fix/names-and-commas`)
 
 The founder chose causes 1 and 3 of the measurement above: "both small
