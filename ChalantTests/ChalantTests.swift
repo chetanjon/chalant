@@ -15,6 +15,20 @@ final class ChalantTests: XCTestCase {
         XCTAssertTrue(UpdateChecker.isNewer("1.0.10", than: "1.0.9"))
         XCTAssertTrue(UpdateChecker.isNewer("1.1", than: "1.0.99"))
         XCTAssertFalse(UpdateChecker.isNewer("1.0.81", than: "1.0.81"))
+    }
+
+    /// The row that answers when you look (2026-08-28): the throttle and
+    /// the staleness words, pure and pinned.
+    func testTheUpdateRowChecksWhenLookedAtAndSpeaksPlainly() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertTrue(UpdateChecker.shouldCheck(onOpenAt: now, lastChecked: nil))
+        XCTAssertFalse(UpdateChecker.shouldCheck(onOpenAt: now, lastChecked: now.addingTimeInterval(-60)))
+        XCTAssertTrue(UpdateChecker.shouldCheck(onOpenAt: now, lastChecked: now.addingTimeInterval(-121)))
+        XCTAssertEqual(UpdateChecker.ago(nil, now: now), "not yet")
+        XCTAssertEqual(UpdateChecker.ago(now.addingTimeInterval(-30), now: now), "just now")
+        XCTAssertEqual(UpdateChecker.ago(now.addingTimeInterval(-300), now: now), "5 min ago")
+        XCTAssertEqual(UpdateChecker.ago(now.addingTimeInterval(-7200), now: now), "2 h ago")
+        XCTAssertEqual(UpdateChecker.ago(now.addingTimeInterval(-200_000), now: now), "2 d ago")
         XCTAssertFalse(UpdateChecker.isNewer("1.0.0", than: "1.0"))
     }
 
