@@ -312,15 +312,36 @@ public enum CleanupPrompt {
         var current: [String] = []
         var currentWords = 0
 
+        var currentCharacters = 0
         for sentence in sentences {
             let words = sentence.split(whereSeparator: \.isWhitespace).count
             if !current.isEmpty && currentWords + words > targetWords {
                 out.append(current.joined(separator: " "))
                 current = []
                 currentWords = 0
+                currentCharacters = 0
             }
             current.append(sentence)
             currentWords += words
+            currentCharacters += sentence.count + (current.count > 1 ? 1 : 0)
+            // **A piece closes at every finished sentence once it is worth
+            // cleaning on its own (2026-08-27).** Filling to `targetWords`
+            // made pieces close so late that clean-while-you-talk had almost
+            // nothing cached at release: the live test (rows
+            // cap-20260827-1905*) measured polish landing 0 of 4 times, the
+            // 0.65 s window expiring on tails half a dictation long. Closing
+            // at each sentence keeps every closed piece above the same floor
+            // the cleanup gate uses, and leaves the release waiting on ONE
+            // sentence, which the window fits (0.45 to 0.65 s measured).
+            // Greedy from the front, so a closed piece never moves as the
+            // speaker goes on; `targetWords` stays as the ceiling for the
+            // single run-on sentence no floor can close.
+            if currentCharacters > minimumCharactersForCleanup {
+                out.append(current.joined(separator: " "))
+                current = []
+                currentWords = 0
+                currentCharacters = 0
+            }
         }
         if !current.isEmpty { out.append(current.joined(separator: " ")) }
 

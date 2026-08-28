@@ -1625,3 +1625,48 @@ Levers the numbers point at, for the founder's pick, none built:
 
 Also on the record: chunks run sequentially today (the 46-word row is
 2 x ~1 s), so concurrent or ahead-of-release chunking is real headroom.
+
+## 2026-08-27 (late night): pieces close at every finished sentence (`feat/sentence-pieces`)
+
+Stage 3 of the polish-live thread, built on the founder's pick after the
+live test. The live rows (cap-20260827-1905*) measured polish landing 0
+of 4: pieces filled to 40 words, closed too late for clean-while-you-talk
+to cache anything, and the release's 0.65 s window expired on tails half
+a dictation long (every miss at exactly 0.65 s, warmChunks 0 except one).
+
+**The change:** `CleanupPrompt.chunks` closes a piece at each sentence
+end once the piece clears `minimumCharactersForCleanup` (40 chars), the
+same floor the cleanup gate uses, so no piece below cleaning-worth ever
+goes to the model. Greedy from the front: a closed piece never moves as
+the speaker goes on (pinned by a new stability test; the spoken-list
+rule is exempt by design, a list is one piece and is never pre-tidied).
+`targetWords` stays as the ceiling for run-on sentences no floor can
+close. 276 tests green, 3 new.
+
+**Tail the release actually waits on, measured over the 220 real corpus
+rows of 8+ words:**
+
+| | old | new |
+|---|---|---|
+| tail p50 | 15 w | **11 w** |
+| tail p90 | 34 w | **22 w** |
+| tails the 0.65 s window fits (<=13 w) | 43% | **66%** |
+
+Plus whatever the key-up head start buys on top. The honest remainder:
+a single long final sentence (max 39 w) still cannot close early and
+will still miss; that class needs either a softer limit or nothing.
+
+**Quality replay (textpath, ungated, warm, same 19 rows):** rejections
+unchanged (2), 3 rows' outputs differ, two read better (cap-...131438's
+run-on is now kept correctly, "on the top, we need", the model echoing
+the deterministic boundary comma instead of inventing "I'm talking on
+the top." as its own sentence), one slightly flatter (cap-...132534:
+per-piece polish cannot fold a trailing fragment into the previous
+sentence: "aesthetic. The UI thing visually." for what one piece folded
+to "aesthetic, visually."). Note: textpath pays EVERY piece on its own
+clock, so its per-row seconds RISE with more pieces (1.01 to 1.47 on
+131438); the live path pays only the tail, which is the point.
+
+Not proven here, needs the live retest on a release build: the pretidy
+cache actually hitting at release (the sheet, plus one spontaneous
+ramble, live mode on).
