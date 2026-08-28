@@ -176,6 +176,18 @@ public enum TermMatcher {
             return .keep("already a known term")
         }
 
+        // 2026-08-27: "that" became "Thota" and "short" became "Sharat" on
+        // the founder's screen, both contact names, both at similarity 1.00
+        // (identical phonetic keys), both inside the length tolerance, gated
+        // open by earphone-mic confidence. Sound cannot separate an everyday
+        // word from a name that shares its key, at any threshold, so
+        // ordinariness itself is the guard: see `EverydayWords`. The alias
+        // path still handles a name the engine writes as a real word, because
+        // there the user taught the pair.
+        if EverydayWords.contains(word) {
+            return .keep("an everyday word is never rewritten on sound alone")
+        }
+
         // Part 1 §1. Without acoustic evidence there is no decision to make,
         // only a guess, and a guess here rewrites words the user got right.
         guard let confidence else {
