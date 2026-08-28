@@ -148,4 +148,29 @@ struct ChunkingTests {
         }
     }
 
+    // MARK: - Worth waiting (2026-08-27, the retest's verdict)
+
+    /// The second live test: pieces cached beautifully (2 of 3 warm on the
+    /// long row) and the release STILL landed 0 of 4, because the wait was
+    /// spent on pieces that never had a chance: a fresh 15-to-18-word
+    /// sentence needs ~0.9 s warm (measured), and two fresh pieces need two
+    /// calls. The rule: the release waits only when at most ONE piece is
+    /// missing and that piece is small enough to finish inside the window.
+    /// Everything else lands as said IMMEDIATELY, zero wait, instead of
+    /// paying the full window for nothing.
+    @Test("the release waits only when the wait can be won")
+    func worthWaiting() {
+        // Nothing missing: wait (the pieces in flight have a head start).
+        #expect(CleanupPrompt.worthWaiting(freshPieces: []))
+        // One small missing piece: the window fits it.
+        let small = "Send me the new version when you are done today please."
+        #expect(CleanupPrompt.worthWaiting(freshPieces: [small]))
+        // One piece past the ceiling: hopeless, land at once.
+        let big = String(repeating: "word ", count: CleanupPrompt.freshPieceWordCeiling + 1)
+            .trimmingCharacters(in: .whitespaces)
+        #expect(!CleanupPrompt.worthWaiting(freshPieces: [big]))
+        // Two missing pieces are two model calls: hopeless, land at once.
+        #expect(!CleanupPrompt.worthWaiting(freshPieces: [small, small]))
+    }
+
 }
