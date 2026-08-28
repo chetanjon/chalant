@@ -1670,3 +1670,49 @@ clock, so its per-row seconds RISE with more pieces (1.01 to 1.47 on
 Not proven here, needs the live retest on a release build: the pretidy
 cache actually hitting at release (the sheet, plus one spontaneous
 ramble, live mode on).
+
+## 2026-08-27 (later): the second live test, and the wait learns to say no (`feat/smart-wait`)
+
+The retest on 1.30.0 (rows cap-20260827-1937*), live mode, the same
+sheet. **Sentence-closing did its job: the long row cached 2 of 3
+pieces while the founder was still talking** (the previous test: 1 of
+2, usually 0). And the release STILL landed 0 of 4: every polish
+expired at exactly 0.65 s again. The three single-sentence rows can
+never close a piece early (nothing finished stands behind the tail),
+and a warm 15-to-18-word sentence needs ~0.9 s. The long row's last
+piece missed by a hair. Cold looked scary in the row (coldStart true
+after a half-hour idle) but is history, not failure: the key-down
+prewarm plus the hold absorbed the wake-up, which is exactly why 2
+pieces were warm.
+
+Also on the record: "inverse" for "invoice" again (raw, the earphone
+mic), the ear discarded two more computed fixes (noUndoHere), and line
+3's missing "email" never reached the recording: the audio ends at "on
+the.", so it was the release timing or the mic, not the pipeline.
+
+Founder's ruling, verbatim intent: "as fast as possible and it should
+polish very well." Two changes, one commit each:
+
+**1. The window: 650 ms to one second** (`refineBudget`, grace 730 to
+1080). Warm measurements on this machine: short tails 0.45 to 0.65 s,
+16-to-20-word sentences 0.90 to 1.00 s. 650 ms landed nothing all
+night; one second owns the pieces sentence-closing leaves behind. A
+ceiling, not a wait.
+
+**2. The wait only when it can be won** (`CleanupPrompt.worthWaiting`,
+outcome `notWorthTheWait`, reason `skipped:notWorthTheWait`). At
+release, when more than one piece is missing from cache and flight, or
+the one missing piece is past 18 words, the words land IMMEDIATELY:
+zero wait, instead of the full window for nothing. Missing pieces
+still start and land in the cache for the record and the hearing pass.
+Pieces in flight are always worth awaiting: they carry the hold's head
+start.
+
+Predicted from the measured curve, to be verified live: multi-sentence
+dictations land polished (pieces cached, tail under a second); single
+sentences to ~18 words land polished within ~0.9 s; single sentences
+past 18 words land as said instantly. The felt worst case is one
+second, paid only when the polish is genuinely close.
+
+277 + 48 tests green (3 new). Third live test after release: the sheet
+again, plus the spontaneous ramble the founder owes the corpus.
