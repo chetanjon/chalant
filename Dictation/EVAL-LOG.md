@@ -1716,3 +1716,41 @@ second, paid only when the polish is genuinely close.
 
 277 + 48 tests green (3 new). Third live test after release: the sheet
 again, plus the spontaneous ramble the founder owes the corpus.
+
+## 2026-08-28, later at 3 AM: run-ons get their full stops, deterministically (`feat/run-on-breaks`)
+
+Two results, one measured against the other.
+
+**Comma-pieces: measured, killed, not shipped.** The obvious follow-up to
+sentence-closing was closing pieces at COMMA boundaries so a run-on could
+cache during the hold. Built, replayed, and the replay said no: the model
+ECHOES comma-fragments (the 3 AM sentence came back byte-identical
+through 4 pieces: a fragment looks fine alone, the comma disease is only
+visible whole), and one of 19 regression rows got worse ("Okay, you know
+what?" lost its idiom to a fragment boundary). Net loss; the working
+tree was discarded and this entry is its record.
+
+**Breaks: the deterministic rule, shipped for review.** In a sentence
+longer than the fresh ceiling (18 words), ", and | but | so " followed
+by a clause opener becomes a full stop and a capital. A sentence that
+OPENS subordinate (if, while, because...) is left whole: on the first
+dry-run two of fifteen changed rows were damaged, both sentences whose
+opening condition was orphaned by a break; the guard removed both, cost
+one borderline win. Runs OUTERMOST in the deterministic chain, after
+fillers and repairs, so judged joints are already clean.
+
+Dry-run over all 444 landed outputs: **13 rows changed, every one read
+and every one better.** The founder's own flagged sentence:
+
+before: "Okay, I was sitting in the living room alone, working on
+Chalant, and everybody was sleeping, and it was all calm and serene
+right now, because it's 3 AM today, and today there is a festival."
+
+after: "Okay, I was sitting in the living room alone, working on
+Chalant. And everybody was sleeping. And it was all calm and serene
+right now, because it's 3 AM today. And today there is a festival."
+
+", because" keeps its comma by rule; "calm and serene" is untouchable
+(no comma); short sentences never qualify. 284 tests green (10 new
+across Breaks and its guard). passprobe gained a "breaks" pass;
+textpath mirrors the chain.

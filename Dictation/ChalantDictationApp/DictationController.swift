@@ -910,14 +910,18 @@ final class DictationController {
         // prefix rule then sees a clean restart. Contrast runs after the
         // fillers are gone, so "153 um not 135" still reads as a value
         // against a value (2026-08-22).
-        let deterministic = Contrast.commaBeforeNot(
+        // Breaks runs OUTERMOST, on finished clean text: a run-on's pause
+        // commas become full stops only after fillers and repairs are gone,
+        // so "and, you know, everybody" has already become "and everybody"
+        // by the time the joint is judged (2026-08-28).
+        let deterministic = Breaks.sentencing(Contrast.commaBeforeNot(
             Restatement.collapsing(
                 Fillers.removing(
                     Repair.repairing(
                         Disfluency.collapsingRepetitions(
                             Guardrail.settlingEllipses(
                                 Guardrail.trimmingPunctuationRun(
-                                    resolved.map(\.text).joined(separator: " "))))))))
+                                    resolved.map(\.text).joined(separator: " ")))))))))
         return deterministic
     }
 
