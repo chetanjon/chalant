@@ -73,4 +73,15 @@ final class PolishOutcomeTests: XCTestCase {
     func testZeroChunksIsNeverRefined() {
         XCTAssertFalse(outcome(.landed, chunks: 0, failed: 0).refinedAtOnce)
     }
+    /// The skip that keeps "as fast as possible" honest: when the wait
+    /// cannot be won, the words land at once and the row says why.
+    func testNotWorthTheWaitLandsRawImmediatelyAndSaysSo() {
+        let o = PolishOutcome(
+            result: .notWorthTheWait, text: nil, chunks: 2, warmChunks: 1,
+            failedChunks: 0, coldStart: false, secondsSinceLastPolish: 3)
+        XCTAssertEqual(o.modelReason, "skipped:notWorthTheWait")
+        XCTAssertFalse(o.refinedAtOnce)
+        XCTAssertNil(o.modelText)
+    }
+
 }

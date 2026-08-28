@@ -16,6 +16,12 @@ public struct PolishOutcome: Sendable, Equatable {
         /// The polisher's own per-chunk deadline expired.
         case budgetExpiredInner
         case modelUnavailable
+        /// The wait could not be won: more than one piece was missing, or
+        /// the one missing piece was too long for the window
+        /// (`CleanupPrompt.worthWaiting`). The words landed at once with
+        /// ZERO wait; the pieces still run and land in the cache for the
+        /// record. Born 2026-08-27, the founder's "as fast as possible".
+        case notWorthTheWait
         /// Under the 40-character line; the model does nothing useful
         /// there and is not asked.
         case belowMinimum
@@ -92,6 +98,7 @@ public struct PolishOutcome: Sendable, Equatable {
         case .landed:
             return modelText != nil ? "landed" : (chunkReasons.first ?? "rejected:unknown")
         case .budgetExpiredInner: return "budgetExpired:inner"
+        case .notWorthTheWait: return "skipped:notWorthTheWait"
         case .modelUnavailable: return "skipped:unavailable"
         case .belowMinimum: return "gated"
         case .empty: return "skipped:empty"

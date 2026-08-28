@@ -243,6 +243,30 @@ actor FoundationModelsPolisher: Polisher {
         // the model now. That is what keeps a long paragraph's wait at release
         // to about one chunk.
         let pieces = CleanupPrompt.chunks(trimmed)
+
+        // The wait only when it can be won (founder, 2026-08-27: "as fast
+        // as possible and it should polish very well"). A budgeted release
+        // lands the raw words IMMEDIATELY when more than one piece is
+        // missing, or the one missing piece is too long for the window:
+        // the second live test paid the full window on four utterances and
+        // landed none. The missing pieces still start now and land in the
+        // cache, so the record and the hearing pass get them; nobody waits.
+        if budget != nil {
+            let fresh = pieces.filter { tidiedPieces[$0] == nil && piecesInFlight[$0] == nil }
+            if !CleanupPrompt.worthWaiting(freshPieces: fresh) {
+                for piece in fresh {
+                    let task = Task { [weak self] in
+                        let result = await Self.tidy(piece: piece)
+                        await self?.finished(piece: piece, result: result)
+                        return result
+                    }
+                    piecesInFlight[piece] = task
+                }
+                Self.log.notice(
+                    "cleanup lands as said at once: \(fresh.count, privacy: .public) piece(s) missing, wait unwinnable")
+                return outcome(.notWorthTheWait, chunks: pieces.count, warm: pieces.count - fresh.count)
+            }
+        }
         let started = ContinuousClock.now
         let deadline = budget.map { started.advanced(by: $0) }
         var out: [String] = []

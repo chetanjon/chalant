@@ -123,6 +123,27 @@ public enum CleanupPrompt {
     /// run on everything; this gates the model only.
     public static let minimumCharactersForCleanup = 40
 
+    /// The most words a piece may have for the release to wait on a FRESH
+    /// model call for it. Measured 2026-08-27 on this machine, warm: pieces
+    /// to ~13 words answer in 0.45 to 0.65 s, 16 to 20 words in 0.90 to
+    /// 1.00 s. With the release window at one second, a fresh piece past
+    /// this many words cannot make it, and waiting for it is paying the
+    /// whole window for nothing.
+    public static let freshPieceWordCeiling = 18
+
+    /// Whether the release-time wait can be won: at most one piece is
+    /// missing from the cache and in-flight work, and that piece is small
+    /// enough to finish inside the window. Anything else lands as said
+    /// IMMEDIATELY: the founder's ruling, 2026-08-27, "as fast as possible
+    /// and it should polish very well": the polish gets the wait only when
+    /// the wait buys the polish. Pieces already in flight are not counted:
+    /// they carry a head start from the hold's tidy-ahead.
+    public static func worthWaiting(freshPieces: [String]) -> Bool {
+        guard let only = freshPieces.first else { return true }
+        guard freshPieces.count == 1 else { return false }
+        return only.split(whereSeparator: \.isWhitespace).count <= freshPieceWordCeiling
+    }
+
     public static func worthCleaning(_ text: String) -> Bool {
         text.trimmingCharacters(in: .whitespacesAndNewlines).count > minimumCharactersForCleanup
     }
