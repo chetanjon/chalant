@@ -66,14 +66,19 @@ final class DictationController {
     /// last one finishes, and the tail it starts on is fresher.
     private static let pretidyInterval: Duration = .milliseconds(400)
     /// How long the release waits for the refined text before landing the raw
-    /// words instead. The on-device model needs ~0.45 s for a few leftover
-    /// words with the plain prompt (measured 2026-08-17), so this catches the
-    /// common case, a short tail after tidy-ahead, and gives up before the wait
-    /// is felt.
-    static let refineBudget: Duration = .milliseconds(650)
+    /// words instead. Was 650 ms on the 2026-08-17 measurement (~0.45 s for a
+    /// few leftover words, plain prompt); the two live tests of 2026-08-27
+    /// measured the shipping prompt warm at 0.45 to 0.65 s for a short tail
+    /// and 0.90 to 1.00 s for a 16-to-20-word sentence, and 650 ms landed
+    /// exactly nothing all night: the window expired by a hair on tails it
+    /// should own. One second owns them. This is a CEILING, not a wait: the
+    /// moment the polish is ready, the words land, and `worthWaiting` lands
+    /// them at ONCE when the wait cannot be won at all: the ceiling is only
+    /// ever paid when the polish is genuinely close.
+    static let refineBudget: Duration = .milliseconds(1000)
     /// The caller's hard ceiling: the budget plus a small grace for the hop
     /// back. Kept beside `refineBudget` so the two can never drift apart.
-    static let budgetWithGrace: Duration = .milliseconds(730)
+    static let budgetWithGrace: Duration = .milliseconds(1080)
     private var swapGeneration = 0
     private let activity = UserActivityWatch()
     /// Turns a real day of dictating into the spontaneous half of the corpus.
