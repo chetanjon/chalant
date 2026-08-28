@@ -1582,3 +1582,46 @@ downstream conditions.
 Not addressed here, still queued from the measurement: the shadow polish
 (cause 2, needs the prewarm/budget arc) and the ear's noUndoHere discards
 (cause 4).
+
+## 2026-08-27 (night): how fast is the polish, really (`chore/polish-speed-baseline`)
+
+Stage 1 of the polish-live thread, measurement only. `textpath` (the
+shipping deterministic chain + FoundationModelsPolisher, gate 40 chars,
+no budget) over the 19 schema-3 raw rows, on this machine, model
+instruct_3b generic_sparse 15.0.0.13.102990. The offline replica is
+faithful: landed 5, gated 12, rejected 2, the exact split the live
+shadow recorded on the same rows.
+
+| run | model calls | p50 | max | under the 0.73 s live budget |
+|---|---|---|---|---|
+| gated, first (cold-ish) | 7 | 0.99 s | 2.37 s | 2/7 |
+| gated, warm | 7 | 0.95 s | 2.04 s | 2/7 |
+| ungated, warm | 19 | 0.57 s | 2.02 s | 14/19 |
+
+**The shape: speed is length, not warmth.** Warm run vs first run
+differ only on the first call (2.37 vs 1.33 s, the cold tax, about a
+second). Under 0.73 s sit rows up to ~13 words (0.45 to 0.63 s). Rows
+of 16+ words run 0.90 to 2.04 s warm; the founder's 46-word complaint
+row takes 2.0 s across 2 sequential chunks (~1 s each).
+
+**The verdict the numbers force: flipping shadow to live at today's
+budget buys nothing.** The only gated rows that fit the budget (11 and
+13 words) are the two the model returned UNCHANGED, and the three rows
+where the model genuinely restores structure (20 to 46 words) need
+0.94 to 2.04 s, meaning a visible wait the founder already rejected
+once (1.27.0's headline was removing it). The two guard-rejected rows
+would pay 0.9 to 1.3 s and then ship raw anyway.
+
+Levers the numbers point at, for the founder's pick, none built:
+1. Polish WHILE talking, land once: the direction 1.19.0 proved
+   (tidy-ahead). Chunks polish during speech; at release only the tail
+   chunk is on the clock (~0.5 to 1.0 s). The no-visible-refine ruling
+   is preserved: nothing swaps after landing.
+2. Raise the budget to ~2.2 s: full stops on long rows, a real wait
+   back on every long dictation.
+3. Deterministic sentence breaks on run-ons: no model, no wait, rule
+   risk instead.
+4. Stay shadow, keep collecting rows.
+
+Also on the record: chunks run sequentially today (the 46-word row is
+2 x ~1 s), so concurrent or ahead-of-release chunking is real headroom.
