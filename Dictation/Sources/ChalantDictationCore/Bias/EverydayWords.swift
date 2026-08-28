@@ -81,6 +81,15 @@ enum EverydayWords {
         "definitely", "certainly", "surely", "actually", "basically",
         "honestly", "literally", "seriously", "exactly", "totally",
         "completely", "absolutely", "obviously", "clearly", "apparently",
+        // The words people SAY but rarely write, added 2026-08-28 after
+        // "you gotta find" landed as "you Goud find" on the founder's own
+        // screen at 3 AM: the list had "got" but not the spoken forms, and
+        // a contact name walked straight through the gap. Dictation is
+        // speech; the spoken register belongs on this list as much as the
+        // written one.
+        "gotta", "gonna", "wanna", "gimme", "lemme", "kinda", "sorta",
+        "dunno", "outta", "ain't", "nah", "yep", "yup", "nope", "cuz",
+        "coz", "cos", "y'all", "c'mon", "'cause", "bout", "til", "till",
         "anyway", "anyhow", "instead", "otherwise", "however", "therefore",
         "meanwhile", "moreover", "besides", "indeed", "further", "furthermore",
         "okay", "ok", "alright", "well", "right", "sure", "fine", "please",

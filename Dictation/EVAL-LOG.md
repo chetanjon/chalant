@@ -1716,3 +1716,37 @@ second, paid only when the polish is genuinely close.
 
 277 + 48 tests green (3 new). Third live test after release: the sheet
 again, plus the spontaneous ramble the founder owes the corpus.
+
+## 2026-08-28, 3 AM: the third live test. It lands. (`fix/spoken-contractions`)
+
+1.31.0, live mode, the sheet plus a real three-part ramble. **Every
+winnable row landed polished, at once, inside the window: 4 of 4**
+(0.65 to 0.83 s), including the first dictation of the night on a cold
+model (the hold's tidy-ahead cached 2 of 3 pieces while the founder
+was still reading, and the release paid 0.83 s for the tail). Every
+unwinnable row landed INSTANTLY as said, zero wait,
+`skipped:notWorthTheWait` working exactly as designed (a 20-word and a
+36-word single sentence, and a 19-word one: nothing finished stands
+behind a single sentence, and past 18 words a fresh call cannot win).
+Shorts gated as ever. The founder's ruling ("as fast as possible and
+it should polish very well") is now the measured shape of the release.
+
+Honest notes on the same rows:
+- The landed polishes on the READ lines were mostly echoes: read
+  speech arrives clean. The polish's value lives on messy spontaneous
+  speech, and the messiest row of the night (the 36-word 3 AM sentence
+  with six pause-commas, which the founder flagged themselves) is
+  exactly the class the skip rule declines: a single run-on sentence
+  can neither cache early nor finish fresh inside any window. That
+  class now has one honest path left: pieces that close at COMMA
+  boundaries inside an unfinished sentence, so a run-on caches like
+  everything else. Not built; the founder decides.
+- **A live corruption, caught and fixed in this branch:** "you gotta
+  find" landed as "you Goud find": the everyday list carried "got" but
+  not the SPOKEN forms, and a contact name walked through the gap.
+  ~20 spoken contractions join the list (gotta, gonna, wanna, kinda,
+  dunno...), pinned by a test against "Goud" itself.
+- The ear discarded ELEVEN more computed corrections tonight, all
+  noUndoHere in VS Code. "summer" for "summary" and "to day" for
+  "today" were raw mishears the ear exists to fix. That arc's evidence
+  is no longer thin.

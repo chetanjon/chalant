@@ -170,6 +170,17 @@ struct TermMatcherTests {
         #expect(capital.replacement == nil)
     }
 
+    /// **2026-08-28, 3 AM, live:** "you gotta find the issue" landed as
+    /// "you Goud find the issue". The first everyday list carried "got"
+    /// and "gotten" but not the SPOKEN forms, and dictation is speech.
+    @Test("spoken contractions are everyday words too")
+    func spokenFormsAreSafe() {
+        for word in ["gotta", "gonna", "wanna", "kinda", "dunno"] {
+            let d = TermMatcher.resolve(heard: word, confidence: 0.10, terms: ["Goud"])
+            #expect(d.replacement == nil, "\(word) must never become a name")
+        }
+    }
+
     /// The repairs the sweep measured must all still fire: their heard sides
     /// are not words, so the guard never sees them.
     @Test("non-words still get repaired")
