@@ -1833,3 +1833,80 @@ a pair whose heard side is an everyday word stays unfixable by design
 than landed teaches nothing (alignment needs at least as many).
 
 294 Core tests green (9 new), app suite green.
+
+## 2026-08-30: what the polish model buys with every gate removed (`chore/polish-upside-measurement`)
+
+**Question.** The founder, dictating into VS Code the night of 08-29: *"this is
+not refining at all."* Before tuning any gate, the number that decides whether
+tuning is worth doing: on his OWN dictation, with the 40-character gate off,
+no release budget, and no word ceiling, how many utterances does the model
+actually change?
+
+**Method.** The 60 most recent real utterances from
+`~/Desktop/chalant-corpus/captured/captured.jsonl` (field `asrRaw`, the ear's
+text, not a script), through `tools/textpath --ungated`: the shipping
+deterministic passes, the shipping prompt and framing, a fresh session per
+chunk, `FidelityGuard` still on, and the model awaited however long it takes.
+Commit `e0a0426`, framing SHA `4b7219cd`, model
+`instruct_3b.fm_api_generic_3b?variant=generic_sparse`, macOS 27.0 (26A5378n).
+Median utterance 6 words; 16 of the 60 are over the 18-word `freshPieceWordCeiling`.
+
+| | rows |
+|---|---|
+| landed | 58 |
+| rejected `noNewTokens` | 2 |
+| gated | 0 (gate off) |
+| **output differs from `afterDeterministic`** | **9 of 60 (7 distinct utterances)** |
+| of the 16 over the word ceiling | 4 changed |
+
+Every change the model made, in full:
+
+| in | out |
+|---|---|
+| The movie was **M**arvelously short. | The movie was **m**arvelously short. |
+| ...it looks very aesthetic. The UI thing **like** visually | ...it looks very aesthetic. The UI thing visually. |
+| Give me **in** a way so that we can understand | Give me a way so that we can understand |
+| the way it is showing on the top **like** we need to improve | the way it is showing on the top**,** we need to improve |
+| has a lot of commas**,** you gotta find the issue | has a lot of commas**. Y**ou gotta find the issue |
+| **Hello, hello, hello.** We were playing games in the hall. | **Hello.** We were playing games in the hall. |
+| Hello, **bro,** nice **versus** pink noise. | Hello, nice pink noise. |
+
+A comma, a case change, or one deleted word: the same three shapes the
+2026-08-22 entry measured. The last row is not a fix. Deleting *versus*
+changes what the sentence claims, and rule six cannot catch it: fewer tokens
+is exactly what tidying is allowed to be.
+
+**What the live path did with the same voice that night.** Three holds, three
+different defeats, none of them a bug:
+
+| hold | text | outcome |
+|---|---|---|
+| 3.3s, 10 w | There is still a lot of improvement that is needed. | `budgetExpiredInner` — cold model, **1.000474 s** against the 1000 ms budget |
+| 11.7s, 27 w, 1 chunk | Like, let's say, when you use a download... use *worse dictation*... | `notWorthTheWait` — 27 > 18, waited **0.0007 s**. Late replies returned and were rejected `noNewTokens` (*immediately*, *downloads*) |
+| 6.7s, 19 w, 2 chunks | *She* and also, this is not refining at all... | `landed`, `refinedChanged: false` — answered in 0.66 s, returned byte-identical |
+
+Standing corpus, 79 polish rows: `belowMinimum` 34, `shadow` 19,
+`budgetExpiredInner` 12, `landed` 5, `notWorthTheWait` 5, `budgetExpiredCaller`
+4. **`refinedChanged == true`: 0 rows.** The model has not changed a character
+of inserted text since 08-27.
+
+### Verdict: the gates are not what is wrong. The ceiling is 15%, and it is commas.
+
+Raising `freshPieceWordCeiling`, widening `refineBudget`, or loosening rule six
+each buys a share of **9 changes in 60 utterances, six of them cosmetic and one
+of them wrong**. The three defeats above are each defensible on their own
+measurement, and the prewarm the cold path would want already fires on
+`keyDown`. There is no plumbing fix here worth the latency it costs.
+
+Two things this measurement does NOT excuse, both outside the polish model:
+
+1. *worse dictation* for **voice** dictation is an ear error. Rule six forbids
+   the model from fixing it (the word *voice* is not in the input) and is right
+   to. The ear's own second opinion ran on that utterance and produced a
+   different 145-char hearing against the 157-char text, and it was dropped:
+   `noUndoHere`, because `com.microsoft.VSCode` is in `noUndoBundleIDs`. The one
+   path that could repair a misheard word is off in the app the founder dictates
+   into all day. Whether that hearing was better is untested and is the next
+   question worth asking.
+2. `AppProfile.allowsPolish` is declared and never read: `polish(_:profile:within:)`
+   ignores its `profile` argument. Per-app polish control is dead code.
