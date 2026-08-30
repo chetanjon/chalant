@@ -22,6 +22,10 @@ struct WelcomeView: View {
     /// The dictation page's switch, read once when the card appears so an
     /// install that already turned it on says so instead of asking again.
     @State private var dictating = Dictation.isEnabled()
+    /// The first sentence anyone dictates, landed in the card itself.
+    @State private var practiceHeard: String?
+    /// Whether the card's own press-and-hold button is down.
+    @State private var practising = false
     /// The role card's selection, read once so a replayed tour shows the
     /// standing answer instead of forgetting it.
     @State private var chosenRole = ChalantRole.current
@@ -41,10 +45,18 @@ struct WelcomeView: View {
     /// have them does not renumber the rest by hand. The role question
     /// leads on Macs that can dictate: it is the choice everything after
     /// it reads (one app, two faces; founder, 2026-08-20).
+    /// **Dictation moved to second on 2026-08-30**, behind the role
+    /// question and ahead of everything else. The founder, dictating:
+    /// "the onboarding should be easy and they should be able to use voice
+    /// dictation immediately without any issues." It used to be the FOURTH
+    /// card, so someone who downloaded a dictation app met the wordmark and
+    /// the island's verbs first. The role question keeps the lead it was
+    /// given on 2026-08-20: it is one tap, and everything after it reads
+    /// the answer.
     private var roleStep: Int? { Dictation.isSupported ? 0 : nil }
-    private var introStep: Int { Dictation.isSupported ? 1 : 0 }
-    private var sayItStep: Int { Dictation.isSupported ? 2 : 1 }
-    private var dictationStep: Int? { Dictation.isSupported ? 3 : nil }
+    private var dictationStep: Int? { Dictation.isSupported ? 1 : nil }
+    private var introStep: Int { Dictation.isSupported ? 2 : 0 }
+    private var sayItStep: Int { Dictation.isSupported ? 3 : 1 }
     private var permissionsStep: Int { Dictation.isSupported ? 4 : 2 }
 
     @ViewBuilder
@@ -198,34 +210,115 @@ struct WelcomeView: View {
     /// the island.
     private var dictationCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
-            step(
-                title: "Hold Option and talk.",
-                lines: [
-                    ("option", VoiceDoor.dictationLine(available: true) ?? ""),
-                    ("text.badge.checkmark", "Ums gone, punctuation placed, and the names you fix, learned. All on this Mac."),
-                ]
-            )
-            Button {
-                guard !dictating else { return }
-                Dictation.setEnabled(true)
-                Dictation.shared.start()
-                dictating = true
-            } label: {
-                Text(dictating ? "On. Hold Option and try it." : "Turn on hold to dictate")
-                    .font(Theme.Fonts.subhead)
-                    .foregroundStyle(dictating ? Theme.textSecondary : .black)
-                    .padding(.horizontal, Theme.Space.l)
-                    .padding(.vertical, Theme.Space.s)
-                    .background(
-                        Capsule().fill(dictating ? Theme.hairlineFaint : accent)
-                    )
+            Text(practiceHeard == nil ? "Hold Option and talk." : "That is dictation.")
+                .font(Theme.Fonts.headline)
+                .foregroundStyle(Theme.textPrimary)
+
+            // The landing spot. A first hold with nothing focused to receive
+            // text is a silence indistinguishable from a broken build, so
+            // the card holds the spot itself and the words appear here.
+            practiceField
+
+            if let heard = practiceHeard, !heard.isEmpty {
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Space.m) {
+                    Image(systemName: "checkmark")
+                        .font(Theme.Fonts.icon(.s))
+                        .foregroundStyle(accent)
+                        .frame(width: 18)
+                    Text("Heard on this Mac. Nothing was uploaded, and nothing was typed anywhere else yet.")
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else if dictating {
+                HStack(spacing: Theme.Space.m) {
+                    practiceButton
+                    Text(VoiceDoor.dictationLine(available: true) ?? "")
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                Button {
+                    guard !dictating else { return }
+                    Dictation.setEnabled(true)
+                    Dictation.shared.start()
+                    Dictation.shared.holdPracticeLanding { text in
+                        practiceHeard = text
+                    }
+                    dictating = true
+                } label: {
+                    Text("Turn on and try it")
+                        .font(Theme.Fonts.subhead)
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, Theme.Space.l)
+                        .padding(.vertical, Theme.Space.s)
+                        .background(Capsule().fill(accent))
+                }
+                .buttonStyle(PressableStyle())
+                Text("Only the microphone for now. Letting Chalant type into your other apps is the next card.")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .buttonStyle(PressableStyle())
-            Text("macOS asks for Input Monitoring and Accessibility: one to notice the key, one to place the text.")
-                .font(Theme.Fonts.caption)
-                .foregroundStyle(Theme.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
         }
+        .onAppear {
+            if dictating {
+                Dictation.shared.holdPracticeLanding { text in practiceHeard = text }
+            }
+        }
+        .onDisappear {
+            // The spot is the card's, never the app's: leaving hands
+            // dictation back to whatever the user is really typing into.
+            Dictation.shared.holdPracticeLanding(nil)
+        }
+    }
+
+    /// Where a practice sentence lands. Dashed while it waits, solid once
+    /// something is in it: law 2, air and a line's own weight rather than a
+    /// box that shouts.
+    private var practiceField: some View {
+        Text(practiceHeard ?? "Say anything. Your words appear right here.")
+            .font(Theme.Fonts.reading)
+            .foregroundStyle(practiceHeard == nil ? Theme.textGhost : Theme.textPrimary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, minHeight: 46, alignment: .topLeading)
+            .padding(Theme.Space.l)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.artwork, style: .continuous)
+                    .strokeBorder(
+                        practiceHeard == nil ? Theme.hairlineFaint : accent.opacity(0.30),
+                        style: StrokeStyle(lineWidth: 1, dash: practiceHeard == nil ? [4, 4] : [])
+                    )
+            )
+    }
+
+    /// The button half of the try-it card, and the reason it exists: the
+    /// event tap can install and still receive nothing when Input
+    /// Monitoring was refused, which is a silent nothing at the worst
+    /// possible moment. A press-and-hold that calls the same two entry
+    /// points the tap does cannot fail that way.
+    private var practiceButton: some View {
+        Text(practising ? "Listening. Let go when done." : "Press and hold to talk")
+            .font(Theme.Fonts.subhead)
+            .foregroundStyle(practising ? .black : Theme.textPrimary)
+            .padding(.horizontal, Theme.Space.l)
+            .padding(.vertical, Theme.Space.s)
+            .background(Capsule().fill(practising ? accent : Theme.hairlineFaint))
+            .contentShape(Capsule())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        guard !practising else { return }
+                        practising = true
+                        Dictation.shared.practicePress()
+                    }
+                    .onEnded { _ in
+                        guard practising else { return }
+                        practising = false
+                        Dictation.shared.practiceRelease()
+                    }
+            )
     }
 
     private func step(
