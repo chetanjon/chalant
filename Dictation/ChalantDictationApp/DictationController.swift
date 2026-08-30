@@ -23,6 +23,20 @@ final class DictationController {
     private let audio = AudioEngine()
     private let assets = SpeechAssets()
     private let inserter = InsertionChain()
+
+    /// While set, the words land HERE instead of in another app.
+    ///
+    /// **The first run's landing spot (2026-08-30).** The founder's own
+    /// words: "the onboarding should be easy and they should be able to use
+    /// voice dictation immediately without any issues." The issue that
+    /// greets a new install is that the first hold happens with nothing
+    /// focused to receive text: no field, no app, no landing, and a silence
+    /// indistinguishable from a broken build. The tour's try-it card sets
+    /// this, so the first sentence anyone dictates has somewhere to go, and
+    /// the permission that lets Chalant type into OTHER apps is asked after
+    /// they have seen it work rather than before (the risk register's
+    /// "design onboarding around a single scripted success").
+    var practiceLanding: ((String) -> Void)?
     /// Whatever shows that dictation is listening. Chalant hands in its
     /// island; the panel this used to own is gone.
     private let surface: any DictationSurface
@@ -691,6 +705,17 @@ final class DictationController {
             // rows nobody can label.
             await corpus.discard()
             Self.log.info("nothing heard")
+            return
+        }
+
+        // The tour is holding the landing spot: the words go to the card,
+        // nothing is inserted anywhere, and no app is touched. The corpus
+        // keeps nothing either, because a practice sentence has no app and
+        // no document to be right or wrong in.
+        if let practiceLanding {
+            await corpus.discard()
+            Self.log.info("practice landing: \(text.count, privacy: .public) chars")
+            practiceLanding(text)
             return
         }
 

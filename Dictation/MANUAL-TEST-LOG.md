@@ -987,3 +987,45 @@ app is running, unplug or disconnect the current microphone: within a
 second the log shows "input devices changed; now on <another mic>" with
 no hold needed; (3) dictate a sentence and trail off before releasing:
 no "..." lands; the text ends with a period.
+
+## 2026-08-30 — the first run has a landing spot (feat/first-run-try-it)
+
+The founder's own words, dictated 2026-08-29 23:14 and read off the
+corpus: "when you use a download, the Chalant, the onboarding should be
+easy and they should be able to use voice dictation immediately without
+any issues." Today's tour asked the role question, showed the wordmark,
+taught the island's verbs, and only then offered dictation on the FOURTH
+card, and it never had anyone dictate: they pressed a button and the
+first real hold happened later, alone, with nothing focused to receive
+text. That silence is indistinguishable from a broken build, which is
+the "issues" the founder means.
+
+Changed: the try-it card is the SECOND card (the role question keeps the
+lead it was given 2026-08-20), it holds the landing spot itself
+(`DictationController.practiceLanding`, set while the card is on screen
+and cleared when it leaves), and it carries a press-and-hold button that
+calls the same two entry points the event tap calls. That button is not
+decoration: without Input Monitoring `CGEvent.tapCreate` still succeeds
+and receives nothing, so a tap-only first run can fail silently at the
+worst moment.
+
+Automated: `WelcomeTourTests` renders the card at its new index (a card
+that cannot build is caught), step count unchanged at six. Everything
+below needs hands, on the installed build, ideally on a Mac that has
+never run Chalant:
+
+1. Fresh install, tour opens: card 1 is the role question, card 2 is
+   "Hold Option and talk." with a dashed landing field.
+2. Press "Turn on and try it": macOS asks for the microphone. Grant it.
+3. Press and HOLD the card's own button, say a sentence, let go: the
+   words appear inside the card, the title becomes "That is dictation.",
+   the field goes solid, and the tick line says nothing was uploaded.
+   Nothing is typed into any other app, and no Accessibility prompt has
+   appeared yet.
+4. With Input Monitoring granted, hold left Option instead: the same
+   thing happens.
+5. Advance past the card and dictate into a real app: the words go to
+   the app, NOT the card (the landing spot is released on leaving).
+6. Refuse Input Monitoring deliberately: the button still works. That is
+   the whole point of it.
+7. "The island" role, or a Mac without dictation: no try-it card at all.

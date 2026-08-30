@@ -26,6 +26,22 @@ final class WelcomeTourTests: XCTestCase {
         XCTAssertTrue(line.localizedCaseInsensitiveContains("hold"))
     }
 
+    /// **The try-it card is the second card now (2026-08-30)**, behind the
+    /// role question and ahead of the island's own tour. The founder,
+    /// dictating: "the onboarding should be easy and they should be able to
+    /// use voice dictation immediately without any issues"; it had been the
+    /// fourth. This renders that card, which is the only automatic proof
+    /// that the card builds at all: everything else about it (the mic
+    /// prompt, a real hold, the words landing) is a manual protocol row.
+    func testTheTryItCardIsSecondAndRenders() throws {
+        try XCTSkipUnless(Dictation.isSupported, "no dictation card on this macOS")
+        let model = NotchViewModel()
+        model.welcomeStep = 1
+        let view = WelcomeView(model: model).frame(width: 560).padding(24)
+        let renderer = ImageRenderer(content: view)
+        XCTAssertNotNil(renderer.nsImage)
+    }
+
     /// Renders the dictation card to a PNG when `CHALANT_TOUR_RENDER` names a
     /// directory, so it can be looked at against the design laws without a
     /// single synthetic click. Skipped otherwise: a test that writes files
@@ -36,7 +52,7 @@ final class WelcomeTourTests: XCTestCase {
         }
         try XCTSkipUnless(Dictation.isSupported, "no dictation card on this macOS")
         let model = NotchViewModel()
-        model.welcomeStep = 2
+        model.welcomeStep = 1
         let view = WelcomeView(model: model)
             .frame(width: 560)
             .padding(24)

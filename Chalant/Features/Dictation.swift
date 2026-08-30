@@ -109,6 +109,35 @@ final class Dictation {
         stack = nil
         tapInstalled = false
     }
+
+    // MARK: - The first run's practice hold
+
+    /// Hold the landing spot: while this is set, dictated words are handed
+    /// here instead of typed into another app. The tour's try-it card sets
+    /// it while it is on screen and clears it when it leaves, so a new
+    /// install's first sentence always has somewhere to go (2026-08-30).
+    /// A no-op when dictation is not running, which is the honest answer:
+    /// there is nothing to practise with yet.
+    func holdPracticeLanding(_ landing: ((String) -> Void)?) {
+        guard #available(macOS 26, *), let live = stack as? DictationStack else { return }
+        live.setPracticeLanding(landing)
+    }
+
+    /// The button's half of the try-it card: press and release WITHOUT the
+    /// Option key, so the first success does not depend on the event tap
+    /// having installed. That matters more than it sounds: without Input
+    /// Monitoring `CGEvent.tapCreate` still succeeds and simply receives
+    /// nothing (see `tapInstalled`), which is exactly the silent nothing a
+    /// first run must never be.
+    func practicePress() {
+        guard #available(macOS 26, *), let live = stack as? DictationStack else { return }
+        live.press()
+    }
+
+    func practiceRelease() {
+        guard #available(macOS 26, *), let live = stack as? DictationStack else { return }
+        live.release()
+    }
 }
 
 /// The macOS 26 half, kept private so nothing outside this file has to carry
@@ -147,4 +176,12 @@ private final class DictationStack {
         monitor?.stop()
         monitor = nil
     }
+
+    func setPracticeLanding(_ landing: ((String) -> Void)?) {
+        controller.practiceLanding = landing
+    }
+
+    /// The same two calls the event tap makes, from a button instead.
+    func press() { Task { await controller.keyDown() } }
+    func release() { Task { await controller.keyUp() } }
 }
