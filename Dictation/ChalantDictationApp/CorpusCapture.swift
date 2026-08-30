@@ -169,17 +169,23 @@ actor CorpusCapture {
     /// seconds after `finish`, so it rides its own appended line, joined on
     /// the row's id by the scoring tools. Counts and durations only.
     func annotate(
-        id: String, decision: String, seconds: TimeInterval, charsBefore: Int, charsAfter: Int
+        id: String, decision: String, seconds: TimeInterval, charsBefore: Int, charsAfter: Int,
+        heard: String? = nil
     ) {
         guard Self.isEnabled(in: defaults) else { return }
-        append([
+        var row: [String: Any] = [
             "id": id,
             "kind": "hearing",
             "decision": decision,
             "seconds": seconds,
             "charsBefore": charsBefore,
             "charsAfter": charsAfter,
-        ])
+        ]
+        // What the ear actually heard (2026-08-28), so the teaching can be
+        // audited row by row. A corpus row is the founder's own opt-in
+        // record, not a log; Part 1 §2 still keeps transcripts out of logs.
+        if let heard { row["hearingOutput"] = heard }
+        append(row)
     }
 
     /// The shadow run's reply, appended against the row it belongs to (the

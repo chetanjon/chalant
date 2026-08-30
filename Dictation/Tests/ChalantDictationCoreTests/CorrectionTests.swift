@@ -407,4 +407,73 @@ struct CorrectionTests {
         ledger.record(pair, at: .init(day: 2))
         #expect(ledger.trusted(at: .init(day: 2)).isEmpty)
     }
+    // MARK: - The ear teaches (2026-08-28)
+
+    /// 46 hearings lifetime, 28 refused swaps, all in VS Code, 25 carrying a
+    /// real correction: the ear heard better and the lesson was thrown away.
+    /// Now a refused swap records what the ear heard, and after TWO ear
+    /// sightings the pair fires at landing as an exact, confidence-gated
+    /// correction. Two always: the ear is a model, not the user's own hand,
+    /// so even a capitalized name earns no one-shot trust from it.
+    @Test("two ear sightings make an exact correction, one does not")
+    func earSightingsTrustSlowly() {
+        var ledger = Correction.Ledger()
+        let pair = Correction.Pair(heard: "inverse", meant: "invoice")
+        ledger.record(pair, at: Correction.Day(day: 100), heardIsWord: true, source: .ear)
+        #expect(ledger.earCorrections(at: Correction.Day(day: 100)).isEmpty)
+        ledger.record(pair, at: Correction.Day(day: 101), heardIsWord: true, source: .ear)
+        #expect(ledger.earCorrections(at: Correction.Day(day: 101)) == ["inverse": "invoice"])
+    }
+
+    @Test("the ear never creates an exact alias, however often it hears")
+    func earNeverAliases() {
+        var ledger = Correction.Ledger()
+        let pair = Correction.Pair(heard: "inverse", meant: "Invoice")
+        for day in 100...105 {
+            ledger.record(pair, at: Correction.Day(day: day), heardIsWord: true, source: .ear)
+        }
+        #expect(ledger.aliases(at: Correction.Day(day: 105)).isEmpty)
+    }
+
+    @Test("user sightings and ear sightings count apart")
+    func sightingSourcesStayApart() {
+        var ledger = Correction.Ledger()
+        let pair = Correction.Pair(heard: "chalan", meant: "Chalant")
+        ledger.record(pair, at: Correction.Day(day: 100), heardIsWord: false, source: .ear)
+        ledger.record(pair, at: Correction.Day(day: 100), heardIsWord: false)
+        // One of each: the alias path sees ONE user sighting of a non-word
+        // name, which one-shot-trusts by the standing rule; the ear path
+        // sees one, short of its two.
+        #expect(ledger.aliases(at: Correction.Day(day: 100))["chalan"] == "Chalant")
+        #expect(ledger.earCorrections(at: Correction.Day(day: 100)).isEmpty)
+    }
+
+    @Test("a forgotten pair stays forgotten to the ear too")
+    func forgottenOutranksTheEar() {
+        var ledger = Correction.Ledger()
+        let pair = Correction.Pair(heard: "inverse", meant: "invoice")
+        ledger.forget(pair)
+        ledger.record(pair, at: Correction.Day(day: 100), heardIsWord: true, source: .ear)
+        ledger.record(pair, at: Correction.Day(day: 101), heardIsWord: true, source: .ear)
+        #expect(ledger.earCorrections(at: Correction.Day(day: 101)).isEmpty)
+    }
+
+    @Test("ear sightings survive the file and old files still read")
+    func earSightingsRoundTrip() throws {
+        var ledger = Correction.Ledger()
+        let pair = Correction.Pair(heard: "inverse", meant: "invoice")
+        ledger.record(pair, at: Correction.Day(day: 100), heardIsWord: true, source: .ear)
+        ledger.record(pair, at: Correction.Day(day: 100), heardIsWord: true, source: .ear)
+        let data = try JSONEncoder().encode(ledger)
+        let back = try JSONDecoder().decode(Correction.Ledger.self, from: data)
+        #expect(back.earCorrections(at: Correction.Day(day: 100)) == ["inverse": "invoice"])
+        // A file from before the field decodes as zero ear sightings.
+        let old = Data("""
+            {"entries":[{"heard":"chalan","meant":"Chalant","sightings":2,"lastSeen":100,"heardIsWord":false}],"forgotten":[]}
+            """.utf8)
+        let vintage = try JSONDecoder().decode(Correction.Ledger.self, from: old)
+        #expect(vintage.earCorrections(at: Correction.Day(day: 100)).isEmpty)
+        #expect(vintage.aliases(at: Correction.Day(day: 100))["chalan"] == "Chalant")
+    }
+
 }
