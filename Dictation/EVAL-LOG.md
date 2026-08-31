@@ -1993,3 +1993,31 @@ dictation" as "worse dictation", "app" as "adapt", "dynamic island" as
 opening on "I mean". No cleanup layer is allowed to fix those, by design:
 they are exactly what the second ear is for, which is why the teaching ear
 of 1.34.0 is the right next measurement rather than another cleanup rule.
+
+## 2026-08-31: the shield asks macOS, not a list I typed (`fix/dictionary-shield`)
+
+The teaching ear's first wild lesson exposed the everyday-words guard's real
+limit. On 08-30 the founder said "can you read this chart" and it landed as
+**"can you read this Sharat"**: a contact ate an ordinary word, because the
+hand-written ~950-word list did not contain "chart" and no list ever will
+contain English. The second ear heard it correctly, could not swap it in VS
+Code, and taught the pair instead: `Sharat -> chart`, `earSightings 1`, the
+first pair in the store created by no typed correction at all. One more
+sighting and it fires by itself, which is the moat working.
+
+But the first mistake still landed, so the shield itself changes shape. The
+matcher now takes `knownWords`, and the app fills it from the system spell
+checker (`CorrectionObserver.isDictionaryWord`, already used to decide
+`heardIsWord`) for the tokens that could be substituted at all: only those
+below the confidence floor, a handful an utterance. The rule stops being "a
+word on my list is safe" and becomes the honest one:
+
+> **If the engine wrote a word macOS knows, believe it.**
+
+`EverydayWords` stays as the floor Core can apply alone, in tests and in the
+offline tools where no dictionary exists, and is documented as such. The
+2026-08-15 sweep's eight repairs all have non-words on the heard side
+(Kisu, versal, Challant, Jonalagata), so the dictionary costs none of them;
+a test pins that, and pins that "chart" is unprotected by the list alone and
+protected the moment the dictionary is passed. 295 Core tests green, app
+builds.

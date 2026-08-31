@@ -163,7 +163,8 @@ public enum TermMatcher {
     public static func resolve(
         heard: String, confidence: Double?, terms: [String],
         confidenceFloor: Double = TermMatcher.confidenceFloor,
-        similarityFloor: Double? = nil
+        similarityFloor: Double? = nil,
+        knownWords: Set<String> = []
     ) -> Decision {
         let word = heard.trimmingCharacters(in: .punctuationCharacters)
         guard !word.isEmpty else { return .keep("nothing to resolve") }
@@ -184,7 +185,7 @@ public enum TermMatcher {
         // ordinariness itself is the guard: see `EverydayWords`. The alias
         // path still handles a name the engine writes as a real word, because
         // there the user taught the pair.
-        if EverydayWords.contains(word) {
+        if EverydayWords.contains(word) || knownWords.contains(word.lowercased()) {
             return .keep("an everyday word is never rewritten on sound alone")
         }
 
@@ -269,7 +270,8 @@ public enum TermMatcher {
     public static func resolving(
         tokens: [Token], terms: [String],
         confidenceFloor: Double = TermMatcher.confidenceFloor,
-        similarityFloor: Double? = nil
+        similarityFloor: Double? = nil,
+        knownWords: Set<String> = []
     ) -> [Token] {
         guard !terms.isEmpty else { return tokens }
 
@@ -282,7 +284,8 @@ public enum TermMatcher {
 
             let decision = resolve(
                 heard: core, confidence: token.confidence, terms: terms,
-                confidenceFloor: confidenceFloor, similarityFloor: similarityFloor)
+                confidenceFloor: confidenceFloor, similarityFloor: similarityFloor,
+                knownWords: knownWords)
             guard let replacement = decision.replacement else { return token }
 
             // The engine's punctuation is the speaker's, not the term's, so it
@@ -310,7 +313,8 @@ public enum TermMatcher {
     /// rewriting common words on any model's word is how trust dies).
     public static func applyingEarCorrections(
         tokens: [Token], corrections: [String: String],
-        confidenceFloor: Double = TermMatcher.confidenceFloor
+        confidenceFloor: Double = TermMatcher.confidenceFloor,
+        knownWords: Set<String> = []
     ) -> [Token] {
         guard !corrections.isEmpty else { return tokens }
         return tokens.map { token in
@@ -318,7 +322,7 @@ public enum TermMatcher {
             guard !core.isEmpty, !notCandidates.contains(core.lowercased()) else { return token }
             guard !core.contains(where: \.isNumber) else { return token }
             guard let confidence = token.confidence, confidence < confidenceFloor else { return token }
-            guard !EverydayWords.contains(core) else { return token }
+            guard !EverydayWords.contains(core), !knownWords.contains(core.lowercased()) else { return token }
             guard let meant = corrections[core.lowercased()] else { return token }
             return Token(text: prefix + meant + suffix, confidence: token.confidence, range: token.range)
         }
