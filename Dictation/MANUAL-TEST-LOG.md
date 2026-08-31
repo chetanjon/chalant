@@ -1063,3 +1063,37 @@ needs hands, on a Mac that has never run Chalant:
 3. On a machine whose speech assets are still downloading, hold the key:
    the island says so with a percentage.
 4. Grant everything: no excuse ever appears.
+
+## 2026-08-31 — the repair screen (feat/dictation-health)
+
+The remaining half of the stranger's silence. The previous entry made the
+speech-asset and microphone refusals speak at the moment they bite; this
+answers the one that never can. **When Input Monitoring is refused the key
+press does not reach the app at all**, so no handler exists to explain the
+nothing that happens. `Dictation.tapInstalled` had recorded it since the
+day it was written and no screen had ever read it.
+
+Settings, Dictation now carries four live rows: Microphone, Noticing the
+Option key, Typing into your apps, Words for your language. Each is read
+fresh every two seconds while the pane is open, because a permission is
+usually revoked in System Settings while the app is running, which is
+exactly when somebody comes looking. A missing row carries a button
+straight to the right System Settings pane. On a Mac below macOS 26 every
+row reads "needs macOS 26" rather than pretending.
+
+One honesty note in the code and repeated here: `tapInstalled` is only
+trustworthy as a NEGATIVE. `CGEvent.tapCreate` can succeed and still
+receive nothing without Input Monitoring, so a true reading says "running"
+rather than "granted".
+
+Automated: the truth table is pinned in ChalantTests (all ready is ready,
+any missing or still-working is not). Manual, on the installed build:
+
+1. With everything granted and hold-to-dictate on: four ticks.
+2. Revoke Microphone in System Settings while the pane is open: within two
+   seconds that row goes open and offers Open Settings; the button lands on
+   the Microphone pane.
+3. Same for Input Monitoring and Accessibility.
+4. Turn hold-to-dictate off: the key row reads "hold to dictate is off"
+   rather than claiming a failure.
+5. On a Mac below macOS 26: every row reads "needs macOS 26".
