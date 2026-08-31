@@ -1029,3 +1029,37 @@ never run Chalant:
 6. Refuse Input Monitoring deliberately: the button still works. That is
    the whole point of it.
 7. "The island" role, or a Mac without dictation: no try-it card at all.
+
+## 2026-08-31 — the app says why it did nothing (fix/say-why-not)
+
+Found while auditing the stranger's path before a public launch. Three
+first-run failures were detected, logged, and never spoken:
+
+| failure | before | now |
+|---|---|---|
+| speech assets not ready (downloading, unsupported, failed, still checking) | key held, nothing happens, reason in the log | the island says which, with the percentage while downloading |
+| microphone denied | same silence | "Chalant has no microphone. It is in System Settings, Privacy and Security, Microphone." |
+| microphone prompt still open | same silence | "macOS is asking about the microphone. Say yes and hold the key again." |
+
+None of these has ever shown on the founder's Mac, because everything
+there was granted and downloaded weeks ago. On a stranger's first run they
+are the likeliest thing that happens, and a silence is indistinguishable
+from a broken app. `surface.say` already existed and was already used for
+insertion refusals; these paths simply never called it.
+
+**Still silent, and it cannot be fixed here: Input Monitoring refused.**
+When the event tap does not install, the key press never reaches the app
+at all, so there is no code path to speak from. `Dictation.tapInstalled`
+records it and no UI reads it. The first-run card's press-and-hold button
+(1.35.0) covers the first sentence, and the standing repair screen is the
+onboarding canvas's direction C, not yet built.
+
+Automated: `excuse(for:)` is pure and pinned in ChalantTests. The rest
+needs hands, on a Mac that has never run Chalant:
+
+1. Deny the microphone at the prompt, then hold the key: the island says
+   the microphone line, not nothing.
+2. Hold the key while the prompt is still on screen: it says to answer it.
+3. On a machine whose speech assets are still downloading, hold the key:
+   the island says so with a percentage.
+4. Grant everything: no excuse ever appears.
