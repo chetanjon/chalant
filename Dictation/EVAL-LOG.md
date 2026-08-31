@@ -1910,3 +1910,39 @@ Two things this measurement does NOT excuse, both outside the polish model:
    question worth asking.
 2. `AppProfile.allowsPolish` is declared and never read: `polish(_:profile:within:)`
    ignores its `profile` argument. Per-app polish control is dead code.
+## 2026-08-30: E0 exists, and the licence gate is cleared (`feat/e0-harness`)
+
+The 08-27 build brief names two things as blocking every accuracy claim the
+product intends to make. Both are answered here.
+
+**Gate 1, the FluidAudio licence: Apache-2.0.** The brief flags this as "a
+gate, not a footnote: the entire deep path runs through it" and leaves it
+unverified. Read from the repository's own LICENSE: Apache-2.0, which is
+usable in a closed-source product with attribution and a retained NOTICE,
+exactly as FluidAudio's role in Part 5 always assumed. Nothing about the
+Parakeet path is blocked by licensing.
+
+**Gate 2, E0, the harness: built.** `tools/transcribe` feeds an AUDIO FILE
+through the engine the app ships (`SpeechTranscriber` + `SpeechAnalyzer`,
+the same explicit initialiser, locale resolution and format negotiation
+`AppleTranscriber` uses), so a corpus row, a public test set, or a
+competitor's audio can be scored on one machine without anyone speaking it
+again. `--deep` adds the architecture arm: the engine's words through Core's
+deterministic chain with an empty vocabulary.
+
+Validation, four recordings whose live transcripts the corpus already holds:
+
+| | result |
+|---|---|
+| harness output vs the live engine | 3 of 4 byte-identical; the fourth differs in its last word only ("the next time" / "the next one"), a mic-stream against file-feed difference on a 46-word take |
+| **the brief's E0 gate: same audio twice** | **4 of 4 identical** |
+| cost | 0.1 to 0.6 s per recording, far under real time |
+
+What this unlocks, none of it possible before today: E1 (does the deeper
+architecture beat the better model), E3 (preprocessing arms), E5 (the
+head-to-head against a competitor on one machine), and any public
+leaderboard claim, which needs a pinned test set the harness can replay.
+What it does NOT unlock on its own: our own corpus is still unlabelled
+(`desired` empty on all 444 rows), so it can answer "what changed" but not
+yet "what was right". A public set brings its own ground truth and is the
+cheaper first target.
