@@ -1097,3 +1097,29 @@ any missing or still-working is not). Manual, on the installed build:
 4. Turn hold-to-dictate off: the key row reads "hold to dictate is off"
    rather than claiming a failure.
 5. On a Mac below macOS 26: every row reads "needs macOS 26".
+
+## 2026-08-31 — the first run, actually walked (1.37.0, build 196)
+
+The seven-row protocol from 2026-08-30 had never been run by anyone: every
+claim about a stranger's first minute was theory. The founder walked it on
+the installed build with the first-run flag cleared (`chalant.onboarded`
+deleted, `dictationEnabled` false, permissions and learned words left
+alone, defaults exported first).
+
+Verified live, rows 1 to 3:
+
+1. The tour opens by itself on launch. Card 1 is the role question, card 2
+   is "Hold Option and talk." with the dashed landing box.
+2. "Turn on and try it" turns dictation on (`dictationEnabled` 1 after).
+3. **Press and hold the card's own button, speak, release: the words
+   appear inside the box.** The founder: "yes the words showed up in the
+   box." This is the whole point of the card, and it now has evidence
+   rather than a design argument.
+
+Not yet exercised: rows 4 to 7 (the Option key instead of the button, the
+landing spot released on leaving, a deliberately refused Input Monitoring,
+and a Mac without dictation).
+
+One process note worth keeping: the reset quits Chalant, and quitting it
+while the founder was mid-install read to them as "it's not working". A
+first-run reset should end by launching the app, not by leaving it closed.
