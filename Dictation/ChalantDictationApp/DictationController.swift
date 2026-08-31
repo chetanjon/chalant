@@ -914,6 +914,22 @@ final class DictationController {
         // put in their document is not a guess needing acoustic verification.
         // It also has to ignore confidence to work at all: proper-noun errors
         // are confident errors, and `Chalan` for `Chalant` measured 0.87.
+        // What macOS itself calls a word, for the tokens that could be
+        // substituted at all (2026-08-31). The hand-written everyday list is
+        // a floor and cannot cover English: it lacked "chart", so "can you
+        // read this chart" landed as "can you read this Sharat", a contact
+        // eating an ordinary word. Only unsure tokens are asked about, which
+        // is a handful per utterance, and the rule this buys is the honest
+        // one: if the engine wrote a word the system knows, believe it.
+        let unsure = tokens
+            .filter { ($0.confidence ?? 1) < TermMatcher.confidenceFloor }
+            .map { $0.text.trimmingCharacters(in: .punctuationCharacters).lowercased() }
+            .filter { !$0.isEmpty }
+        var knownWords: Set<String> = []
+        for word in Set(unsure) where CorrectionObserver.isDictionaryWord(word) {
+            knownWords.insert(word)
+        }
+
         let learned = await LearnedTerms.shared.aliases()
         let corrected = TermMatcher.applyingAliases(tokens: tokens, aliases: learned)
 
@@ -923,7 +939,8 @@ final class DictationController {
         // refused in VS Code (and everywhere else, eventually) it delivers
         // here instead, BEFORE the words land, in every app.
         let earTaught = await LearnedTerms.shared.earCorrections()
-        let earFixed = TermMatcher.applyingEarCorrections(tokens: corrected, corrections: earTaught)
+        let earFixed = TermMatcher.applyingEarCorrections(
+            tokens: corrected, corrections: earTaught, knownWords: knownWords)
 
         // Then the phonetic passes, over the hand-kept list plus everything
         // learned, plus the contacts that sound like something in this
@@ -931,7 +948,7 @@ final class DictationController {
         // is present.
         let vocabulary = await Names.forMatching(heard: tokens.map(\.text).joined(separator: " "))
         let whole = TermMatcher.joiningSpans(tokens: earFixed, terms: vocabulary)
-        let resolved = TermMatcher.resolving(tokens: whole, terms: vocabulary)
+        let resolved = TermMatcher.resolving(tokens: whole, terms: vocabulary, knownWords: knownWords)
 
         // Three stages, in order, all pure and all in Core: refuse what is not
         // text, collapse what was said twice by accident, then remove the words

@@ -27,6 +27,14 @@ import Foundation
 /// readable in one place and pinned by tests.
 enum EverydayWords {
 
+    /// **This list is the FLOOR, not the whole shield (2026-08-31).** A
+    /// hand-written set cannot cover English, and it did not contain
+    /// "chart": the founder said "can you read this chart" and a contact
+    /// named Sharat ate the word. The app now passes the system spell
+    /// checker's verdict alongside it (`knownWords`), so the real rule is
+    /// "if the engine wrote a word macOS knows, believe it". This set is
+    /// what Core can decide alone, in tests and in offline tools where no
+    /// dictionary exists.
     static func contains(_ word: String) -> Bool {
         words.contains(word.lowercased())
     }

@@ -181,6 +181,30 @@ struct TermMatcherTests {
         }
     }
 
+    /// **The shield's real shape, settled 2026-08-31.** The hand-written
+    /// list is a floor: it lacked "chart", and a contact named Sharat ate
+    /// the word in "can you read this chart". The app hands the system spell
+    /// checker's verdict in as `knownWords`, so the rule becomes "if the
+    /// engine wrote a word macOS knows, believe it", and a word Core has
+    /// never heard of is protected the moment the dictionary claims it.
+    @Test("a word the system dictionary knows is protected too")
+    func knownWordsExtendTheShield() {
+        let bare = TermMatcher.resolve(heard: "chart", confidence: 0.10, terms: ["Sharat"])
+        #expect(bare.replacement == "Sharat", "the hand list alone does not cover it")
+        let shielded = TermMatcher.resolve(
+            heard: "chart", confidence: 0.10, terms: ["Sharat"], knownWords: ["chart"])
+        #expect(shielded.replacement == nil)
+        // The ear's own corrections obey the same shield.
+        let taught = TermMatcher.applyingEarCorrections(
+            tokens: [Token(text: "chart", confidence: 0.10)],
+            corrections: ["chart": "Sharat"], knownWords: ["chart"])
+        #expect(taught.map(\.text) == ["chart"])
+        // And a non-word is still repaired with the dictionary present.
+        let repair = TermMatcher.resolve(
+            heard: "Kisu", confidence: 0.20, terms: Self.vocabulary, knownWords: ["chart"])
+        #expect(repair.replacement == "Kizu")
+    }
+
     /// The repairs the sweep measured must all still fire: their heard sides
     /// are not words, so the guard never sees them.
     @Test("non-words still get repaired")
