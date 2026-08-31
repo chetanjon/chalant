@@ -1946,3 +1946,50 @@ What it does NOT unlock on its own: our own corpus is still unlabelled
 (`desired` empty on all 444 rows), so it can answer "what changed" but not
 yet "what was right". A public set brings its own ground truth and is the
 cheaper first target.
+
+## 2026-08-31: the first accuracy numbers, and what they cost to get
+
+E0 (2026-08-30) made recordings replayable; this is the first thing scored
+with it. The founder labelled by ear from a queue of forty rows chosen by
+error signal (the ear disagreed / the chain cut words / rare word / long),
+a ranking whose validation is that it surfaced every error found by hand
+this week without being told about any of them.
+
+**Twelve of the forty came back rewritten**, and those twelve are the only
+honest references in the set. The other twenty-eight were pre-filled with
+what shipped and left untouched, so the shipped arm scores against its own
+output there and any arm that differs is punished even when it is right
+(the deep arm applies `Breaks`, which post-dates most of these rows).
+Scored over all forty, "shipped" reads 1.21 corrections per 100 words: that
+number is an artefact of how the labels were made and must not be repeated.
+
+**Scored over the twelve rewritten rows, 757 reference words:**
+
+| arm | corrections / 100 words |
+|---|---|
+| A, the engine alone | **9.91** (75) |
+| B, engine + the deterministic chain | **5.28** (40) |
+| C, what shipped (adds vocabulary and the polish model) | 3.43 (26) |
+
+**A against B is the clean comparison and it is the session's finding: the
+deterministic chain cuts errors nearly in half on the founder's hardest
+speech, 9.91 to 5.28, with no model involved.** C is NOT clean and its 3.43
+must not be quoted as the architecture's win: the labels were made by
+editing C's own output, so every word the founder did not touch matches C
+for free. What C legitimately shows is a shape change: B's remaining errors
+are 38% numbers, C's are 8%, which is the vocabulary and listing passes
+doing their job.
+
+Caveats, stated rather than buried: twelve rows is small; they are the
+hardest twelve by construction, so the absolute rates are pessimistic and
+only the ratio travels; A and B come from the file harness while C is the
+live engine's own output (measured 3 of 4 byte-identical, so a small
+difference remains).
+
+**What survives everything, from C's own error list, is one class: the
+engine mishearing a word nothing downstream may overrule.** "voice
+dictation" as "worse dictation", "app" as "adapt", "dynamic island" as
+"dynamic elements", ".md" as "dotem defile", and the founder's habit of
+opening on "I mean". No cleanup layer is allowed to fix those, by design:
+they are exactly what the second ear is for, which is why the teaching ear
+of 1.34.0 is the right next measurement rather than another cleanup rule.
