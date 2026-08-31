@@ -298,6 +298,14 @@ final class DictationController {
 
         guard assetState.isReady else {
             Self.log.error("ignoring key: assets are not ready")
+            // **Say why (2026-08-31).** This guard, and the microphone one
+            // below, used to return in silence: the user held the key, and
+            // nothing happened, with the reason known only to the log. On
+            // this Mac that never showed, because everything has been
+            // granted and downloaded for weeks. On a stranger's first run it
+            // is the likeliest thing that happens, and a silence is
+            // indistinguishable from a broken app.
+            surface.say(Self.excuse(for: assetState))
             key.setupFailed()
             return
         }
@@ -308,6 +316,12 @@ final class DictationController {
         micPermission = await MicPermission.ensure()
         guard micPermission == .granted else {
             Self.log.error("ignoring key: microphone not granted")
+            // Pending means the prompt is on screen right now and answering
+            // it is the whole job; saying "denied" over it would be a lie.
+            surface.say(
+                micPermission == .pending
+                    ? "macOS is asking about the microphone. Say yes and hold the key again."
+                    : "Chalant has no microphone. It is in System Settings, Privacy and Security, Microphone.")
             key.setupFailed()
             onStateChange?()
             return
@@ -887,6 +901,26 @@ final class DictationController {
     /// Core, all measured. Used at release on the whole transcript and, during
     /// the hold, on the finalized prefix ("clean while you talk"), so the two
     /// agree word for word on the part they share.
+    /// The asset state in one sentence a person can act on. Every branch
+    /// says what is true and, where there is one, the next move.
+    nonisolated static func excuse(for state: SpeechAssetState) -> String {
+        switch state {
+        case .checking:
+            return "Still getting ready. Try the key again in a moment."
+        case .downloading(let fraction):
+            let percent = Int((fraction * 100).rounded())
+            return percent > 0
+                ? "macOS is still downloading the words for your language, \(percent)%."
+                : "macOS is downloading the words for your language."
+        case .unsupported(let requested):
+            return "macOS has no dictation model for \(requested) yet."
+        case .failed:
+            return "The language model did not load. Try the key again in a moment."
+        case .available:
+            return "Ready."
+        }
+    }
+
     private func deterministicText(from tokens: [Token]) async -> String {
 
         // **The vocabulary pass runs FIRST, and on tokens rather than text.**

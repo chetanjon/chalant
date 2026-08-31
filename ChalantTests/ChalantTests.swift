@@ -1494,4 +1494,15 @@ final class RecordingAmbienceSource: AmbienceSource {
     func pause() { calls.append("pause") }
     func resume() { calls.append("resume") }
     func setVolume(_ volume: Float) { calls.append("setVolume") }
+    /// The stranger's first run: every silent refusal now says why
+    /// (2026-08-31). Pure, so the sentences themselves are pinned.
+    @available(macOS 26, *)
+    func testTheAppSaysWhyItDidNothing() {
+        XCTAssertTrue(DictationController.excuse(for: .checking).contains("moment"))
+        XCTAssertTrue(DictationController.excuse(for: .downloading(fraction: 0.4)).contains("40%"))
+        XCTAssertFalse(DictationController.excuse(for: .downloading(fraction: 0)).contains("%"))
+        XCTAssertTrue(DictationController.excuse(for: .unsupported(requested: "en-IE")).contains("en-IE"))
+        XCTAssertTrue(DictationController.excuse(for: .failed(reason: "x")).contains("did not load"))
+    }
+
 }
