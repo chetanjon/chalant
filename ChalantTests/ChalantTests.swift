@@ -1505,4 +1505,24 @@ final class RecordingAmbienceSource: AmbienceSource {
         XCTAssertTrue(DictationController.excuse(for: .failed(reason: "x")).contains("did not load"))
     }
 
+    /// The repair screen's own truth table (2026-08-31). Pure enough to pin:
+    /// every row ready means ready, and any one missing means not.
+    @MainActor
+    func testDictationHealthIsReadyOnlyWhenEveryRowIs() {
+        let ok = Dictation.Health(
+            microphone: .ready, noticingTheKey: .ready, typingIntoApps: .ready, words: .ready)
+        XCTAssertTrue(ok.allReady)
+        var bad = ok
+        bad.noticingTheKey = .missing
+        XCTAssertFalse(bad.allReady)
+        var working = ok
+        working.words = .working("downloading, 40%")
+        XCTAssertFalse(working.allReady, "still downloading is not ready")
+        // A Mac that cannot dictate at all says so on every row.
+        let old = Dictation.Health(
+            microphone: .unavailable("needs macOS 26"), noticingTheKey: .unavailable("needs macOS 26"),
+            typingIntoApps: .unavailable("needs macOS 26"), words: .unavailable("needs macOS 26"))
+        XCTAssertFalse(old.allReady)
+    }
+
 }

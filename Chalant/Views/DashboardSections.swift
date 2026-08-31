@@ -59,6 +59,13 @@ struct GeneralSection: View {
         return "You run \(current) · checked \(UpdateChecker.ago(updates.lastChecked))"
     }
 
+    /// What hold-to-dictate needs, read fresh. The one screen that can
+    /// answer "why did nothing happen": a refused Input Monitoring means the
+    /// key never reaches the app, so nothing can be said at the moment of
+    /// failure (2026-08-31).
+    @State private var dictationHealth = Dictation.Health(
+        microphone: .ready, noticingTheKey: .ready, typingIntoApps: .ready, words: .ready)
+
     @State private var launchAtLogin = false
     /// The mics on offer right now, refreshed each time this section
     /// appears; (name, uid) pairs for the Microphone picker.
@@ -209,6 +216,10 @@ struct GeneralSection: View {
                         "The first time you turn this on, macOS asks for Input Monitoring and "
                         + "Accessibility. It needs both: one to notice the key, one to place the text."
                     )
+                    if dictationOn || !dictationHealth.allReady {
+                        SettingDivider()
+                        DictationHealthRows(health: dictationHealth)
+                    }
                     SettingDivider()
                     // Three positions, not a switch (2026-08-22): the model
                     // measured as not worth a wait, so by default it reads
@@ -298,7 +309,13 @@ struct GeneralSection: View {
                 SettingNote("The cards you saw the first time Chalant opened.")
             }
         }
+        .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
+            // A permission can be revoked in System Settings while this pane
+            // is open, which is exactly when somebody is looking at it.
+            dictationHealth = Dictation.shared.health()
+        }
         .onAppear {
+            dictationHealth = Dictation.shared.health()
             // Opening the page is the ask: re-check, throttled inside.
             updates.sectionOpened()
             launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -1643,5 +1660,67 @@ private struct WrappingRules: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Why dictation is not working
+
+/// The four things hold-to-dictate needs, each with a live answer and, where
+/// one exists, the door to fix it.
+///
+/// **Built 2026-08-31.** Three of the four could be wrong while the app said
+/// nothing, and one of them cannot ever be spoken at the moment it bites: a
+/// refused Input Monitoring means the key press never reaches the app, so
+/// there is no handler to explain the silence. This pane is read on demand
+/// instead, which is the only place the answer can live.
+struct DictationHealthRows: View {
+    let health: Dictation.Health
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            row("Microphone", health.microphone, pane: "Privacy_Microphone")
+            row("Noticing the Option key", health.noticingTheKey, pane: "Privacy_ListenEvent")
+            row("Typing into your apps", health.typingIntoApps, pane: "Privacy_Accessibility")
+            row("Words for your language", health.words, pane: nil)
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ name: String, _ state: Dictation.Health.State, pane: String?) -> some View {
+        HStack(spacing: Theme.Space.m) {
+            mark(state)
+            Text(name)
+                .font(Theme.Fonts.body)
+                .foregroundStyle(state == .ready ? Theme.textSecondary : Theme.textPrimary)
+            Spacer(minLength: Theme.Space.m)
+            if case .working(let why) = state {
+                Text(why).font(Theme.Fonts.captionMono).foregroundStyle(Theme.textTertiary)
+            }
+            if case .unavailable(let why) = state {
+                Text(why).font(Theme.Fonts.captionMono).foregroundStyle(Theme.textTertiary)
+            }
+            if state == .missing, let pane {
+                Button("Open Settings") {
+                    if let url = URL(
+                        string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(Theme.controlTint)
+            }
+        }
+        .padding(.vertical, Theme.Space.s)
+    }
+
+    /// A tick when it is ready, an open circle when it is not. Law 1: no
+    /// pills, and no colour doing the talking on its own.
+    @ViewBuilder
+    private func mark(_ state: Dictation.Health.State) -> some View {
+        Image(systemName: state == .ready ? "checkmark" : "circle")
+            .font(Theme.Fonts.icon(.s))
+            .foregroundStyle(state == .ready ? Theme.textSecondary : Theme.textGhost)
+            .frame(width: 16)
     }
 }

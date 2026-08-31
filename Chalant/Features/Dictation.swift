@@ -110,6 +110,78 @@ final class Dictation {
         tapInstalled = false
     }
 
+    // MARK: - Why it is not working
+
+    /// Everything hold-to-dictate needs, each with a live answer.
+    ///
+    /// **Built 2026-08-31, auditing the stranger's path before a public
+    /// launch.** Three of these four could be wrong while the app said
+    /// nothing: the key press itself never arrives when Input Monitoring is
+    /// refused, so there is no code path that can speak at the moment of
+    /// failure. This is the surface that can, because it is read on demand
+    /// rather than during a hold.
+    struct Health: Sendable, Equatable {
+        enum State: Sendable, Equatable {
+            case ready
+            case missing
+            case working(String)
+            case unavailable(String)
+        }
+        var microphone: State
+        var noticingTheKey: State
+        var typingIntoApps: State
+        var words: State
+
+        var allReady: Bool {
+            [microphone, noticingTheKey, typingIntoApps, words].allSatisfy { $0 == .ready }
+        }
+    }
+
+    /// Read fresh every time: a permission can be revoked in System Settings
+    /// while the app is running, which is exactly when somebody comes looking
+    /// at this screen.
+    @MainActor
+    func health() -> Health {
+        guard Self.isSupported else {
+            let why = Health.State.unavailable("needs macOS 26")
+            return Health(microphone: why, noticingTheKey: why, typingIntoApps: why, words: why)
+        }
+        let mic: Health.State
+        switch MicPermission.current {
+        case .granted: mic = .ready
+        case .pending: mic = .working("macOS has not asked yet")
+        case .denied: mic = .missing
+        }
+        // `tapInstalled` is what `CGEvent.tapCreate` returned, and it is only
+        // trustworthy as a negative: the call can succeed and still receive
+        // nothing without Input Monitoring, which is why this row says
+        // "running" rather than "granted" when it is true.
+        let tap: Health.State = isRunning
+            ? (tapInstalled ? .ready : .missing)
+            : .working("hold to dictate is off")
+        let ax: Health.State = AccessibilityPermission.isTrusted ? .ready : .missing
+        return Health(
+            microphone: mic, noticingTheKey: tap, typingIntoApps: ax,
+            words: wordsState())
+    }
+
+    /// The speech assets, asked of the live stack when there is one.
+    @MainActor
+    private func wordsState() -> Health.State {
+        guard #available(macOS 26, *), let live = stack as? DictationStack else {
+            return .working("hold to dictate is off")
+        }
+        switch live.assetState() {
+        case .available: return .ready
+        case .checking: return .working("checking")
+        case .downloading(let fraction):
+            let percent = Int((fraction * 100).rounded())
+            return .working(percent > 0 ? "downloading, \(percent)%" : "downloading")
+        case .unsupported(let requested): return .unavailable("no model for \(requested)")
+        case .failed: return .missing
+        }
+    }
+
     // MARK: - The first run's practice hold
 
     /// Hold the landing spot: while this is set, dictated words are handed
@@ -176,6 +248,8 @@ private final class DictationStack {
         monitor?.stop()
         monitor = nil
     }
+
+    func assetState() -> SpeechAssetState { controller.assetState }
 
     func setPracticeLanding(_ landing: ((String) -> Void)?) {
         controller.practiceLanding = landing
