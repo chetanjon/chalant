@@ -1123,3 +1123,32 @@ and a Mac without dictation).
 One process note worth keeping: the reset quits Chalant, and quitting it
 while the founder was mid-install read to them as "it's not working". A
 first-run reset should end by launching the app, not by leaving it closed.
+
+## 2026-09-01 — the stranger's failures, walked (1.37.0, build 196)
+
+Both things shipped that day for people who are not the founder had never
+been seen by a human. Walked on the installed build.
+
+**The microphone denied.** Toggled off in System Settings, Privacy and
+Security, Microphone; held the key and spoke. The island said it:
+"chalant has no microphone access" in the founder's own retelling. Before
+1.37.0 this path returned in silence with the reason in a log nobody
+reads. Verified without needing a relaunch.
+
+**The repair screen.** With the microphone still off, Settings, Dictation
+showed the four rows (Microphone, Noticing the Option key, Typing into
+your apps, Words for your language) with Microphone flagged and its Open
+Settings button present. Founder confirmed the rows and the state, then
+re-granted; dictation types normally again.
+
+**A test-design trap worth keeping.** The first attempt looked like a
+failure: the microphone was toggled off while Chalant was RUNNING, the app
+kept its live grant, dictation went on working, and nothing was said. That
+was correct behaviour for a condition that had not actually happened. macOS
+applies the change to an already-authorised running process late, so a
+permission test must either restart the app or accept the toggle taking
+effect on its own schedule. Reading "it did not say anything" as a broken
+fix would have sent us looking in the wrong place.
+
+Still unexercised: a deliberately refused Input Monitoring, and a Mac
+below macOS 26.
