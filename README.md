@@ -1,6 +1,8 @@
 # Chalant
 
-The AI-native dynamic island for Mac. Incumbents treat the notch as a widget shelf. Chalant's rule: **everything you put on the island can be asked about.**
+**Hold Option. Talk. It types.** Dictation for Mac that runs entirely on your own machine: hold the left Option key, say it, let go, and the words land where you were typing, tidied. It learns the names and words you actually say, so the second time is right. Nothing you say is uploaded, ever.
+
+And there is an island. Incumbents treat the notch as a widget shelf. Chalant's rule: **everything you put on the island can be asked about.** Pick *just dictation* the first time it opens and the island never appears.
 
 The name: chalant is nonchalant without the non. French chaloir meant to care; nonchalant means not caring; chalant is the half English forgot to keep. This island is both halves at once, perfectly calm on the surface, quietly caring underneath.
 
@@ -8,7 +10,7 @@ The name: chalant is nonchalant without the non. French chaloir meant to care; n
 
 ## Download
 
-[**Download Chalant.dmg**](https://github.com/chetanjon/chalant/releases/latest/download/Chalant.dmg), always the newest build. Apple Silicon, macOS 15+, free. (Release notes live on the [releases page](https://github.com/chetanjon/chalant/releases/latest).) Or through Homebrew:
+[**Download Chalant.dmg**](https://github.com/chetanjon/chalant/releases/latest/download/Chalant.dmg), always the newest build. Apple Silicon, free. The app needs macOS 15; **dictation needs macOS 26**, because it uses the on-device speech model that shipped with it. (Release notes live on the [releases page](https://github.com/chetanjon/chalant/releases/latest).) Or through Homebrew:
 
 ```bash
 brew install --cask chetanjon/chalant/chalant
