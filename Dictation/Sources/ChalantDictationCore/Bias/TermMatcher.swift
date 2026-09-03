@@ -133,7 +133,35 @@ public enum TermMatcher {
     /// 0.90 rather than 0.85 because the two measure identically and the last
     /// observed loss is at 0.80, so this stands a full step clear of the cliff
     /// rather than balancing on its edge.
-    public static let provisionalFloor = 0.90
+    ///
+    /// **LOWERED TO 0.75 ON 2026-09-03, AND THE REASON IS THE SHIELD.** The
+    /// founder dictated their own contacts and got "Journalagada", "Shararat"
+    /// and "Abishek" back; every one of those sounds 0.75 to 0.83 like the
+    /// name it should be, so a 0.90 floor refused all of them. The August
+    /// sweep above was right for August: at 0.80 and below, ordinary words
+    /// were rewritten into names, and that is the worst thing this layer can
+    /// do. What changed is that the words which used to be lost are now
+    /// unreachable by construction: `EverydayWords` plus the system
+    /// dictionary make a real English word untouchable at any floor.
+    ///
+    /// Re-swept 2026-09-03 on the founder's own recordings (their contacts'
+    /// names, plus the twelve hand-labelled rows as a control), with and
+    /// without that shield, at confidence 0.60:
+    ///
+    /// | similarity | wins | losses without the shield | losses with it |
+    /// |---|---|---|---|
+    /// | 0.90 (was) | 1 | 0 | 0 |
+    /// | 0.80 | 2 | 0 | 0 |
+    /// | **0.75** | **3** | 2 | **0** |
+    ///
+    /// The two losses at 0.75 were `super -> Wispr` and `period ->
+    /// Parakeet`: both ordinary words, both now impossible. The three wins
+    /// are `Shararat -> Sharat`, `Jonalagadda -> Jonnalagadda` and
+    /// `Journalagada -> Jonnalagadda`, which is the founder's own name in
+    /// the two ways the engine gets it wrong. 0.75 is chosen as the HIGHEST
+    /// floor that catches all three; 0.65 and 0.70 measure the same and buy
+    /// nothing more, so they would only widen the surface on unseen speech.
+    public static let provisionalFloor = 0.75
 
     /// Above this, the engine was sure enough that nothing may overrule it.
     ///
