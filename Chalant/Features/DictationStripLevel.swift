@@ -277,6 +277,36 @@ enum DictationStripLevel {
     /// island, so the strip reads as a solid object over any wallpaper.
     static let glassDepth: Double = 0.45
 
+    // MARK: - The edge (2026-09-03)
+
+    /// **The strip stops being an object.** The founder, on the shipped
+    /// pill: "that thing that's popping, which shows that I'm talking, I
+    /// don't like that", and when asked what was wrong they named three
+    /// things at once: where it sits, its shape and size, and how it moves.
+    /// Not that it appears. So the answer that fixes all three is to stop
+    /// drawing a thing at all: light gathers along the very top edge of the
+    /// screen, brightest at the middle, reaching further out as the sentence
+    /// goes on. Nothing floats, nothing has a size to be wrong, and it
+    /// behaves the same on a notch Mac, a pill Mac and an external monitor,
+    /// which no floating shape ever did.
+    static let edgeLineHeight: CGFloat = 3
+    /// The light that falls from the line onto the wallpaper below it.
+    static let edgeBloomHeight: CGFloat = 22
+    static var edgeHeight: CGFloat { edgeLineHeight + edgeBloomHeight }
+
+    /// Brightness at the middle of the swell: near dark in silence, vivid on
+    /// the voice. The one thing kept whole from the pill's rim, because it is
+    /// the part nobody complained about.
+    static func edgePeak(level: CGFloat) -> Double {
+        0.14 + Double(clamp(level)) * 0.81
+    }
+
+    /// The shoulders, as a share of the peak. Low on purpose: the swell has
+    /// to melt into the dark rather than end at a visible stop.
+    static let edgeShoulderShare: Double = 0.16
+    /// How much of the peak the bloom under the line carries.
+    static let edgeBloomShare: Double = 0.11
+
     static let stripWidth: CGFloat = 260
     static let stripHeight: CGFloat = 28
     static var stripSize: CGSize { CGSize(width: stripWidth, height: stripHeight) }

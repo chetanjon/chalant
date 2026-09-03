@@ -198,7 +198,10 @@ struct NotchRootView: View {
     /// lower and tauter (2026-08-20, Slipstream), then smaller again and off
     /// the notch ("it looks weird cause its covering the notch").
     private var dictatingSize: CGSize {
-        DictationStripLevel.stripSize
+        // The window is already 1000 wide and centred at the top of the
+        // screen, so the light spans it end to end and fades to nothing well
+        // inside the display's own edges. No object, nothing to place.
+        CGSize(width: Theme.Panel.panel, height: DictationStripLevel.edgeHeight)
     }
 
     /// How far a resting pill clears the top of its screen. Small on
@@ -343,16 +346,12 @@ struct NotchRootView: View {
     /// the edge).
     private var topGap: CGFloat {
         if face.state == .dictating {
-            // Hardware wins, the same rule as `contentTopReserve`: a screen
-            // with a real cutout floats the strip beneath it WHATEVER style
-            // the user chose. The founder runs Pill style on the MacBook,
-            // and gating this on style left the strip straddling the
-            // housing ("look hwo ugly it looks", 2026-08-20). An emulated
-            // notch draws its silhouette and gets the same room.
-            if face.cutout != nil || face.style == .notch {
-                return face.contentTopReserve + DictationStripLevel.notchGap
-            }
-            return Self.pillTopGap
+            // Zero, and that is the whole design: the light is the screen's
+            // own top edge rather than an object floating below the
+            // hardware. The old rule (clear the cutout, then a gap) existed
+            // because a solid strip straddling the housing looked wrong;
+            // light has no housing to straddle.
+            return 0
         }
         return face.style == .pill && face.state == .collapsed ? Self.pillTopGap : 0
     }
@@ -396,6 +395,17 @@ struct NotchRootView: View {
 
     @ViewBuilder
     private var glassFill: some View {
+        if face.state == .dictating {
+            // Nothing. The dictating face draws no body at all, so there is
+            // no shape to be the wrong size or sit in the wrong place.
+            Color.clear
+        } else {
+            glassMaterialFill
+        }
+    }
+
+    @ViewBuilder
+    private var glassMaterialFill: some View {
         // The compiler gate mirrors the runtime one: glassEffect is
         // an Xcode 26 SDK symbol, and CI's older toolchain must
         // still compile this file (the runtime #available alone
@@ -435,7 +445,23 @@ struct NotchRootView: View {
         return 0.30
     }
 
+    @ViewBuilder
     private var islandBase: some View {
+        if face.state == .dictating {
+            // **No body at all while dictating (2026-09-03).** The black
+            // fill below is what the founder saw through the new edge light:
+            // "I can see the box. I don't want the box. There is a
+            // transparent box there." It was the island's own base, still
+            // being drawn at the strip's size, now a thousand points wide
+            // across the top of the screen. The edge design has no object,
+            // so there is nothing to fill.
+            Color.clear
+        } else {
+            islandBody
+        }
+    }
+
+    private var islandBody: some View {
         ZStack {
             if glassBody {
                 glassFill
@@ -449,7 +475,7 @@ struct NotchRootView: View {
         // glass, still, part of the 2026-08-27 polish.
         .shadow(
             color: .black.opacity(
-                face.state == .dictating ? DictationStripLevel.floatShadowOpacity : 0),
+                0),
             radius: DictationStripLevel.floatShadowRadius,
             x: 0, y: DictationStripLevel.floatShadowDrop
         )
@@ -538,11 +564,9 @@ struct NotchRootView: View {
                     // founder felt that half second as lag.
                     .overlay {
                         if face.state == .dictating {
-                            DictationStripLight(
-                                shape: islandShape, accent: accent,
+                            DictationEdgeLight(
+                                accent: accent,
                                 level: model.dictationLevel, fill: model.dictationFill,
-                                pulse: model.dictationPulse, pace: model.dictationPace,
-                                beat: model.dictationBeat, sway: model.dictationSway,
                                 size: dictatingSize
                             )
                             .transition(.opacity)
@@ -964,6 +988,15 @@ struct NotchRootView: View {
     /// you are talking it steps back to almost nothing, and the strip earns
     /// its emptiness.
     private var dictatingContent: some View {
+        // Empty since 2026-09-03. The app's name lived on the strip's left
+        // and stepped back once you were talking; with no strip there is
+        // nowhere for it to stand, and the first-second question it answered
+        // (where will these words land) is worth revisiting on its own
+        // rather than smuggling a label back onto the screen's edge.
+        EmptyView()
+    }
+
+    private var retiredDictatingContent: some View {
         HStack {
             Text(model.dictationInfo?.appName ?? "")
                 .font(Theme.Fonts.micro)
