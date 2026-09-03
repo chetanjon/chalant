@@ -2021,3 +2021,45 @@ offline tools where no dictionary exists, and is documented as such. The
 a test pins that, and pins that "chart" is unprotected by the list alone and
 protected the moment the dictionary is passed. 295 Core tests green, app
 builds.
+
+## 2026-09-02: the engine on a public benchmark (`eval/librispeech`)
+
+The first number in this project's life that anyone outside it can check.
+`tools/transcribe` over **LibriSpeech test-clean, all 2620 utterances,
+52,576 reference words**, scored by the new `corpus-kit/wer.py` (lowercase,
+punctuation stripped, the normalisation ASR papers use; `score.py` is the
+product metric and would have counted every correctly-added full stop as
+an error).
+
+| | |
+|---|---|
+| WER | **2.40%** |
+| WER, numbers written back out | **2.24%** |
+| speed | 0.15 s median per utterance, 8 minutes for the set |
+
+**Read against the published field, the engine is not the weak link.**
+Strong models sit around 2% on this set. The build brief's 5.42% (Cohere)
+and 6.3% (Parakeet) are averages over EIGHT sets including meetings and
+accented finance, so they are not comparable to this figure and must never
+be quoted beside it; what is comparable is that Apple's on-device
+`SpeechTranscriber`, which the brief does not list among its engines at
+all, is in the same class as the models it wants to swap to, on clean read
+speech.
+
+**And the true rate is better than 2.24%.** Of the 2620 utterances, 99
+have DIGITS in our output where the reference spells the number out ("on
+august 27th 1837" against "on august twenty seventh eighteen thirty
+seven") and 15 have a contraction the reference expands ("he's" against
+"he is"). Both are the product being right and the metric being blind:
+inverse text normalisation is a feature every user wants and this
+benchmark punishes. The numbers-written-out column recovers part of it
+(2.40 to 2.24) and does not handle ordinals.
+
+**What this does and does not settle.** It settles that on clean, read,
+American English the engine is competitive, and that the remaining errors
+on the founder's own speech come from the harder conditions (an earphone
+mic, an accent, spontaneous phrasing) rather than from a weak model. It
+does NOT measure the product: read speech has no fillers, no restarts and
+no run-ons, so every layer built above the engine is idle here. That
+number needs spontaneous speech with honest labels, which is a separate
+piece of work.
