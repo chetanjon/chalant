@@ -39,7 +39,20 @@ public enum Breaks {
         "she's", "she'll", "she'd", "it's", "it'll", "it'd",
         "they're", "they'll", "they've", "they'd", "there's", "there",
         "let's", "everybody", "everyone", "nobody", "somebody", "someone",
-        "this", "that's", "today", "tomorrow", "yesterday", "now", "then",
+        "this", "that's",
+    ]
+
+    /// Adverbs that open a clause only when a subject follows them.
+    ///
+    /// **Found by the corpus dry-run, 2026-09-03.** Listing these beside the
+    /// pronouns cost a real sentence: "holding the option button for a short
+    /// period of time and then letting it go gives more accurate sentences"
+    /// broke after "time", orphaning the subject from its verb, because
+    /// "then" was treated as an opener in "and then letting". It opens a
+    /// clause in "and then IT is refining" and does not in "and then
+    /// LETTING", and the difference is exactly whether a subject follows.
+    private static let adverbialOpeners: Set<String> = [
+        "now", "then", "today", "tomorrow", "yesterday",
     ]
 
     /// A sentence that OPENS subordinate ("While holding the button, ...",
@@ -85,13 +98,35 @@ public enum Breaks {
         guard words.count > 2 else { return String(sentence) }
         for i in 0..<(words.count - 2) {
             let joint = words[i]
-            guard joint.hasSuffix(","), !words[i + 1].isEmpty else { continue }
+            // **The comma was evidence, not the rule (2026-09-03).** It used
+            // to be required here, and a claims test caught the cost: read
+            // in one breath, "I opened a laptop this morning and the update
+            // was already there and everybody said it would take weeks and
+            // it was done overnight and now I just want to use it" arrives
+            // with no commas anywhere, and the rule had nothing to convert.
+            // A pause comma marks a break; its absence does not mean there
+            // isn't one. The coordinator plus a clause opener is the signal,
+            // and the length gate and the subordinate-opening guard are what
+            // keep it honest. Measured over the founder's 479 dictations:
+            // 13 rows touched with the comma required, 22 without, and every
+            // newly touched row read better.
+            guard !joint.hasSuffix("."), !joint.hasSuffix("!"), !joint.hasSuffix("?"),
+                  !words[i + 1].isEmpty
+            else { continue }
             let coordinator = words[i + 1].lowercased()
             guard coordinators.contains(coordinator) else { continue }
             let opener = words[i + 2].lowercased()
                 .trimmingCharacters(in: .punctuationCharacters)
-            guard openers.contains(opener) else { continue }
-            words[i] = String(joint.dropLast()) + "."
+            if adverbialOpeners.contains(opener) {
+                // "and now I", yes. "and then letting", no.
+                guard i + 3 < words.count else { continue }
+                let subject = words[i + 3].lowercased()
+                    .trimmingCharacters(in: .punctuationCharacters)
+                guard openers.contains(subject) else { continue }
+            } else {
+                guard openers.contains(opener) else { continue }
+            }
+            words[i] = (joint.hasSuffix(",") ? String(joint.dropLast()) : joint) + "."
             words[i + 1] = words[i + 1].prefix(1).uppercased() + words[i + 1].dropFirst()
         }
         return words.joined(separator: " ")

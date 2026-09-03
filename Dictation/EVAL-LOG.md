@@ -2063,3 +2063,41 @@ does NOT measure the product: read speech has no fillers, no restarts and
 no run-ons, so every layer built above the engine is idle here. That
 number needs spontaneous speech with honest labels, which is a separate
 piece of work.
+## 2026-09-03: the comma was evidence, not the rule (`feat/breaks-without-commas`)
+
+The nine-line claims test found the run-on rule doing nothing to a real
+run-on. The founder read "I opened a laptop this morning and the update
+was already there and everybody said it would take weeks and it was done
+overnight and now I just want to use it" **in one breath, as instructed**,
+and the transcriber wrote no commas anywhere. `Breaks` only knew how to
+convert ", and", so it had nothing to act on and the whole line landed as
+one sentence. Proven both ways with `passprobe`: the same text with pause
+commas breaks correctly, without them it is untouched.
+
+The pause comma was always evidence of a break rather than the break
+itself, so it stops being required. The signal is now the coordinator plus
+a clause opener; the length gate (over 18 words) and the
+subordinate-opening guard are what keep it honest.
+
+**Measured over the founder's own dictations, before and after:**
+
+| | rows touched |
+|---|---|
+| comma required (shipped since 1.32.0) | 13 |
+| comma not required | **21** |
+
+**The dry run earned its keep by catching damage.** The first pass touched
+22 rows, and one was wrong: "holding the option button for a short period
+of time **and then letting it go** gives more accurate sentences" broke
+after "time", cutting a subject from its verb. The cause was "then" sitting
+in the openers list beside the pronouns: it opens a clause in "and then IT
+is refining" and does not in "and then LETTING". So the adverbs (now, then,
+today, tomorrow, yesterday) now need a subject after them, and the pronouns
+do not. That removed the damaged row and kept every good one, including
+"and now I just want to use it".
+
+All 21 remaining changed rows were read individually. 297 Core tests green,
+two new, and one old test deliberately rewritten: "calm and serene and
+quiet and it went on" now breaks before "it", which is correct, while a
+coordinator between adjectives still cannot break because "serene" is not
+a clause opener. The openers list, not the comma, is what protects them.
