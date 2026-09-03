@@ -2101,3 +2101,57 @@ two new, and one old test deliberately rewritten: "calm and serene and
 quiet and it went on" now breaks before "it", which is correct, while a
 coordinator between adjectives still cannot break because "serene" is not
 a clause opener. The openers list, not the comma, is what protects them.
+
+## 2026-09-03: the floor comes down, because the shield replaced it (`fix/similarity-floor`)
+
+The founder dictated their own contacts and got them back wrong,
+including their own name twice: "Chetan, Journal Agadda" and
+"Journalagada". Their first reading was that the contacts were not
+synced. They were: the matcher simply refused every one of them.
+
+| what the engine wrote | what it should be | sounds like | the 0.90 floor |
+|---|---|---|---|
+| Journalagada | Jonnalagadda | 0.83 | refused |
+| Abishek | Abhishek | 0.80 | refused |
+| Shararat | Sharat | 0.75 | refused |
+
+The 0.90 floor was set on 2026-08-15 and was right then: below 0.80 the
+sweep measured ordinary words being rewritten into names, which is the
+worst thing this layer can do. **What changed since is that those losses
+became impossible rather than unlikely**: `EverydayWords` plus the system
+dictionary (2026-08-31) mean a real English word cannot be overwritten at
+any floor.
+
+So the sweep was re-run, on the founder's own recordings this time (the
+ten name utterances above, plus the twelve hand-labelled rows as a
+control against losses), with `tools/transcribe --tokens` supplying real
+per-word confidence and `tools/floorsweep` extended to run the grid twice,
+with the shield and without. At confidence 0.60:
+
+| similarity | wins | losses, no shield | losses, shielded |
+|---|---|---|---|
+| 0.90 (shipped) | 1 | 0 | 0 |
+| 0.85 | 1 | 0 | 0 |
+| 0.80 | 2 | 0 | 0 |
+| **0.75** | **3** | **2** | **0** |
+| 0.70 | 3 | 2 | 0 |
+| 0.65 | 3 | 2 | 0 |
+
+**Every substitution, read rather than counted.** The three wins at 0.75
+are `Shararat -> Sharat`, `Jonalagadda -> Jonnalagadda` and
+`Journalagada -> Jonnalagadda`. The two losses are `super -> Wispr` and
+`period -> Parakeet`: both ordinary words, both refused outright once the
+shield is on. One neutral change (`Siri -> Sarah`, wrong before and wrong
+after) fires at every floor including today's and is unaffected.
+
+0.75 is chosen as the HIGHEST floor that catches all three wins. 0.70 and
+0.65 measure identically here and would only widen the surface on speech
+this probe has not seen.
+
+Two tests that pinned the old trade were rewritten rather than deleted.
+One of them had predicted this exact day in its own comment: "if CTC
+rescoring lands and the floor comes down, this is the case to check
+first". The other showed the alias path reaching what sound could not;
+it now shows what the alias is really for, which never depended on
+distance: an alias ignores CONFIDENCE, and a confidently-written name is
+still untouchable by sound alone.

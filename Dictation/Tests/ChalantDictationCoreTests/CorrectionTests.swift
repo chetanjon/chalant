@@ -305,13 +305,23 @@ struct CorrectionTests {
     /// is the whole reason it exists. `Chalan` sits below the 0.90 similarity
     /// floor the 2026-08-15 sweep set, so without this the loop learns the pair
     /// and then declines to use it.
-    @Test("an alias reaches what the phonetic matcher cannot")
+    /// **Rewritten 2026-09-03 with the floor at 0.75.** `Chalan` is now
+    /// within the matcher's reach, so this no longer shows a gap the alias
+    /// fills. What it still shows is the alias's own reason to exist, which
+    /// never depended on distance: an alias ignores CONFIDENCE. A name the
+    /// engine wrote confidently is untouchable by the phonetic pass by
+    /// design (proper-noun errors are confident errors), and only a pair the
+    /// user typed themselves may overrule it.
+    @Test("an alias reaches what the phonetic matcher may not: a confident word")
     func aliasesReachWhatSoundCannot() {
-        let heard = [Token(text: "Chalan", confidence: 0.41)]
-        #expect(TermMatcher.resolving(tokens: heard, terms: ["Chalant"]).map(\.text) == ["Chalan"])
+        let confident = [Token(text: "Chalan", confidence: 0.93)]
+        #expect(TermMatcher.resolving(tokens: confident, terms: ["Chalant"]).map(\.text) == ["Chalan"])
         #expect(
-            TermMatcher.applyingAliases(tokens: heard, aliases: ["chalan": "Chalant"])
+            TermMatcher.applyingAliases(tokens: confident, aliases: ["chalan": "Chalant"])
                 .map(\.text) == ["Chalant"])
+        // Unsure, the matcher now reaches it on its own.
+        let unsure = [Token(text: "Chalan", confidence: 0.41)]
+        #expect(TermMatcher.resolving(tokens: unsure, terms: ["Chalant"]).map(\.text) == ["Chalant"])
     }
 
     @Test("an alias keeps the speaker's punctuation and matches whatever the case")

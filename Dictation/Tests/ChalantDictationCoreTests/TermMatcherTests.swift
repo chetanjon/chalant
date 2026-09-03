@@ -37,15 +37,37 @@ struct TermMatcherTests {
     /// still works, because the engine's usual error on this word is much
     /// closer than `Shalan`. If CTC rescoring lands and the floor comes down,
     /// this is the case to check first.
-    @Test("a distant mishearing is now refused, and that is the trade")
-    func distantMishearingsAreRefused() {
-        let d = TermMatcher.resolve(heard: "Shalan", confidence: 0.18, terms: Self.vocabulary)
-        #expect(d.replacement == nil)
-
-        // The one that actually shows up in the corpus still lands.
+    /// **The trade was bought back on 2026-09-03, exactly as the note above
+    /// predicted.** This case was written to record a deliberate loss: at
+    /// the 0.90 floor, `Shalan` (0.75) was refused, and the comment said
+    /// "if the floor comes down, this is the case to check first". The floor
+    /// came down to 0.75 because the dictionary shield now makes the losses
+    /// that justified 0.90 impossible, so `Shalan` lands again, and so does
+    /// the founder's own name in the two shapes the engine mangles it into.
+    @Test("a distant mishearing is repaired again, and the shield is why")
+    func distantMishearingsAreRepaired() {
+        #expect(
+            TermMatcher.resolve(heard: "Shalan", confidence: 0.18, terms: Self.vocabulary)
+                .replacement == "Chalant")
+        // The one that always showed up in the corpus still lands.
         #expect(
             TermMatcher.resolve(heard: "Challant", confidence: 0.56, terms: Self.vocabulary)
                 .replacement == "Chalant")
+        // What the founder actually said, and what came back, 2026-09-03.
+        #expect(
+            TermMatcher.resolve(heard: "Journalagada", confidence: 0.44, terms: ["Jonnalagadda"])
+                .replacement == "Jonnalagadda")
+        #expect(
+            TermMatcher.resolve(heard: "Shararat", confidence: 0.27, terms: ["Sharat"])
+                .replacement == "Sharat")
+        // And the two the lower floor would have cost without the shield:
+        // ordinary words, refused now by the shield rather than by distance.
+        #expect(
+            TermMatcher.resolve(heard: "super", confidence: 0.51, terms: ["Wispr"],
+                                knownWords: ["super"]).replacement == nil)
+        #expect(
+            TermMatcher.resolve(heard: "period", confidence: 0.57, terms: ["Parakeet"],
+                                knownWords: ["period"]).replacement == nil)
     }
 
     // MARK: - The guard, which matters more
