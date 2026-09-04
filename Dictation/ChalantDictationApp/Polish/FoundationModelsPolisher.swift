@@ -350,6 +350,37 @@ actor FoundationModelsPolisher: Polisher {
     /// is what a cleanup pass measured by a corpus has to do.
     private static let decoding = GenerationOptions(sampling: .greedy)
 
+    /// The opt-in rewrite: the whole utterance reflowed into clean writing.
+    ///
+    /// Not chunked (a rewrite needs the whole thought to reorder it), a fresh
+    /// session (no growing transcript), and it returns nil on ANY failure so
+    /// the caller falls back to the safe cleanup: a guardrail refusal (Part 0
+    /// Â§0.7, measured reproducible on ordinary sentences), a timeout, or a
+    /// rewrite that dropped a number, negation or name. Never leaves the user
+    /// with nothing (2026-09-04).
+    func rewrite(_ text: String) async -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > CleanupPrompt.minimumCharactersForCleanup else { return nil }
+        guard case .available = SystemLanguageModel.default.availability else { return nil }
+        let session = LanguageModelSession(instructions: RewritePrompt.instructions)
+        let reply: String
+        do {
+            reply = try await Self.withTimeout(.seconds(6)) {
+                try await session.respond(to: RewritePrompt.framing(trimmed), options: Self.decoding).content
+            }
+        } catch {
+            Self.log.notice("rewrite failed, falling back to cleanup: \(Self.errorClass(error), privacy: .public)")
+            return nil
+        }
+        let out = RewritePrompt.unwrap(reply).trimmingCharacters(in: .whitespacesAndNewlines)
+        let verdict = FidelityGuard.checkRewrite(raw: trimmed, rewritten: out)
+        if case .violated(let reason) = verdict {
+            Self.log.notice("rewrite rejected, falling back: \(reason, privacy: .public)")
+            return nil
+        }
+        return out.isEmpty ? nil : out
+    }
+
     private static func tidy(piece: String) async -> Piece {
         let session = LanguageModelSession(instructions: CleanupPrompt.instructions(for: piece))
         let reply: String

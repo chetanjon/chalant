@@ -93,6 +93,26 @@ public enum FidelityGuard {
         return .ok
     }
 
+    /// The looser guard for the rewrite pass (2026-09-04).
+    ///
+    /// Rewrite is ALLOWED to change the words: it merges sentences and drops
+    /// redundant restarts, so the content-overlap, no-new-tokens and stutter
+    /// checks that keep cleanup honest would reject every good rewrite. What
+    /// stays is the safety floor that has nothing to do with wording: a
+    /// number, a negation or a name that changed is a changed MEANING, and
+    /// the whole reason rewrite is opt-in is that the user accepted a reword,
+    /// never a reversal. A failure here falls back to the safe cleanup.
+    public static func checkRewrite(raw: String, rewritten: String) -> Verdict {
+        let rawTrimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outTrimmed = withoutListMarkers(rewritten).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawTrimmed.isEmpty else { return .ok }
+        guard !outTrimmed.isEmpty else { return .violated("the model returned nothing") }
+        if let reason = numbersSurvived(rawTrimmed, outTrimmed) { return .violated(reason) }
+        if let reason = negationsSurvived(rawTrimmed, outTrimmed) { return .violated(reason) }
+        if let reason = namesSurvived(rawTrimmed, outTrimmed) { return .violated(reason) }
+        return .ok
+    }
+
     /// List markers off the front of every line, lines joined with spaces.
     static func withoutListMarkers(_ text: String) -> String {
         text.components(separatedBy: .newlines).map { line -> String in

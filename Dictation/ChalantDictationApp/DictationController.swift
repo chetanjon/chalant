@@ -494,6 +494,13 @@ final class DictationController {
 
     func keyUp() async {
         Self.log.info("keyUp entered, listening=\(self.isListening, privacy: .public)")
+        // Was Shift held at release? That is the opt-in rewrite gesture
+        // (2026-09-04): hold Option to dictate, and if Shift is down when you
+        // let go, the whole utterance is reflowed into clean writing instead
+        // of merely tidied. Read here, at the moment of the decision; if the
+        // user lets Shift go a beat before Option it reverts to a normal
+        // tidy, which is the safe direction to miss in.
+        let wantsRewrite = NSEvent.modifierFlags.contains(.shift)
         // Whatever way this release ends, the latency-critical window ends
         // with it; the hearing that may follow is deliberately nap-able.
         defer { endUtteranceActivity() }
@@ -637,6 +644,24 @@ final class DictationController {
         // change. The tidy is worth less than a still page; the second ear
         // (Better hearing) is the one later change left, and it is a switch.
         var text = shaped
+
+        // The opt-in rewrite runs first and, when it lands, wins: the user
+        // asked for a reflow and accepted the wait for it. It falls back to
+        // the safe cleanup path below on any failure (a guardrail refusal, a
+        // timeout, or a rewrite that changed a number, name or negation), so
+        // Shift never leaves you worse off than a plain hold (2026-09-04).
+        var rewroteWholeUtterance = false
+        if wantsRewrite, !shaped.isEmpty, target != nil {
+            if let rewritten = await polisher.rewrite(shaped) {
+                text = rewritten
+                rewroteWholeUtterance = true
+                Self.log.notice("rewrite landed (\(rewritten.count, privacy: .public) chars)")
+            } else {
+                surface.say("Couldn't rewrite that one. Landed as tidied.")
+                Self.log.notice("rewrite declined; falling back to cleanup")
+            }
+        }
+
         var refinedAtOnce = false
         // The facts behind the row (campaign phase 0): why the polish landed
         // or didn't, and the counters the speed work steers by.
@@ -657,7 +682,7 @@ final class DictationController {
             ? "skipped:empty"
             : (mode == .live ? "skipped:noTarget" : (mode == .shadow ? "shadow:pending" : "skipped:off"))
         var modelChunks: [String] = []
-        if mode == .live, !shaped.isEmpty, let target {
+        if mode == .live, !shaped.isEmpty, !rewroteWholeUtterance, let target {
             let waitStart = Date()
             // The budget is enforced HERE, not only inside the polisher, and
             // for three days it was not enforced anywhere: both waits were
