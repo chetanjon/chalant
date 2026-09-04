@@ -41,9 +41,16 @@ struct DictationEdgeLight: NSViewRepresentable {
             layer?.masksToBounds = false
             line.startPoint = CGPoint(x: 0, y: 0.5)
             line.endPoint = CGPoint(x: 1, y: 0.5)
-            // Top to bottom: the bloom is brightest where it meets the line.
+            // **A radial dome, not a band (2026-09-03).** The first cut made
+            // the bloom a full-width vertical gradient: it fell off top to
+            // bottom but not side to side, so it painted a rectangle the
+            // whole width of the screen, which the founder saw as a box. A
+            // radial gradient centred at the top middle is light gathering
+            // under the notch and fading to nothing at the edges, which is
+            // the whole point of the design.
+            bloom.type = .radial
             bloom.startPoint = CGPoint(x: 0.5, y: 1)
-            bloom.endPoint = CGPoint(x: 0.5, y: 0)
+            bloom.endPoint = CGPoint(x: 1, y: -1)
             layer?.addSublayer(bloom)
             layer?.addSublayer(line)
         }
@@ -71,28 +78,45 @@ struct DictationEdgeLight: NSViewRepresentable {
             let lineTop = size.height - DictationStripLevel.edgeLineHeight
             line.frame = CGRect(x: 0, y: lineTop,
                                 width: size.width, height: DictationStripLevel.edgeLineHeight)
+            // The shoulders sit at `reach`, but the fade to nothing carries
+            // on well past them so the ends melt into the dark rather than
+            // stopping (founder, 2026-09-03: "spread it wider instead of
+            // looking like a cutoff end"). A wide, low tail either side.
+            let shoulderAt = min(0.42, Double(reach))
             line.colors = [
                 base.withAlphaComponent(0).cgColor,
-                base.withAlphaComponent(shoulder).cgColor,
+                base.withAlphaComponent(shoulder * 0.5).cgColor,
                 base.withAlphaComponent(peak).cgColor,
-                base.withAlphaComponent(shoulder).cgColor,
+                base.withAlphaComponent(shoulder * 0.5).cgColor,
                 base.withAlphaComponent(0).cgColor,
             ]
             line.locations = [
                 0,
-                NSNumber(value: Double(0.5 - reach)),
+                NSNumber(value: 0.5 - shoulderAt),
                 0.5,
-                NSNumber(value: Double(0.5 + reach)),
+                NSNumber(value: 0.5 + shoulderAt),
                 1,
             ]
 
-            bloom.frame = CGRect(x: 0, y: lineTop - DictationStripLevel.edgeBloomHeight,
-                                 width: size.width, height: DictationStripLevel.edgeBloomHeight)
+            // The dome is as wide as the swell reaches, so louder speech
+            // spills its glow further out; the frame is centred on the
+            // middle of the edge and only as wide as `reach` allows.
+            let domeWidth = size.width * CGFloat(reach) * 2.4
+            bloom.frame = CGRect(x: (size.width - domeWidth) / 2,
+                                 y: lineTop - DictationStripLevel.edgeBloomHeight,
+                                 width: domeWidth, height: DictationStripLevel.edgeBloomHeight)
+            // Three stops, fully transparent by 70% down, so the light
+            // dissolves inside the frame and the bottom of the frame is
+            // empty (founder, 2026-09-03: "there is an end to the bar, like
+            // a cutoff in the bottom, remove that so it looks like an
+            // aurora"). A two-stop fade let the frame edge clip a still-lit
+            // region, which drew the flat line they saw as a box bottom.
             bloom.colors = [
                 base.withAlphaComponent(peak * DictationStripLevel.edgeBloomShare).cgColor,
+                base.withAlphaComponent(peak * DictationStripLevel.edgeBloomShare * 0.28).cgColor,
                 base.withAlphaComponent(0).cgColor,
             ]
-            bloom.locations = [0, 1]
+            bloom.locations = [0, 0.42, 0.7]
             CATransaction.commit()
         }
     }

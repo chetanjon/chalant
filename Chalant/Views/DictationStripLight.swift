@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+/// SUPERSEDED 2026-09-03 by `DictationEdgeLight`. The floating strip was
+/// replaced by light on the screen's top edge; this renderer is no longer
+/// mounted anywhere. Kept only until its remaining tests are migrated, then
+/// deleted.
+///
 /// The dictation strip's light: Slipstream.
 ///
 /// The island's outline carries a thin white core and one tight accent glow,

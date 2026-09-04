@@ -19,10 +19,16 @@ struct NotchRootView: View {
     @ObservedObject var activities: ActivityStore
     @ObservedObject var sessions: SessionStore
     @State private var pressStarted: Date?
-    /// The dictation strip's "sent" light, alive only for the half second
-    /// after a hold ends (see `DictationSentLight`).
-    @State private var sentLightVisible = false
-    @State private var sentLightPhase: CGFloat = 0
+    /// True for one frame after a hold ends, so the shell's size snaps to
+    /// the resting pill instead of animating the shrink from the full-width
+    /// edge (2026-09-03). The opacity fade does the visible work.
+    @State private var leftDictation = false
+    /// True from the end of a dictation for a short beat: the island stays
+    /// hidden so nothing surfaces the instant you stop, then eases back.
+    @State private var restAfterDictation = false
+    /// Identifies the current rest, so an earlier timer cannot clear a later
+    /// dictation's rest.
+    @State private var restToken = UUID()
 
     // Declared so the view re-renders (and re-reads Theme.Motion) the
     // moment the user changes the feel in settings.
@@ -233,8 +239,16 @@ struct NotchRootView: View {
             return ChalantRole.islandHidden(
                 collapsed: face.state == .collapsed,
                 toastShowing: model.glanceToast != nil,
-                sentLightShowing: sentLightVisible,
+                sentLightShowing: false,
                 somethingWantsYou: model.somethingWantsYou)
+        }
+        // Just finished dictating: stay hidden until reached for, so the
+        // resting pill does not surface the instant the aurora fades
+        // (founder, 2026-09-03: "I still see the pill coming up after I'm
+        // done talking"). Cleared the moment the pointer reaches the notch.
+        if restAfterDictation, face.state == .collapsed, !face.pointerNear,
+           model.glanceToast == nil, !model.somethingWantsYou {
+            return true
         }
         return (autoHideIsland || (face.style == .pill && face.fullscreenBelow))
             && face.state == .collapsed
@@ -258,6 +272,17 @@ struct NotchRootView: View {
     /// leaving it pours shut like everything else.
     private var stateMotion: Animation {
         face.state == .dictating ? Theme.Motion.dictationPop : Theme.Motion.island
+    }
+
+    /// Whether the size should animate at all through this state change.
+    /// Leaving dictation, it must NOT: the shell shrinks from the
+    /// full-width edge back to the small pill, and animating that shrink
+    /// draws the eye to a morphing shape (founder, 2026-09-03, "I still see
+    /// the pill in the end after talking"). Instead the frame snaps to the
+    /// pill's size while the shell is still at opacity zero, and the 0.5 s
+    /// opacity fade brings the pill in already at rest, so nothing morphs.
+    private var sizeMotion: Animation? {
+        leftDictation ? nil : stateMotion
     }
 
     private var islandShape: IslandShape {
@@ -492,6 +517,7 @@ struct NotchRootView: View {
                         islandShape
                             .strokeBorder(Theme.specularEdge, lineWidth: 1)
                             .opacity(
+                                face.state == .dictating ? 0 :
                                 face.state == .collapsed
                                     ? (face.isHovering ? 0.9 : (idleEdgeOn ? 0.75 : 0.4))
                                     : 1
@@ -514,7 +540,7 @@ struct NotchRootView: View {
                     // A soft specular highlight that follows the cursor
                     // along the top edge, the glass answers the hand.
                     .overlay {
-                        if Theme.Feel.current.ambient, let unit = face.pointerUnit {
+                        if Theme.Feel.current.ambient, face.state != .dictating, let unit = face.pointerUnit {
                             islandShape
                                 .strokeBorder(Color.white.opacity(0.14), lineWidth: 1.5)
                                 .mask(
@@ -565,37 +591,51 @@ struct NotchRootView: View {
                     .overlay {
                         if face.state == .dictating {
                             DictationEdgeLight(
-                                accent: accent,
+                                // White, not the album accent (founder,
+                                // 2026-09-03: "I don't want it to have blue").
+                                // The default accent is a pale blue and read
+                                // as blue on a thin bright edge; a clean white
+                                // is the light this design wants regardless of
+                                // what is playing.
+                                accent: Color(white: 0.96),
                                 level: model.dictationLevel, fill: model.dictationFill,
                                 size: dictatingSize
                             )
                             .transition(.opacity)
                         }
                     }
-                    // Letting go is a small satisfaction: a point of light
-                    // gathers at the strip's centre and slips up into the
-                    // notch while the strip pours shut. Once.
-                    .overlay(alignment: .top) {
-                        if sentLightVisible {
-                            DictationSentLight(
-                                accent: accent, phase: sentLightPhase,
-                                stripHeight: dictatingSize.height
-                            )
+                    // No farewell (2026-09-03). The point-of-light-into-the-
+                    // notch goodbye was built for the floating strip, and on
+                    // release it read to the founder as a pill flashing shut.
+                    // The edge light simply fades; letting go needs no send-off
+                    // of its own.
+                    .onChange(of: face.state) { was, now in
+                        // Snap the size (no shrink animation) for one frame
+                        // when leaving dictation, so only the opacity fade is
+                        // seen. Reset next runloop so the flag governs this
+                        // transition alone.
+                        guard was == .dictating, now != .dictating else { return }
+                        leftDictation = true
+                        DispatchQueue.main.async { leftDictation = false }
+                        // Come back after a beat, not the instant you release
+                        // (founder, 2026-09-03: "we should come back after
+                        // some time, right? for now it looks like a glitch").
+                        // A held rest, then the island eases back to whatever
+                        // it normally shows. Reaching for the notch ends it
+                        // early.
+                        restAfterDictation = true
+                        let token = UUID()
+                        restToken = token
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                            if restToken == token { restAfterDictation = false }
                         }
                     }
-                    .onChange(of: face.state) { was, now in
-                        guard was == .dictating, now != .dictating else { return }
-                        sentLightPhase = 0
-                        sentLightVisible = true
-                        withAnimation(.easeOut(duration: DictationStripLevel.sentDuration)) {
-                            sentLightPhase = 1
-                        }
-                        DispatchQueue.main.asyncAfter(
-                            deadline: .now() + DictationStripLevel.sentDuration + 0.05
-                        ) { sentLightVisible = false }
+                    .onChange(of: face.pointerNear) { _, near in
+                        if near { restAfterDictation = false }
                     }
                     .shadow(
-                        color: Color.black.opacity(face.state == .collapsed ? 0 : 0.45),
+                        color: Color.black.opacity(
+                            face.state == .collapsed || face.state == .dictating ? 0 : 0.45),
                         radius: 14, y: 7
                     )
 
@@ -642,7 +682,7 @@ struct NotchRootView: View {
             // (SwiftUI's onDrop never fires in this panel); the accent edge
             // lights via face.isDropTargeted. The island opens after the
             // drop lands, not during the drag, so nothing disrupts it.
-            .animation(stateMotion, value: face.state)
+            .animation(sizeMotion, value: face.state)
             .animation(Theme.Motion.hover, value: face.isHovering)
             .animation(Theme.Motion.hover, value: statusWings)
 
@@ -662,7 +702,7 @@ struct NotchRootView: View {
         // it is a lost one.
         .opacity(hiddenUntilReachedFor ? 0 : 1)
         .animation(Theme.Motion.island, value: hiddenUntilReachedFor)
-        .animation(stateMotion, value: face.state)
+        .animation(sizeMotion, value: face.state)
         .frame(maxWidth: .infinity, alignment: .top)
         // The user's accent choice, not the raw album color, fixed
         // modes must win everywhere below this point.
