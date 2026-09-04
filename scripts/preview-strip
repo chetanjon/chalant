@@ -12,12 +12,13 @@ cat <<'EOF'
 
   Click into any text field. Hold LEFT OPTION and talk.
 
-  The island should grow into a low strip ON THE SCREEN WITH THAT APP,
-  and its rim should light up with your voice. One dot in the middle.
-  App name on the left, mic on the right. Let go: it closes.
+  No strip, no pill. A white AURORA lights the very top edge of the
+  screen with that app, gathered in the middle, spreading wider the
+  louder you are, and fading down into nothing. Let go: it fades, and
+  after a beat the island returns to whatever it normally shows.
 
-  Then: cover the mic with your thumb and hold again. The strip should
-  open and STAY DARK. That is the pass, not a failure.
+  Then: cover the mic with your thumb and hold again. The aurora
+  should open and STAY DARK. That is the pass, not a failure.
 
   Press Return when done.
 EOF

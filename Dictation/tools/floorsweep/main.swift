@@ -1,3 +1,5 @@
+import AppKit
+import ChalantDictationCore
 import Foundation
 
 // Sweep the two floors `TermMatcher` gates on, the way Part 0 §0.13 swept
@@ -44,6 +46,27 @@ let rows: [Row] = (try! String(contentsOfFile: args[1], encoding: .utf8))
         return try? JSONDecoder().decode(Row.self, from: data)
     }
 
+/// The dictionary shield the app hands the matcher (2026-09-03): every word
+/// macOS itself knows is untouchable. The August sweep predates it, and it is
+/// the whole reason this sweep is worth running again: the losses that forced
+/// the floor up to 0.90 were ordinary words being rewritten into names, which
+/// is now impossible by construction rather than by threshold.
+func dictionaryWords(_ rows: [Row]) -> Set<String> {
+    let checker = NSSpellChecker.shared
+    var known: Set<String> = []
+    for row in rows {
+        for token in row.detail {
+            let word = token.t.trimmingCharacters(in: .punctuationCharacters).lowercased()
+            guard !word.isEmpty, !known.contains(word) else { continue }
+            let range = checker.checkSpelling(
+                of: word, startingAt: 0, language: "en", wrap: false,
+                inSpellDocumentWithTag: 0, wordCount: nil)
+            if range.location == NSNotFound { known.insert(word) }
+        }
+    }
+    return known
+}
+
 func bare(_ s: String) -> String {
     s.lowercased().filter { $0.isLetter || $0.isNumber || $0 == "'" }
 }
@@ -84,8 +107,13 @@ if args.count > 4, let similarity = Double(args[3]), let confidence = Double(arg
     exit(0)
 }
 
-print("similarity  confidence     wins   losses  neutral   verdict")
-print(String(repeating: "-", count: 66))
+let known = dictionaryWords(rows)
+print("dictionary shield: \(known.count) of the corpus's words are words macOS knows\n")
+
+for shielded in [false, true] {
+    print(shielded ? "WITH the dictionary shield" : "WITHOUT the shield (August's conditions)")
+    print("similarity  confidence     wins   losses  neutral   verdict")
+    print(String(repeating: "-", count: 66))
 
 for similarity in [0.65, 0.70, 0.75, 0.80, 0.85, 0.90] {
     for confidence in [0.3, 0.4, 0.5, 0.6] {
@@ -95,7 +123,8 @@ for similarity in [0.65, 0.70, 0.75, 0.80, 0.85, 0.90] {
             let tokens = row.detail.map { Token(text: $0.t, confidence: $0.c) }
             let after = TermMatcher.resolving(
                 tokens: tokens, terms: terms,
-                confidenceFloor: confidence, similarityFloor: similarity)
+                confidenceFloor: confidence, similarityFloor: similarity,
+                knownWords: shielded ? known : [])
 
             for (before, now) in zip(tokens, after) where before.text != now.text {
                 let wasRight = truth.contains(bare(before.text))
@@ -114,4 +143,6 @@ for similarity in [0.65, 0.70, 0.75, 0.80, 0.85, 0.90] {
             String(format: "%10.2f  %10.2f   %6d   %6d   %6d   %@",
                    similarity, confidence, tally.wins, tally.losses, tally.neutral, verdict))
     }
+}
+    print("")
 }

@@ -214,12 +214,13 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(Theme.Motion.dictationPop, .spring(response: 0.22, dampingFraction: 0.85))
     }
 
-    /// The lit portion of the edge: about the middle third at the start of a
-    /// hold, the whole edge after a full sentence.
-    func testSpreadRunsFromAThirdToEverything() {
-        XCTAssertEqual(DictationStripLevel.spread(fill: 0), 0.18, accuracy: 0.001)
-        XCTAssertEqual(DictationStripLevel.spread(fill: 1), 0.60, accuracy: 0.001)
-        XCTAssertEqual(DictationStripLevel.spread(fill: 2), 0.60, accuracy: 0.001)
+    /// The lit portion of the edge (2026-09-03: opens fast, then grows a
+    /// little). Most of its width the instant you speak, edging wider over
+    /// the sentence, so the aurora blooms rather than crawls.
+    func testSpreadOpensFastThenGrows() {
+        XCTAssertEqual(DictationStripLevel.spread(fill: 0), 0.40, accuracy: 0.001)
+        XCTAssertEqual(DictationStripLevel.spread(fill: 1), 0.58, accuracy: 0.001)
+        XCTAssertEqual(DictationStripLevel.spread(fill: 2), 0.58, accuracy: 0.001)
     }
 
     /// The audio engine reports raw peak, which can exceed 1 on a hot mic
@@ -331,10 +332,10 @@ final class DictationStripTests: XCTestCase {
         XCTAssertEqual(host.spreadMask.frame.width, 320 + spill * 2, accuracy: 0.001)
         let maskWidth = 320 + spill * 2
         let atRest = host.spreadMask.locations!.map { CGFloat(truncating: $0) }
-        XCTAssertEqual(atRest[1], 0.5 - 0.18 * 320 / maskWidth, accuracy: 0.001)
+        XCTAssertEqual(atRest[1], 0.5 - 0.40 * 320 / maskWidth, accuracy: 0.001)
         host.apply(shape: shape, accent: .white, level: 0, fill: 1, pulse: 0, pace: 0, beat: 0, sway: 0, size: size)
         let full = host.spreadMask.locations!.map { CGFloat(truncating: $0) }
-        XCTAssertEqual(full[3], 0.5 + 0.60 * 320 / maskWidth, accuracy: 0.001)
+        XCTAssertEqual(full[3], 0.5 + 0.58 * 320 / maskWidth, accuracy: 0.001)
     }
 
     // MARK: - Which display (spec, "Which display")

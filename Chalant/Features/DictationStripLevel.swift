@@ -189,11 +189,16 @@ enum DictationStripLevel {
         )
     }
 
-    /// How far from the strip's centre the lit edge reaches, as a fraction of
-    /// the strip's width on each side: about the middle third at the start of
-    /// a hold, the whole edge after a full sentence.
+    /// How far from the centre the lit edge reaches, per side.
+    ///
+    /// **Opens fast, then grows a little (2026-09-03).** It used to start at
+    /// the middle third (0.18) and crawl to the ends over a whole sentence,
+    /// and on the thin edge the founder felt that crawl as slow. Now it opens
+    /// to most of its width the instant you speak and only edges wider as the
+    /// sentence goes on, so the motion is a quick bloom rather than a slow
+    /// stretch.
     static func spread(fill: CGFloat) -> CGFloat {
-        0.18 + clamp(fill) * 0.42
+        0.40 + clamp(fill) * 0.18
     }
 
     // MARK: - The pool
@@ -276,6 +281,44 @@ enum DictationStripLevel {
     /// How deep the dictating glass tints: a hair darker than the veiled
     /// island, so the strip reads as a solid object over any wallpaper.
     static let glassDepth: Double = 0.45
+
+    // MARK: - The edge (2026-09-03)
+
+    /// **The strip stops being an object.** The founder, on the shipped
+    /// pill: "that thing that's popping, which shows that I'm talking, I
+    /// don't like that", and when asked what was wrong they named three
+    /// things at once: where it sits, its shape and size, and how it moves.
+    /// Not that it appears. So the answer that fixes all three is to stop
+    /// drawing a thing at all: light gathers along the very top edge of the
+    /// screen, brightest at the middle, reaching further out as the sentence
+    /// goes on. Nothing floats, nothing has a size to be wrong, and it
+    /// behaves the same on a notch Mac, a pill Mac and an external monitor,
+    /// which no floating shape ever did.
+    /// Thicker than the first cut's 3 pt: the founder saw it and said "it
+    /// looks good, but it's not visible" (2026-09-03). A hairline reads as
+    /// premium and reads as nothing; a 5 pt band you can actually find.
+    static let edgeLineHeight: CGFloat = 5
+    /// The light that falls from the line onto the wallpaper below it. Tall
+    /// enough that the glow fades fully to nothing within it, with room to
+    /// spare below, so the frame never clips a lit region into a flat line.
+    static let edgeBloomHeight: CGFloat = 52
+    static var edgeHeight: CGFloat { edgeLineHeight + edgeBloomHeight }
+
+    /// Brightness at the middle of the swell. **The floor is the fix
+    /// (2026-09-03):** it was 0.14, near invisible at rest, so a held key
+    /// with a quiet room looked like nothing was happening. Raised so the
+    /// light is unmistakably present the instant you hold the key, and still
+    /// brightens hard on the voice.
+    static func edgePeak(level: CGFloat) -> Double {
+        0.45 + Double(clamp(level)) * 0.53
+    }
+
+    /// The shoulders, as a share of the peak. Low on purpose: the swell has
+    /// to melt into the dark rather than end at a visible stop.
+    static let edgeShoulderShare: Double = 0.16
+    /// How much of the peak the bloom under the line carries. Raised with the
+    /// floor so the glow under the line is visible, not just the line.
+    static let edgeBloomShare: Double = 0.22
 
     static let stripWidth: CGFloat = 260
     static let stripHeight: CGFloat = 28

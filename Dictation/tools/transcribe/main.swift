@@ -33,6 +33,9 @@ guard args.count > 2 else {
 let input = args[1]
 let outPath = args[2]
 let deep = args.contains("--deep")
+/// Per-word confidence, which the vocabulary matcher gates on and nothing
+/// else needs. Emitted as `detail` so `floorsweep` reads this file directly.
+let wantTokens = args.contains("--tokens")
 var limit = Int.max
 if let i = args.firstIndex(of: "--limit"), i + 1 < args.count, let n = Int(args[i + 1]) { limit = n }
 
@@ -76,7 +79,9 @@ func audioFiles() -> [(id: String, url: URL)] {
 /// One file through the engine, finalized text only. A fresh analyzer per
 /// file: sample-rate conversion is stateful and a shared one would carry a
 /// previous recording's tail into the next row's numbers.
-func transcribe(_ url: URL) async throws -> String {
+struct Word: Encodable { let t: String; let c: Double? }
+
+func transcribe(_ url: URL) async throws -> (text: String, words: [Word]) {
     guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: "en-US")) else {
         throw NSError(domain: "transcribe", code: 1, userInfo: [NSLocalizedDescriptionKey: "no supported en-US locale"])
     }
@@ -94,12 +99,21 @@ func transcribe(_ url: URL) async throws -> String {
     let converter = (analyzerFormat != nil && analyzerFormat != fileFormat)
         ? AVAudioConverter(from: fileFormat, to: analyzerFormat!) : nil
 
-    let collected = Task<String, Error> {
+    let collected = Task<(String, [Word]), Error> {
         var text = ""
+        var words: [Word] = []
         for try await result in module.results where result.isFinal {
             text += String(result.text.characters)
+            for run in result.text.runs {
+                let piece = String(result.text[run.range].characters)
+                let confidence = run[AttributeScopes.SpeechAttributes.ConfidenceAttribute.self]
+                for token in piece.split(separator: " ") {
+                    let value: Double? = confidence.map { Double($0) }
+                    words.append(Word(t: String(token), c: value))
+                }
+            }
         }
-        return text
+        return (text, words)
     }
 
     let (inputs, continuation) = AsyncStream<AnalyzerInput>.makeStream()
@@ -144,7 +158,7 @@ var failed = 0
 for (n, item) in files.enumerated() {
     let started = ContinuousClock.now
     do {
-        let raw = try await transcribe(item.url)
+        let (raw, words) = try await transcribe(item.url)
         let seconds = Double(started.duration(to: .now).components.seconds)
             + Double(started.duration(to: .now).components.attoseconds) * 1e-18
         var row: [String: Any] = [
@@ -154,6 +168,9 @@ for (n, item) in files.enumerated() {
             "seconds": seconds,
         ]
         if deep { row["deep"] = deterministic(raw.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        if wantTokens {
+            row["detail"] = words.map { ["t": $0.t, "c": $0.c as Any] }
+        }
         let data = try JSONSerialization.data(withJSONObject: row, options: [.sortedKeys])
         lines.append(String(decoding: data, as: UTF8.self))
         print("\(n + 1)/\(files.count) \(item.id) \(raw.split(separator: " ").count) words")
