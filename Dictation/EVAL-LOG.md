@@ -2155,3 +2155,39 @@ first". The other showed the alias path reaching what sound could not;
 it now shows what the alias is really for, which never depended on
 distance: an alias ignores CONFIDENCE, and a confidently-written name is
 still untouchable by sound alone.
+
+## 2026-09-04: does the model rewrite, not just proofread (`feat/rewrite-mode`)
+
+The founder rambled a messy paragraph to test cleanup and got choppy
+output. Measured why: the cleanup model, given 4.8 s (5x its budget),
+changed almost nothing, because its prompt forbids restructuring
+("smallest possible changes, do not paraphrase, do not add words"). That
+is the safety design, not a bug. Turning a ramble into prose is rewriting,
+which the fidelity guard exists to block.
+
+So the question for a real rewrite mode: can the SAME on-device 3B model
+produce good reflowed prose under a prompt that ALLOWS restructuring?
+`tools/rewriteprobe` tests it directly. Findings, on real rambles:
+
+| input | time | result |
+|---|---|---|
+| the resume ramble (74 w) | 2.76 s | choppy "And ... And ..." merged into flowing sentences, questions kept, first person kept, facts kept |
+| the 3 AM sentence | 1.51 s | one clean two-sentence rewrite, calm, facts intact |
+| a run/pushups/weight line | 0.79 s | "five miles, 20 pushups, 165" all preserved, well reflowed |
+| "send the invoice for 320 to Rohan by Friday, do not cc the manager" | — | **REFUSED, "May contain unsafe content", twice** |
+
+**Verdict: viable and good, with one hard caveat.** The model rewrites
+well and fast and keeps numbers and names. But Apple's guardrail
+(Part 0 §0.7) refuses some ordinary sentences outright and
+reproducibly, so a rewrite mode MUST fall back to the safe cleanup (or
+the raw words) on refusal, never leave the user with nothing.
+
+Design consequences for the build:
+- **Opt-in gesture, never the default.** Rewrite can change how a thing is
+  said, so it must be a deliberate ask, separate from the safe cleanup
+  that ships as the default path.
+- **No 1 s budget.** The user asked for a rewrite; ~3 s is acceptable
+  where 1 s was not, because they chose to wait.
+- **A looser guard, not no guard.** The rewrite may restructure, so
+  "no new tokens" and the length check cannot apply; but numbers, names
+  and negations are still verified, and a guardrail refusal falls back.
