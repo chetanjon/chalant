@@ -89,8 +89,9 @@ widget opens the app on that note.
    email. Internal testers (your team) need no review. External testers go
    through a short review once, a day or two. They install through the
    TestFlight app and later builds update on their own.
-5. **App Store**: when it is stable, fill in the listing and submit the same
-   build for review.
+5. **App Store**: when it is stable, follow `AppStore/SUBMISSION.md` top to
+   bottom. `AppStore/LISTING.md` has every field the form asks for, and the
+   privacy and support pages it links are in `docs/notes/`.
 
 Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.yml`
 before each upload; App Store Connect refuses a build number it has seen.
