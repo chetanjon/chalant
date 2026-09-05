@@ -1,11 +1,4 @@
 Chalant.xcodeproj/
-# The iPhone app. Its project, Info.plists and entitlements all come out of
-# Notes/project.yml on every `xcodegen generate`, so none is checked in.
-Notes/Notes.xcodeproj/
-Notes/Notes/Info.plist
-Notes/Notes/Notes.entitlements
-Notes/NotesWidget/Info.plist
-Notes/NotesWidget/NotesWidget.entitlements
 DerivedData/
 build/
 .DS_Store
