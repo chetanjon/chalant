@@ -33,6 +33,36 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           CODE_SIGN_IDENTITY=""
 
+  # The iPhone app under Notes/. Builds the app, its widget and its tests
+  # for the simulator and runs the tests there. Signing is off because the
+  # runner has no team; entitlements are still checked for shape.
+  notes:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install xcodegen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate --spec Notes/project.yml
+      - name: Pick a simulator
+        id: sim
+        run: |
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          phones = [d for runtime, ds in devices.items() if "iOS" in runtime
+                    for d in ds if d["isAvailable"] and d["name"].startswith("iPhone")]
+          print(phones[-1]["udid"])')
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+      - name: Run unit tests
+        run: >
+          xcodebuild test
+          -project Notes/Notes.xcodeproj
+          -scheme Notes
+          -destination "id=${{ steps.sim.outputs.udid }}"
+          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGN_IDENTITY=""
+
   # Chalant's landing page exists twice, here and in the private portfolio
   # repo, and most downloads come from the copy this repo cannot see. It
   # is deliberate that a change to docs/index.html turns this job red
