@@ -52,7 +52,7 @@ final class CorpusCaptureTests: XCTestCase {
         XCTAssertNotNil(id)
 
         let row = try XCTUnwrap(try rows().first)
-        XCTAssertEqual(row["schema"] as? Int, 3)
+        XCTAssertEqual(row["schema"] as? Int, 4)
         XCTAssertEqual(row["asrRaw"] as? String, "send fifteen um not fifty")
         XCTAssertEqual(row["afterDeterministic"] as? String, "Send 15, not 50.")
         XCTAssertEqual(row["modelOutput"] as? String, "Send 15, not 50.")
