@@ -99,6 +99,17 @@ actor CorpusCapture {
         var insertOutcome: String
     }
 
+    /// What the two ears did with each other, when the merge ran in front of
+    /// the landing.
+    struct Merge {
+        var outcome: String
+        var waitSeconds: Double
+        var earSeconds: Double
+        var disputedSpans: Int
+        var mergedSpans: Int
+        var earOutput: String?
+    }
+
     @discardableResult
     func finish(
         output: String, fedBuffers: Int, finalize: TimeInterval?, insert: TimeInterval?,
@@ -106,7 +117,7 @@ actor CorpusCapture {
         holdSeconds: TimeInterval = 0, inputPeak: Double = 0, keyDownHeard: Bool = true,
         polishOutcome: String = "", chunkCount: Int = 0, warmChunks: Int = 0,
         failedChunks: Int = 0, refinedChanged: Bool = false, polishColdStart: Bool = false,
-        secondsSinceLastPolish: Double = -1, texts: Texts? = nil
+        secondsSinceLastPolish: Double = -1, merge: Merge? = nil, texts: Texts? = nil
     ) -> String? {
         guard let p = pending else { return nil }
         pending = nil
@@ -122,8 +133,13 @@ actor CorpusCapture {
         // schema 3 (2026-08-21, later): the four texts of the path joined
         // (`Texts`), so the protected-span mutation rate can be read off
         // real dictations rather than only off Set C.
+        // schema 4 (2026-09-04): the second ear moved in FRONT of the
+        // landing, so what it decided is now part of what the user was
+        // shown rather than a swap they could watch happen. A merge that
+        // gets a word wrong is invisible: nobody sees the version it
+        // replaced. These fields are how it stays reviewable.
         var row: [String: Any] = [
-            "schema": 3,
+            "schema": 4,
             "id": p.id,
             "audio": "captured/\(p.id).caf",
             "recorded": ISO8601DateFormatter().string(from: p.startedAt),
@@ -151,6 +167,16 @@ actor CorpusCapture {
             "secondsSinceLastPolish": secondsSinceLastPolish,
             "note": "",
         ]
+        if let merge {
+            row["mergeOutcome"] = merge.outcome
+            row["mergeWaitSeconds"] = merge.waitSeconds
+            row["earSecondsAtRelease"] = merge.earSeconds
+            row["disputedSpans"] = merge.disputedSpans
+            row["mergedSpans"] = merge.mergedSpans
+            // The ear's own words, so a merge can be judged against what it
+            // was choosing between rather than only by its verdict.
+            row["hearingOutput"] = merge.earOutput ?? NSNull()
+        }
         if let texts {
             row["asrRaw"] = texts.asrRaw
             row["afterDeterministic"] = texts.afterDeterministic

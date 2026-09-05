@@ -58,7 +58,7 @@ final class DictationController {
     private var hearingTask: Task<Void, Never>?
     /// The Whisper listening itself. Retired with the swap task, and never
     /// started before the words have landed: the ANE is the tidy's first.
-    private var hearingWorkTask: Task<String?, Never>?
+    private var hearingWorkTask: Task<BetterHearing.Hearing?, Never>?
     private var lastLanded: String = ""
     /// "Clean while you talk": during the hold, every chunk of the transcript
     /// that is already closed goes to the model early, so at release only the
@@ -595,18 +595,87 @@ final class DictationController {
         // other output touched.
         let raw = transcript.rawText
 
-        // The second ear does NOT start here. It did for one day (1.24.0
-        // started it at finalize so bursts could not retire it), and the
-        // corpus caught the price the same day: Whisper, the tidy model and
-        // the first ear share ONE Neural Engine, so a hearing running during
-        // the release window serialized the tidy behind it. Every real
-        // utterance landed raw with waits of 1.35 to 5.17 s against the
-        // 0.65 s budget, and neither priorities nor executor choices could
-        // fix what is hardware contention. The ear now waits its turn: it
-        // starts after the words have landed (`startHearingSwap`), with the
-        // ceiling that scales by utterance length making up the lost start.
+        // **The second ear starts HERE now (2026-09-04), and the words wait
+        // for it.** This reverses the note that stood here from 2026-08-20,
+        // and the reversal is worth stating because that note was right about
+        // the hardware: Whisper, the tidy model and the first ear share one
+        // Neural Engine, and a hearing running during the release window
+        // serialized the tidy behind it, so every utterance landed raw with
+        // waits of 1.35 to 5.17 s. What changed is not the hardware but what
+        // the window is FOR. The tidy model earned that window and then did
+        // not use it: measured over the founder's own week, it changed
+        // anything on 3.9% of rows, while the ear disagreed with what landed
+        // on 79 rows and was allowed to fix 21 of them, the rest refused for
+        // want of a safe undo or thrown away because the user had already
+        // typed. So the tidy yields the window to the ear (`mergeEngaged`
+        // below skips the release polish), the contention the old note
+        // measured does not arise, and the words the ear rescues land the
+        // first time instead of arriving as a visible swap or not at all.
+        //
+        // The founder chose this shape outright when asked: wait for the
+        // accurate ear rather than keep the instant landing and correct
+        // afterwards.
+        let earIsReady = await BetterHearing.shared.isReady
+        let mergeEngaged =
+            !hearingSamples.isEmpty && BetterHearing.isEnabled()
+            && BetterHearing.mergesAtLanding() && target != nil && practiceLanding == nil
+            && earIsReady
+        let hearingWork: Task<BetterHearing.Hearing?, Never>? =
+            mergeEngaged
+            ? Task(priority: .userInitiated) { [raw] in
+                let hints = await Names.forHearing(heard: raw)
+                return await BetterHearing.shared.hearFully(hearingSamples, hints: hints)
+            }
+            : nil
+
         let prepareStart = Date()
-        let deterministic = await deterministicText(from: transcript.tokens)
+
+        // Reconcile the two hearings, or keep the engine's and let the old
+        // post-landing swap have the same decode.
+        var tokens = transcript.tokens
+        var mergeOutcomeName = mergeEngaged ? "" : (BetterHearing.isEnabled() ? "earNotReady" : "earOff")
+        var mergeWaitSeconds: Double = 0
+        var earSecondsAtRelease: Double = -1
+        var disputedSpans = 0
+        var mergedSpans = 0
+        var mergeHearing: BetterHearing.Hearing?
+        if let hearingWork {
+            let waitStarted = Date()
+            let ceiling = HearingMerge.waitCeiling(
+                utteranceSeconds: Double(hearingSamples.count) / 16_000)
+            if let hearing = await Deadline.value(of: hearingWork, within: ceiling) ?? nil {
+                mergeHearing = hearing
+                earSecondsAtRelease = hearing.seconds
+                // PROVISIONAL, and it is the one number here chosen by
+                // argument rather than by data. `tools/mergeprobe` sweeps the
+                // three policies over recorded audio, but telling a win from
+                // a loss needs labels, and the labelling of the forty rows
+                // that decide it is with the founder. On the eyeball reading
+                // of those rows earLeads recovers three more corrections than
+                // engineLeads and risks the same two; when the labels land,
+                // this constant changes or it does not, with the table in
+                // EVAL-LOG either way.
+                let outcome = HearingMerge.merge(
+                    engine: tokens, ear: hearing.text,
+                    signals: await mergeSignals(engine: tokens, ear: hearing.text),
+                    policy: HearingMerge.Policy.earLeads)
+                tokens = outcome.tokens
+                mergeOutcomeName = outcome.verdict.rawValue
+                disputedSpans = outcome.disputedSpans
+                mergedSpans = outcome.mergedSpans
+                if outcome.mergedSpans > 0 {
+                    Self.log.notice(
+                        "merged \(outcome.mergedSpans, privacy: .public) of \(outcome.disputedSpans, privacy: .public) disputes from the second ear")
+                }
+            } else {
+                // The decode is still running and is never cancelled, so the
+                // swap below takes it rather than starting a second one.
+                mergeOutcomeName = "budgetMissed"
+            }
+            mergeWaitSeconds = Date().timeIntervalSince(waitStarted)
+        }
+
+        let deterministic = await deterministicText(from: tokens)
         if deterministic != raw {
             Self.log.error(
                 "guardrail trimmed \(raw.count - deterministic.count, privacy: .public) chars of punctuation run")
@@ -657,7 +726,15 @@ final class DictationController {
             ? "skipped:empty"
             : (mode == .live ? "skipped:noTarget" : (mode == .shadow ? "shadow:pending" : "skipped:off"))
         var modelChunks: [String] = []
-        if mode == .live, !shaped.isEmpty, let target {
+        // The tidy yields its window when the ear has already used it. It
+        // changes anything on 3.9% of rows and the ear had 79 corrections
+        // waiting, so paying both waits back to back would spend the
+        // founder's patience on the weaker of the two.
+        if mergeOutcomeName == "merged" || mergeOutcomeName == "agreed" {
+            polishOutcomeName = "skipped:hearingMerge"
+            modelReason = "skipped:hearingMerge"
+        }
+        if mode == .live, !shaped.isEmpty, let target, mergeHearing == nil {
             let waitStart = Date()
             // The budget is enforced HERE, not only inside the polisher, and
             // for three days it was not enforced anywhere: both waits were
@@ -784,6 +861,13 @@ final class DictationController {
             refinedChanged: refinedChanged,
             polishColdStart: polishColdStart,
             secondsSinceLastPolish: sinceLastPolish,
+            merge: CorpusCapture.Merge(
+                outcome: mergeOutcomeName,
+                waitSeconds: mergeWaitSeconds,
+                earSeconds: earSecondsAtRelease,
+                disputedSpans: disputedSpans,
+                mergedSpans: mergedSpans,
+                earOutput: mergeHearing?.text),
             texts: CorpusCapture.Texts(
                 asrRaw: raw,
                 afterDeterministic: shaped,
@@ -828,12 +912,20 @@ final class DictationController {
             let insertedAt = Date()
             lastLanded = text
             retirePendingSwap()
-            if !hearingSamples.isEmpty, BetterHearing.isEnabled(), await BetterHearing.shared.isReady {
+            // The swap is the fallback now, not the main path: it runs when
+            // the merge was off, not ready, or did not finish inside its
+            // ceiling. When the ceiling was missed the decode is still
+            // running and is handed over rather than started again, because
+            // starting a second one would put two Whispers on one Neural
+            // Engine to answer the same question.
+            if mergeHearing == nil, !hearingSamples.isEmpty, BetterHearing.isEnabled(),
+                await BetterHearing.shared.isReady
+            {
                 startHearingSwap(
                     samples: hearingSamples, heard: raw, outcome: outcome, target: target,
                     insertedAt: insertedAt,
                     utteranceSeconds: Double(hearingSamples.count) / 16_000,
-                    corpusRow: corpusRow, mode: mode)
+                    corpusRow: corpusRow, mode: mode, alreadyRunning: hearingWork)
             }
         } else if case .inserted = outcome {
             // Rescued above; the toast has already spoken.
@@ -1078,7 +1170,7 @@ final class DictationController {
         }
     }
 
-    private func startHearingSwap(samples: [Float], heard firstHearing: String, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date, utteranceSeconds: TimeInterval, corpusRow: String? = nil, mode: Cleanup.Mode) {
+    private func startHearingSwap(samples: [Float], heard firstHearing: String, outcome: InsertionOutcome, target: InsertionTarget, insertedAt: Date, utteranceSeconds: TimeInterval, corpusRow: String? = nil, mode: Cleanup.Mode, alreadyRunning: Task<BetterHearing.Hearing?, Never>? = nil) {
         hearingTask?.cancel()
         let generation = swapGeneration
         activity.arm()
@@ -1087,14 +1179,16 @@ final class DictationController {
         // the release window serializes the tidy behind it (measured
         // 2026-08-20, twice: every real utterance landed raw). The scaled
         // ceiling in SwapPolicy absorbs the later start.
-        let work = Task<String?, Never>(priority: .utility) {
-            let hints = await Names.forHearing(heard: firstHearing)
-            return await BetterHearing.shared.hear(samples, hints: hints)
-        }
+        let work =
+            alreadyRunning
+            ?? Task<BetterHearing.Hearing?, Never>(priority: .utility) {
+                let hints = await Names.forHearing(heard: firstHearing)
+                return await BetterHearing.shared.hearFully(samples, hints: hints)
+            }
         hearingWorkTask = work
         hearingTask = Task { [weak self] in
             guard let self else { return }
-            let heard = await work.value
+            let heard = await work.value?.text
             // A retired hearing leaves the watch alone: a newer utterance
             // owns it now. Only a hearing that is still current and came
             // back empty stands the watch down itself.
@@ -1138,8 +1232,11 @@ final class DictationController {
             // word-pair guards the user's own edits go through; after two
             // hearings of a pair, the fix fires at landing instead
             // (`applyingEarCorrections`), and no swap is needed at all.
-            for pair in Correction.learnings(inserted: landed, nowReads: cleaned) {
-                await LearnedTerms.shared.recordHeardByEar(pair)
+            for pair in Correction.earLearnings(inserted: landed, nowReads: cleaned) {
+                await LearnedTerms.shared.recordHeardByEar(
+                    pair,
+                    heardIsWord: CorrectionObserver.isDictionaryWord(pair.heard),
+                    meantIsWord: CorrectionObserver.isDictionaryWord(pair.meant))
             }
             switch SwapPolicy.decide(situation) {
             case .keep(let reason):
@@ -1170,6 +1267,27 @@ final class DictationController {
             }
             self.hearingTask = nil
         }
+    }
+
+    /// The evidence Core cannot gather for itself: the spell checker's verdict
+    /// on every word either ear produced, and everything the user has taught.
+    ///
+    /// Asked about both sides, unlike the landing chain's `knownWords`, which
+    /// asks only about words the engine doubted. The merge needs the answer in
+    /// both directions: a non-word on the ear's side is an invention to
+    /// refuse, and a non-word on the engine's side is the strongest sign the
+    /// ear is right.
+    private func mergeSignals(engine tokens: [Token], ear: String) async -> HearingMerge.Signals {
+        var known: Set<String> = []
+        let candidates =
+            Set(tokens.map(\.text)).union(ear.split(whereSeparator: \.isWhitespace).map(String.init))
+        for word in candidates {
+            let bare = String(word.filter { $0.isLetter || $0.isNumber || $0 == "'" })
+            guard !bare.isEmpty else { continue }
+            if CorrectionObserver.isDictionaryWord(bare) { known.insert(bare) }
+        }
+        return HearingMerge.Signals(
+            knownWords: known, vocabulary: await Names.forMatching(heard: ear))
     }
 
     /// Tear down a session that was prepared but never captured, because the

@@ -75,9 +75,18 @@ actor LearnedTerms {
 
     /// A lesson from a hearing the swap could not (or did not need to)
     /// deliver: the pair only, never the sentence it was in.
-    func recordHeardByEar(_ pair: Correction.Pair) {
+    ///
+    /// Both spelling facts come from the caller, which holds the spell
+    /// checker. They decide whether one hearing is enough
+    /// (`Correction.earSightingsBeforeTrusting`); until 2026-09-04 this method
+    /// asserted `heardIsWord: true` for every pair, which was not a measured
+    /// answer but a placeholder, and it held every non-word mishearing at the
+    /// two-hearing bar.
+    func recordHeardByEar(_ pair: Correction.Pair, heardIsWord: Bool, meantIsWord: Bool) {
         load()
-        ledger.record(pair, at: Self.today(), heardIsWord: true, source: .ear)
+        ledger.record(
+            pair, at: Self.today(), heardIsWord: heardIsWord, meantIsWord: meantIsWord,
+            source: .ear)
         save()
         Self.log.info("ear taught a pair (\(pair.heard.count, privacy: .public) -> \(pair.meant.count, privacy: .public) chars)")
     }
