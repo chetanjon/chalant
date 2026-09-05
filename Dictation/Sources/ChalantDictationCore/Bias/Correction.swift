@@ -83,9 +83,33 @@ public enum Correction {
         heardIsWord ? sightingsBeforeTrust : sightingsBeforeTrusting(pair)
     }
 
-    /// The ear's own bar, and it never lowers: two hearings of the same
-    /// pair before a correction may fire, whatever the spelling looks like.
+    /// The ear's standing bar: two hearings of the same pair before a
+    /// correction may fire. A model hearing a model is weaker evidence than a
+    /// person typing over our word, so nothing it says is trusted blind.
     public static let earSightingsBeforeTrust = 2
+
+    /// **One hearing is enough when the engine wrote gibberish and the ear
+    /// wrote English (2026-09-04).** Measured over the founder's own week: the
+    /// ear disagreed with the landed text 79 times and was allowed to change
+    /// it 21 times, so 57 correct hearings were computed and thrown away, and
+    /// the two-sighting bar meant most of them taught nothing either, because
+    /// a name is misheard differently every time ("Journalagada", "Journal
+    /// Agadda", "Jonalagadda" inside one minute). The same reasoning
+    /// `sightingsBeforeAliasing` already applies to the user's own edits
+    /// applies here, and it is the pair's SHAPE that carries it rather than
+    /// the ear's authority: when the word we wrote is not a word at all and
+    /// the word the ear heard is, nothing else was ever going to be meant by
+    /// it. Both facts come from the shell's spell checker; Core only
+    /// remembers them.
+    ///
+    /// Everything else keeps the two-hearing bar, and that is the important
+    /// half. Real word to real word ("career" for "carrier") is exactly where
+    /// a model hearing a model goes wrong, and a non-word heard as another
+    /// non-word ("Abit" for "O'PIT", live on 2026-09-04) is two engines
+    /// failing together rather than one correcting the other.
+    public static func earSightingsBeforeTrusting(heardIsWord: Bool, meantIsWord: Bool) -> Int {
+        (!heardIsWord && meantIsWord) ? 1 : earSightingsBeforeTrust
+    }
 
     /// Part 3 M5. A term from a project that ended stops competing for the 100
     /// active slots §0.13 allows.
@@ -145,6 +169,25 @@ public enum Correction {
             }
         }
         return pairs
+    }
+
+    /// The same reading, for what the SECOND EAR heard rather than what the
+    /// user typed, and it drops one class the user's own edits keep: a pair
+    /// that differs only in capitalisation.
+    ///
+    /// **Why the ear needs its own door (2026-09-04).** `pair` deliberately
+    /// lets a pure change of casing through, because `posthog` becoming
+    /// `PostHog` under a person's hands is exactly the fix worth learning. The
+    /// two ears capitalise differently on every utterance, so through the ear
+    /// the same rule taught "yeah" to "Yeah", "one" to "One", "how" to "How"
+    /// and "tame" to "Tame", and that last one reached two sightings and
+    /// became live: the ledger on the founder's Mac was mostly this noise, and
+    /// lowering the bar to one hearing would have poured it in faster.
+    /// Capitalisation is the deterministic chain's job and nobody has to learn
+    /// it.
+    public static func earLearnings(inserted: String, nowReads field: String) -> [Pair] {
+        learnings(inserted: inserted, nowReads: field)
+            .filter { $0.heard.lowercased() != $0.meant.lowercased() }
     }
 
     /// More changed words than this is a rewrite, not a set of fixes.
@@ -218,6 +261,14 @@ public enum Correction {
             /// user's own sightings, because a model hearing a model is
             /// weaker evidence than a person typing over our word.
             var earSightings: Int = 0
+            /// Whether the word the correction puts IN is an ordinary
+            /// dictionary word, decided by the shell the same way
+            /// `heardIsWord` is. Only the ear reads it, to tell "the engine
+            /// wrote gibberish and the ear wrote English" from two engines
+            /// failing together. Missing in files written before 2026-09-04
+            /// and read back as false, which holds every pair already on disk
+            /// at the two-hearing bar: the careful answer.
+            var meantIsWord: Bool = false
         }
 
         /// A dictionary keyed by a struct cannot be JSON, so the wire form is a
@@ -232,6 +283,8 @@ public enum Correction {
             var heardIsWord: Bool?
             /// Missing in files written before 2026-08-28, read back as zero.
             var earSightings: Int?
+            /// Missing in files written before 2026-09-04, read back as false.
+            var meantIsWord: Bool?
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -247,7 +300,8 @@ public enum Correction {
                     Record(
                         sightings: entry.sightings, lastSeen: Day(day: entry.lastSeen),
                         heardIsWord: entry.heardIsWord ?? true,
-                        earSightings: entry.earSightings ?? 0)
+                        earSightings: entry.earSightings ?? 0,
+                        meantIsWord: entry.meantIsWord ?? false)
             }
             let gone = try container.decodeIfPresent([Entry].self, forKey: .forgotten) ?? []
             forgotten = Set(gone.map { Pair(heard: $0.heard, meant: $0.meant) })
@@ -261,7 +315,8 @@ public enum Correction {
                         heard: $0.key.heard, meant: $0.key.meant,
                         sightings: $0.value.sightings, lastSeen: $0.value.lastSeen.day,
                         heardIsWord: $0.value.heardIsWord,
-                        earSightings: $0.value.earSightings)
+                        earSightings: $0.value.earSightings,
+                        meantIsWord: $0.value.meantIsWord)
                 }.sorted { $0.heard < $1.heard },
                 forKey: .entries)
             try container.encode(
@@ -293,7 +348,8 @@ public enum Correction {
         }
 
         public mutating func record(
-            _ pair: Pair, at day: Day, heardIsWord: Bool = true, source: Source = .user
+            _ pair: Pair, at day: Day, heardIsWord: Bool = true, meantIsWord: Bool = false,
+            source: Source = .user
         ) {
             guard !forgotten.contains(pair) else { return }
             let existing = records[pair]
@@ -302,21 +358,27 @@ public enum Correction {
                 lastSeen: day,
                 // Once known to be a real word, always treated as one.
                 heardIsWord: (existing?.heardIsWord ?? false) || heardIsWord,
-                earSightings: (existing?.earSightings ?? 0) + (source == .ear ? 1 : 0))
+                earSightings: (existing?.earSightings ?? 0) + (source == .ear ? 1 : 0),
+                // Ratcheted the same way, and for the same reason: the two
+                // calls that see this pair may not both have asked the spell
+                // checker, and a yes is the answer that was actually measured.
+                meantIsWord: (existing?.meantIsWord ?? false) || meantIsWord)
         }
 
         /// What the ear taught, as exact confidence-gated substitutions:
-        /// heard (lowercased) to meant. Two ear sightings always, even for
-        /// a capitalized name: the ear is a model, not the user's hand, so
-        /// nothing it says is one-shot-trusted. Never an alias: aliases
-        /// rewrite blind, and only a person earns that. Applied by
+        /// heard (lowercased) to meant. Two ear sightings, or one where the
+        /// engine wrote a non-word and the ear wrote a real one, per
+        /// `earSightingsBeforeTrusting`. Never an alias: aliases rewrite
+        /// blind, and only a person earns that. Applied by
         /// `TermMatcher.applyingEarCorrections`, which adds the engine's
         /// own doubt and the everyday-words shield on top.
         public func earCorrections(at day: Day) -> [String: String] {
             var out: [String: String] = [:]
             let qualified = records
                 .filter { _, record in
-                    record.earSightings >= earSightingsBeforeTrust
+                    record.earSightings
+                        >= earSightingsBeforeTrusting(
+                            heardIsWord: record.heardIsWord, meantIsWord: record.meantIsWord)
                         && day.day - record.lastSeen.day < trustLifetimeInDays
                 }
                 .sorted { a, b in

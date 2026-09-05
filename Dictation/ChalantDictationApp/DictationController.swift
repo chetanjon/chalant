@@ -1138,8 +1138,11 @@ final class DictationController {
             // word-pair guards the user's own edits go through; after two
             // hearings of a pair, the fix fires at landing instead
             // (`applyingEarCorrections`), and no swap is needed at all.
-            for pair in Correction.learnings(inserted: landed, nowReads: cleaned) {
-                await LearnedTerms.shared.recordHeardByEar(pair)
+            for pair in Correction.earLearnings(inserted: landed, nowReads: cleaned) {
+                await LearnedTerms.shared.recordHeardByEar(
+                    pair,
+                    heardIsWord: CorrectionObserver.isDictionaryWord(pair.heard),
+                    meantIsWord: CorrectionObserver.isDictionaryWord(pair.meant))
             }
             switch SwapPolicy.decide(situation) {
             case .keep(let reason):

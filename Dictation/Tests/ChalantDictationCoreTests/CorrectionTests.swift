@@ -486,4 +486,102 @@ struct CorrectionTests {
         #expect(vintage.aliases(at: Correction.Day(day: 100))["chalan"] == "Chalant")
     }
 
+
+    // MARK: - What the second ear may teach in one hearing (2026-09-04)
+
+    @Test("gibberish in, English out: one hearing is enough")
+    func earTrustsOneHearingWhenTheEngineWroteANonWord() {
+        var ledger = Correction.Ledger()
+        // The founder's own surname, live on 2026-09-03: three attempts, three
+        // spellings, none of them a word. Waiting for the same wrong spelling
+        // twice is waiting for something that does not happen.
+        let pair = Correction.Pair(heard: "Journalagada", meant: "Jonnalagadda")
+        ledger.record(
+            pair, at: Correction.Day(day: 100), heardIsWord: false, meantIsWord: true,
+            source: .ear)
+        #expect(ledger.earCorrections(at: Correction.Day(day: 100)) == ["journalagada": "Jonnalagadda"])
+    }
+
+    @Test("real word for a real word still needs two hearings")
+    func earKeepsTheBarWhenBothSidesAreWords() {
+        var ledger = Correction.Ledger()
+        // "career" for "carrier" is exactly where a model hearing a model goes
+        // wrong, and this pair is on the founder's Mac today.
+        let pair = Correction.Pair(heard: "career", meant: "carrier")
+        ledger.record(
+            pair, at: Correction.Day(day: 100), heardIsWord: true, meantIsWord: true,
+            source: .ear)
+        #expect(ledger.earCorrections(at: Correction.Day(day: 100)).isEmpty)
+        ledger.record(
+            pair, at: Correction.Day(day: 101), heardIsWord: true, meantIsWord: true,
+            source: .ear)
+        #expect(ledger.earCorrections(at: Correction.Day(day: 101)) == ["career": "carrier"])
+    }
+
+    @Test("two engines failing together still needs two hearings")
+    func earKeepsTheBarWhenNeitherSideIsAWord() {
+        var ledger = Correction.Ledger()
+        // Live on 2026-09-04: the engine wrote "Abit", the ear heard "O'PIT",
+        // and the truth was "OPT". Neither of them earned one-shot trust.
+        let pair = Correction.Pair(heard: "Abit", meant: "OPIT")
+        ledger.record(
+            pair, at: Correction.Day(day: 100), heardIsWord: false, meantIsWord: false,
+            source: .ear)
+        #expect(ledger.earCorrections(at: Correction.Day(day: 100)).isEmpty)
+    }
+
+    @Test("the user's own hand is unchanged by the ear's new door")
+    func userSightingsAreUntouched() {
+        var ledger = Correction.Ledger()
+        let pair = Correction.Pair(heard: "Kisu", meant: "Kizu")
+        ledger.record(pair, at: Correction.Day(day: 100), heardIsWord: false)
+        // One typed correction of a non-word still aliases from the first
+        // sighting, and it is still not an ear correction.
+        #expect(ledger.aliases(at: Correction.Day(day: 100))["kisu"] == "Kizu")
+        #expect(ledger.earCorrections(at: Correction.Day(day: 100)).isEmpty)
+    }
+
+    @Test("a pair already on disk keeps the two-hearing bar")
+    func vintagePairsAreHeldAtTheOldBar() throws {
+        // meantIsWord is missing from every file written before 2026-09-04, so
+        // one hearing recorded back then must not become live on upgrade.
+        let old = Data("""
+            {"entries":[{"heard":"Sharat","meant":"chart","sightings":0,"lastSeen":100,"heardIsWord":true,"earSightings":1}],"forgotten":[]}
+            """.utf8)
+        let vintage = try JSONDecoder().decode(Correction.Ledger.self, from: old)
+        #expect(vintage.earCorrections(at: Correction.Day(day: 100)).isEmpty)
+    }
+
+    @Test("meantIsWord survives the file")
+    func meantIsWordRoundTrips() throws {
+        var ledger = Correction.Ledger()
+        let pair = Correction.Pair(heard: "agronics", meant: "ergonomics")
+        ledger.record(
+            pair, at: Correction.Day(day: 100), heardIsWord: false, meantIsWord: true,
+            source: .ear)
+        let back = try JSONDecoder().decode(
+            Correction.Ledger.self, from: try JSONEncoder().encode(ledger))
+        #expect(back.earCorrections(at: Correction.Day(day: 100)) == ["agronics": "ergonomics"])
+    }
+
+    @Test("the ear never teaches capitalisation")
+    func earLearningsDropCaseOnlyPairs() {
+        // The two ears capitalise differently on every utterance. Through the
+        // shared door this taught "yeah" to "Yeah" and "tame" to "Tame", and
+        // the second reached two sightings and went live on the founder's Mac.
+        #expect(Correction.earLearnings(inserted: "yeah okay", nowReads: "Yeah okay").isEmpty)
+        #expect(Correction.earLearnings(inserted: "listening now", nowReads: "Listening now").isEmpty)
+        // The user's own hand keeps that lesson: posthog to PostHog is a fix.
+        #expect(
+            Correction.learnings(inserted: "ship posthog", nowReads: "ship PostHog")
+                == [Correction.Pair(heard: "posthog", meant: "PostHog")])
+    }
+
+    @Test("the ear still teaches a real mishearing")
+    func earLearningsKeepRealPairs() {
+        // Live on 2026-09-03, discarded as noUndoHere in VS Code.
+        #expect(
+            Correction.earLearnings(inserted: "a lot of commerce", nowReads: "a lot of commas")
+                == [Correction.Pair(heard: "commerce", meant: "commas")])
+    }
 }
