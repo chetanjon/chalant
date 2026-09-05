@@ -283,7 +283,8 @@ public enum HearingMerge {
                     mergedSpans += 1
                     merged.append(
                         contentsOf: rewrite(
-                            span, opensASentence: opensASentence(merged, whole: index == 0)))
+                            span, opensASentence: opensASentence(merged, whole: index == 0),
+                            signals: signals))
                 } else {
                     merged.append(contentsOf: span.engine)
                 }
@@ -436,13 +437,43 @@ public enum HearingMerge {
     /// the deterministic chain run after this and are tuned against the
     /// engine's punctuation, and letting a second opinion move the full stops
     /// would change two things at once.
-    private static func rewrite(_ span: Span, opensASentence: Bool) -> [Token] {
+    private static func rewrite(_ span: Span, opensASentence: Bool, signals: Signals) -> [Token] {
         let (leading, _, _) = split(span.engine.first?.text ?? "")
         let (_, _, trailing) = split(span.engine.last?.text ?? "")
+        // The ear's own punctuation at the edges of the span goes: the engine
+        // owns the shape, and keeping both is how "JP Morgan" became
+        // "JPMorgan..". Punctuation BETWEEN the ear's words is inside the span
+        // and survives, which is the ear's to give.
         var words = span.ear
-        if opensASentence, let first = words.first, let initial = first.first, initial.isLowercase {
-            words[0] = initial.uppercased() + first.dropFirst()
+        if let first = words.first {
+            words[0] = String(first.drop(while: { !$0.isLetter && !$0.isNumber }))
         }
+        if var last = words.last {
+            while let final = last.last, !final.isLetter, !final.isNumber, final != "'" {
+                last = String(last.dropLast())
+            }
+            words[words.count - 1] = last
+        }
+        words = words.filter { !$0.isEmpty }
+        guard !words.isEmpty else { return span.engine }
+
+        // Case follows the sentence, not the ear. The ear capitalises where it
+        // hears a new sentence begin, and dropping its capital into the middle
+        // of the engine's sentence reads as a mistake ("right, That is very
+        // good"). A name is exempt in both directions: a word the user taught
+        // us, or one the dictionary does not know, keeps whatever the ear gave
+        // it, which is what saves "Capgemini" from becoming "capgemini".
+        let ordinary = !signals.isTaught(words[0]) && signals.isWord(words[0])
+        if let initial = words[0].first {
+            if opensASentence, initial.isLowercase {
+                words[0] = initial.uppercased() + words[0].dropFirst()
+            } else if !opensASentence, initial.isUppercase, ordinary,
+                span.engine.first?.text.first?.isUppercase != true
+            {
+                words[0] = initial.lowercased() + words[0].dropFirst()
+            }
+        }
+
         return words.enumerated().map { index, word in
             var text = word
             if index == 0 { text = leading + text }

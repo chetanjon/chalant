@@ -308,4 +308,44 @@ struct HearingMergeTests {
         #expect(spans.map(\.kind) == [.agreed, .insertion, .agreed])
         #expect(spans[1].ear == ["don't"])
     }
+
+    // MARK: - Shape bugs the first sweep over real audio exposed (2026-09-04)
+
+    @Test("the engine's full stop is not doubled by the ear's")
+    func punctuationIsNotDoubled() {
+        // Live: "JP Morgan." merged to "JPMorgan..", and five more rows like it.
+        let outcome = HearingMerge.merge(
+            engine: engine("the link for JP Morgan."),
+            ear: "the link for JPMorgan.",
+            signals: signals(words: ["the", "link", "for", "jp", "morgan"],
+                vocabulary: ["JPMorgan"]))
+        #expect(text(outcome) == "the link for JPMorgan.")
+    }
+
+    @Test("the ear's new sentence does not capitalise mid-sentence")
+    func casingFollowsTheSentenceNotTheEar() {
+        // Live: "Let's pick it right, and it is very good" merged to
+        // "right, That is very good", because the ear heard a sentence break
+        // there and the engine did not.
+        let outcome = HearingMerge.merge(
+            engine: engine("pick it right, and it is very good"),
+            ear: "pick it right. That is very good",
+            signals: signals(words: [
+                "pick", "it", "right", "and", "is", "very", "good", "that",
+            ]))
+        #expect(text(outcome) == "pick it right, that is very good")
+    }
+
+    @Test("a name keeps its capital in the middle of a sentence")
+    func namesKeepTheirCase() {
+        // The same rule must not lowercase a taught name: live, "in cap
+        // Gemini" merges to "in Capgemini" and must not become "capgemini".
+        let outcome = HearingMerge.merge(
+            engine: engine("payments in cap Gemini today"),
+            ear: "payments in Capgemini today",
+            signals: signals(
+                words: ["payments", "in", "cap", "gemini", "today"],
+                vocabulary: ["Capgemini"]))
+        #expect(text(outcome) == "payments in Capgemini today")
+    }
 }
