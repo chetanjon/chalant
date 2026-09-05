@@ -5,6 +5,60 @@ here. "Should work" and "now supports" are not evidence.
 
 ---
 
+## 2026-09-04 — hearing-merge at landing. QUEUED, NOT YET RUN.
+
+Branch `feat/hearing-merge`. Core tests green (331) and the app target builds,
+but **nothing below has been run on a live machine yet**, so nothing here is
+evidence of anything. Part 1 §2: the claim waits for the dated run.
+
+The change puts the second ear in front of the landing, so it is the first
+thing on this list whose failure mode is INVISIBLE: a merge that takes the
+wrong word replaces text the user never saw. That is why the protocol leads
+with the refusals rather than the wins.
+
+### Before running
+
+- Better hearing ON (`dictationBetterHearing`), corpus capture ON.
+- `defaults read com.cj.chalant dictationHearingMerge` should be absent
+  (default on). The kill switch is `-bool false`.
+- Note the installed version; this needs a build of the branch, not 1.39.0.
+
+### The rows to dictate
+
+| # | What to say | What must happen |
+|---|---|---|
+| 1 | Anything short into TextEdit | Words land once. No visible swap afterwards. |
+| 2 | "I don't want the box" | The negation survives. This is the row the merge exists for. |
+| 3 | A sentence with a number in it ("transfer 4500 today") | The number is exactly what was said. |
+| 4 | Your own name | "Jonnalagadda", now that the vocabulary is seeded. |
+| 5 | Something in VS Code | The fix arrives IN the landing, not as a swap. `noUndoHere` should no longer cost a correction. |
+| 6 | A 60-second ramble | Lands within the ceiling, or lands as said and the swap follows. Either is correct; note which. |
+| 7 | Dictate with Better hearing OFF | Byte-identical to 1.39.0 behaviour: instant landing, no wait. |
+| 8 | A password field (secure input) | Still refuses, still says where the words went. |
+
+### What to read afterwards
+
+From the newest rows in `captured.jsonl` (schema 4):
+
+- `mergeOutcome`: merged / agreed / budgetMissed / earOff / earNotReady /
+  implausible / qualityRejected / tooMuchDisagreement
+- `mergeWaitSeconds`: **the number that decides whether this is worth it.**
+  Predicted p90 near 3 s. If it runs long, the during-hold pre-decode is the
+  next commit.
+- `disputedSpans` / `mergedSpans`, and `hearingOutput` to see what it chose
+  between.
+- `polishOutcome` should read `skipped:hearingMerge` on merged rows.
+
+### The one thing deliberately NOT built
+
+**There is no "still writing" cue during the wait.** The strip hides at key-up
+and the gap is now longer than it was. A visible indicator sits close to the
+visible-refinement the founder rejected in 1.19.0, and they judge the strip by
+eye, so it waits for them rather than being invented here. If row 6 feels
+blind, that is the fix.
+
+---
+
 ## 2026-08-12 — M0, partial. NOT YET ACCEPTED.
 
 Build: Debug, `a699748` + event-tap mask fix. macOS 27.0, arm64.

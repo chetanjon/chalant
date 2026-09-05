@@ -39,6 +39,21 @@ actor BetterHearing {
         defaults.set(on, forKey: enabledKey)
     }
 
+    /// Whether the two hearings are reconciled BEFORE the words land
+    /// (2026-09-04), rather than the ear correcting them afterwards.
+    ///
+    /// On for everyone who has the ear on, which is the point of the change,
+    /// and off by one line for the case nobody has measured yet:
+    /// `defaults write com.cj.chalant dictationHearingMerge -bool false`
+    /// puts the ear back behind the landing without a release. No Settings
+    /// row: law 6 says a good default rather than a switch, and a switch here
+    /// would ask the user a question they have no way to answer.
+    static let mergeKey = "dictationHearingMerge"
+
+    static func mergesAtLanding(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: mergeKey) as? Bool ?? true
+    }
+
     /// Where the model lives: Application Support, beside everything else
     /// Chalant keeps, never the Documents folder Hugging Face would pick.
     static var modelsFolder: URL {
@@ -110,6 +125,24 @@ actor BetterHearing {
     /// (~13 ms on this Mac), which is why the list arrives already capped and
     /// chosen for this utterance; the encoder is unaffected.
     func hear(_ samples: [Float], hints: [String] = []) async -> String? {
+        await hearFully(samples, hints: hints)?.text
+    }
+
+    /// What the ear heard, with what it thinks of its own hearing.
+    ///
+    /// **The three quality numbers have always been returned and always been
+    /// thrown away.** Part 0 §0.18 names them as the guard against fabricated
+    /// text on near-silence, and the failure class belongs to any decoder
+    /// rather than to one model: the swap path could afford to ignore them
+    /// because a bad swap was visible and undoable, and the merge cannot,
+    /// because it decides before the user sees anything.
+    struct Hearing: Sendable {
+        var text: String
+        var quality: HearingMerge.Quality
+        var seconds: Double
+    }
+
+    func hearFully(_ samples: [Float], hints: [String] = []) async -> Hearing? {
         guard let pipe else { return nil }
         guard samples.count >= 16_000 / 2 else { return nil }
         var options = DecodingOptions()
@@ -140,7 +173,15 @@ actor BetterHearing {
                 + Double(started.duration(to: .now).components.attoseconds) * 1e-18
             Self.log.notice(
                 "heard \(samples.count / 16_000, privacy: .public)s of audio as \(text.count, privacy: .public) chars in \(seconds, privacy: .public)s with \(hints.count, privacy: .public) names (\(promptTokenCount, privacy: .public) prompt tokens)")
-            return text.isEmpty ? nil : text
+            guard !text.isEmpty else { return nil }
+            // Worst case across the segments, because one fabricated stretch
+            // is enough to make the whole hearing untrustworthy.
+            let segments = results.flatMap(\.segments)
+            let quality = HearingMerge.Quality(
+                averageLogProbability: segments.map { Double($0.avgLogprob) }.min(),
+                noSpeechProbability: segments.map { Double($0.noSpeechProb) }.max(),
+                compressionRatio: segments.map { Double($0.compressionRatio) }.max())
+            return Hearing(text: text, quality: quality, seconds: seconds)
         } catch is CancellationError {
             // The next utterance landed first and retired this one. By
             // design, not a failure: logged at info so a night of burst

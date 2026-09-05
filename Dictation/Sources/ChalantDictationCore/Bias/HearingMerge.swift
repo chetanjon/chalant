@@ -205,6 +205,27 @@ public enum HearingMerge {
         return a * 2 >= b && a <= b * 2
     }
 
+    /// How long the landing may wait for the second ear before giving up on
+    /// it and letting the engine's words go.
+    ///
+    /// **The founder chose the wait (2026-09-04), so this is a sanity ceiling
+    /// rather than a budget**: asked whether landing should stay instant and
+    /// keep correcting afterwards or wait for the accurate ear, they chose to
+    /// wait. What it protects against is not slowness but a hearing that never
+    /// arrives, so it is set well above what the ear actually costs rather
+    /// than tightly around it.
+    ///
+    /// Measured: the ear returns in 1.29 s median and 2.95 s at p90 on the
+    /// founder's own week, and that was at background priority with the tidy
+    /// model competing for the same Neural Engine. Both of those go away here.
+    /// The per-second term is `SwapPolicy`'s, which was fitted to the same
+    /// model on the same hardware, and the hard cap keeps a ninety-second
+    /// ramble from hanging the words on a decode that has gone wrong.
+    public static func waitCeiling(utteranceSeconds: TimeInterval) -> Duration {
+        let seconds = min(3.0 + 0.15 * max(0, utteranceSeconds), 8.0)
+        return .milliseconds(Int(seconds * 1000))
+    }
+
     static func qualityRefusal(_ quality: Quality, _ constants: Constants) -> Bool {
         if let silence = quality.noSpeechProbability, silence > constants.noSpeechCeiling {
             return true

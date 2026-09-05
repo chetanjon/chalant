@@ -5,6 +5,84 @@ pipeline reports corrections per 100 words before and after, on `--split dev`.
 
 ---
 
+## 2026-09-04 — the second ear moves in FRONT of the landing (`feat/hearing-merge`)
+
+**The question.** The ear has been running after the words land since 1.20.0,
+and the corpus says what that costs. Over the founder's own last seven days
+(181 rows, 114 of them with both a hearing and its audio still on disk): the
+ear disagreed with what landed on **79 rows** and was allowed to change them on
+**21**. The other 57 corrections were computed, paid for at 1.3 to 5.5 s each,
+and thrown away: **36 as `noUndoHere`** (VS Code, where 63% of these dictations
+go), **21 as `userActed`** (the fix arrived after they had already typed), 3 as
+implausible. Meanwhile the tidy model, which owns the release window, changed
+anything on **3.9%** of rows. So the window is spent on the weaker of the two.
+
+**Method.** `tools/mergeprobe`, new, on 114 paired rows. The engine's side
+re-derived from the recorded `.caf` through `tools/transcribe --tokens`, so the
+per-word confidence the policies turn on is real rather than assumed; the ear's
+side read off the `kind:"hearing"` lines the app has written since 2026-08-28.
+No re-decode of Whisper, which is why the grid is affordable. Vocabulary read
+from the live `dictationTerms` (10 terms, seeded the same day).
+
+**What the merge does, by policy, over 114 rows:**
+
+| policy | rows changed | disputes taken | disputes refused | refused whole |
+|---|---|---|---|---|
+| earLeads | 27 | 34 | 44 | 7 |
+| engineLeads | 24 | 27 | 51 | 7 |
+| hybrid | 24 | 27 | 51 | 7 |
+
+**Why each dispute went the way it did (earLeads):** theEarLeads 28,
+theEngineHeardMore 24 (kept, always), theEarAddedWords 8 (dropped),
+theEngineWasSure 5, theEarInventedAWord 5, theEngineWroteANonWord 3,
+theUserTaughtThisWord 2, theEngineDroppedANegation 1, theEarAddedTooMuch 1,
+digitsStayWithEngine 1. Whole-hearing verdicts: agreed 80, merged 27,
+tooMuchDisagreement 5, implausible 2.
+
+**What it recovers, read off the founder's own rows:** "agriculture" to "a
+recruiter", "commerce" to "commas", "agronics" to "ergonomics", "allocate
+flaws" to "allocate slots", "it feels low" to "it feels slow", "option K" to
+"option key", "And sentences" to "End sentences", "in cap Gemini" to
+"in Capgemini", "Chalon" to "Chalant", "She was my resume" to "This is my
+resume", and the dropped "don't" that had reversed a sentence
+(cap-20260903-130505-007: the founder said "I don't want the box" and "I want
+the box" landed).
+
+**Two shape bugs the first sweep exposed, both fixed before this entry was
+written.** The engine's full stop was doubled by the ear's, so "JP Morgan."
+merged to "JPMorgan.." on six rows. And the ear capitalises where it hears a
+sentence begin, which dropped a capital into the middle of the engine's
+sentence: "Let's pick it right, That is very good". Both now have tests.
+
+**NOT ANSWERED HERE, and it gates the release: which policy is right.** Telling
+a win from a loss needs labels, and by eye there are two losses under every
+policy: "career page" taken as "carrier page", and "that role" taken as "the
+troll" (cap-20260904-014520-257, where what landed was already right). Both are
+ordinary word for ordinary word, which is exactly the class no refusal can
+settle and only data can. Forty rows are with the founder for blind A/B
+labelling (27 where the merge changes something, 13 where it refuses, so both
+the wins and the missed wins get counted). `earLeads` ships as the provisional
+default because it recovers three more and risks the same two.
+
+**Latency, predicted not measured.** The ear returned in 1.29 s median and
+2.95 s p90 on live rows, at `.utility` priority with the tidy model competing
+for the same Neural Engine; the merge runs it at `.userInitiated` with the tidy
+yielding, so both of those should improve. The ceiling is
+`3.0 s + 0.15 s per spoken second`, capped at 8 s, after which the engine's
+words land and the old post-landing swap takes over with the same decode. The
+founder chose this shape when asked: wait for the accurate ear rather than keep
+the instant landing and correct afterwards.
+
+**Reproduce:**
+
+```
+./tools/transcribe/build.sh && ./tools/mergeprobe/build.sh
+./build/tools/transcribe <pairs>.jsonl engine-tokens.jsonl --tokens
+./build/tools/mergeprobe engine-tokens.jsonl pairs.jsonl [labels.jsonl] [--dump]
+```
+
+---
+
 ## 2026-08-12 — Part 0 §0.1 smoke test: the biasing path
 
 **Question §0.1 posed:** does `AnalysisContext.contextualStrings` actually bias
