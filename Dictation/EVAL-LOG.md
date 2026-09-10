@@ -5,6 +5,73 @@ pipeline reports corrections per 100 words before and after, on `--split dev`.
 
 ---
 
+## 2026-09-10 — Chalant stays running, and the ear stops being a target. QUEUED, one part PROVEN.
+
+Branch `fix/stay-running`. The restart mechanism below was **run end to end on
+the founder's own Mac** against the installed 1.39.0; the ear's unload and the
+instance guard are built and build clean but have NOT been exercised live.
+
+### What was measured, and it is the reason for the change
+
+Chalant was found not running twice in five days (2026-09-05, 2026-09-10). The
+second time there were **no log entries for three days**, so the founder had
+gone that long without dictation and found out by accident. Both times: uptime
+in the weeks, `vm.swapusage` at 88%, and RunningBoard terminating us
+(`explanation:"com.apple.frontboard.after-life.interrupted"`). No crash report
+is written for this, so DiagnosticReports says "no crash" and misleads.
+
+### PROVEN, on the installed app, 2026-09-10
+
+A user LaunchAgent with `KeepAlive: {SuccessfulExit: false}`, `RunAtLoad: true`,
+`ThrottleInterval: 10`, `Program` pointing at the app executable:
+
+| case | command | result |
+|---|---|---|
+| macOS kills it | `kill -9 <pid>` (the signal RunningBoard sends) | **restarted after ~2 s**, new pid |
+| user quits it | `osascript -e 'tell application "Chalant" to quit'` | **stayed quit for the full 20 s watch** |
+
+Both halves matter. An app that comes back from a kill but also comes back from
+Quit is an app the user cannot turn off.
+
+`launchctl` over `SMAppService.agent` deliberately: the plist is a file a person
+can read, `launchctl print` says what launchd believes, and the test above is
+one command. The supported API hides all three behind a status enum, and this
+mechanism had to be *watched* working before it went near the founder's daily
+driver.
+
+### NOT installed on the founder's machine, and the reason is the old worst bug
+
+The agent was booted out and the plist deleted after the test. Installing it
+against **1.39.0** would mean launchd AND the existing login item both starting
+Chalant at the next login, and 1.39.0 has no instance guard: two Chalants both
+hold the left-Option tap and both paste, which is the doubled-text report of
+2026-08-13. The guard ships in the same commit as the agent, so the protection
+arrives with the release and not before it.
+
+### Also in the change
+
+**The instance guard.** `AppDelegate` now refuses to be the second Chalant
+(`NSRunningApplication.runningApplications(withBundleIdentifier:)`, newcomer
+terminates). Independently worth having; here it is what makes the agent safe.
+
+**The ear sleeps.** `scheduleEarRest` closed the microphone after 600 s and did
+nothing about the model, so 626 MB stayed resident for as long as the app ran
+whether or not anyone had dictated. `BetterHearing.sleep()` now releases it
+after `earSleepAfter` = 1800 s, and `wake()` reloads it from key-down.
+Deliberately a different timer from the microphone's: closing the mic costs the
+next dictation nothing, and unloading the model costs it the second ear
+entirely. **The first utterance after a sleep lands without the merge**, on the
+same path as having the ear switched off, because the reload is ~5 s and no
+hold is that long. Settings gained a `.idle` line rather than reading "off"
+while the switch is on.
+
+**Unmeasured, and stated rather than implied:** whether unloading actually
+stops the kills. The mechanism is verified; the hypothesis that memory
+footprint is what selected Chalant is inference from two data points. The
+honest test is time on a machine that has not been restarted.
+
+---
+
 ## 2026-09-10 — the founder's ears settle the merge policy (`fix/merge-policy`)
 
 **The question left open on 2026-09-04:** when both ears produce a real,

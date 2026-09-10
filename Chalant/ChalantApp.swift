@@ -54,6 +54,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else {
             return
         }
+        // **One Chalant, or none.** Two of them is the worst bug this app has
+        // shipped: both hold the left-Option event tap, both hear the same
+        // sentence, and both paste it, which is how "the dictated text arrives
+        // twice" was reported on 2026-08-13. Nothing enforced it until now,
+        // and StayRunning makes it reachable for the first time, because
+        // launchd and a login item can both decide to start us at login.
+        // The newcomer leaves; the one already serving the user keeps the tap.
+        if let older = NSRunningApplication.runningApplications(
+            withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+            .first(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier })
+        {
+            CrashWatch.log.notice(
+                "another Chalant is already running (pid \(older.processIdentifier, privacy: .public)); standing down")
+            NSApp.terminate(nil)
+            return
+        }
         // One-time inheritance from the Moai era: the rename changed
         // the bundle id, which changed the defaults domain, which
         // would have orphaned every setting, note, and focus streak.
