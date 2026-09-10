@@ -39,9 +39,19 @@ struct PairRow: Codable {
     let decision: String?
 }
 
+/// One row the founder judged by ear, blind, against the recording.
+///
+/// Not a transcript: a PREFERENCE. They were shown two candidates in a random
+/// order without being told which came from which ear, and said which was
+/// nearer what they actually said. `preferred` is "engine", "other" (the
+/// merged or ear text), "same" or "neither"; the last two score nothing in
+/// either direction, because a row where both readings are wrong cannot tell
+/// us which rule is right.
 struct LabelRow: Codable {
     let id: String
-    let desired: String
+    let preferred: String
+    let engine: String
+    let other: String
 }
 
 let args = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("--") }
@@ -64,9 +74,9 @@ func read<T: Decodable>(_ path: String, _ type: T.Type) -> [T] {
 
 let engineRows = read(args[0], EngineRow.self)
 let pairRows = read(args[1], PairRow.self)
-let labels: [String: String] =
+let labels: [String: LabelRow] =
     args.count >= 3
-    ? Dictionary(read(args[2], LabelRow.self).map { ($0.id, $0.desired) }, uniquingKeysWith: { a, _ in a })
+    ? Dictionary(read(args[2], LabelRow.self).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
     : [:]
 
 let pairsByID = Dictionary(pairRows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -171,9 +181,15 @@ func run(policy: HearingMerge.Policy, constants: HearingMerge.Constants, dumping
         }
 
         let mergedText = outcome.tokens.map(\.text).joined(separator: " ")
-        if let truth = labels[engineRow.id] {
-            let reference = compareWords(truth)
-            let before = distance(compareWords(engineRow.raw), reference)
+        if let label = labels[engineRow.id], label.preferred == "engine" || label.preferred == "other"
+        {
+            // The founder's chosen reading is the reference. A rule is right
+            // when it moves the words TOWARDS it and wrong when it moves them
+            // away, which is the same wins-against-losses accounting
+            // `floorsweep` uses, asked of a preference rather than a
+            // transcript.
+            let reference = compareWords(label.preferred == "engine" ? label.engine : label.other)
+            let before = distance(compareWords(label.engine), reference)
             let after = distance(compareWords(mergedText), reference)
             tally.labelled += 1
             tally.engineEdits += before
@@ -186,10 +202,10 @@ func run(policy: HearingMerge.Policy, constants: HearingMerge.Constants, dumping
                 tally.same += 1
             }
             if dumping, after != before {
-                print("\(after < before ? "WIN " : "LOSS") \(engineRow.id)")
-                print("   engine: \(engineRow.raw)")
+                print("\(after < before ? "WIN " : "LOSS") \(engineRow.id) [wanted: \(label.preferred)]")
+                print("   engine: \(label.engine)")
                 print("   merged: \(mergedText)")
-                print("   truth : \(truth)")
+                print("   wanted: \(reference.joined(separator: " "))")
             }
         } else if dumping, outcome.verdict == .merged {
             print("MERGED \(engineRow.id) [\(pair.app ?? "")] was \(pair.decision ?? "")")
@@ -204,26 +220,34 @@ func run(policy: HearingMerge.Policy, constants: HearingMerge.Constants, dumping
 print("mergeprobe: \(engineRows.count) engine rows, \(pairRows.count) pairs, \(labels.count) labelled")
 print("vocabulary: \(vocabulary.count) terms\n")
 
-print("policy         rows  merged  refused  taken  refusedSpans   labelled  better  worse  same   edits")
+// The grid. Everything with a number in it that could plausibly move the
+// answer, swept over the rows the founder judged, because the whole point of
+// asking them was to stop choosing these by argument.
+print("policy        funcWords  sureFloor   merged  better  worse  same   edits")
 for policy in HearingMerge.Policy.allCases {
-    reasons = [:]
-    verdicts = [:]
-    let tally = run(policy: policy, constants: HearingMerge.Constants(), dumping: false)
-    let edits =
-        tally.labelled > 0 ? "\(tally.engineEdits) -> \(tally.mergedEdits)" : "no labels"
-    print(
-        String(
-            format: "%-13@ %5d  %6d  %7d  %5d  %12d   %8d  %6d  %5d  %4d   %@",
-            policy.rawValue as NSString, tally.rows, tally.merged, tally.refusedWhole,
-            tally.spansTaken, tally.spansRefused, tally.labelled, tally.better, tally.worse,
-            tally.same, edits as NSString))
+    for functionWords in [true, false] {
+        for floor in [0.70, 0.85, 0.95] {
+            var constants = HearingMerge.Constants()
+            constants.refusesFunctionWordEdits = functionWords
+            constants.engineSureFloor = floor
+            reasons = [:]
+            verdicts = [:]
+            let tally = run(policy: policy, constants: constants, dumping: false)
+            print(
+                String(
+                    format: "%-13@ %8@  %9.2f  %7d  %6d  %5d  %4d   %d -> %d",
+                    policy.rawValue as NSString, (functionWords ? "on" : "off") as NSString,
+                    floor, tally.merged, tally.better, tally.worse, tally.same,
+                    tally.engineEdits, tally.mergedEdits))
+        }
+    }
 }
 
 // The winner's reasons, so the refusals can be read rather than trusted.
-print("\nwhy each dispute went the way it did (earLeads):")
+print("\nwhy each dispute went the way it did (engineLeads, the swept winner):")
 reasons = [:]
 verdicts = [:]
-_ = run(policy: .earLeads, constants: HearingMerge.Constants(), dumping: dump)
+_ = run(policy: .engineLeads, constants: HearingMerge.Constants(), dumping: dump)
 for (reason, count) in reasons.sorted(by: { $0.value > $1.value }) {
     print(String(format: "  %-28@ %4d", reason as NSString, count))
 }

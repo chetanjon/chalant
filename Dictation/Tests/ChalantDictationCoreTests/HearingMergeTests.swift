@@ -260,7 +260,7 @@ struct HearingMergeTests {
                 "there", "are", "a", "lot", "of", "commerce", "commas", "here",
             ]))
         let dispute = outcome.spans.first { $0.kind == .substitution }
-        #expect(dispute?.reason == "theEarLeads")
+        #expect(dispute?.reason == "theEngineDoubtedItself")
         #expect(dispute?.choseEar == true)
     }
 
@@ -324,16 +324,15 @@ struct HearingMergeTests {
 
     @Test("the ear's new sentence does not capitalise mid-sentence")
     func casingFollowsTheSentenceNotTheEar() {
-        // Live: "Let's pick it right, and it is very good" merged to
-        // "right, That is very good", because the ear heard a sentence break
-        // there and the engine did not.
+        // The ear hears a sentence begin where the engine did not, and its
+        // capital must not land in the middle of the engine's sentence.
         let outcome = HearingMerge.merge(
-            engine: engine("pick it right, and it is very good"),
-            ear: "pick it right. That is very good",
+            engine: engine("we shipped it, commerce were wrong"),
+            ear: "we shipped it. Commas were wrong",
             signals: signals(words: [
-                "pick", "it", "right", "and", "is", "very", "good", "that",
+                "we", "shipped", "it", "commerce", "commas", "were", "wrong",
             ]))
-        #expect(text(outcome) == "pick it right, that is very good")
+        #expect(text(outcome) == "we shipped it, commas were wrong")
     }
 
     @Test("a name keeps its capital in the middle of a sentence")
@@ -347,5 +346,50 @@ struct HearingMergeTests {
                 words: ["payments", "in", "cap", "gemini", "today"],
                 vocabulary: ["Capgemini"]))
         #expect(text(outcome) == "payments in Capgemini today")
+    }
+
+    // MARK: - Function words, which the founder's own ear settled (2026-09-10)
+
+    @Test("two ears differing over a function word is not evidence")
+    func refusesAFunctionWordSubstitution() {
+        // cap-20260902-175112-407, judged a LOSS by the founder: the engine
+        // was right and the merge broke it.
+        let outcome = HearingMerge.merge(
+            engine: engine("pick it right, and it is very good"),
+            ear: "pick it right. That is very good",
+            signals: signals(words: [
+                "pick", "it", "right", "and", "is", "very", "good", "that",
+            ]))
+        #expect(text(outcome) == "pick it right, and it is very good")
+    }
+
+    @Test("a function word is never swallowed by a substitution")
+    func refusesToLoseAFunctionWord() {
+        // cap-20260903-143200-203: the ear fixed "commerce" to "commas" and
+        // deleted the "and" beside it in the same move, and the founder
+        // rejected the whole row for it. Refusing here costs that fix; the
+        // sweep says the trade is worth it.
+        let outcome = HearingMerge.merge(
+            engine: engine("there are a lot of commerce and I think so"),
+            ear: "there are a lot of commas I think so",
+            signals: signals(words: [
+                "there", "are", "a", "lot", "of", "commerce", "commas", "i", "think", "so",
+            ]))
+        #expect(text(outcome) == "there are a lot of commerce and I think so")
+    }
+
+    @Test("a real mishearing beside a function word is still fixed")
+    func stillFixesAContentWord() {
+        // cap-20260903-133433-827, the row that taught the rule: the ear was
+        // right about "ergonomics" and wrong about "in" becoming "and", and
+        // the founder rejected the row because it did both. Now it does one.
+        let outcome = HearingMerge.merge(
+            engine: engine("talking to the laptop in the machine gives me agronics"),
+            ear: "talking to the laptop and the machine gives me ergonomics",
+            signals: signals(words: [
+                "talking", "to", "the", "laptop", "in", "and", "machine", "gives", "me",
+                "ergonomics",
+            ]))
+        #expect(text(outcome) == "talking to the laptop in the machine gives me ergonomics")
     }
 }
