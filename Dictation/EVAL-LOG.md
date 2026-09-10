@@ -5,6 +5,88 @@ pipeline reports corrections per 100 words before and after, on `--split dev`.
 
 ---
 
+## 2026-09-10 — the founder's ears settle the merge policy (`fix/merge-policy`)
+
+**The question left open on 2026-09-04:** when both ears produce a real,
+ordinary word, who wins. `earLeads` shipped as provisional and the forty rows
+that decide it went to the founder as a BLIND A/B: play the recording, pick the
+line nearer what you actually said, without being told which ear wrote which.
+All forty came back.
+
+**First, what the provisional default actually did**, scored against those
+answers on the 27 rows it changed:
+
+| | rows |
+|---|---|
+| merge better | 10 |
+| **merge worse** | **6** |
+| no difference | 9 |
+| both readings wrong | 2 |
+
+**Ten against six is not a shipping ratio**, and it would have shipped. That is
+what the labelling was for.
+
+**On the 13 rows the merge REFUSED:** 7 refusals were right (the engine was
+already correct), 4 cost a real fix, 1 no difference, 1 both wrong. The four
+missed wins are worth naming because two of them are design consequences rather
+than bugs: the ear punctuated "Thursday no wait Friday" into "Thursday. No
+wait, Friday" (refused because the engine owns sentence shape) and heard
+".md file" where the engine wrote "dot MD file".
+
+**The cause of half the damage, found by reading the six losses: FUNCTION
+WORDS.** "and it is very good" came back as "that is very good"; "to the laptop
+in the machine" as "to the laptop and the machine". And one row lost its "and"
+to a substitution that swallowed it ("a lot of commerce and I think" became "a
+lot of commas I think"), so the founder rejected a row that had ALSO fixed a
+real mishearing in the same sentence. `Correction.pair` has refused these since
+2026-08-16 for exactly this reason and the merge did not.
+
+**`HearingMerge.Constants.refusesFunctionWordEdits` (default on) refuses a
+dispute where either side is entirely function words, and refuses a
+substitution that would swallow one.** Swept with everything else:
+
+| policy | funcWords | sureFloor | rows changed | better | worse | edits |
+|---|---|---|---|---|---|---|
+| earLeads | on | 0.70 | 17 | 9 | 2 | 37 -> 19 |
+| earLeads | on | 0.85 | 20 | 10 | 3 | 37 -> 20 |
+| earLeads | on | 0.95 | 23 | 10 | 4 | 37 -> 21 |
+| earLeads | off | 0.70 | 24 | 10 | 4 | 37 -> 16 |
+| earLeads | off | 0.85 | 27 | 10 | **6** | 37 -> 19 |
+| earLeads | off | 0.95 | 31 | 10 | 8 | 37 -> 21 |
+| **engineLeads** | **on** | **any** | **17** | **9** | **2** | **37 -> 19** |
+| engineLeads | off | any | 24 | 10 | 4 | 37 -> 16 |
+| hybrid | on | any | 17 | 9 | 2 | 37 -> 19 |
+| hybrid | off | any | 24 | 10 | 4 | 37 -> 16 |
+
+**The function-word refusal is better in every policy it is applied to**, and
+`engineLeads` is the only configuration whose result does not move when the
+confidence floor moves, which is worth more than the single extra correction
+`earLeads` buys for an extra mistake. **Shipped: `engineLeads`, function words
+refused.** 9 rows better, 2 worse, 16 left alone.
+
+**One of those two "worse" rows is a stale label, and saying so honestly
+matters more than the better number it would give.** cap-20260903-133433-827
+was judged against a merge that did two things at once: fixed "agronics" to
+"ergonomics" (right) and changed "in the machine" to "and the machine" (wrong).
+The founder rejected the pair. With the function-word rule the merge now makes
+only the first change, which is unambiguously an improvement, but the recorded
+preference was cast against a candidate that no longer exists and cannot be
+re-used. **The genuinely remaining loss is one: "career page" taken as "carrier
+page"** (cap-20260903-035639-673), two ordinary words, nothing in the evidence
+separating them. No number, negation or name regressed under any cell.
+
+**Do not read 9-2 as an accuracy score.** It counts rows where the merge moved
+the words towards or away from the reading the founder chose, on a set
+deliberately built from the rows where the two ears DISAGREED, so it is the
+hardest 40 rows and not a sample of ordinary dictation. What it settles is the
+policy, not the product's accuracy.
+
+**Reproduce:** `./build/tools/mergeprobe engine-tokens.jsonl pairs.jsonl labels.jsonl [--dump]`
+Labels and the blind key are at `~/Desktop/chalant-corpus/labelling/`, out of
+the repo because the rows are the founder's own dictated words.
+
+---
+
 ## 2026-09-04 — the second ear moves in FRONT of the landing (`feat/hearing-merge`)
 
 **The question.** The ear has been running after the words land since 1.20.0,

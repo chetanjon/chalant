@@ -141,6 +141,24 @@ public enum HearingMerge {
         /// Above this fraction of words in dispute, the two hearings are not
         /// the same sentence and nothing is merged.
         public var disputeCeiling: Double = 0.5
+        /// Whether a dispute that is only about function words is refused.
+        ///
+        /// **Added after the founder judged forty rows by ear (2026-09-10),
+        /// where it accounts for half the merge's mistakes.** "and it is very
+        /// good" came back as "that is very good", and "to the laptop in the
+        /// machine" as "to the laptop and the machine". Neither is a
+        /// mishearing worth acting on: a function word carries almost no
+        /// information, so two ears differing over one is the weakest evidence
+        /// in the whole type. `Correction.pair` already refuses these for the
+        /// same reason, in the same words: "on" becoming "in" is the user
+        /// writing, not the engine mishearing.
+        ///
+        /// The second half of the rule matters as much as the first. A
+        /// substitution that swallows a function word DELETES it, and one row
+        /// lost its "and" that way while fixing a real mishearing in the same
+        /// sentence ("a lot of commerce and I think" became "a lot of commas I
+        /// think"), so the founder rejected a row that was otherwise a win.
+        public var refusesFunctionWordEdits: Bool = true
         public var noSpeechCeiling: Double = 0.6
         public var logProbabilityFloor: Double = -1.0
         public var compressionCeiling: Double = 2.4
@@ -245,7 +263,7 @@ public enum HearingMerge {
 
     public static func merge(
         engine: [Token], ear: String, signals: Signals = .init(),
-        policy: Policy = .earLeads, constants: Constants = .init()
+        policy: Policy = .engineLeads, constants: Constants = .init()
     ) -> Outcome {
         let engineText = engine.map(\.text).joined(separator: " ")
         let earWords = words(ear)
@@ -374,6 +392,26 @@ public enum HearingMerge {
             minimumConfidence(span.engine) ?? 1 >= constants.negationConfidenceFloor
         {
             return Judgement(take: false, reason: "wouldChangeANegation")
+        }
+
+        // 4b. Function words. Half the merge's measured mistakes are here,
+        //     and none of its measured wins are.
+        if constants.refusesFunctionWordEdits {
+            let engineBare = engineWords.map(bare)
+            let earBare = span.ear.map(bare)
+            if engineBare.allSatisfy(TermMatcher.stopwords.contains)
+                || earBare.allSatisfy(TermMatcher.stopwords.contains)
+            {
+                return Judgement(take: false, reason: "onlyAFunctionWordDiffers")
+            }
+            // The ear said it in fewer words, and the ones it dropped are
+            // function words: that is a deletion wearing a substitution's
+            // clothes, and Part 1 §2 does not let us lose them.
+            if engineWords.count > span.ear.count,
+                engineBare.contains(where: TermMatcher.stopwords.contains)
+            {
+                return Judgement(take: false, reason: "wouldSwallowAFunctionWord")
+            }
         }
 
         // 5. The user's own vocabulary outranks both engines and every

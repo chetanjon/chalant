@@ -646,19 +646,19 @@ final class DictationController {
             if let hearing = await Deadline.value(of: hearingWork, within: ceiling) ?? nil {
                 mergeHearing = hearing
                 earSecondsAtRelease = hearing.seconds
-                // PROVISIONAL, and it is the one number here chosen by
-                // argument rather than by data. `tools/mergeprobe` sweeps the
-                // three policies over recorded audio, but telling a win from
-                // a loss needs labels, and the labelling of the forty rows
-                // that decide it is with the founder. On the eyeball reading
-                // of those rows earLeads recovers three more corrections than
-                // engineLeads and risks the same two; when the labels land,
-                // this constant changes or it does not, with the table in
-                // EVAL-LOG either way.
+                // SWEPT, not chosen: the founder judged forty rows by ear
+                // against the recordings on 2026-09-10, blind to which ear
+                // wrote which line, and `tools/mergeprobe` ran the grid over
+                // their answers. `engineLeads` with the function-word refusal
+                // won every cell it was in (9 rows better, 1 worse, 16 left
+                // alone) and is the only configuration whose result does not
+                // move when the confidence floor moves, which is worth more
+                // than the one extra correction `earLeads` buys for an extra
+                // mistake. Full table in EVAL-LOG.
                 let outcome = HearingMerge.merge(
                     engine: tokens, ear: hearing.text,
                     signals: await mergeSignals(engine: tokens, ear: hearing.text),
-                    policy: HearingMerge.Policy.earLeads)
+                    policy: HearingMerge.Policy.engineLeads)
                 tokens = outcome.tokens
                 mergeOutcomeName = outcome.verdict.rawValue
                 disputedSpans = outcome.disputedSpans
