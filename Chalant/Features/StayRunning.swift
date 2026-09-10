@@ -1,4 +1,5 @@
 import Foundation
+import ServiceManagement
 import os
 
 /// Chalant comes back when macOS stops it.
@@ -97,6 +98,29 @@ enum StayRunning {
         _ = launchctl(["bootout", domain + "/" + label])
         try? FileManager.default.removeItem(at: plistURL)
         log.notice("launchd is no longer watching Chalant")
+    }
+
+    /// Take over from the login item on an install that already had one.
+    ///
+    /// **Without this the fix ships switched off for everyone who already
+    /// wanted it.** The Settings toggle installs the agent when someone flips
+    /// it, and a user whose "start at login" was already on has no reason to
+    /// ever touch it again, so 1.40.0 would have given them a protection that
+    /// only arrived if they happened to fidget with a switch. Anyone who has
+    /// said they want Chalant at login has already said they want it running.
+    ///
+    /// Runs once at launch and does nothing on every launch after, because
+    /// `isOn` is true from then on.
+    static func adoptExistingLoginItem() {
+        guard !isOn, SMAppService.mainApp.status == .enabled else { return }
+        guard enable() else {
+            log.error("could not adopt the login item; leaving it as it was")
+            return
+        }
+        // Only after launchd has accepted the job: unregistering first would
+        // leave a failed adoption with neither mechanism.
+        try? SMAppService.mainApp.unregister()
+        log.notice("adopted the login item, launchd is watching Chalant now")
     }
 
     private static var domain: String { "gui/\(getuid())" }
