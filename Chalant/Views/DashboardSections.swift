@@ -74,17 +74,28 @@ struct GeneralSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.settingsGroup) {
             SettingCard(title: "Startup") {
-                SettingToggle(label: "Start at login", isOn: Binding(
+                SettingToggle(label: "Start at login, and stay running", isOn: Binding(
                     get: { launchAtLogin },
                     set: { enabled in
                         launchAtLogin = enabled
                         if enabled {
-                            try? SMAppService.mainApp.register()
+                            // launchd replaces the login item rather than
+                            // joining it: it does everything the login item
+                            // did and also brings Chalant back when macOS
+                            // stops it. If it refuses, fall back rather than
+                            // leaving the user with neither.
+                            if StayRunning.enable() {
+                                try? SMAppService.mainApp.unregister()
+                            } else {
+                                try? SMAppService.mainApp.register()
+                            }
                         } else {
+                            StayRunning.disable()
                             try? SMAppService.mainApp.unregister()
                         }
                     }
                 ))
+                SettingNote("macOS stops background apps when memory runs short, and it has stopped Chalant twice. This puts it back. Quitting it yourself still quits it.")
                 SettingDivider()
                 SettingToggle(label: "Check for new versions", isOn: $updateCheckOn)
                 SettingNote("Once a day, quietly, and again each time you open this page. Chalant never installs anything without you asking.")
@@ -318,7 +329,7 @@ struct GeneralSection: View {
             dictationHealth = Dictation.shared.health()
             // Opening the page is the ask: re-check, throttled inside.
             updates.sectionOpened()
-            launchAtLogin = SMAppService.mainApp.status == .enabled
+            launchAtLogin = StayRunning.isOn || SMAppService.mainApp.status == .enabled
             var devices = SystemVolume.inputDevices()
                 .filter { !$0.uid.isEmpty }
                 .map { (name: $0.name, uid: $0.uid) }

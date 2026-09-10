@@ -73,6 +73,12 @@ final class DictationController {
     /// 0.5 s wake as lag (2026-08-19). Ten minutes covers a working burst and
     /// still lets the mic rest for the rest of the day.
     static let earWarmHold: Duration = .seconds(600)
+    /// How long a silence has to run before the second ear puts the 626 MB
+    /// model down. Half an hour, deliberately far longer than the microphone's
+    /// ten minutes: closing the microphone costs the next dictation nothing,
+    /// and unloading the model costs it the second ear entirely, so the two
+    /// are not the same decision and do not share a timer.
+    static let earSleepAfter: Duration = .seconds(1800)
     private var earRestTask: Task<Void, Never>?
     /// How often the hold hands the live text to the model. Only one tail
     /// speculation runs at a time, so a shorter tick does not mean more
@@ -294,6 +300,13 @@ final class DictationController {
         // model to warm.
         if Cleanup.mode() != .off {
             Task { await polisher.warmUp() }
+        }
+        // And the second ear, if it put the model down during a long silence.
+        // Fire and forget on purpose: the reload takes about five seconds, far
+        // longer than any hold, so THIS utterance lands without it, exactly as
+        // it would with the ear switched off. The next one has it back.
+        if BetterHearing.isEnabled() {
+            Task { await BetterHearing.shared.wake() }
         }
 
         guard assetState.isReady else {
@@ -982,6 +995,16 @@ final class DictationController {
             try? await Task.sleep(for: Self.earWarmHold)
             guard let self, !Task.isCancelled, !self.isListening else { return }
             await self.audio.rest()
+            self.onStateChange?()
+            // Then, much later, the model itself. Twice in five days
+            // (2026-09-05 and 09-10) macOS terminated Chalant while nobody
+            // was looking, both times on a machine at 88% swap, and a
+            // menu-bar app holding 626 MB of speech model is what
+            // RunningBoard reaches for first. An idle Chalant should not be
+            // the biggest thing on the system.
+            try? await Task.sleep(for: Self.earSleepAfter - Self.earWarmHold)
+            guard !Task.isCancelled, !self.isListening else { return }
+            await BetterHearing.shared.sleep()
             self.onStateChange?()
         }
     }

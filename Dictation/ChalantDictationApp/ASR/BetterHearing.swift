@@ -114,6 +114,41 @@ actor BetterHearing {
         await HearingStatus.shared.set(.off)
     }
 
+    /// Put the model down after a long silence, keeping the switch on.
+    ///
+    /// **This is why Chalant kept disappearing (2026-09-10).** Twice in five
+    /// days macOS terminated it while the founder was not looking, and both
+    /// times the machine was at 88% swap after weeks of uptime. RunningBoard
+    /// reclaims the fattest background process it can find, and a menu-bar app
+    /// sitting on 626 MB of speech model is a long way ahead of the field.
+    /// `rest()` already closes the microphone after ten minutes; it does
+    /// nothing about the model, so the memory that made us a target was held
+    /// for as long as the app ran, whether or not anyone had dictated since
+    /// launch.
+    ///
+    /// Distinct from `stop()` in one way that matters to everything upstream:
+    /// the feature is still ON. `isReady` goes false, so a dictation in this
+    /// state lands the engine's words exactly as it would with the ear
+    /// switched off, and `wake()` brings it back for the next one.
+    func sleep() async {
+        guard pipe != nil else { return }
+        preparing?.cancel()
+        preparing = nil
+        pipe = nil
+        await HearingStatus.shared.set(.idle)
+        Self.log.info("better hearing asleep: model unloaded after a long silence")
+    }
+
+    /// Load again after `sleep`, if the switch is still on. Costs about five
+    /// seconds, so the caller starts it early and never waits on it: an
+    /// utterance that arrives before it finishes simply lands without the
+    /// second ear, which is the same path as having it switched off.
+    func wake() {
+        guard Self.isEnabled(), pipe == nil, preparing == nil else { return }
+        let task = Task { await self.load() }
+        preparing = task
+    }
+
     var isReady: Bool { pipe != nil }
 
     /// Whisper's hearing of the utterance, or nil when there is nothing to
@@ -221,7 +256,7 @@ actor BetterHearing {
 final class HearingStatus: ObservableObject {
     static let shared = HearingStatus()
     enum State: Equatable {
-        case off, downloading(Double), loading, ready, failed(String)
+        case off, downloading(Double), loading, ready, idle, failed(String)
     }
     @Published private(set) var state: State = .off
 
@@ -232,7 +267,10 @@ final class HearingStatus: ObservableObject {
         case .off: return "Off. Turning it on downloads the model once (\(BetterHearing.downloadSizeDescription))."
         case .downloading(let f): return "Downloading the better ear… \(Int(f * 100))%"
         case .loading: return "Loading…"
-        case .ready: return "Ready. Your words are corrected in place a second or two after they land, when it heard better."
+        case .ready: return "Ready. It listens alongside the first ear and the two agree on your words before they land."
+        // Said plainly, because a person who opens this page and reads
+        // "off" when the switch is on has been told something false.
+        case .idle: return "Resting. It puts the model down after a long silence and picks it up again when you next dictate."
         case .failed(let why): return "Could not download: \(why). It will try again next launch."
         }
     }
