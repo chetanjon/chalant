@@ -70,6 +70,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
+        // Whoever asked for Chalant at login asked for Chalant running.
+        // macOS has stopped it twice; launchd puts it back.
+        StayRunning.adoptExistingLoginItem()
         // One-time inheritance from the Moai era: the rename changed
         // the bundle id, which changed the defaults domain, which
         // would have orphaned every setting, note, and focus streak.
