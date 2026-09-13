@@ -2466,3 +2466,68 @@ job?", the ear wrote "Will I even get a job?". `mergeOutcome: agreed`, one
 disputed span, none merged. It is a `.deletion`, and deletions are always
 refused as `theEngineHeardMore` under Part 1 §2. Working as designed; it is
 also the second live sighting of that rule costing a real fix.
+## 2026-09-13: the names stop riding along on every sentence (`fix/prompt-rides-only-when-called-for`)
+
+The wait before the words land is the second ear's decode, and 0.05 s of it is
+each name in the prompt. `Names.forHearing` was filling that prompt to the cap
+from the standing list whether or not the sentence had a name in it: the
+founder's own log reads "16 names (65 prompt tokens)" on a sentence that said
+"My FNOPD just started."
+
+`NameHints.select` already scores every name against the utterance and keeps
+what clears `similarityFloor`. The standing list simply skipped that check.
+It no longer fills past `promptStandingFloor`.
+
+**Measured two ways, and they agree.** `tools/nameprobe` over the 114 rows with
+real first-ear transcripts, modelling the founder's list at ten typed names
+plus six learned (`--learned 6`, which reproduces the "16 names" in their log):
+
+| | prompt size | at 0.05 s/name |
+|---|---|---|
+| today | 16.3 names | - |
+| floored | 8.0 names | **0.42 s saved per sentence** |
+
+End to end, replaying the recordings through the ear itself: 16 names 1.76 s,
+8 names 1.35 s. Same 0.41 s from a completely different direction.
+
+### The floor is measured, not chosen
+
+Gating with no floor at all saves twice as much and **breaks a rescue**. On the
+23 name-bearing recordings:
+
+| prompt | names the full prompt rescued, kept | decode p50 |
+|---|---|---|
+| 16 names, today | 10 of 10 | 1.78 s |
+| **gated, floor of 8** | **10 of 10** | **1.37 s** |
+| gated, no floor | 9 of 10 | 1.16 s |
+
+The one it loses is `cap-20260819-161321-326`, which opens "Hey Chalant", and
+**it is not lost because the name was missing.** The gated prompt for that row
+is exactly "Chalant." Run the same audio with Chalant named and nothing else
+and the model drops the greeting; at four names it still drops it; at eight it
+comes back. Whisper reads the prompt as context and its LENGTH moves the decode
+on its own, independently of which names are in it. Eight is the shortest
+prompt measured to lose nothing, which makes it a measurement and not a
+principle: re-run the probe and these recordings if the ear or the model
+changes.
+
+### A pair needs one long half, not two
+
+`NameHints.probes` built a joined probe only when BOTH words cleared
+`minimumProbeLength`. The first ear writes Capgemini as "cap Gemini", "cap" is
+three letters, so "capgemini" was never built and a name it matches exactly was
+never offered to either ear. It now builds the pair when either half is long
+enough.
+
+It may not go further than that. Requiring neither half to be long puts
+function words back in play through the joins: "and the one at ten" reaches
+Andrew and Amanda on "andthe" alone, which is the exact hazard
+`minimumProbeLength` exists to stop, and `shortHeardWordsAreNotProbes` caught
+it within a minute of the looser rule being written.
+
+### What this does not touch
+
+`Names.forMatching` still lets the standing list fill to its own cap, so a name
+the ear was never warned about can still be repaired afterwards; the floor only
+governs what Whisper is told in advance. The wait itself, the ceiling and the
+merge policy are unchanged. 337 Core tests green, app target builds.

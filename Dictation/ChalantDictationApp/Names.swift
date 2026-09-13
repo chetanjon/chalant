@@ -27,15 +27,26 @@ enum Names {
         return (typed + learned).filter { seen.insert($0.lowercased()).inserted }
     }
 
-    /// The names the second ear reads before it listens: the standing list,
-    /// then the contacts that sound like something in what was heard, capped
-    /// at `NameHints.promptLimit` because a longer prompt made it slower and
-    /// worse on Set E.
+    /// The names the second ear reads before it listens: whatever sounds like
+    /// something in what was heard, from either list, capped at
+    /// `NameHints.promptLimit`.
+    ///
+    /// **The standing list no longer fills this prompt to the cap
+    /// (2026-09-13).** The prompt costs about 0.05 s per name and the ear
+    /// decodes before the words land now, so a sentence with no name in it was
+    /// paying roughly 0.8 s to be told about sixteen names it had no use for.
+    /// It fills to `NameHints.promptStandingFloor` instead, which is as short
+    /// as the prompt can get without Whisper's own length sensitivity
+    /// changing the decode.
+    ///
+    /// A name left out here is not forgotten: `forMatching` still carries the
+    /// whole standing list, so it can still be repaired afterwards.
     static func forHearing(heard: String) async -> [String] {
         NameHints.select(
             heard: heard,
             always: await standing(),
-            pool: await ContactNames.shared.pool())
+            pool: await ContactNames.shared.pool(),
+            standingFills: NameHints.promptStandingFloor)
     }
 
     /// The sound-alikes the matching pass may draw on. At most `Vocabulary.activeLimit`
