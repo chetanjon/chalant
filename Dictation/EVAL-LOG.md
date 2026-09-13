@@ -2382,3 +2382,87 @@ first". The other showed the alias path reaching what sound could not;
 it now shows what the alias is really for, which never depended on
 distance: an alias ignores CONFIDENCE, and a confidently-written name is
 still untouchable by sound alone.
+
+## 2026-09-13: what the merge costs, on the clock (`chore/merge-latency-measurement`)
+
+1.40.0 moved the second ear in front of the landing and the words got
+better. Nobody had timed what that does to the wait, and this file's own
+prior claim, "speed was never the problem, p50 0.29 s, already faster than
+Wispr Flow", stopped being true the day it shipped.
+
+**Key release to words on screen**, summed from the capture log as
+`finalizeSeconds + prepareSeconds + polishSeconds + insertSeconds`
+(`prepareSeconds` already contains `mergeWaitSeconds`; do not add it twice):
+
+| build | rows | p50 | p90 | max |
+|---|---|---|---|---|
+| 1.39.0, 1-5 Sep, no merge | 178 | **0.40 s** | 1.22 s | 1.85 s |
+| 1.40.0, 10 Sep, merge on | 2 | **3.48 s**, 3.11 s | | |
+
+The two 1.40.0 rows in full: finalize 0.11 + **mergeWait 2.14** + insert
+1.21, and finalize 0.26 + **mergeWait 1.95** + insert 0.90. **n=2 on the
+after side: the founder has dictated three times since the release, so this
+illustrates the mechanism rather than a distribution.** The mechanism is
+the designed one, `waitCeiling` = 3 s + 0.15 s/spoken second capped at 8 s,
+and the wait lands at whatever the decode takes.
+
+### Half the wait is the name prompt
+
+40 of the founder's own recordings replayed through the same model on the
+same Mac via `whisperkit-cli`, paired, changing only the prompt:
+
+| names in the prompt | decode p50 | p90 | added |
+|---|---|---|---|
+| 0 | 0.94 s | 1.23 s | - |
+| 8 | 1.35 s | 1.67 s | +0.42 s |
+| 16, which is what it sends | 1.76 s | 2.19 s | **+0.82 s** |
+
+Linear, about **0.05 s per name**. The live log line reads "16 names (65
+prompt tokens)". `Names.standing()` is typed terms plus trusted learned
+terms and grows as the ledger learns, so this gets worse with use.
+
+**Two settings that looked like free speed are not.** `concurrentWorkerCount`
+1 against 4, and chunking strategy `none` against `vad`, both measure
+0.94 s p50 on the same 40 rows. They were chosen on 2026-08-18 for an ear
+that ran in the background; they are harmless now and also useless. Do not
+re-test them.
+
+### The prompt is load-bearing on names and a tax on everything else
+
+The 29 rows in the corpus containing a pinned name, run twice: **the prompt
+rescued the name on 10 and broke 0.** `Chaland`, `Chalan`, `talent` and
+`challenge` all become `Chalant`; `Keeju` and `Kisu` become `Kizu`;
+`Jaydan` becomes `Chetan`; "Hey, it's a lot" becomes "Hey Chalant".
+
+The same prompt on 40 ordinary rows with no name in them changed the words
+on 6, and **3 of those were worse**: "Pick up milk, eggs, bread and coffee"
+became "Pickup Milk, Eggs, Bread and Coffee", and "I'm grateful for both of
+you" became "I'm a great robot". Two were better (punctuation and casing)
+and one is a coin toss. `Capgemini` is correct with the prompt and without
+it: the model knows the company, it does not know Kizu.
+
+**So the change worth making is a gate, not a deletion.** `NameHints.select`
+already filters the Contacts `pool` at `similarityFloor` 0.75; the `always`
+list skips that check and rides on every utterance. Applying the same check
+to `always` gives an ordinary sentence no prompt at all. The risk sits
+exactly on the rescues above, since `talent` and `challenge` are the two
+that are nearest the floor, **so the 29 name rows are the test set and a
+gate has to clear all ten rescues before it ships.**
+
+### Two dead ends, so nobody measures them again
+
+1. **"Skip the wait when the engine was sure."** `judgeSubstitution` refuses
+   a dispute whose minimum confidence is at or above `engineSureFloor`
+   (0.85), so a transcript entirely above it cannot be substituted and the
+   wait could be skipped outright. Over the 114 labelling rows with real
+   per-word confidence: **6 rows, 5%.** Not worth building.
+2. The two ears write **identical words on 45%** of those 114 rows. Nearly
+   half the waits buy nothing, and nothing tells you which half beforehand.
+
+### One refusal seen live
+
+`cap-20260910-065626-226`: the engine wrote "The rules will I even get a
+job?", the ear wrote "Will I even get a job?". `mergeOutcome: agreed`, one
+disputed span, none merged. It is a `.deletion`, and deletions are always
+refused as `theEngineHeardMore` under Part 1 §2. Working as designed; it is
+also the second live sighting of that rule costing a real fix.
