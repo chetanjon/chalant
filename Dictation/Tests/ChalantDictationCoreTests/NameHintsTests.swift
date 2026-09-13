@@ -82,6 +82,50 @@ struct NameHintsTests {
         #expect(NameHints.prompt([]) == "")
     }
 
+    /// The second ear's prompt is the one that pays for its own length: 0.05 s
+    /// per name, in front of the words landing. A sentence with nothing
+    /// name-shaped in it gets the floor, not the cap.
+    @Test("the prompt stops at the standing floor when nothing sounds like a name")
+    func promptStopsAtTheFloor() {
+        let many = (1...40).map { "Standing\($0)" }
+        let prompt = NameHints.select(
+            heard: "Put the kettle on and close the window.",
+            always: many, pool: contacts,
+            standingFills: NameHints.promptStandingFloor)
+        #expect(prompt.count == NameHints.promptStandingFloor)
+        let matching = NameHints.select(
+            heard: "Put the kettle on and close the window.",
+            always: many, pool: contacts)
+        #expect(matching.count == NameHints.promptLimit)
+    }
+
+    /// The floor is a floor, not a cap: a sentence full of sound-alikes still
+    /// gets them, because they are the part that earns the slot.
+    @Test("sound-alikes are never cut to make room for the floor")
+    func floorNeverCutsTheSoundAlikes() {
+        let prompt = NameHints.select(
+            heard: "Deploy versal first, then super base, then friction lens.",
+            always: pinned, pool: contacts,
+            standingFills: NameHints.promptStandingFloor)
+        #expect(prompt.contains("Vercel"))
+        #expect(prompt.contains("Supabase"))
+        #expect(prompt.contains("FrictionLens"))
+    }
+
+    /// The first ear writes Capgemini as "cap Gemini". "cap" is three letters,
+    /// and the pair rule used to want `minimumProbeLength` from both halves,
+    /// so "capgemini" was never built and the name it matches exactly was
+    /// never offered. One half is enough (2026-09-13).
+    @Test("a split name is found when only one half is a long word")
+    func joinsSplitNamesWithAShortHalf() {
+        let prompt = NameHints.select(
+            heard: "I did real time payments in cap Gemini.",
+            always: ["Capgemini", "Chalant", "Kizu"], pool: [],
+            standingFills: 0)
+        #expect(prompt.contains("Capgemini"))
+        #expect(!prompt.contains("Kizu"))
+    }
+
     /// The phonetic pass wants a bigger list (its own cap is 100) but the same
     /// selection: standing names, then whatever in the pool sounds like the
     /// utterance. Nothing from the pool that does not.
