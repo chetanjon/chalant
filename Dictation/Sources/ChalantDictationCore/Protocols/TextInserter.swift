@@ -47,7 +47,15 @@ public enum InsertionRefusal: Sendable, Hashable {
 }
 
 public enum InsertionOutcome: Sendable, Hashable {
-    case inserted(tier: InsertionTier)
+    /// The keystroke was dispatched at `tier`, and `landing` is what the
+    /// focused field said about it afterwards.
+    ///
+    /// **`landing` is evidence, not a gate.** `.uncertain` is the common case
+    /// and still counts as inserted, because Electron and web views answer
+    /// nothing and Part 1 §1 keeps accessibility out of the decision to
+    /// insert. Only `.confirmed` may be reported anywhere as text the user can
+    /// see.
+    case inserted(tier: InsertionTier, landing: LandingCheck.Verdict = .uncertain)
     case leftOnClipboard(reason: String)
     case refused(reason: InsertionRefusal)
 }

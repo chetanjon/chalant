@@ -97,18 +97,34 @@ actor PasteboardGuard {
         return board.changeCount
     }
 
-    /// Give the clipboard back.
+    /// Give the clipboard back, unless somebody has copied since.
     ///
     /// **1.5 seconds, not the 40-80ms the original spec guessed.** Part 1 §1
     /// corrects this: Chromium reads the pasteboard asynchronously, so
     /// restoring too quickly makes Chrome and every Electron app paste the
     /// user's OLD clipboard instead of the dictation. A competitor's own docs
     /// independently recommend 500ms to 2s.
-    func restore(_ snapshot: Snapshot) async {
+    ///
+    /// **Which leaves a 1.5 second window in which a real copy can be
+    /// overwritten, and until now it was.** `Snapshot.changeCount` has been
+    /// captured since this file was written and read by nothing: the restore
+    /// called `clearContents()` unconditionally and wrote the old contents
+    /// over whatever was there. Press ⌘C inside that window and the clipboard
+    /// silently reverted to what it held before the dictation.
+    ///
+    /// So the restore asks whether the clipboard is still ours. `ours` is the
+    /// count returned by our own `place`; if the board has moved past it,
+    /// somebody wrote something and their copy wins. Losing the restore costs
+    /// the user nothing they can see; losing their copy costs them the thing
+    /// they just deliberately saved.
+    func restore(_ snapshot: Snapshot, ours: Int) async {
         try? await Task.sleep(for: .milliseconds(1500))
 
         let board = NSPasteboard.general
-        board.clearContents()
+        guard board.changeCount == ours else {
+            Self.log.info("clipboard not restored: something was copied since the paste")
+            return
+        }
 
         var restored: [NSPasteboardItem] = []
         for stored in snapshot.items {
@@ -118,9 +134,16 @@ actor PasteboardGuard {
             }
             restored.append(item)
         }
-        if !restored.isEmpty {
-            board.writeObjects(restored)
+        // **Nothing to restore means leave it alone, not empty it.** The
+        // guard used to sit only on the write, so an empty snapshot (a user
+        // whose clipboard was empty, or one whose items would not read) left
+        // the board CLEARED rather than restored.
+        guard !restored.isEmpty else {
+            Self.log.info("clipboard not restored: the snapshot held nothing to put back")
+            return
         }
+        board.clearContents()
+        board.writeObjects(restored)
         Self.log.info("clipboard restored (\(restored.count, privacy: .public) items)")
     }
 
