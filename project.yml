@@ -17,6 +17,27 @@ packages:
   WhisperKit:
     url: https://github.com/argmaxinc/WhisperKit
     from: 1.1.0
+  # Parakeet TDT v3 on device, the primary recognizer from 1.42.0.
+  #
+  # **Pinned exactly, never a range, and Part 0 §0.8 is the reason:** this
+  # project ships releases days apart and shipped two breaking changes in
+  # 2026 (`DownloadUtils` to `ModelHub`, the v0.12.6 actor conversion). The
+  # third one is the one that bites here: `AsrManager.initialize(models:)`,
+  # `configure(models:)` and `transcribe(samples, source:)` all appear in
+  # the published README, Documentation/API.md and docs.fluidinference.com,
+  # and NONE of them exist at 0.15.7. Only `Sources/**/*.swift` at the
+  # pinned tag is authoritative here; the Markdown is stale. Verified by
+  # compiling the whole surface we use against the checkout before the
+  # first line of app code was written.
+  #
+  # Pulls one remote binary artifact of its own, `NemoTextProcessing`
+  # (text-processing-rs v0.3.0), for inverse text normalisation. Swift 6.2+
+  # toolchains read `Package@swift-6.2.swift`, where that is a package trait
+  # enabled by default; xcodegen has no way to pass traits, so the default
+  # set is what ships.
+  FluidAudio:
+    url: https://github.com/FluidInference/FluidAudio.git
+    exactVersion: 0.15.7
   # Dictation's pure core, merged 2026-08-15 by git subtree so its 20 commits
   # of history came along. The package boundary is kept on purpose: it lets
   # Core stay Swift 6 `complete` while this app target stays 5.9 `targeted`,
@@ -71,6 +92,8 @@ targets:
       - package: Sparkle
       - package: WhisperKit
         product: WhisperKit
+      - package: FluidAudio
+        product: FluidAudio
       - package: ChalantDictationCore
         product: ChalantDictationCore
     info:
