@@ -310,6 +310,23 @@ final class DictationController {
         }
     }
 
+    /// One more attempt at typing text that could not be typed before.
+    ///
+    /// Aimed at whatever is in front NOW rather than at the app the user was
+    /// in when they spoke: they have moved, the retry button is in their hand,
+    /// and pasting into somewhere they left is the failure this is here to
+    /// undo. Captures a fresh target for the same reason, so nothing stale can
+    /// be pasted into.
+    @MainActor
+    private static func retryInsertion(of text: String, using inserter: InsertionChain) async {
+        let front = NSWorkspace.shared.frontmostApplication
+        let target = InsertionTarget(
+            bundleID: front?.bundleIdentifier, processID: front?.processIdentifier,
+            capturedAt: Date(), appName: front?.localizedName)
+        let outcome = await inserter.insert(text, into: target)
+        Self.log.notice("retry insertion: \(String(describing: outcome), privacy: .public)")
+    }
+
     /// Apple hearing the same audio, once, because the chosen engine could
     /// not.
     ///
@@ -891,6 +908,25 @@ final class DictationController {
             // rows nobody can label.
             await corpus.discard()
             Self.log.info("nothing heard")
+            // **And it says so now.** This was the commonest way a dictation
+            // ended in silence: the light went out, nothing appeared, and the
+            // reason lived only in the log. It is indistinguishable from a
+            // broken app, which is the failure every other guard in this file
+            // was taught to speak up about.
+            //
+            // There is nothing to put on the clipboard, so this is a sentence
+            // rather than a recovery. It says which of the two silences it was,
+            // because "I heard nothing" and "your microphone heard nothing"
+            // have different answers and the instruments to tell them apart
+            // are already here.
+            if engineNote.hasSuffix("appleFailed") {
+                surface.say("Neither ear could make that out. Nothing was typed.")
+            } else if !keyDownHeard || holdPeak == 0 {
+                let ear = await liveInputName() ?? "your microphone"
+                surface.say("\(ear) heard nothing. Check it is not muted.")
+            } else {
+                surface.say("I didn't catch that.")
+            }
             return
         }
 
@@ -906,6 +942,12 @@ final class DictationController {
         }
 
         guard let target else {
+            // Nothing was in front at key-down, so there is nowhere to aim.
+            // The words still exist and are the user's.
+            Self.log.error("no target was captured; handing the words back")
+            await inserter.leaveOnClipboard(text)
+            surface.offerRecovery(
+                text: text, reason: "Nowhere to type it", retry: nil)
             return
         }
 
@@ -920,9 +962,23 @@ final class DictationController {
 
         // Re-validate: if focus moved between key-down and now, the paste
         // would land in the wrong app.
+        //
+        // **This used to return in silence, and it was the sharpest of the
+        // four.** `InsertionChain` already has a `.targetChanged` path that
+        // saves the words and says so, and this earlier guard short-circuited
+        // before reaching it: switch app before letting go and the sentence
+        // was simply gone, with no message and nothing on the clipboard.
         let front = NSWorkspace.shared.frontmostApplication
         guard front?.processIdentifier == target.processID else {
             Self.log.error("focus moved during dictation; refusing to insert")
+            await inserter.leaveOnClipboard(text)
+            let inserter = self.inserter
+            surface.offerRecovery(text: text, reason: "Focus moved while you spoke") {
+                // Retry aims at whatever is in front NOW, which is where the
+                // user went, and captures its own target so nothing stale can
+                // be pasted into.
+                Task { await Self.retryInsertion(of: text, using: inserter) }
+            }
             return
         }
 
@@ -996,7 +1052,10 @@ final class DictationController {
             let role = LandingProbe.focusedRole()
             if LandingRoles.verdict(role: role) == .doesNot {
                 await inserter.leaveOnClipboard(text)
-                surface.say("Nowhere to type. What you said is in your clips.")
+                let inserter = self.inserter
+                surface.offerRecovery(text: text, reason: "Nowhere to type it") {
+                    Task { await Self.retryInsertion(of: text, using: inserter) }
+                }
                 Self.log.notice(
                     "no landing spot (role \(role ?? "none", privacy: .public)); words left on the clipboard")
             } else {
@@ -1025,15 +1084,26 @@ final class DictationController {
             // and the words are already on the clipboard (the chain places
             // them there on every refusal that gets this far). Until tonight
             // nothing SAID so, and a refusal read as words vanishing.
+            let inserter = self.inserter
+            let retry: @MainActor () -> Void = {
+                Task { await Self.retryInsertion(of: text, using: inserter) }
+            }
             switch outcome {
             case .refused(reason: .secureInputActive(let holder)):
+                // No retry offered: while secure input is held the system
+                // drops synthetic keystrokes, so a second attempt would fail
+                // the same way. The words stay out of visible history too.
                 let who = holder.map { " (\($0))" } ?? ""
-                surface.say("A password field has the keyboard\(who). What you said is on the clipboard.")
+                surface.say("A password field has the keyboard\(who). Your words are on the clipboard.")
             case .refused(reason: .targetChanged):
-                surface.say("Focus moved while you spoke. What you said is in your clips.")
+                surface.offerRecovery(
+                    text: text, reason: "Focus moved while you spoke", retry: retry)
+            case .refused(reason: .noTarget):
+                // Said nothing at all before this.
+                surface.offerRecovery(text: text, reason: "Nowhere to type it", retry: retry)
             case .leftOnClipboard:
-                surface.say("Couldn't type there. What you said is in your clips.")
-            default:
+                surface.offerRecovery(text: text, reason: "Couldn't type there", retry: retry)
+            case .inserted:
                 break
             }
         }

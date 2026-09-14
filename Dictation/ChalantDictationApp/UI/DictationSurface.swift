@@ -16,10 +16,19 @@ protocol DictationSurface: AnyObject {
     func update(level: CGFloat, mic: String?)
     /// The key came up, or the session stood down.
     func hide()
-    /// A short line the surface shows after the strip is gone: today, that
-    /// the words had nowhere to land and are on the clipboard. Never used
+    /// A short line the surface shows after the strip is gone. Never used
     /// while the strip is up.
     func say(_ message: String)
+
+    /// Words that could not be typed, with what can still be done with them.
+    ///
+    /// **Distinct from `say` because a sentence was never enough.** Every
+    /// failure message in this subsystem goes through `say` into one clipped
+    /// line, and "your words are on the clipboard" is not information, it is
+    /// an instruction the user cannot act on from there. The words are always
+    /// on the clipboard before this is called; `retry` is another attempt at
+    /// whatever is in front now, or nil when there is nothing to try.
+    func offerRecovery(text: String, reason: String, retry: (@MainActor () -> Void)?)
 }
 
 /// How the controller asks which display a pid is showing on, without the

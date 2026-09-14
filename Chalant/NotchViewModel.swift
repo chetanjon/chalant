@@ -363,6 +363,63 @@ final class NotchViewModel: ObservableObject {
     /// A short-lived line in the collapsed glance: a session landing,
     /// a timer finishing. Clears itself.
     @Published var glanceToast: String?
+
+    /// Words that could not be typed, and what can still be done with them.
+    ///
+    /// **A toast could not carry this and was already failing to carry
+    /// less.** Every insertion failure funnels into `flashGlance`, which draws
+    /// one `lineLimit(1)` line in a notch wing reserving 124 pt, and all four
+    /// existing sentences are 45 to 70 characters: they have been clipped for
+    /// as long as they have existed. "Your words are on the clipboard" needs
+    /// to be actionable, not truncated, so it gets a glance of its own with
+    /// the two things a person wants: the text, and another go at putting it
+    /// where they meant.
+    struct Recovery: Identifiable, Equatable {
+        let id = UUID()
+        /// What was said. Also on the clipboard, always, before this appears.
+        let text: String
+        /// Why it did not land, in one short phrase that fits.
+        let reason: String
+        /// Another attempt at the app in front right now, when one makes
+        /// sense. Nil when there is nothing to retry into.
+        let retry: (@MainActor () -> Void)?
+
+        static func == (a: Recovery, b: Recovery) -> Bool { a.id == b.id }
+    }
+
+    @Published var dictationRecovery: Recovery?
+    private var recoveryClearWork: DispatchWorkItem?
+
+    /// Show the recovery glance. Thirty seconds, not the toast's six: this one
+    /// asks the user to do something, and six seconds is not long enough to
+    /// notice a line in a notch wing and decide to act on it.
+    func offerRecovery(_ recovery: Recovery, seconds: TimeInterval = 30) {
+        recoveryClearWork?.cancel()
+        dictationRecovery = recovery
+        let work = DispatchWorkItem { [weak self] in
+            guard self?.dictationRecovery?.id == recovery.id else { return }
+            self?.dictationRecovery = nil
+        }
+        recoveryClearWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+    }
+
+    /// Put the words back on the clipboard, in case something has been copied
+    /// since they were rescued there.
+    func copyRecoveredText() {
+        guard let text = dictationRecovery?.text else { return }
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.setString(text, forType: .string)
+        flashGlance("Copied.")
+        clearRecovery()
+    }
+
+    func clearRecovery() {
+        recoveryClearWork?.cancel()
+        recoveryClearWork = nil
+        dictationRecovery = nil
+    }
     private var toastClearWork: DispatchWorkItem?
 
     func flashGlance(_ text: String, seconds: TimeInterval = 6) {
@@ -622,6 +679,10 @@ final class NotchViewModel: ObservableObject {
 
     /// Width the right-of-camera glance needs.
     func notchSideNeed(style: DisplayConfigStore.Style) -> CGFloat {
+        // Wider than a toast, because it carries two buttons as well as a
+        // line. Still a wing rather than a panel: law 2, and the founder has
+        // already rejected one object that appeared over their work.
+        if dictationRecovery != nil { return 210 }
         if glanceToast != nil { return 124 }
         // Nothing beyond the user's list: the day, the streak, and the
         // clock glances all duplicated surfaces that already exist (the
