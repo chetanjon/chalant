@@ -5,6 +5,147 @@ pipeline reports corrections per 100 words before and after, on `--split dev`.
 
 ---
 
+## 2026-09-14: three engines, one voice, and §0.12 was right (`feat/parakeet-primary`)
+
+The branch replaces the two-ear merge with one chosen recognizer, and the
+question it had to answer first was which one ships by default. Part 0 §0.12
+ruled on this before Parakeet existed here: its closest public lineage scores
+roughly twice Whisper's word error on Indian-accented English (Svarah, Javed
+et al., Interspeech 2023), and *"if Parakeet underperforms the Apple default
+on the corpus, cut its engine role"*. The founder, asked directly, said the
+shipped default should follow the measurement.
+
+`tools/engineprobe` is the measurement: three engines, the same recordings,
+`corpus-kit/score.py`, the app's own `SubwordAssembly` and deterministic chain
+compiled in from Core so an arm cannot drift from the shipping path.
+
+### The set
+
+`~/Desktop/chalant-corpus/manifest.jsonl`, the 90 prompted rows that carry real
+`desired` ground truth. **Scored over the 60 English rows only** — `torture`
+(Set C, 30 rows, 225 words) and `propernoun` (Set E, 30 rows, 243 words). The
+30 `codeswitch` rows are excluded on purpose: they are deliberately Telugu and
+English in one breath against an en-US engine, all three arms score 83 to 105
+corrections per 100 words on them, and averaging that in would drown the
+comparison in a number that measures a different thing. Read speech, one
+speaker, deliberately hard content. **Only the ratio between arms travels.**
+
+### The result, with the deterministic chain applied
+
+| engine | corrections / 100 words | torture | propernoun | decode p50 | decode p90 |
+|---|---|---|---|---|---|
+| **Whisper** large-v3-turbo | **24.15** (113) | 16.89 | **30.86** | 0.888 s | 1.132 s |
+| **Apple** `SpeechTranscriber` | **28.21** (132) | **17.78** | 37.86 | 0.134 s | 0.157 s |
+| **Parakeet** TDT v3 + ITN | 30.98 (145) | 24.00 | 37.45 | 0.135 s | 0.142 s |
+| Parakeet TDT v3, no ITN | 35.04 (164) | 35.11 | 34.98 | 0.135 s | 0.142 s |
+
+Raw, before the chain: Apple 29.27, Whisper 24.79, Parakeet 36.97.
+
+**So the default is Apple, and Parakeet is not cut but is not the default
+either.** §0.12's prediction held: on this voice Parakeet is the worst of the
+three, 2.8 corrections per hundred words behind Apple. It is also exactly as
+fast as Apple here, which was the surprise (see below), so it stays available:
+one speaker's accented English cannot settle a US-English model's value for
+everyone, and that is a question a picker can answer and a constant cannot.
+
+### Speed is not the axis anyone thought it was
+
+Apple 0.134 s and Parakeet 0.135 s median on ~9 s recordings. **Tied.** The
+"Parakeet is an order of magnitude faster" expectation came from comparing its
+decode against the *dual-ear merge*, which measured 3.48 s and 3.11 s at
+release — and almost all of that was Whisper plus the wait, not Apple. Against
+Apple alone there is nothing to win. Whisper is 6.6x slower than either
+(0.888 s), which is the honest price of its 4 corrections per hundred words.
+
+Parakeet's own footprint, measured on this Mac rather than quoted:
+
+| | |
+|---|---|
+| Download | **471 MB** on disk (the HF file tree sums to ~483 MB) |
+| First load after download | **~17 s**, the Neural Engine compiling |
+| Every load after that | **0.10 s**, in a fresh process |
+| Resident | **~87 MB** peak, against Whisper's 626 MB |
+
+The last two rewrote the lifecycle. 87 MB is not what RunningBoard reaches for,
+so unlike the second ear this model is *not* put down after a long silence, and
+a burst of dictation never pays a reload. The 17 s is genuinely once, and it is
+the `.compiling` phase FluidAudio reports, so it gets its own word in Settings
+rather than a silent bar.
+
+### Inverse text normalisation is worth 4 corrections per 100 words
+
+Parakeet writes what it hears. Apple applies ITN and Parakeet does not, and
+that was most of the gap on Set C rather than any failure of hearing:
+
+```
+C02  truth     Send 15, not 50.
+     apple     Send 15, not 50
+     parakeet  Send fifteen, not fifty.
+
+C06  truth     The invoice came to $120.
+     parakeet  The invoice came to one hundred and twenty dollars.
+
+C03  truth     The meeting moved to 3:15, not 3:50.
+     apple     Eating, the meeting moved to 315, not 350
+     parakeet  Meeting the meeting moved to three fifteen, not three fifty.
+```
+
+C03 is worth reading twice: Parakeet **hears** it correctly and writes it
+wrong, while Apple mishears the numbers and invents a leading "Eating". On C04
+Parakeet gets the comma the truth has where Apple invents a full stop.
+
+FluidAudio ships the normaliser and it is already linked (`NemoTextProcessing`
+comes down with the package). Wired in, Set C goes 35.11 to 24.00 and the
+overall figure 35.04 to 30.98. Checked on the exact failing lines first, and on
+the line that mattered most: `Ship Chalant to the Kizu group today` comes back
+untouched.
+
+### What ITN costs, and what it does not
+
+`normalizeSentence` works on a sentence and collapses five words into one, so
+the decoder's per-word confidences stop lining up. Throwing them away would
+silence the vocabulary layer, which is the 2026-08-15 bug in a new coat;
+keeping them by position would attach a number's score to whatever word landed
+in that slot, which is worse than nothing. `TokenRealignment` aligns the two
+sequences with `HearingMerge.align` — the same edit-distance walk, reused
+because it already handles a word being added or removed — and a word carries
+its confidence only where it survived unchanged. Everything the rewrite touched
+arrives `nil`, which `TermMatcher` reads as "no evidence to act on".
+
+### Four things not to measure again
+
+1. **Parakeet's per-word confidence does not come from the library.**
+   `ASRResult.confidence` is utterance-level, `TokenTiming.confidence` is
+   sub-word, and FluidAudio's own `buildWordTimings(from:)` discards it.
+   `SubwordAssembly` aggregates the pieces; which aggregation is right is not
+   obvious and is left as a parameter, because on Set E the pieces of a
+   correctly heard `Kizu` score 0.527 and a misheard `chalan` scores 0.575.
+   **The AUC is not measured yet**, so the floor ships provisionally at 0.45.
+2. **Parakeet has no biasing API.** Batch `AsrManager` at 0.15.7 takes no
+   hotwords, no prompt, no contextual strings. Its CTC rescoring path does, at
+   the cost of a second 97.5 MB model and roughly a quarter of the throughput.
+   Unmeasured; a real option, not a free one.
+3. **Parakeet repeats itself occasionally.** C05 came back "Email Sarah about
+   it, not Sarah. Sarah. Sarah." This is §0.8's open issue #128 showing up on
+   the founder's own corpus. `Restatement` does not catch it because it only
+   collapses sentences of three or more words.
+4. **Paths are beyond all three.** C12 (`/Users/chetan/projects`) is 100% error
+   on Apple and Whisper and 300% on Parakeet, which writes "slash users slash".
+   Nothing downstream reconstructs a path and nothing should guess at one.
+
+### Reproduce
+
+```bash
+swift build -c release --package-path Dictation/tools/engineprobe
+P=Dictation/tools/engineprobe/.build/release/engineprobe
+for e in apple parakeet whisper; do
+  $P ~/Desktop/chalant-corpus/manifest.jsonl out-$e.jsonl --engine $e --tokens --deep
+done
+# join `desired` from the manifest onto `deep`, keep context in {torture, propernoun}
+python3 Dictation/corpus-kit/score.py english-$e-deep.jsonl \
+    --terms ~/Desktop/chalant-corpus/terms-canonical.txt
+```
+
 ## 2026-09-10 — Chalant stays running, and the ear stops being a target. QUEUED, one part PROVEN.
 
 Branch `fix/stay-running`. The restart mechanism below was **run end to end on

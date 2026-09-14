@@ -567,7 +567,12 @@ public enum HearingMerge {
     /// a word being ADDED or REMOVED. The single most valuable disagreement in
     /// the whole measured week was exactly that shape: the ear heard a "don't"
     /// the engine never wrote.
-    static func align(engine: [Token], ear: [String]) -> [Span] {
+    ///
+    /// Public since 2026-09-14: `TokenRealignment` needs the same alignment to
+    /// carry per-word confidence across a rewritten sentence, and a second
+    /// edit-distance walk in the same module would be a second thing to keep
+    /// correct.
+    public static func align(engine: [Token], ear: [String]) -> [Span] {
         let a = engine.map { bare($0.text) }
         let b = ear.map { bare($0) }
 

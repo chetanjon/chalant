@@ -24,3 +24,9 @@ _bmad-output/*
 # scripts/make-dmg-background.py whenever GEOMETRY changes.
 packaging/background.png
 packaging/background@2x.png
+
+# SwiftPM build products for the offline probes. The probes themselves are
+# source; their .build directories are 20 MB binaries and a FluidAudio
+# checkout.
+.build/
+Dictation/tools/*/.build/

@@ -172,6 +172,27 @@ actor ParakeetEngine {
         }
         let seconds = Date().timeIntervalSince(started)
 
+        // **Numbers, times, amounts and versions, written the way they were
+        // meant (2026-09-14).** Parakeet writes what it hears: "one hundred
+        // and twenty dollars", "three fifteen", "version one point four two".
+        // Apple's engine applies inverse text normalisation and this model
+        // does not, and the gap is not cosmetic: measured on the founder's own
+        // Set C it was most of the reason Parakeet scored 37.78 corrections
+        // per 100 words against Apple's 20.00, and a dictated amount arriving
+        // spelled out is a real defect rather than a style.
+        //
+        // FluidAudio ships the normaliser and it is already linked: the
+        // `NemoTextProcessing` binary target comes down with the package.
+        // Measured on the exact failing lines before this was wired: "Send
+        // fifteen, not fifty." to "Send 15, not 50.", "one hundred and twenty
+        // dollars" to "$120", and — the one that mattered most to check —
+        // "Ship Chalant to the Kizu group today" untouched.
+        let normalized = TextNormalizer.shared.normalizeSentence(result.text)
+        let rewritten = normalized != result.text
+        if rewritten {
+            Self.log.info("inverse text normalisation rewrote the sentence")
+        }
+
         // The pieces, with the confidence FluidAudio's own word helper drops.
         let pieces = (result.tokenTimings ?? []).map {
             SubwordAssembly.Piece(
@@ -181,10 +202,17 @@ actor ParakeetEngine {
         // A decode with text but no timings is possible and must not become
         // an empty transcript: fall back to the text the engine returned,
         // unscored, which the vocabulary layer correctly refuses to touch.
-        let tokens =
+        let heard =
             pieces.isEmpty
             ? result.text.split(whereSeparator: \.isWhitespace).map { Token(text: String($0)) }
             : SubwordAssembly.tokens(from: pieces, aggregation: aggregation)
+        // Confidence carried across the rewrite where the word survived it,
+        // and dropped where it did not: a word the normaliser just rewrote is
+        // not a word to second-guess on sound, and attaching a number's score
+        // to whatever landed in its slot would be worse than having none.
+        let tokens =
+            rewritten
+            ? TokenRealignment.carryingConfidence(from: heard, onto: normalized) : heard
 
         Self.log.notice(
             """
@@ -192,7 +220,7 @@ actor ParakeetEngine {
             \(tokens.count, privacy: .public) words in \(seconds, privacy: .public)s \
             (utterance confidence \(result.confidence, privacy: .public))
             """)
-        return Hearing(tokens: tokens, text: result.text, seconds: seconds)
+        return Hearing(tokens: tokens, text: normalized, seconds: seconds)
     }
 }
 
