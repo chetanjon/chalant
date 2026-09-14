@@ -43,6 +43,10 @@ final class IslandDictationSurface: DictationSurface, DictationDisplayLookup {
         model?.updateDictating(level: DictationStripLevel.normalize(peak: level), mic: mic)
     }
 
+    func finishListening() {
+        model?.finishDictationListening()
+    }
+
     func hide() {
         model?.endDictating()
     }

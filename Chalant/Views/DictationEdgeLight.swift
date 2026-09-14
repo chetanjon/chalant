@@ -20,15 +20,26 @@ struct DictationEdgeLight: NSViewRepresentable {
     let level: CGFloat
     let fill: CGFloat
     let size: CGSize
+    /// The key is up and the words are still coming.
+    ///
+    /// **A still line, not a new thing.** The gap between release and text was
+    /// invisible before because it was 0.4 s at p50 on Apple's engine; it is no
+    /// longer reliably that small, and a user looking at nothing cannot tell
+    /// "working" from "broken". So the aurora stops responding to a microphone
+    /// that is closed and holds a dim, even line instead. Nothing appears,
+    /// nothing travels, nothing spins: the founder rejected a visible
+    /// refinement in 1.19.0 and a floating object in 1.40.0, and the rule
+    /// "the bright point never moves" is the whole design.
+    var working: Bool = false
 
     func makeNSView(context: Context) -> EdgeHostView {
         let view = EdgeHostView()
-        view.apply(accent: accent, level: level, fill: fill, size: size)
+        view.apply(accent: accent, level: level, fill: fill, size: size, working: working)
         return view
     }
 
     func updateNSView(_ view: EdgeHostView, context: Context) {
-        view.apply(accent: accent, level: level, fill: fill, size: size)
+        view.apply(accent: accent, level: level, fill: fill, size: size, working: working)
     }
 
     final class EdgeHostView: NSView {
@@ -58,13 +69,26 @@ struct DictationEdgeLight: NSViewRepresentable {
         @available(*, unavailable)
         required init?(coder: NSCoder) { fatalError("not from a nib") }
 
+        /// How bright the line sits while it thinks. Below the quietest
+        /// speaking peak (`edgePeak` at level 0 is 0.45) so the change from
+        /// listening to working reads as settling rather than as a new state,
+        /// and well above nothing so it is visibly still there.
+        private static let workingPeak: CGFloat = 0.28
+
         override var isOpaque: Bool { false }
         /// The light is decoration over whatever the user is really doing.
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-        func apply(accent: Color, level: CGFloat, fill: CGFloat, size: CGSize) {
+        func apply(accent: Color, level: CGFloat, fill: CGFloat, size: CGSize, working: Bool) {
             guard size.width > 0, size.height > 0 else { return }
-            let peak = DictationStripLevel.edgePeak(level: level)
+            // While working, the microphone is closed and `level` is zero, so
+            // the peak is held at a fixed dim value rather than read off a
+            // meter that has nothing to say. The reach is kept wherever the
+            // sentence left it, so the line does not shrink on release: the
+            // brightness changes, the geometry does not.
+            let peak =
+                working
+                ? Self.workingPeak : DictationStripLevel.edgePeak(level: level)
             let shoulder = peak * DictationStripLevel.edgeShoulderShare
             let reach = DictationStripLevel.spread(fill: fill)
             let base = NSColor(accent)

@@ -1608,6 +1608,7 @@ final class NotchViewModel: ObservableObject {
             expandedDisplayID = defaultOwnerDisplay()
         }
         dictationInfo = DictationInfo(appName: appName, micName: mic)
+        dictationPhase = .listening
         dictationVoice.reset()
         dictationLevel = 0
         dictationFill = 0
@@ -1616,6 +1617,29 @@ final class NotchViewModel: ObservableObject {
         dictationSway = 0
         quietTheRoom()
         state = .dictating
+    }
+
+    /// Whether the strip is hearing you or thinking about what it heard.
+    ///
+    /// A phase rather than a fifth `IslandState`, deliberately: `.dictating`
+    /// already owns the display, the ducked room and the shape, and a new
+    /// state would mean teaching every guard in this file and
+    /// `ChalantRole.islandHidden` about it for a difference the user reads as
+    /// "the light went still".
+    enum DictationPhase: Equatable { case listening, working }
+
+    @Published private(set) var dictationPhase: DictationPhase = .listening
+
+    /// The key came up. The room stays quiet, because the words are not there
+    /// yet and restoring the music now would announce a finish that has not
+    /// happened.
+    func finishDictationListening() {
+        guard state == .dictating else { return }
+        dictationPhase = .working
+        dictationVoice.reset()
+        dictationLevel = 0
+        dictationPulse = 0
+        dictationPace = 0
     }
 
     func updateDictating(level: CGFloat, mic: String?) {
@@ -1635,6 +1659,7 @@ final class NotchViewModel: ObservableObject {
 
     func endDictating() {
         guard state == .dictating else { return }
+        dictationPhase = .listening
         restoreTheRoom()
         dictationVoice.reset()
         dictationLevel = 0

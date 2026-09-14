@@ -599,7 +599,8 @@ struct NotchRootView: View {
                                 // what is playing.
                                 accent: Color(white: 0.96),
                                 level: model.dictationLevel, fill: model.dictationFill,
-                                size: dictatingSize
+                                size: dictatingSize,
+                                working: model.dictationPhase == .working
                             )
                             .transition(.opacity)
                         }

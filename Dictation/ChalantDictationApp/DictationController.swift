@@ -676,7 +676,20 @@ final class DictationController {
         pretidyTask = nil
         await audio.endCapture()
         stopMeter()
-        surface.hide()
+        // **The light stays, still, until the words are actually somewhere.**
+        // `hide()` used to be called here, before draining, finalization,
+        // cleanup and insertion, so everything expensive happened in the dark
+        // and `restAfterDictation` then enforced 1.4 s of quiet on top. That
+        // was invisible while the gap was 0.4 s at p50; it is not reliably
+        // that small any more, and a user looking at nothing cannot tell
+        // "working" from "broken".
+        surface.finishListening()
+        // Every way out of this function from here ends the session, and
+        // there are eight of them. A `defer` is the only way to be sure the
+        // light goes out on all eight: forgetting one would strand the island
+        // in `.dictating`, which makes the next key-up a no-op and leaves the
+        // user's music paused for good (`NotchViewModel` line 109).
+        defer { surface.hide() }
         // Whatever happens below, the hold is over: the ear may rest in a while.
         scheduleEarRest()
 

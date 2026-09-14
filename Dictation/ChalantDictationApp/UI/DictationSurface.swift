@@ -14,7 +14,24 @@ protocol DictationSurface: AnyObject {
     func show(into appName: String, mic: String?, on display: CGDirectDisplayID?)
     /// On the meter timer while the key is held. `level` is raw peak.
     func update(level: CGFloat, mic: String?)
-    /// The key came up, or the session stood down.
+    /// The key came up and the microphone is closed, but the words have not
+    /// arrived yet.
+    ///
+    /// **This is the gap nobody was shown.** `hide()` used to be called here,
+    /// before draining, finalization, cleanup and insertion, so the light went
+    /// out and every expensive thing happened in the dark; `restAfterDictation`
+    /// then enforced 1.4 s of quiet on top. On Apple's engine that gap was
+    /// 0.4 s at p50 and mostly invisible. It is no longer reliably small, and
+    /// a user staring at nothing has no way to tell "still working" from
+    /// "broken", which is the failure this whole branch keeps closing.
+    ///
+    /// The surface is expected to go still rather than to add anything: no
+    /// spinner, no object, no travel. The founder rejected a visible
+    /// refinement in 1.19.0 and a floating pill in 1.40.0.
+    func finishListening()
+
+    /// The words have landed, or they have not and the user has been told.
+    /// Either way the session is over.
     func hide()
     /// A short line the surface shows after the strip is gone. Never used
     /// while the strip is up.
