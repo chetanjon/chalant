@@ -54,6 +54,21 @@ final class DictationController {
     /// is not. Empty when it is. Rides the corpus row, never the log's
     /// content rules.
     private var engineNote = ""
+
+    /// Which utterance is current.
+    ///
+    /// **Generalises the guard that used to protect only the swap.** Every
+    /// stage after the key comes up is `await`ed, and a second press, a
+    /// cancellation or a conflicting shortcut can land in any of those gaps.
+    /// Before this, the only thing checking was `swapGeneration`, and only
+    /// for the post-landing swap; a session abandoned mid-finalize could
+    /// still reach `inserter.insert` and type into whatever the user had
+    /// moved on to. Bumped on every key-down and every cancel, and read at
+    /// every point where the next thing would be visible to the user.
+    private var sessionID = 0
+
+    /// Whether the utterance that started as `id` is still the one in flight.
+    private func isCurrent(_ id: Int) -> Bool { sessionID == id }
     private var pumpTask: Task<Void, Never>?
     /// The better ear's swap in flight after an insert, and what is currently
     /// in the document from this utterance, which is what the ear's version is
@@ -295,6 +310,33 @@ final class DictationController {
         }
     }
 
+    /// Apple hearing the same audio, once, because the chosen engine could
+    /// not.
+    ///
+    /// A whole second engine run, deliberately: the alternative is losing the
+    /// sentence, and Part 1 §2 does not trade a sentence for a tidy failure
+    /// path. It goes through a file rather than the ring because the ring's
+    /// buffers are gone by now and Apple's analyzer takes a stream; writing
+    /// 16 kHz mono to a scratch file and feeding it back is the cheapest
+    /// honest way to replay audio we already hold.
+    ///
+    /// Returns nil when Apple cannot answer either, which is the end of the
+    /// road and is reported as such rather than retried.
+    private static func fallback(on samples: [Float], locale: Locale) async -> Transcript? {
+        guard samples.count >= UtteranceTee.minimumSamples else { return nil }
+        let engine = AppleTranscriber()
+        await engine.prepare(locale: locale, format: UtteranceTee.format)
+        do {
+            try await engine.begin(locale: locale, hints: [])
+            await engine.feed(samples: samples, format: UtteranceTee.format)
+            let transcript = try await engine.end()
+            return transcript.tokens.isEmpty ? nil : transcript
+        } catch {
+            Self.log.error("the fallback could not run: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
     /// The engine for one utterance, and a note when it is not the one the
     /// user asked for.
     ///
@@ -323,6 +365,8 @@ final class DictationController {
     // MARK: - The chain
 
     func keyDown() async {
+        // A new press retires everything the last one might still be doing.
+        sessionID &+= 1
         beginUtteranceActivity()
         retirePendingSwap()
         earRestTask?.cancel()
@@ -602,6 +646,10 @@ final class DictationController {
         }
 
         let releasedAt = Date()
+        // Read once, checked at every point below where the next step would
+        // be visible to the user. Everything from here on is awaited, and a
+        // second press or a cancellation can land in any of those gaps.
+        let session = sessionID
         pretidyTask?.cancel()
         pretidyTask = nil
         await audio.endCapture()
@@ -636,19 +684,51 @@ final class DictationController {
         // samples are on disk by the time the row naming them is written.
         await transcriber.endCapture()
 
-        let transcript: Transcript
+        // **The one fallback hop.** A chosen engine that throws does not cost
+        // the user their sentence and does not get a second try of its own:
+        // Apple hears the same audio, once, and the row records why. Never
+        // two recognizers on a healthy utterance, which is the whole point of
+        // the change above.
+        //
+        // The distinction that matters is what counts as a failure. Too
+        // little audio, or a microphone that delivered digital silence, is
+        // NOT an engine failure and must not start a fallback: it is silence,
+        // and the user is told so in those words. `SpeechEngine.end()`
+        // returns an empty transcript for that and throws only when the
+        // engine itself could not answer.
+        let samples = await transcriber.utteranceSamples()
+        var transcript: Transcript
         do {
             transcript = try await transcriber.end()
         } catch {
-            Self.log.error("finalization failed: \(error.localizedDescription, privacy: .public)")
-            self.transcriber = nil
+            Self.log.error(
+                "\(transcriber.engineName, privacy: .public) could not finalize: \(error.localizedDescription, privacy: .public)")
+            engineNote = "\(transcriber.engineName)Failed"
+            if let rescued = await Self.fallback(on: samples, locale: locale) {
+                transcript = rescued
+                Self.log.notice("apple answered instead, \(rescued.tokens.count, privacy: .public) words")
+            } else {
+                // Both ears are out. The words are gone whatever happens
+                // next, so say nothing here and let the empty-text path
+                // below tell the user, which it now does.
+                engineNote += "+appleFailed"
+                transcript = Transcript(tokens: [], locale: locale.identifier)
+            }
+        }
+        await transcriber.releaseSamples()
+        // Which engine's numbers the vocabulary layer is about to read. After
+        // a fallback the tokens are Apple's, so the floor must be Apple's
+        // too: carrying Parakeet's across to Apple's distribution would be
+        // the same unmeasured transfer in the other direction.
+        let fellBack = !engineNote.isEmpty && engineNote.hasSuffix("Failed")
+        let engineUsed = fellBack ? "apple" : transcriber.engineName
+        let engineFloor = fellBack ? TermMatcher.confidenceFloor : transcriber.confidenceFloor
+        self.transcriber = nil
+
+        guard isCurrent(session) else {
+            Self.log.info("a newer hold retired this one during finalization; nothing lands")
             return
         }
-        // The utterance's audio for the better ear, before the transcriber
-        // goes. Empty unless the ear was on and ready at key-down.
-        let hearingSamples = await transcriber.utteranceSamples()
-        await transcriber.releaseSamples()
-        self.transcriber = nil
 
         // Part 0 §0.5 makes this the number M0 exists to measure. No latency
         // claim is made anywhere until it has been read off real hardware.
@@ -693,7 +773,7 @@ final class DictationController {
         let prepareStart = Date()
         let tokens = transcript.tokens
 
-        let deterministic = await deterministicText(from: tokens)
+        let deterministic = await deterministicText(from: tokens, confidenceFloor: engineFloor)
         if deterministic != raw {
             Self.log.error(
                 "guardrail trimmed \(raw.count - deterministic.count, privacy: .public) chars of punctuation run")
@@ -821,6 +901,15 @@ final class DictationController {
         }
 
         guard let target else {
+            return
+        }
+
+        // The last gate before anything is typed. A session that has been
+        // superseded or cancelled since the key came up stops here, which is
+        // the difference between "nothing happened" and "words appeared in
+        // whatever you moved on to".
+        guard isCurrent(session) else {
+            Self.log.info("this hold was retired before it could land; nothing is typed")
             return
         }
 
@@ -957,7 +1046,7 @@ final class DictationController {
         let overruns = await audio.overrunCount
         Self.log.notice(
             """
-            utterance: \(text.count, privacy: .public) chars, \
+            utterance on \(engineUsed, privacy: .public)\(self.engineNote.isEmpty ? "" : " (\(self.engineNote))", privacy: .public): \(text.count, privacy: .public) chars, \
             finalize \(self.timings.finalization ?? -1, privacy: .public)s, \
             \(refinedAtOnce ? "refined at once" : "raw", privacy: .public) after \
             \(self.timings.polish ?? 0, privacy: .public)s wait, \
@@ -1020,7 +1109,7 @@ final class DictationController {
         }
     }
 
-    private func deterministicText(from tokens: [Token]) async -> String {
+    private func deterministicText(from tokens: [Token], confidenceFloor: Double = TermMatcher.confidenceFloor) async -> String {
 
         // **The vocabulary pass runs FIRST, and on tokens rather than text.**
         // It is the only stage that needs per-word confidence, and confidence
@@ -1055,7 +1144,7 @@ final class DictationController {
         // is a handful per utterance, and the rule this buys is the honest
         // one: if the engine wrote a word the system knows, believe it.
         let unsure = tokens
-            .filter { ($0.confidence ?? 1) < TermMatcher.confidenceFloor }
+            .filter { ($0.confidence ?? 1) < confidenceFloor }
             .map { $0.text.trimmingCharacters(in: .punctuationCharacters).lowercased() }
             .filter { !$0.isEmpty }
         var knownWords: Set<String> = []
@@ -1073,7 +1162,8 @@ final class DictationController {
         // here instead, BEFORE the words land, in every app.
         let earTaught = await LearnedTerms.shared.earCorrections()
         let earFixed = TermMatcher.applyingEarCorrections(
-            tokens: corrected, corrections: earTaught, knownWords: knownWords)
+            tokens: corrected, corrections: earTaught, confidenceFloor: confidenceFloor,
+            knownWords: knownWords)
 
         // Then the phonetic passes, over the hand-kept list plus everything
         // learned, plus the contacts that sound like something in this
@@ -1081,7 +1171,9 @@ final class DictationController {
         // is present.
         let vocabulary = await Names.forMatching(heard: tokens.map(\.text).joined(separator: " "))
         let whole = TermMatcher.joiningSpans(tokens: earFixed, terms: vocabulary)
-        let resolved = TermMatcher.resolving(tokens: whole, terms: vocabulary, knownWords: knownWords)
+        let resolved = TermMatcher.resolving(
+            tokens: whole, terms: vocabulary, confidenceFloor: confidenceFloor,
+            knownWords: knownWords)
 
         // Three stages, in order, all pure and all in Core: refuse what is not
         // text, collapse what was said twice by accident, then remove the words

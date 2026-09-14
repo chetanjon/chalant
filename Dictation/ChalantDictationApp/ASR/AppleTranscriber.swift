@@ -259,6 +259,32 @@ actor AppleTranscriber: Transcriber, SpeechEngine {
         return moved
     }
 
+    /// Feed audio we already hold, rather than audio arriving from the ring.
+    ///
+    /// The fallback path: another engine recorded the utterance, could not
+    /// transcribe it, and this one is being asked the same question. The
+    /// samples go in as quarter-second slices, which is what
+    /// `tools/transcribe` has fed the same analyzer since E0 and what its
+    /// determinism gate was measured on (same audio twice, 4 of 4 identical).
+    func feed(samples: [Float], format: AVAudioFormat) async {
+        let slice = AVAudioFrameCount(format.sampleRate / 4)
+        var offset = 0
+        while offset < samples.count {
+            let count = min(Int(slice), samples.count - offset)
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)),
+                let channel = buffer.floatChannelData?[0]
+            else { return }
+            samples.withUnsafeBufferPointer { source in
+                channel.update(from: source.baseAddress! + offset, count: count)
+            }
+            buffer.frameLength = AVAudioFrameCount(count)
+            if let ready = converted(buffer) {
+                inputContinuation?.yield(AnalyzerInput(buffer: ready))
+            }
+            offset += count
+        }
+    }
+
     /// The utterance's audio, 16 kHz mono, for whatever has to hear it again.
     ///
     /// **Reading and releasing are two calls now, and the split is the
