@@ -21,8 +21,23 @@ import os
 /// `Transcriber` protocol it conforms to lives in Core and stays ungated, so a
 /// future engine could serve older systems through the same seam.
 @available(macOS 26, *)
-actor AppleTranscriber: Transcriber {
+actor AppleTranscriber: Transcriber, SpeechEngine {
     private static let log = Logger(subsystem: "com.cj.chalant.dictation", category: "asr")
+
+    // MARK: - SpeechEngine identity
+
+    nonisolated let engineName = "apple"
+
+    /// Apple's own floor, where it has always been. Swept 2026-08-15 against
+    /// this engine's distribution: its wrong words average 0.757 confidence
+    /// and its right ones 0.909, AUC 0.796 on the propernoun set.
+    nonisolated var confidenceFloor: Double { TermMatcher.confidenceFloor }
+
+    /// No. Part 0 §0.1, CONFIRMED by two independent research passes and by
+    /// the smoke test in `tools/biasprobe`: `contextualStrings` does not bias
+    /// `SpeechTranscriber` at all. The API accepts the strings and silently
+    /// ignores them on this module, which is worse than refusing them.
+    nonisolated let usesHints = false
 
     private var analyzer: SpeechAnalyzer?
     private var transcriber: SpeechTranscriber?
@@ -40,13 +55,13 @@ actor AppleTranscriber: Transcriber {
     // (WhisperKit, `BetterHearing`) can listen to it after the words have
     // landed. Capped at 90 s (~5.8 MB); a hold longer than that keeps its
     // first 90 s, which is more than any dictation the app has ever seen.
-    private(set) var keepSamplesForHearing = false
-    func setKeepSamplesForHearing(_ on: Bool) { keepSamplesForHearing = on }
+    private var keepsSamples = false
+    func setKeepsSamples(_ on: Bool) { keepsSamples = on }
     private var hearingConverter: AVAudioConverter?
     private static let hearingFormat = AVAudioFormat(
         commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
-    private static let hearingCapSamples = 16_000 * 90
-    private(set) var utteranceSamples: [Float] = []
+    private static let keptSampleCap = 16_000 * 90
+    private var keptSamples: [Float] = []
     private var converter: AVAudioConverter?
 
     private var eventStream: AsyncStream<TranscriptEvent>?
@@ -153,9 +168,16 @@ actor AppleTranscriber: Transcriber {
 
     // MARK: - Transcriber
 
+    /// The `SpeechEngine` entry point. `hints` is ignored here and the
+    /// `usesHints` note above says why; it is taken rather than refused so
+    /// the controller has one call site for every engine.
+    func begin(locale: Locale, hints: [String]) async throws {
+        try await begin(locale: locale, bias: [])
+    }
+
     func begin(locale: Locale, bias: [BiasTerm]) async throws {
         assembler.reset()
-        utteranceSamples.removeAll(keepingCapacity: true)
+        keptSamples.removeAll(keepingCapacity: true)
 
         if analyzer == nil {
             await prepare(locale: locale, format: nil)
@@ -252,7 +274,7 @@ actor AppleTranscriber: Transcriber {
                 // the user their words, so this never throws outward.
                 try? captureFile?.write(from: item.buffer)
             }
-            if keepSamplesForHearing { keepForHearing(item.buffer) }
+            if keepsSamples { keep(item.buffer) }
             guard let ready = converted(item.buffer) else { continue }
             inputContinuation?.yield(AnalyzerInput(buffer: ready))
             moved += 1
@@ -260,8 +282,8 @@ actor AppleTranscriber: Transcriber {
         return moved
     }
 
-    private func keepForHearing(_ buffer: AVAudioPCMBuffer) {
-        guard utteranceSamples.count < Self.hearingCapSamples else { return }
+    private func keep(_ buffer: AVAudioPCMBuffer) {
+        guard keptSamples.count < Self.keptSampleCap else { return }
         if hearingConverter == nil || hearingConverter?.inputFormat != buffer.format {
             hearingConverter = AVAudioConverter(from: buffer.format, to: Self.hearingFormat)
         }
@@ -278,15 +300,21 @@ actor AppleTranscriber: Transcriber {
             return buffer
         }
         guard error == nil, out.frameLength > 0, let channel = out.floatChannelData?[0] else { return }
-        utteranceSamples.append(contentsOf: UnsafeBufferPointer(start: channel, count: Int(out.frameLength)))
+        keptSamples.append(contentsOf: UnsafeBufferPointer(start: channel, count: Int(out.frameLength)))
     }
 
-    /// The utterance's audio for the second ear, and the buffer cleared for
-    /// the next hold.
-    func takeUtteranceSamples() -> [Float] {
-        defer { utteranceSamples.removeAll(keepingCapacity: true) }
-        return utteranceSamples
-    }
+    /// The utterance's audio, 16 kHz mono, for whatever has to hear it again.
+    ///
+    /// **Reading and releasing are two calls now, and the split is the
+    /// point.** They used to be one: `takeUtteranceSamples()` handed the
+    /// array over and cleared it, which was right while the only consumer was
+    /// a second ear that either used them immediately or never. A fallback
+    /// has to be able to read the same audio after a first attempt failed, so
+    /// the engine holds them until somebody says the utterance is over
+    /// (`releaseSamples`), and every path out of `keyUp` says so.
+    func utteranceSamples() -> [Float] { keptSamples }
+
+    func releaseSamples() { keptSamples.removeAll(keepingCapacity: true) }
 
     // MARK: - Internals
 

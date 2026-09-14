@@ -49,7 +49,7 @@ final class DictationController {
     /// Polls the live microphone's health once a second, for the whole life of
     /// the app, so a deaf ear is found before a session is spent on it.
     private var healthTimer: Timer?
-    private var transcriber: AppleTranscriber?
+    private var transcriber: (any SpeechEngine)?
     private var pumpTask: Task<Void, Never>?
     /// The better ear's swap in flight after an insert, and what is currently
     /// in the document from this utterance, which is what the ear's version is
@@ -366,7 +366,7 @@ final class DictationController {
         startMeter()
         onStateChange?()
 
-        let transcriber = AppleTranscriber()
+        let transcriber: any SpeechEngine = AppleTranscriber()
         self.transcriber = transcriber
         // Samples are kept whenever the switch is on, NOT only when the model
         // is already loaded: gating on readiness at key-down meant a hold
@@ -375,7 +375,7 @@ final class DictationController {
         // hearings engaged). The samples cost a few MB for a capped 90 s;
         // readiness is judged once, at release, when it matters.
         if BetterHearing.isEnabled() {
-            await transcriber.setKeepSamplesForHearing(true)
+            await transcriber.setKeepsSamples(true)
         }
 
         // A dead ear is rebuilt HERE, before the format below is read, so the
@@ -413,7 +413,7 @@ final class DictationController {
         }
 
         do {
-            try await transcriber.begin(locale: locale, bias: [])
+            try await transcriber.begin(locale: locale, hints: [])
         } catch {
             Self.log.error("could not begin transcription: \(error.localizedDescription, privacy: .public)")
             key.setupFailed()
@@ -486,7 +486,7 @@ final class DictationController {
     /// While the key is held, hand every closed chunk of what has been said so
     /// far to the model, through the same deterministic passes the release
     /// path uses, so the pieces match exactly at release and are already done.
-    private func startPretidy(_ transcriber: AppleTranscriber) {
+    private func startPretidy(_ transcriber: any SpeechEngine) {
         pretidyTask?.cancel()
         // Tidy-ahead exists to shorten a wait the release will make; in
         // shadow there is no wait, so nothing runs during the hold.
@@ -583,7 +583,8 @@ final class DictationController {
         }
         // The utterance's audio for the better ear, before the transcriber
         // goes. Empty unless the ear was on and ready at key-down.
-        let hearingSamples = await transcriber.takeUtteranceSamples()
+        let hearingSamples = await transcriber.utteranceSamples()
+        await transcriber.releaseSamples()
         self.transcriber = nil
 
         // Part 0 §0.5 makes this the number M0 exists to measure. No latency
@@ -1317,7 +1318,7 @@ final class DictationController {
     /// key came up during setup. Nothing was recorded, so there is nothing to
     /// transcribe and nothing to insert: this only has to leave nothing
     /// running. The key is already back at idle, so the next press works.
-    private func standDown(_ transcriber: AppleTranscriber) async {
+    private func standDown(_ transcriber: any SpeechEngine) async {
         endUtteranceActivity()
         scheduleEarRest()
         // The strip opens and capture begins at the press now, so a session
@@ -1338,7 +1339,7 @@ final class DictationController {
 
     /// End a session that went live and then could not run, closing the gate
     /// and the surface the live path had already opened.
-    private func abandonLiveSession(_ transcriber: AppleTranscriber) async {
+    private func abandonLiveSession(_ transcriber: any SpeechEngine) async {
         endUtteranceActivity()
         _ = key.release()
         await audio.endCapture()
