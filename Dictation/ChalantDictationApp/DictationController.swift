@@ -1095,7 +1095,6 @@ final class DictationController {
         if landed {
             await CorrectionObserver.shared.watch(
                 inserted: text, in: target.bundleID)
-            let insertedAt = Date()
             lastLanded = text
             retirePendingSwap()
             // **Nothing changes the page after the words land any more.**
