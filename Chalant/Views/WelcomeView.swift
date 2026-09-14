@@ -210,7 +210,10 @@ struct WelcomeView: View {
     /// the island.
     private var dictationCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
-            Text(practiceHeard == nil ? "Hold Option and talk." : "That is dictation.")
+            Text(
+                practiceHeard == nil
+                    ? "Hold \(DictationShortcutStore.current().label) and talk."
+                    : "That is dictation.")
                 .font(Theme.Fonts.headline)
                 .foregroundStyle(Theme.textPrimary)
 
@@ -233,7 +236,9 @@ struct WelcomeView: View {
             } else if dictating {
                 HStack(spacing: Theme.Space.m) {
                     practiceButton
-                    Text(VoiceDoor.dictationLine(available: true) ?? "")
+                    Text(
+                        VoiceDoor.dictationLine(
+                            available: true, keyName: DictationShortcutStore.current().label) ?? "")
                         .font(Theme.Fonts.caption)
                         .foregroundStyle(Theme.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)

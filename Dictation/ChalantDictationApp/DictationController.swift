@@ -381,31 +381,11 @@ final class DictationController {
             // refused every press for three hours and never said so once.
             Self.log.error("key down refused: \(why, privacy: .public)")
             return
-        case .capture, .abandon, .finish, .waitForSetup:
+        case .capture, .abandon, .finish, .waitForSetup, .cancel:
             Self.log.error("key down: a press cannot mean any of those")
             return
         }
 
-        // The cleanup model warms NOW, behind the speech, not at release.
-        // The system unloads it five minutes after its last use (measured
-        // 2026-08-21, EVAL-LOG), so the launch prewarm covers only the first
-        // five minutes and every dictation after a longer pause used to pay
-        // the cold load (2.49 s against 0.9 s) at the one moment the user is
-        // waiting. The hold hides it: a polish-worthy utterance is over ~3 s
-        // of speech and the reload takes 0.9 s. A no-op when already warm.
-        // Shadow runs the model too, just after the words land instead of
-        // before, so this warms in every mode but off, where there is no
-        // model to warm.
-        if Cleanup.needsModel() {
-            Task { await polisher.warmUp() }
-        }
-        // And the second ear, if it put the model down during a long silence.
-        // Fire and forget on purpose: the reload takes about five seconds, far
-        // longer than any hold, so THIS utterance lands without it, exactly as
-        // it would with the ear switched off. The next one has it back.
-        if BetterHearing.isEnabled() {
-            Task { await BetterHearing.shared.wake() }
-        }
 
         guard assetState.isReady else {
             Self.log.error("ignoring key: assets are not ready")
@@ -460,8 +440,23 @@ final class DictationController {
         // 523 ms with the ear asleep, 83 ms warm, and the strip used to wait
         // for that. The mic name follows through the meter. Every way out of
         // the setup below hides it again.
-        surface.show(into: target?.appName ?? target?.bundleID ?? "", mic: nil, on: targetDisplay)
-        startMeter()
+        // **Nothing visible or expensive happens for `activationDelay`.**
+        // The light, the music, the tidy model's prewarm: all of it waits,
+        // because left Option is a real modifier and `Option+←`, `Option+e`
+        // and `Option+Delete` are all a press of it. Before this, every one
+        // of those flashed the aurora, woke the microphone, warmed a language
+        // model and PAUSED whatever the user was listening to
+        // (`NotchViewModel.quietTheRoom` calls `music.pause()`, not a volume
+        // duck), then undid it a moment later.
+        //
+        // **Capture is not deferred, and that is the whole trick.** The audio
+        // gate opens below exactly as it always has, before the analyzer is
+        // even prepared: the ring holds ~1.6 s and the pump drains the
+        // backlog, so a word spoken during the delay is still recorded and
+        // still transcribed. The user loses nothing by the wait except a
+        // light they did not want.
+        scheduleReveal(
+            into: target?.appName ?? target?.bundleID ?? "", on: targetDisplay, session: sessionID)
         onStateChange?()
 
         // Which ear hears this one, decided here and remembered for the
@@ -548,7 +543,7 @@ final class DictationController {
             Self.log.error("setup finished but \(why, privacy: .public)")
             await standDown(transcriber)
             return
-        case .begin, .finish, .waitForSetup:
+        case .begin, .finish, .waitForSetup, .cancel:
             Self.log.error("ready: setup cannot mean any of those")
             await standDown(transcriber)
             return
@@ -627,9 +622,16 @@ final class DictationController {
             Self.log.info("released while still starting; setup will stand down")
             return
         case .ignored(let why):
-            Self.log.error("key up refused: \(why, privacy: .public)")
+            // A release after a cancelled hold is expected, not a refusal:
+            // `Option+←` arrives dozens of times a minute in an editor, and
+            // an error line for each would bury the refusals that matter.
+            if why == PushToTalk.cancelledReason {
+                Self.log.info("key up after a cancelled hold")
+            } else {
+                Self.log.error("key up refused: \(why, privacy: .public)")
+            }
             return
-        case .begin, .capture, .abandon:
+        case .begin, .capture, .abandon, .cancel:
             Self.log.error("key up: a release cannot mean any of those")
             return
         }
@@ -646,6 +648,9 @@ final class DictationController {
         }
 
         let releasedAt = Date()
+        // A reveal that has not fired yet never fires: a hold that ends a
+        // hair past the threshold should not flash the light on its way out.
+        cancelReveal()
         // Read once, checked at every point below where the next step would
         // be visible to the user. Everything from here on is awaited, and a
         // second press or a cancellation can land in any of those gaps.
@@ -1059,6 +1064,96 @@ final class DictationController {
         onStateChange?()
     }
 
+    /// How long the key must be held before anything is shown, paused or
+    /// loaded.
+    ///
+    /// **Not a gate on recording, only on spending.** 180 ms is long enough
+    /// that a shortcut is over before it costs anything and short enough that
+    /// a real hold feels immediate: the founder's own complaint about the
+    /// press feeling slow (2026-08-19) was measured at 523 ms with the ear
+    /// asleep, and this is a third of that. A hold shorter than this produces
+    /// well under the half second any engine here will accept, so it was
+    /// never going to become text.
+    static let activationDelay: Duration = .milliseconds(180)
+
+    private var revealTask: Task<Void, Never>?
+
+    /// Show the light, start the meter, and pay for the model, once the hold
+    /// has lasted long enough to mean something.
+    private func scheduleReveal(into name: String, on display: CGDirectDisplayID?, session: Int) {
+        revealTask?.cancel()
+        revealTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.activationDelay)
+            guard let self, !Task.isCancelled, self.isCurrent(session), self.key.state != .idle
+            else { return }
+            self.surface.show(into: name, mic: nil, on: display)
+            self.startMeter()
+            self.onStateChange?()
+            // Behind the light rather than in front of it, for the same
+            // reason: an abandoned shortcut must not cost a model load. The
+            // system unloads the tidy model five minutes after its last use
+            // (measured 2026-08-21), so a hold after a longer pause would
+            // otherwise pay 2.49 s against 0.9 s at the one moment the user
+            // is waiting. A no-op when already warm.
+            if Cleanup.needsModel() {
+                Task { await self.polisher.warmUp() }
+            }
+            self.onStateChange?()
+        }
+    }
+
+    private func cancelReveal() {
+        revealTask?.cancel()
+        revealTask = nil
+    }
+
+    /// Another key arrived while the hold key was down, so this was a
+    /// shortcut and not a sentence.
+    ///
+    /// Everything recorded is discarded, nothing is transcribed, nothing is
+    /// typed, and nothing is said: the user pressed `Option+←` and expects
+    /// their cursor to move, not to be told anything about dictation.
+    func otherKeyPressed() async {
+        switch key.otherKeyPressed() {
+        case .cancel(let why):
+            Self.log.info("hold cancelled: \(why, privacy: .public)")
+            await discardUtterance()
+        case .ignored:
+            // The overwhelming majority: an ordinary keystroke with no hold
+            // in flight. Not logged, or the log would be every key of the day.
+            return
+        case .begin, .capture, .abandon, .finish, .waitForSetup:
+            Self.log.error("a conflicting key cannot mean any of those")
+        }
+    }
+
+    /// Stand a live or arming session down and keep nothing from it.
+    private func discardUtterance() async {
+        // Retire anything already in flight from this hold, so a finalize or
+        // an insert that has not reached its next `await` can never land.
+        sessionID &+= 1
+        cancelReveal()
+        pretidyTask?.cancel()
+        pretidyTask = nil
+        pumpTask?.cancel()
+        pumpTask = nil
+        await audio.endCapture()
+        stopMeter()
+        surface.hide()
+        endUtteranceActivity()
+        scheduleEarRest()
+        if let engine = transcriber {
+            await engine.releaseSamples()
+            // Closed rather than abandoned: an engine left mid-stream holds
+            // its analyzer and would queue the next hold behind it. Its text
+            // is deliberately dropped on the floor.
+            _ = try? await engine.end()
+            transcriber = nil
+        }
+        await corpus.discard()
+        onStateChange?()
+    }
+
     /// A while after the last dictation, close the microphone. Any key-down
     /// cancels this; a hold in progress is never interrupted (`rest` refuses
     /// while capturing).
@@ -1394,6 +1489,7 @@ final class DictationController {
     /// transcribe and nothing to insert: this only has to leave nothing
     /// running. The key is already back at idle, so the next press works.
     private func standDown(_ transcriber: any SpeechEngine) async {
+        cancelReveal()
         endUtteranceActivity()
         scheduleEarRest()
         // The strip opens and capture begins at the press now, so a session
@@ -1415,6 +1511,7 @@ final class DictationController {
     /// End a session that went live and then could not run, closing the gate
     /// and the surface the live path had already opened.
     private func abandonLiveSession(_ transcriber: any SpeechEngine) async {
+        cancelReveal()
         endUtteranceActivity()
         _ = key.release()
         await audio.endCapture()

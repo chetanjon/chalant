@@ -147,3 +147,87 @@ struct PushToTalkTests {
         #expect(key.release().isIgnored)
     }
 }
+
+/// A hold that turned out to be a shortcut.
+///
+/// **This is the case `Option+←` needed and never had.** Left Option is a
+/// real modifier: moving by word, deleting a word and typing an accented
+/// character are all a left-Option press followed by another key, and before
+/// 1.42.0 every one of them was the start of a dictation as far as this state
+/// machine could tell.
+@Suite("PushToTalk cancellation")
+struct PushToTalkCancellationTests {
+
+    @Test("another key while arming stands the session down without capturing")
+    func cancelWhileArming() {
+        var key = PushToTalk()
+        #expect(key.press() == .begin)
+        guard case .cancel = key.otherKeyPressed() else {
+            Issue.record("arming should cancel")
+            return
+        }
+        #expect(key.state == .idle)
+        // And setup finishing afterwards must not go live behind the user.
+        #expect(key.ready().isIgnored)
+        #expect(key.state == .idle)
+    }
+
+    @Test("another key while listening cancels, and nothing is transcribed")
+    func cancelWhileListening() {
+        var key = PushToTalk()
+        #expect(key.press() == .begin)
+        #expect(key.ready() == .capture)
+        guard case .cancel = key.otherKeyPressed() else {
+            Issue.record("listening should cancel")
+            return
+        }
+        #expect(key.state == .idle)
+        // The release that follows is expected, not a refusal worth an error.
+        #expect(key.release() == .ignored(PushToTalk.cancelledReason))
+    }
+
+    /// The overwhelming majority of keystrokes. Every key of the day arrives
+    /// here with nothing held, and it must cost nothing and say nothing.
+    @Test("a key with no hold in flight is ignored")
+    func idleIgnoresEverything() {
+        var key = PushToTalk()
+        #expect(key.otherKeyPressed().isIgnored)
+        #expect(key.state == .idle)
+        #expect(key.wasCancelled == false)
+    }
+
+    /// A cancelled hold must not poison the next one.
+    @Test("the next press works normally after a cancellation")
+    func theNextPressIsClean() {
+        var key = PushToTalk()
+        _ = key.press()
+        _ = key.otherKeyPressed()
+        #expect(key.press() == .begin)
+        #expect(key.wasCancelled == false)
+        #expect(key.ready() == .capture)
+        #expect(key.release() == .finish)
+    }
+
+    /// Only one release is excused. A second one is a real refusal again.
+    @Test("only the release that follows a cancellation is excused")
+    func onlyOneReleaseIsExcused() {
+        var key = PushToTalk()
+        _ = key.press()
+        _ = key.ready()
+        _ = key.otherKeyPressed()
+        #expect(key.release() == .ignored(PushToTalk.cancelledReason))
+        #expect(key.release() == .ignored("nothing was listening"))
+    }
+
+    /// A cancel is not a finish: it must never be the decision that
+    /// transcribes, because the audio it holds is somebody using a shortcut.
+    @Test("cancelling is never finishing")
+    func cancelIsNotFinish() {
+        var key = PushToTalk()
+        _ = key.press()
+        _ = key.ready()
+        let decision = key.otherKeyPressed()
+        #expect(decision != .finish)
+        #expect(decision != .abandon)
+    }
+}

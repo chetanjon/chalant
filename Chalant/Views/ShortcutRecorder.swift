@@ -147,7 +147,21 @@ struct KeyboardSection: View {
             SettingCard(title: "About shortcuts") {
                 SettingNote(
                     "These work anywhere, whatever app you are in. Chalant asks the system to watch "
-                    + "for the exact combination you choose, so it never sees anything else you type."
+                    + "for the exact combination you choose, so these shortcuts never involve "
+                    + "reading anything else you type."
+                )
+                SettingDivider()
+                // Corrected 2026-09-14. The sentence above used to end "so it
+                // never sees anything else you type", full stop, and that
+                // stopped being true of the dictation hold key the moment its
+                // tap started watching for a conflicting keystroke. A false
+                // sentence in the one place a person decides whether to trust
+                // an app is worse than no sentence.
+                SettingNote(
+                    "Hold-to-dictate is the one exception, and only while its key is held: to tell "
+                    + "Option+arrow from the start of a sentence, Chalant has to notice that a "
+                    + "second key arrived. It reads only that a key was pressed, never which one, "
+                    + "and keeps nothing."
                 )
                 SettingDivider()
                 SettingNote(

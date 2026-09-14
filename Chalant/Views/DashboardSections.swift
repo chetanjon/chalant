@@ -1,3 +1,4 @@
+import ChalantDictationCore
 import ServiceManagement
 import SwiftUI
 
@@ -51,6 +52,11 @@ struct GeneralSection: View {
     @AppStorage(SpeechEngineChoice.key) private var speechEngine = SpeechEngineChoice.current().rawValue
     @ObservedObject private var hearingStatus = HearingStatus.shared
     @ObservedObject private var parakeetStatus = ParakeetStatus.shared
+    @AppStorage(DictationShortcutStore.key) private var holdKeyStorage = DictationShortcut.default.storage
+
+    private var holdKey: DictationShortcut {
+        DictationShortcut.from(storage: holdKeyStorage) ?? .default
+    }
 
     private var chosenEngine: SpeechEngineChoice {
         SpeechEngineChoice(rawValue: speechEngine) ?? SpeechEngineChoice.shipped
@@ -272,10 +278,33 @@ struct GeneralSection: View {
                     // Read off VoiceDoor, never written here, for the same
                     // reason the tour's line is: the app must not describe a
                     // gesture in one place and ship another.
-                    SettingNote(VoiceDoor.dictationLine(available: true) ?? "")
+                    SettingNote(
+                        VoiceDoor.dictationLine(available: true, keyName: holdKey.label) ?? "")
                     SettingNote(
                         "The first time you turn this on, macOS asks for Input Monitoring and "
                         + "Accessibility. It needs both: one to notice the key, one to place the text."
+                    )
+                    SettingDivider()
+                    // **A choice, since 1.42.0.** Left Option is a real
+                    // modifier: Option+arrow moves by word, Option+Delete
+                    // deletes one, Option+e starts an accent. Chalant cancels
+                    // those now rather than treating them as speech, but if
+                    // they are still a nuisance the gesture can move.
+                    SettingPicker(
+                        label: "Hold key",
+                        selection: $holdKeyStorage,
+                        options: DictationShortcut.allCases.map { ($0.label, $0.storage) },
+                        width: 320)
+                        .onChange(of: holdKeyStorage) { _, _ in
+                            // The tap reads the key once when it installs, so
+                            // it is restarted rather than mutated: a live tap
+                            // and the stored choice can never disagree.
+                            Dictation.shared.stop()
+                            Dictation.shared.start()
+                        }
+                    SettingNote(
+                        "Hold it alone to talk. Pressing any other key while it is held means you "
+                        + "wanted that shortcut, so Chalant stands down and types nothing."
                     )
                     if dictationOn || !dictationHealth.allReady {
                         SettingDivider()

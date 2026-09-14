@@ -237,10 +237,16 @@ private final class DictationStack {
 
     /// Returns whether the event tap installed.
     func start() -> Bool {
-        let monitor = EventTapMonitor { [weak self] down in
-            guard let self else { return }
-            Task { down ? await self.controller.keyDown() : await self.controller.keyUp() }
-        }
+        let monitor = EventTapMonitor(
+            shortcut: DictationShortcutStore.current(),
+            onChange: { [weak self] down in
+                guard let self else { return }
+                Task { down ? await self.controller.keyDown() : await self.controller.keyUp() }
+            },
+            onConflict: { [weak self] in
+                guard let self else { return }
+                Task { await self.controller.otherKeyPressed() }
+            })
         self.monitor = monitor
         let installed = monitor.start()
 
