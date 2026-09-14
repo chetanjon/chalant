@@ -50,6 +50,10 @@ final class DictationController {
     /// the app, so a deaf ear is found before a session is spent on it.
     private var healthTimer: Timer?
     private var transcriber: (any SpeechEngine)?
+    /// Why the utterance in flight is not on the engine the user chose, if it
+    /// is not. Empty when it is. Rides the corpus row, never the log's
+    /// content rules.
+    private var engineNote = ""
     private var pumpTask: Task<Void, Never>?
     /// The better ear's swap in flight after an insert, and what is currently
     /// in the document from this utterance, which is what the ear's version is
@@ -185,11 +189,11 @@ final class DictationController {
         if Cleanup.mode() != .off {
             await polisher.warmUp()
         }
-        // The better ear, if the switch is on: download if needed, load, warm.
-        // Nothing happens here when it is off, which is the default.
-        if BetterHearing.isEnabled() {
-            Task { await BetterHearing.shared.prepare() }
-        }
+        // The chosen engine, loaded now rather than behind the first held
+        // key. **Never downloaded here**, only loaded when the model is
+        // already on disk: a launch that reaches for 470 MB unasked is not a
+        // launch. Choosing the engine in Settings is what downloads it.
+        Task { await Self.loadChosenEngine(allowingDownload: false) }
         // The names in Contacts, for both ears, read once now rather than on
         // the first utterance. Only when macOS already allows it; nothing is
         // asked here.
@@ -264,6 +268,56 @@ final class DictationController {
 
     func liveInputName() async -> String? {
         await audio.currentDevice?.name
+    }
+
+    /// Bring the chosen engine's model up, and let the others go.
+    ///
+    /// `allowingDownload` is false at launch and true when somebody picks an
+    /// engine in Settings: the one and only place a 470 MB fetch may start is
+    /// a person choosing it, having read what it costs.
+    ///
+    /// Exactly one model is held at a time. Two would be 1.1 GB of speech
+    /// models in a menu-bar app, which is how Chalant got reclaimed by macOS
+    /// twice in five days.
+    static func loadChosenEngine(allowingDownload: Bool) async {
+        switch SpeechEngineChoice.current() {
+        case .apple:
+            await ParakeetEngine.shared.stop()
+            await BetterHearing.shared.stop()
+        case .parakeet:
+            await BetterHearing.shared.stop()
+            await ParakeetEngine.shared.prepare(allowingDownload: allowingDownload)
+        case .whisper:
+            await ParakeetEngine.shared.stop()
+            if allowingDownload || BetterHearing.isDownloaded {
+                await BetterHearing.shared.prepare()
+            }
+        }
+    }
+
+    /// The engine for one utterance, and a note when it is not the one the
+    /// user asked for.
+    ///
+    /// **A held key never starts a download and never waits for a load.** A
+    /// chosen engine whose model is still arriving is simply not used for
+    /// this utterance: Apple runs it, the row says so, and the next hold gets
+    /// the real answer. The alternative was a first dictation that hangs for
+    /// seventeen seconds behind a progress bar nobody can see.
+    private static func engine(for choice: SpeechEngineChoice) async -> (any SpeechEngine, String) {
+        switch choice {
+        case .apple:
+            return (AppleTranscriber(), "")
+        case .parakeet:
+            guard await ParakeetEngine.shared.isReady else {
+                return (AppleTranscriber(), "parakeetNotReady")
+            }
+            return (ParakeetTranscriber(), "")
+        case .whisper:
+            guard await BetterHearing.shared.isReady else {
+                return (AppleTranscriber(), "whisperNotReady")
+            }
+            return (WhisperTranscriber(), "")
+        }
     }
 
     // MARK: - The chain
@@ -366,17 +420,21 @@ final class DictationController {
         startMeter()
         onStateChange?()
 
-        let transcriber: any SpeechEngine = AppleTranscriber()
+        // Which ear hears this one, decided here and remembered for the
+        // row: a chosen engine that is not loaded yet does not hold up the
+        // hold and does not start a download, it simply is not used
+        // (`engineForThisUtterance`).
+        let chosen = SpeechEngineChoice.current()
+        let (transcriber, engineNote) = await Self.engine(for: chosen)
         self.transcriber = transcriber
-        // Samples are kept whenever the switch is on, NOT only when the model
-        // is already loaded: gating on readiness at key-down meant a hold
-        // during the model's load window silently lost its second hearing,
-        // and on 2026-08-20 that was most of a night (74 utterances, 5
-        // hearings engaged). The samples cost a few MB for a capped 90 s;
-        // readiness is judged once, at release, when it matters.
-        if BetterHearing.isEnabled() {
-            await transcriber.setKeepsSamples(true)
-        }
+        self.engineNote = engineNote
+        // The audio is kept for EVERY utterance now, not only when a second
+        // ear was switched on. It is the primary engine's own input on two
+        // of the three paths, and on all three it is what a fallback re-hears
+        // when the chosen engine cannot answer. Gating it on readiness is
+        // what silently lost most of a night on 2026-08-20 (74 utterances,
+        // 5 hearings engaged), so it is not gated on anything.
+        await transcriber.setKeepsSamples(true)
 
         // A dead ear is rebuilt HERE, before the format below is read, so the
         // analyzer is prepared against the engine that will actually feed it.
@@ -412,8 +470,13 @@ final class DictationController {
             await transcriber.setCapture(to: url)
         }
 
+        // Names before it listens, but only for an engine that can be told:
+        // Apple accepts them and ignores them (Part 0 §0.1), Parakeet's batch
+        // API has no such parameter at all, and building the list costs a
+        // phonetic pass over the standing vocabulary.
+        let hints = transcriber.usesHints ? await Names.standing() : []
         do {
-            try await transcriber.begin(locale: locale, hints: [])
+            try await transcriber.begin(locale: locale, hints: hints)
         } catch {
             Self.log.error("could not begin transcription: \(error.localizedDescription, privacy: .public)")
             key.setupFailed()
@@ -609,85 +672,26 @@ final class DictationController {
         // other output touched.
         let raw = transcript.rawText
 
-        // **The second ear starts HERE now (2026-09-04), and the words wait
-        // for it.** This reverses the note that stood here from 2026-08-20,
-        // and the reversal is worth stating because that note was right about
-        // the hardware: Whisper, the tidy model and the first ear share one
-        // Neural Engine, and a hearing running during the release window
-        // serialized the tidy behind it, so every utterance landed raw with
-        // waits of 1.35 to 5.17 s. What changed is not the hardware but what
-        // the window is FOR. The tidy model earned that window and then did
-        // not use it: measured over the founder's own week, it changed
-        // anything on 3.9% of rows, while the ear disagreed with what landed
-        // on 79 rows and was allowed to fix 21 of them, the rest refused for
-        // want of a safe undo or thrown away because the user had already
-        // typed. So the tidy yields the window to the ear (`mergeEngaged`
-        // below skips the release polish), the contention the old note
-        // measured does not arise, and the words the ear rescues land the
-        // first time instead of arriving as a visible swap or not at all.
+        // **One ear, and the wait goes with the second one (2026-09-14).**
+        // From 1.40.0 two engines heard every sentence and `HearingMerge`
+        // adjudicated them word by word before the words landed. It was the
+        // right idea and it bought real corrections: over the founder's own
+        // week the second ear disagreed 79 times and was allowed to fix 21 of
+        // them, and "I don't want the box" stopped landing as "I want the
+        // box".
         //
-        // The founder chose this shape outright when asked: wait for the
-        // accurate ear rather than keep the instant landing and correct
-        // afterwards.
-        let earIsReady = await BetterHearing.shared.isReady
-        let mergeEngaged =
-            !hearingSamples.isEmpty && BetterHearing.isEnabled()
-            && BetterHearing.mergesAtLanding() && target != nil && practiceLanding == nil
-            && earIsReady
-        let hearingWork: Task<BetterHearing.Hearing?, Never>? =
-            mergeEngaged
-            ? Task(priority: .userInitiated) { [raw] in
-                let hints = await Names.forHearing(heard: raw)
-                return await BetterHearing.shared.hearFully(hearingSamples, hints: hints)
-            }
-            : nil
-
+        // It also cost the whole wait. The only measurement of it is two rows
+        // at 3.48 s and 3.11 s from key release to words, against a p50 of
+        // 0.40 s on 178 rows of the build before, and 45% of those waits were
+        // spent on utterances where the two ears wrote identical words.
+        // Nothing tells you which half you are in beforehand.
+        //
+        // So the choice moves to the user, one engine runs, and this block is
+        // where the second one used to be. `HearingMerge` stays compiled and
+        // tested rather than deleted: `tools/mergeprobe` still sweeps it, and
+        // nothing about it was wrong except the price.
         let prepareStart = Date()
-
-        // Reconcile the two hearings, or keep the engine's and let the old
-        // post-landing swap have the same decode.
-        var tokens = transcript.tokens
-        var mergeOutcomeName = mergeEngaged ? "" : (BetterHearing.isEnabled() ? "earNotReady" : "earOff")
-        var mergeWaitSeconds: Double = 0
-        var earSecondsAtRelease: Double = -1
-        var disputedSpans = 0
-        var mergedSpans = 0
-        var mergeHearing: BetterHearing.Hearing?
-        if let hearingWork {
-            let waitStarted = Date()
-            let ceiling = HearingMerge.waitCeiling(
-                utteranceSeconds: Double(hearingSamples.count) / 16_000)
-            if let hearing = await Deadline.value(of: hearingWork, within: ceiling) ?? nil {
-                mergeHearing = hearing
-                earSecondsAtRelease = hearing.seconds
-                // SWEPT, not chosen: the founder judged forty rows by ear
-                // against the recordings on 2026-09-10, blind to which ear
-                // wrote which line, and `tools/mergeprobe` ran the grid over
-                // their answers. `engineLeads` with the function-word refusal
-                // won every cell it was in (9 rows better, 1 worse, 16 left
-                // alone) and is the only configuration whose result does not
-                // move when the confidence floor moves, which is worth more
-                // than the one extra correction `earLeads` buys for an extra
-                // mistake. Full table in EVAL-LOG.
-                let outcome = HearingMerge.merge(
-                    engine: tokens, ear: hearing.text,
-                    signals: await mergeSignals(engine: tokens, ear: hearing.text),
-                    policy: HearingMerge.Policy.engineLeads)
-                tokens = outcome.tokens
-                mergeOutcomeName = outcome.verdict.rawValue
-                disputedSpans = outcome.disputedSpans
-                mergedSpans = outcome.mergedSpans
-                if outcome.mergedSpans > 0 {
-                    Self.log.notice(
-                        "merged \(outcome.mergedSpans, privacy: .public) of \(outcome.disputedSpans, privacy: .public) disputes from the second ear")
-                }
-            } else {
-                // The decode is still running and is never cancelled, so the
-                // swap below takes it rather than starting a second one.
-                mergeOutcomeName = "budgetMissed"
-            }
-            mergeWaitSeconds = Date().timeIntervalSince(waitStarted)
-        }
+        let tokens = transcript.tokens
 
         let deterministic = await deterministicText(from: tokens)
         if deterministic != raw {
@@ -740,15 +744,7 @@ final class DictationController {
             ? "skipped:empty"
             : (mode == .live ? "skipped:noTarget" : (mode == .shadow ? "shadow:pending" : "skipped:off"))
         var modelChunks: [String] = []
-        // The tidy yields its window when the ear has already used it. It
-        // changes anything on 3.9% of rows and the ear had 79 corrections
-        // waiting, so paying both waits back to back would spend the
-        // founder's patience on the weaker of the two.
-        if mergeOutcomeName == "merged" || mergeOutcomeName == "agreed" {
-            polishOutcomeName = "skipped:hearingMerge"
-            modelReason = "skipped:hearingMerge"
-        }
-        if mode == .live, !shaped.isEmpty, let target, mergeHearing == nil {
+        if mode == .live, !shaped.isEmpty, let target {
             let waitStart = Date()
             // The budget is enforced HERE, not only inside the polisher, and
             // for three days it was not enforced anywhere: both waits were
@@ -875,13 +871,7 @@ final class DictationController {
             refinedChanged: refinedChanged,
             polishColdStart: polishColdStart,
             secondsSinceLastPolish: sinceLastPolish,
-            merge: CorpusCapture.Merge(
-                outcome: mergeOutcomeName,
-                waitSeconds: mergeWaitSeconds,
-                earSeconds: earSecondsAtRelease,
-                disputedSpans: disputedSpans,
-                mergedSpans: mergedSpans,
-                earOutput: mergeHearing?.text),
+            merge: nil,
             texts: CorpusCapture.Texts(
                 asrRaw: raw,
                 afterDeterministic: shaped,
@@ -926,21 +916,14 @@ final class DictationController {
             let insertedAt = Date()
             lastLanded = text
             retirePendingSwap()
-            // The swap is the fallback now, not the main path: it runs when
-            // the merge was off, not ready, or did not finish inside its
-            // ceiling. When the ceiling was missed the decode is still
-            // running and is handed over rather than started again, because
-            // starting a second one would put two Whispers on one Neural
-            // Engine to answer the same question.
-            if mergeHearing == nil, !hearingSamples.isEmpty, BetterHearing.isEnabled(),
-                await BetterHearing.shared.isReady
-            {
-                startHearingSwap(
-                    samples: hearingSamples, heard: raw, outcome: outcome, target: target,
-                    insertedAt: insertedAt,
-                    utteranceSeconds: Double(hearingSamples.count) / 16_000,
-                    corpusRow: corpusRow, mode: mode, alreadyRunning: hearingWork)
-            }
+            // **Nothing changes the page after the words land any more.**
+            // The in-place swap was the second ear's only door once the merge
+            // could not be reached in time, and with one engine there is no
+            // second hearing to swap in. `startHearingSwap`, `SwapPolicy` and
+            // `replaceLastInsertion` stay compiled and tested rather than
+            // deleted: the machinery is sound, its tests pin real rules, and
+            // the day something earns a post-landing correction again it
+            // should not have to be rebuilt from the commit log.
         } else if case .inserted = outcome {
             // Rescued above; the toast has already spoken.
         } else {

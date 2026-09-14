@@ -110,6 +110,17 @@ final class Dictation {
         tapInstalled = false
     }
 
+    /// Bring the chosen recognizer's model up and let the others go.
+    ///
+    /// Here rather than on `DictationController` because Settings is not
+    /// macOS 26 code and must not become it: this type exists to keep the
+    /// availability dance in one file. A no-op below 26, where there is no
+    /// dictation to have an engine for.
+    func reloadEngine(allowingDownload: Bool) {
+        guard #available(macOS 26, *) else { return }
+        Task { await DictationController.loadChosenEngine(allowingDownload: allowingDownload) }
+    }
+
     // MARK: - Why it is not working
 
     /// Everything hold-to-dictate needs, each with a live answer.

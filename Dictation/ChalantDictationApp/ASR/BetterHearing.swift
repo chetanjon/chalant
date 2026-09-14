@@ -61,6 +61,20 @@ actor BetterHearing {
         return base.appendingPathComponent("Chalant/Models", isDirectory: true)
     }
 
+    /// Whether the model is already on this Mac.
+    ///
+    /// Read off the layout WhisperKit actually writes, confirmed on disk
+    /// rather than guessed: `Models/models/argmaxinc/whisperkit-coreml/<variant>`.
+    /// Pure `FileManager`, no network, so it is safe on a Settings redraw and
+    /// at launch. Only a positive answer is trusted: a false here means "do
+    /// not load without asking", never "delete anything".
+    nonisolated static var isDownloaded: Bool {
+        let folder = modelsFolder
+            .appendingPathComponent("models/argmaxinc/whisperkit-coreml", isDirectory: true)
+            .appendingPathComponent("openai_whisper-\(modelVariant)", isDirectory: true)
+        return FileManager.default.fileExists(atPath: folder.path)
+    }
+
     private var pipe: WhisperKit?
     private var preparing: Task<Void, Never>?
 

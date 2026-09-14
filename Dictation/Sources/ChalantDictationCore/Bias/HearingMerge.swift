@@ -244,7 +244,15 @@ public enum HearingMerge {
         return .milliseconds(Int(seconds * 1000))
     }
 
-    static func qualityRefusal(_ quality: Quality, _ constants: Constants) -> Bool {
+    /// Whether the decoder's own three numbers say this hearing is not to be
+    /// trusted.
+    ///
+    /// Public since 2026-09-14, and the reason is that it is no longer only
+    /// the merge's business. With one engine running, a Whisper hearing has
+    /// no second opinion to be checked against, so these three are the only
+    /// check there is between a fabrication over near-silence and the user's
+    /// document. Part 0 §0.18 names exactly this trio for exactly this job.
+    public static func qualityRefusal(_ quality: Quality, _ constants: Constants = .init()) -> Bool {
         if let silence = quality.noSpeechProbability, silence > constants.noSpeechCeiling {
             return true
         }
