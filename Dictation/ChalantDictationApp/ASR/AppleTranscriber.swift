@@ -48,20 +48,16 @@ actor AppleTranscriber: Transcriber, SpeechEngine {
     private var canonicalLocale: Locale = .init(identifier: "en-US")
     private var analyzerFormat: AVAudioFormat?
 
-    // MARK: Better hearing's copy of the audio
+    // MARK: The utterance's own copy of the audio
     //
-    // While the switch is on, every tap buffer is also resampled to 16 kHz
-    // mono Float32 and kept in memory for the utterance, so a second ear
-    // (WhisperKit, `BetterHearing`) can listen to it after the words have
-    // landed. Capped at 90 s (~5.8 MB); a hold longer than that keeps its
-    // first 90 s, which is more than any dictation the app has ever seen.
+    // Every tap buffer is also resampled to 16 kHz mono and kept for the
+    // length of the utterance, so something else can hear it: the fallback
+    // when this engine cannot, or a second opinion. The conversion lives in
+    // `UtteranceTee` now rather than here, because it is no longer Apple's
+    // to own.
     private var keepsSamples = false
     func setKeepsSamples(_ on: Bool) { keepsSamples = on }
-    private var hearingConverter: AVAudioConverter?
-    private static let hearingFormat = AVAudioFormat(
-        commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
-    private static let keptSampleCap = 16_000 * 90
-    private var keptSamples: [Float] = []
+    private var tee = UtteranceTee()
     private var converter: AVAudioConverter?
 
     private var eventStream: AsyncStream<TranscriptEvent>?
@@ -177,7 +173,7 @@ actor AppleTranscriber: Transcriber, SpeechEngine {
 
     func begin(locale: Locale, bias: [BiasTerm]) async throws {
         assembler.reset()
-        keptSamples.removeAll(keepingCapacity: true)
+        tee.reset()
 
         if analyzer == nil {
             await prepare(locale: locale, format: nil)
@@ -274,33 +270,12 @@ actor AppleTranscriber: Transcriber, SpeechEngine {
                 // the user their words, so this never throws outward.
                 try? captureFile?.write(from: item.buffer)
             }
-            if keepsSamples { keep(item.buffer) }
+            if keepsSamples { tee.append(item.buffer) }
             guard let ready = converted(item.buffer) else { continue }
             inputContinuation?.yield(AnalyzerInput(buffer: ready))
             moved += 1
         }
         return moved
-    }
-
-    private func keep(_ buffer: AVAudioPCMBuffer) {
-        guard keptSamples.count < Self.keptSampleCap else { return }
-        if hearingConverter == nil || hearingConverter?.inputFormat != buffer.format {
-            hearingConverter = AVAudioConverter(from: buffer.format, to: Self.hearingFormat)
-        }
-        guard let converter = hearingConverter else { return }
-        let ratio = Self.hearingFormat.sampleRate / buffer.format.sampleRate
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1024
-        guard let out = AVAudioPCMBuffer(pcmFormat: Self.hearingFormat, frameCapacity: capacity) else { return }
-        var supplied = false
-        var error: NSError?
-        converter.convert(to: out, error: &error) { _, status in
-            if supplied { status.pointee = .noDataNow; return nil }
-            supplied = true
-            status.pointee = .haveData
-            return buffer
-        }
-        guard error == nil, out.frameLength > 0, let channel = out.floatChannelData?[0] else { return }
-        keptSamples.append(contentsOf: UnsafeBufferPointer(start: channel, count: Int(out.frameLength)))
     }
 
     /// The utterance's audio, 16 kHz mono, for whatever has to hear it again.
@@ -312,9 +287,9 @@ actor AppleTranscriber: Transcriber, SpeechEngine {
     /// has to be able to read the same audio after a first attempt failed, so
     /// the engine holds them until somebody says the utterance is over
     /// (`releaseSamples`), and every path out of `keyUp` says so.
-    func utteranceSamples() -> [Float] { keptSamples }
+    func utteranceSamples() -> [Float] { tee.samples }
 
-    func releaseSamples() { keptSamples.removeAll(keepingCapacity: true) }
+    func releaseSamples() { tee.reset() }
 
     // MARK: - Internals
 
