@@ -95,3 +95,40 @@ struct UtteranceTee {
         truncated = false
     }
 }
+
+/// The corpus's copy: the RAW microphone buffers, written to a file.
+///
+/// Raw rather than converted, and that is the whole value of it: a captured
+/// utterance can be replayed through any engine or locale later, which is
+/// what makes an engine bake-off possible at all. Best effort by design, so
+/// losing a corpus buffer can never cost the user their words.
+///
+/// Lifted out of `AppleTranscriber` alongside the tee, for the same reason:
+/// two engines needed identical behaviour and a file write with
+/// swallow-everything semantics is not a thing to have two copies of.
+struct RawCapture {
+    private var url: URL?
+    private var file: AVAudioFile?
+
+    mutating func begin(writingTo url: URL?) {
+        file = nil
+        self.url = url
+    }
+
+    mutating func end() {
+        file = nil
+        url = nil
+    }
+
+    var isOn: Bool { url != nil }
+
+    /// Created lazily on the first buffer, because that is the first moment
+    /// the microphone's real format is known.
+    mutating func write(_ buffer: AVAudioPCMBuffer) {
+        guard let url else { return }
+        if file == nil {
+            file = try? AVAudioFile(forWriting: url, settings: buffer.format.settings)
+        }
+        try? file?.write(from: buffer)
+    }
+}
