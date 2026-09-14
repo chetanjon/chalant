@@ -201,7 +201,7 @@ final class DictationController {
         // 2026-08-14 when cleanup became the default path, so it would never
         // have fired and the whole 1.4s would have landed on whichever sentence
         // the user happened to dictate first.
-        if Cleanup.mode() != .off {
+        if Cleanup.needsModel() {
             await polisher.warmUp()
         }
         // The chosen engine, loaded now rather than behind the first held
@@ -396,7 +396,7 @@ final class DictationController {
         // Shadow runs the model too, just after the words land instead of
         // before, so this warms in every mode but off, where there is no
         // model to warm.
-        if Cleanup.mode() != .off {
+        if Cleanup.needsModel() {
             Task { await polisher.warmUp() }
         }
         // And the second ear, if it put the model down during a long silence.
