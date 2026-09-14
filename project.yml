@@ -10,14 +10,25 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     from: 2.9.4
-  # "Better hearing" (2026-08-18): Whisper on device, as the background
-  # final that corrects the words in place a second or two after they land.
-  # Off by default; the model (606 MB) downloads only when the switch is on.
-  # Measured before it was added: verification/EAR_2026-08-17.md.
+  # Whisper on device. Arrived 2026-08-18 as "Better hearing", a second ear
+  # that corrected the words after they landed; from 1.42.0 it is one of three
+  # selectable recognizers, and the most accurate of them on the founder's own
+  # corpus (24.15 corrections per 100 words against Apple's 28.21) at about
+  # six times the decode time. Not the default for that reason, and because it
+  # costs a 606 MB download. verification/EAR_2026-08-17.md, EVAL-LOG 09-14.
   WhisperKit:
     url: https://github.com/argmaxinc/WhisperKit
     from: 1.1.0
-  # Parakeet TDT v3 on device, the primary recognizer from 1.42.0.
+  # Parakeet TDT v3 on device, one of the three recognizers from 1.42.0.
+  #
+  # **Not the default, and that was measured rather than assumed.** Part 0
+  # §0.12 warned that Parakeet's lineage scores roughly twice Whisper's word
+  # error on Indian-accented English and said to cut its engine role if it
+  # underperformed Apple on the corpus. It did: 30.98 corrections per 100
+  # words against Apple's 28.21 on the founder's own 60 labelled English rows.
+  # It stays because it is exactly as fast as Apple (0.135 s against 0.134 s)
+  # and one speaker cannot settle a US-English model's value for everyone.
+  # Full table in EVAL-LOG 2026-09-14.
   #
   # **Pinned exactly, never a range, and Part 0 §0.8 is the reason:** this
   # project ships releases days apart and shipped two breaking changes in
@@ -101,8 +112,8 @@ targets:
       properties:
         # Version lives here: xcodegen regenerates Info.plist on every
         # run, so a version bumped only in the plist silently resets.
-        CFBundleShortVersionString: 1.41.0
-        CFBundleVersion: "200"
+        CFBundleShortVersionString: 1.42.0
+        CFBundleVersion: "201"
         # Sparkle: the feed rides the Pages site; checks stay OUR quiet
         # daily UpdateChecker (Sparkle's own scheduler off, no consent
         # dialog); Sparkle acts only when the user asks to install.
@@ -126,7 +137,10 @@ targets:
         # requiresOnDeviceRecognition false on purpose, for reliability).
         # These two strings are the one place a user actually reads, so
         # they say what really happens rather than what we would prefer.
-        NSMicrophoneUsageDescription: "Hold the notch to talk to Chalant, or hold left Option to dictate into whatever you are typing in. Dictation is transcribed entirely on this Mac. Island commands use macOS dictation, which goes to Apple's service when the local model is not ready."
+        # "left Option" was true until 1.42.0 made the hold key a setting. The
+        # one dialog a user actually reads must not name a key they may have
+        # moved, and it cannot read their settings, so it names neither.
+        NSMicrophoneUsageDescription: "Hold the notch to talk to Chalant, or hold your dictation key to dictate into whatever you are typing in. Dictation is transcribed entirely on this Mac. Island commands use macOS dictation, which goes to Apple's service when the local model is not ready."
         NSSpeechRecognitionUsageDescription: "Turns your words into text at your cursor, and into actions on the island. Dictation runs entirely on this Mac. Island commands use macOS dictation, which runs here when its local model is ready and through Apple's service when it is not. The answer itself never leaves."
         NSRemindersFullAccessUsageDescription: Chalant creates the reminders you set.
         NSCalendarsFullAccessUsageDescription: Chalant adds events and reads today's agenda.

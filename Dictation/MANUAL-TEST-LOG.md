@@ -5,6 +5,80 @@ here. "Should work" and "now supports" are not evidence.
 
 ---
 
+## 2026-09-14 — one recognizer, a hold key that can be moved, and nothing lost in silence. QUEUED, NOT YET RUN.
+
+Branch `feat/parakeet-primary`. 386 Core tests and 732 app tests green, the app
+target builds, and the engine bake-off ran offline over the founder's own
+corpus (`EVAL-LOG.md`, same date). **Nothing below has been exercised on a live
+machine, so nothing here is evidence of anything.** Part 1 §2: the claim waits
+for the dated run.
+
+The 2026-09-04 hearing-merge protocol above is now moot: that path is gone.
+
+### Before running
+
+- Note the installed version. This needs a build of the branch.
+- `defaults read com.cj.chalant dictationEngine` should be **absent** on this
+  machine, which means `SpeechEngineChoice.current` reads the old
+  `dictationBetterHearing` switch and answers `whisper`. That is the migration
+  under test, and it is the founder's own profile: they had the second ear on.
+- Corpus capture ON, so every row below is readable afterwards.
+
+### The rows
+
+| # | What to do | What must happen |
+|---|---|---|
+| 1 | **Option+← , Option+→, Option+Delete in any editor** | No light, no music pause, no capture. This is the whole reason for the activation work: before it, each of these opened the aurora, woke the mic, warmed a model and PAUSED the music. |
+| 2 | **Option+e, then a vowel** (an accented character) | The character arrives. Nothing dictation-shaped happens. |
+| 3 | Play something, then do row 1 for a minute | The track never stops. `quietTheRoom` calls `music.pause()`, not a duck, so a regression here is audible rather than subtle. |
+| 4 | A real hold, under 180 ms, and say nothing | Nothing at all: no light, no toast. |
+| 5 | A real hold, and **start speaking immediately** | The first word is in the transcript. The light appears ~180 ms in, but capture opened at the press: this row is the one that proves the threshold does not clip. |
+| 6 | Watch the light after letting go | It goes **still and dim** rather than out, until the words land or a message appears. |
+| 7 | Settings, switch the recognizer to **Apple** | Status says Ready. Dictate: words land, no download. |
+| 8 | Switch to **Parakeet** | ~470 MB downloads with a percentage, then "Preparing the model for this Mac" for about fifteen seconds, then Ready. Dictate: words land. |
+| 9 | Say "**The invoice came to one hundred and twenty dollars**" on Parakeet | It lands as `$120`. This is the ITN path. |
+| 10 | Say "**Ship Chalant to the Kizu group today**" on Parakeet | The names survive. |
+| 11 | Switch back to **Whisper** | Loads from the model already on disk, no second download. |
+| 12 | Settings, **Hold key** to Right Option, then hold it | It dictates. Left Option no longer does. The gesture line in Settings and the tour both say "Right Option". |
+| 13 | Dictate into **TextEdit** | Lands. The row should read `inserted:1:confirmed` — TextEdit answers accessibility, so this is the row that proves the paste verification works at all. |
+| 14 | Dictate into **VS Code**, **Slack**, **Chrome**, **Terminal** | Lands. Rows read `inserted:1:uncertain`, which is correct and must NOT demote the app. Seven of the twelve M1 apps have never been run; this is the chance. |
+| 15 | Hold, speak, and **switch app before letting go** | Words on the clipboard, the recovery glance appears with a reason and two glyphs, and **Retry types them into the app you moved to**. This path returned in silence before. |
+| 16 | Hold and say nothing at all | "I didn't catch that." Something is said. |
+| 17 | **Mute the microphone in hardware**, hold, speak | It says the mic heard nothing and names it. Then unmute and dictate again: it must work without relaunching. |
+| 18 | Dictate, then **⌘C something else within a second and a half** | Your copy survives. The old restore overwrote it. |
+| 19 | A **password field** | Still refuses, still says where the words went, and offers no Retry. |
+| 20 | Say "**first line. New paragraph. second line**" with cleanup **Off** | A real blank line. This never worked outside `live` mode. |
+| 21 | Say "**add a new line to the file**" | The words survive verbatim. |
+| 22 | A **60-second ramble** on Parakeet | One transcript, no duplicated text at the ~15 s seams, no dropped tail. The library chunks above 15 s and dedups its own overlaps; this is the row that checks it. |
+| 23 | Two holds in quick succession | Two insertions, in order, nothing doubled. |
+
+### What to read afterwards
+
+From the newest rows in `captured.jsonl`:
+
+- `insertOutcome`, which now carries the landing verdict:
+  `inserted:<tier>:confirmed|uncertain|refuted`.
+- The log line per utterance names the engine and says either "seen after Ns"
+  or "arrival unconfirmed". **"arrival unconfirmed" is the normal case** and is
+  not a fault.
+- `finalizeSeconds`, `prepareSeconds`, `insertSeconds`. The sum is
+  key-release-to-paste-dispatch, which is NOT key-release-to-visible: that
+  claim now has its own field and is set only where the focused field confirmed
+  it.
+
+### Deliberately not built
+
+- **No spinner or label in the working phase.** A still line only. The founder
+  rejected visible refinement in 1.19.0 and a floating object in 1.40.0, and if
+  row 6 reads as a hang, that judgement is theirs to make.
+- **Parakeet is not told your names.** Its batch API has no biasing parameter
+  at 0.15.7. Names are repaired after the fact by the passes that always did.
+- **The AUC of Parakeet's confidence is not measured**, so its floor is
+  provisional at 0.45 and the phonetic vocabulary pass fires rarely on that
+  engine. Row 10 is the one that would show it.
+
+---
+
 ## 2026-09-04 — hearing-merge at landing. QUEUED, NOT YET RUN.
 
 Branch `feat/hearing-merge`. Core tests green (331) and the app target builds,

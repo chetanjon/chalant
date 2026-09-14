@@ -31,7 +31,8 @@ enum VoiceDoor: CaseIterable {
     case holdTheIsland
     /// The global `.talk` key, which ships bound to nothing.
     case talkHotkey
-    /// Hold left Option anywhere and speak, and the words land in whatever
+    /// Hold the dictation key anywhere and speak (left Option by default,
+    /// `DictationShortcut` since 1.42.0), and the words land in whatever
     /// app you were already typing in. Added by the dictation merge, and it
     /// is a different job from every door above: those turn speech into
     /// island commands, this one turns speech into text at your cursor.
