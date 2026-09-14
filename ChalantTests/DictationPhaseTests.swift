@@ -77,3 +77,66 @@ final class DictationPhaseTests: XCTestCase {
         XCTAssertNotEqual(m.state, .dictating)
     }
 }
+
+/// The recovery glance, and whether anyone can see it.
+///
+/// **The gap this closes.** The island is hidden by role for a "just
+/// dictation" user, hidden for 1.4 s after every dictation, and hidden by
+/// auto-hide, and all three exceptions were written for `glanceToast` alone.
+/// A recovery appears in exactly that window, on exactly the path where the
+/// user's words did not land, so a Copy and a Retry nobody can see is worse
+/// than no affordance at all.
+@MainActor
+final class DictationRecoveryTests: XCTestCase {
+
+    func testARecoveryCountsAsSomethingWorthShowing() {
+        // The role rule the view reads. A recovery has to pass the same gate a
+        // toast does.
+        XCTAssertTrue(
+            ChalantRole.islandHidden(
+                collapsed: true, toastShowing: false, sentLightShowing: false,
+                somethingWantsYou: false))
+        XCTAssertFalse(
+            ChalantRole.islandHidden(
+                collapsed: true, toastShowing: true, sentLightShowing: false,
+                somethingWantsYou: false))
+    }
+
+    func testARecoveryIsOfferedAndCleared() {
+        let m = NotchViewModel()
+        XCTAssertNil(m.dictationRecovery)
+        m.offerRecovery(
+            NotchViewModel.Recovery(text: "hello there", reason: "Couldn't type there", retry: nil))
+        XCTAssertEqual(m.dictationRecovery?.text, "hello there")
+        m.clearRecovery()
+        XCTAssertNil(m.dictationRecovery)
+    }
+
+    /// Latest wins, like the toast. Two failures in a row must not queue.
+    func testASecondRecoveryReplacesTheFirst() {
+        let m = NotchViewModel()
+        m.offerRecovery(NotchViewModel.Recovery(text: "first", reason: "one", retry: nil))
+        m.offerRecovery(NotchViewModel.Recovery(text: "second", reason: "two", retry: nil))
+        XCTAssertEqual(m.dictationRecovery?.text, "second")
+    }
+
+    /// A retry is offered only where there is something to retry into, which
+    /// is what the secure-input path relies on: while a password field holds
+    /// the keyboard, a second paste fails the same way.
+    func testARecoveryCanCarryNoRetry() {
+        let m = NotchViewModel()
+        m.offerRecovery(
+            NotchViewModel.Recovery(text: "secret", reason: "A password field", retry: nil))
+        XCTAssertNil(m.dictationRecovery?.retry)
+    }
+
+    /// Copy takes it back to the clipboard and dismisses, because the user has
+    /// now done the thing the glance was asking about.
+    func testCopyingClearsTheGlance() {
+        let m = NotchViewModel()
+        m.offerRecovery(NotchViewModel.Recovery(text: "words", reason: "nowhere", retry: nil))
+        m.copyRecoveredText()
+        XCTAssertNil(m.dictationRecovery)
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), "words")
+    }
+}

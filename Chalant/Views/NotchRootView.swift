@@ -238,7 +238,11 @@ struct NotchRootView: View {
         if ChalantRole.current == .dictation {
             return ChalantRole.islandHidden(
                 collapsed: face.state == .collapsed,
-                toastShowing: model.glanceToast != nil,
+                // A recovery counts as a toast for visibility. Without this a
+                // "just dictation" user, whose island is hidden by role, would
+                // be offered a Copy and a Retry they could never see, on the
+                // one path where their words did not land.
+                toastShowing: model.glanceToast != nil || model.dictationRecovery != nil,
                 sentLightShowing: false,
                 somethingWantsYou: model.somethingWantsYou)
         }
@@ -246,14 +250,18 @@ struct NotchRootView: View {
         // resting pill does not surface the instant the aurora fades
         // (founder, 2026-09-03: "I still see the pill coming up after I'm
         // done talking"). Cleared the moment the pointer reaches the notch.
+        // The 1.4 s of enforced quiet after a dictation is exactly when a
+        // recovery appears, so it has to be an exception here too or the words
+        // would be handed back to a hidden island.
         if restAfterDictation, face.state == .collapsed, !face.pointerNear,
-           model.glanceToast == nil, !model.somethingWantsYou {
+           model.glanceToast == nil, model.dictationRecovery == nil, !model.somethingWantsYou {
             return true
         }
         return (autoHideIsland || (face.style == .pill && face.fullscreenBelow))
             && face.state == .collapsed
             && !face.pointerNear
             && model.glanceToast == nil
+            && model.dictationRecovery == nil
             && !model.somethingWantsYou
     }
 
