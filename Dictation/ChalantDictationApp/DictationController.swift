@@ -512,6 +512,10 @@ final class DictationController {
         // BEFORE the analyzer binds to its format. A healthy mic passes this
         // gate in one or two buffers.
         let heardAtKeyDown = await audio.confirmHearing(within: 0.9)
+        // The first of the five numbers the release path is steered by, and
+        // the only one measured from key-DOWN: how long it took before there
+        // was a microphone worth speaking into.
+        if let startedAt { timings.recordingReady = Date().timeIntervalSince(startedAt) }
         keyDownHeard = heardAtKeyDown
         if !heardAtKeyDown {
             await audio.condemnCurrentInput()
@@ -827,6 +831,11 @@ final class DictationController {
         // on the release path; the founder feels the whole path, so every
         // piece of it gets a number (2026-08-20).
         let prepareSeconds = Date().timeIntervalSince(prepareStart)
+        // Filled in for the first time (2026-09-14). `StageTimings` has
+        // carried this field since M0 and nothing ever set it, so the
+        // deterministic chain was the one stage on the release path with no
+        // number against it.
+        timings.textPipeline = prepareSeconds
 
         // Refined at once, or as said: wait a short, fixed budget for the
         // tidied text and land it once. Tidy-ahead during the hold usually
@@ -1003,9 +1012,16 @@ final class DictationController {
         let insertOutcomeName: String
         var inserted: String?
         switch outcome {
-        case .inserted(let tier):
+        case .inserted(let tier, let landing):
             inserted = text
-            insertOutcomeName = "inserted:\(tier)"
+            insertOutcomeName = "inserted:\(tier):\(landing.rawValue)"
+            // The one number allowed to say the words are on screen, and only
+            // where the focused field answered both before and after and had
+            // grown. Nil the rest of the time, which is most of the time,
+            // because Electron and web views answer nothing.
+            if landing == .confirmed {
+                timings.visibleConfirmed = Date().timeIntervalSince(releasedAt)
+            }
         case .leftOnClipboard(let reason):
             insertOutcomeName = "leftOnClipboard:\(reason)"
         case .refused(let reason):
@@ -1138,7 +1154,8 @@ final class DictationController {
             finalize \(self.timings.finalization ?? -1, privacy: .public)s, \
             \(refinedAtOnce ? "refined at once" : "raw", privacy: .public) after \
             \(self.timings.polish ?? 0, privacy: .public)s wait, \
-            insert \(self.timings.insertion ?? -1, privacy: .public)s, \
+            dispatch \(self.timings.insertion ?? -1, privacy: .public)s, \
+            \(self.timings.visibleConfirmed.map { "seen after \($0)s" } ?? "arrival unconfirmed", privacy: .public), \
             outcome \(String(describing: outcome), privacy: .public), \
             ring overruns \(overruns, privacy: .public)
             """
@@ -1367,14 +1384,19 @@ final class DictationController {
         // commas become full stops only after fillers and repairs are gone,
         // so "and, you know, everybody" has already become "and everybody"
         // by the time the joint is judged (2026-08-28).
-        let deterministic = Breaks.sentencing(Contrast.commaBeforeNot(
-            Restatement.collapsing(
-                Fillers.removing(
-                    Repair.repairing(
-                        Disfluency.collapsingRepetitions(
-                            Guardrail.settlingEllipses(
-                                Guardrail.trimmingPunctuationRun(
-                                    resolved.map(\.text).joined(separator: " ")))))))))
+        // Paragraphs runs LAST, outside Breaks and after it. A spoken cue is
+        // only recognised where punctuation shows it stood alone, and
+        // `Breaks` is what turns a run-on's pause commas into the full stops
+        // that show it (2026-09-14).
+        let deterministic = Paragraphs.applying(
+            Breaks.sentencing(Contrast.commaBeforeNot(
+                Restatement.collapsing(
+                    Fillers.removing(
+                        Repair.repairing(
+                            Disfluency.collapsingRepetitions(
+                                Guardrail.settlingEllipses(
+                                    Guardrail.trimmingPunctuationRun(
+                                        resolved.map(\.text).joined(separator: " "))))))))))
         return deterministic
     }
 
@@ -1636,5 +1658,7 @@ final class DictationController {
     }
 
     /// Latest measured key-release-to-visible, for the menu bar readout.
-    var lastLatency: TimeInterval? { timings.keyReleaseToVisible }
+    /// Latest measured key-release-to-paste-dispatch, for the menu bar
+    /// readout. Not "to visible": see `StageTimings`.
+    var lastLatency: TimeInterval? { timings.keyReleaseToInsertDispatch }
 }
