@@ -5,6 +5,51 @@ here. "Should work" and "now supports" are not evidence.
 
 ---
 
+## 2026-09-15 — reply to a text from the island: the two live measurements the feature rests on
+
+Run on this Mac against a Developer ID build of `feat/island-message-reply`
+(a Debug build cannot do this: it has no Accessibility grant, see the
+2026-09-14 entry below). Notifications were posted with `display
+notification` and read back out of the wire log.
+
+### 1. The watcher sees a live banner
+
+```
+2026-09-15 13:27:21  banner  type=Notification Center|Script Editor, Alpha Sender, First body  tool=other  -> lines=2
+2026-09-15 13:27:30  banner  type=Notification Center|Script Editor, Beta Sender, Second body  tool=other  -> lines=2
+```
+
+Two banners nine seconds apart, **both caught**, each with its title and
+body read out of the tree. The `AXObserver` on `NotificationCenter`'s
+`kAXWindowCreatedNotification` is the right hook.
+
+### 2. The posting app names itself in the DESCRIPTION, not the identifier
+
+The first attempt classified on `AXIdentifier` and would have matched
+nothing, ever:
+
+```
+type=widgets-overlay-view,0A11494F-90EE-432C-8891-4C71750F3207,title,body
+```
+
+Generic layout names and the notification's own UUID. **No bundle id
+anywhere in the tree.** What does carry the app is a description shaped
+`App, title, body` (`Script Editor, Alpha Sender, First body`), with the
+window itself described as `Notification Center`. That is what
+`MessageWatch.isMessages` tests, matching the first comma-separated field
+against the app's localized display name rather than searching for a
+substring.
+
+### Still not run
+
+**A real Messages banner has never been read.** Everything above was
+measured with a synthetic notification, so the `App, title, body` shape is
+proven but "Messages" appearing in that first field is inferred, not seen.
+The next incoming text on this Mac settles it, and the wire log captures it
+without anyone having to be watching.
+
+---
+
 ## 2026-09-14 (night) — row 1 attempted live. BLOCKED on permissions, and the block is the finding.
 
 Attempted with a synthetic hold against both builds, on this Mac, using the

@@ -302,7 +302,7 @@ struct ExpandedView: View {
     /// it alone, which is how the tour has always behaved.
     private var layoutRows: [IslandRow] {
         let rows = model.layout.layout.rows
-        guard model.pane == .welcome else { return rows }
+        guard model.pane != .none else { return rows }
         return rows.filter { row in !row.elements.contains { $0.isRequired } }
             + [IslandRow([.input])]
     }
@@ -393,6 +393,30 @@ struct ExpandedView: View {
             if model.pane == .welcome {
                 WelcomeView(model: model)
                     .transition(.opacity)
+            } else if model.pane == .message {
+                MessageCard(
+                    reply: model.messages,
+                    press: {
+                        // Held open the moment somebody starts
+                        // talking, not when the words come back: a
+                        // card that fades mid-sentence takes the
+                        // landing spot with it.
+                        model.messages.holdOpen()
+                        Dictation.shared.practicePress()
+                    },
+                    release: { Dictation.shared.practiceRelease() },
+                    send: {
+                        Task {
+                            let went = await model.messages.send()
+                            guard went else { return }
+                            // Let "Sent." be read before the card goes.
+                            try? await Task.sleep(for: .seconds(1.2))
+                            model.closeMessage()
+                        }
+                    },
+                    dismiss: { model.closeMessage() }
+                )
+                .transition(.opacity)
             } else {
                 // Identity per tab, so SwiftUI sees a swap to transition
                 // rather than one view quietly changing its contents.
