@@ -1185,6 +1185,14 @@ final class DictationController {
             try? await Task.sleep(for: Self.activationDelay)
             guard let self, !Task.isCancelled, self.isCurrent(session), self.key.state != .idle
             else { return }
+            // **Said out loud because it is the assertion of manual row 1.**
+            // "No light" is otherwise only checkable by eye, and the whole
+            // point of the threshold is that an Option+arrow never gets here.
+            // A line at the moment the aurora opens, and the absence of one,
+            // is what makes that row provable by a harness rather than a
+            // person: it is also the moment the music is paused
+            // (`beginDictating` is the only caller of `quietTheRoom`).
+            Self.log.info("revealing: the hold lasted long enough to be one")
             self.surface.show(into: name, mic: nil, on: display)
             self.startMeter()
             self.onStateChange?()

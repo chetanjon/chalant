@@ -5,6 +5,62 @@ here. "Should work" and "now supports" are not evidence.
 
 ---
 
+## 2026-09-14 (night) — row 1 attempted live. BLOCKED on permissions, and the block is the finding.
+
+Attempted with a synthetic hold against both builds, on this Mac, using the
+`optionhold` technique `earprobe` has driven the app with since August. A
+control (bare hold, no second key) ran first every time, so that "nothing
+happened" could be told from "the tap never heard anything".
+
+**Row 1 is NOT run.** The branch build's event tap receives nothing: a Debug
+build signs with the development identity, so it has its own TCC entries, and
+it has neither Input Monitoring nor Accessibility. The control caught it
+exactly as designed — no `keyDown entered` at all — so the apparent pass
+("music kept playing") means the tap was deaf, not that the conflict was
+cancelled. Reported as blocked rather than green.
+
+### What the attempt established anyway
+
+| | |
+|---|---|
+| **Synthetic holds do reach a granted tap** | On the installed 1.41.0: `flagsChanged leftOption down=true`, `keyDown entered`. The technique is sound; the grant is what was missing. |
+| **"Started" really is not "hearing"** | The branch build logged `event tap installed` and `dictation is listening for the hold key` while receiving zero events. That is the exact silent lie `Dictation.tapInstalled` and the health row were built to expose, reproduced end to end. |
+| **A clean quit does not resurrect** | `tell application "Chalant" to quit` left it gone; launchd's `KeepAlive` with `SuccessfulExit: false` behaved as `StayRunning` documents. The agent was never touched. |
+| **The migration works in the real app** | Launched with `dictationBetterHearing = 1` and no `dictationEngine`, the branch build loaded Whisper: `better hearing ready: large-v3-v20240930_626MB`. |
+| **The clipboard guards fire** | `clipboard not restored: the snapshot held nothing to put back` on an empty clipboard (the old code cleared it), and `clipboard restored (1 items)` on the normal path. |
+| **The ladder demotes and the verdict is honest** | With Accessibility refused, tier 1 refused, tier 2 dispatched, `landing: uncertain`, treated as success and NOT counted against the app. |
+
+### A limitation worth writing down
+
+**Paste verification is load-bearing on Accessibility.** With AX denied,
+`FocusedField.measure()` returns nil for every app, so every verdict is
+`uncertain` and nothing is verifiable — while the words are also not landing.
+That is the health screen's job to say, not `LandingCheck`'s, and it does say
+it. But the two failures look identical in the corpus row, so a row full of
+`uncertain` should be read against the health screen rather than on its own.
+
+### Two limits of the synthetic harness, so nobody re-derives them
+
+1. **A synthetic hold does not reach `.listening`.** A 2.5 s hold on 1.41.0
+   ended in `released while still starting`: key-down's setup (mic permission,
+   engine start, `confirmHearing` up to 0.9 s, analyzer prepare) outlasts it.
+   Synthetic holds can prove the tap saw a key; they cannot prove a session
+   went live.
+2. **A phantom second key-down arrives in the same millisecond**, refused as
+   `a session is already starting`. `PushToTalk` handles it correctly, which is
+   incidentally a live exercise of the state machine, but it means event counts
+   from a synthetic driver are not to be trusted.
+
+### To actually finish row 1
+
+Either grant the Debug build Input Monitoring and Accessibility and re-run, or
+just do it by hand: put music on, open any editor, hold Option and tap the
+arrow keys for a minute. Sixty seconds, no dictation, no setup. The branch
+logs `revealing: the hold lasted long enough to be one` when the aurora opens,
+so the assertion is now checkable from the log rather than only by eye.
+
+---
+
 ## 2026-09-14 (evening) — the rows that need no voice, RUN
 
 Of the 23 rows below, **15 need somebody to speak into a live microphone and
