@@ -5,6 +5,32 @@ here. "Should work" and "now supports" are not evidence.
 
 ---
 
+## 2026-09-14 (evening) — the rows that need no voice, RUN
+
+Of the 23 rows below, **15 need somebody to speak into a live microphone and
+cannot be run by an agent.** These are the ones that could be, on this Mac,
+against real recordings and the real code. The rest stay unticked.
+
+| row | what | result |
+|---|---|---|
+| 9 | Numbers and amounts on Parakeet | **PASS.** `Send 15, not 50.` exact; `$120` exact; `$1200` (truth `$1,200`, Apple writes it the same way); `3:15, not 3:50` as `03:15, not 03:50`. Fails on a spoken email address and on `9:30 to 10:15`, both of which Apple also fails. |
+| 10 | Do names survive Parakeet | **PASS only with the vocabulary layer, and it took a fix.** Raw, the engine mishears almost every name (`chalan`, `Atram`, `Chaitanya Gata`, `post hoc`). The repair layer was nearly switched off by the provisional 0.45 floor: `tools/floorsweep` gives 1 win at 0.40 and **8 wins, 0 losses at 0.60**. Floor corrected to 0.60, shared with Apple again. Full table in EVAL-LOG. |
+| 22 | 60-second ramble across the chunk seams | **PASS on real audio.** Two of the founder's own recordings, 65 s and 70 s, crossing Parakeet's 15 s window four and five times. **Zero repeated five-word runs**, so no seam duplication; word counts within 3% of Apple's and tails complete, so no dropped audio. Parakeet decoded 65 s in 0.87 s, faster than Apple's 1.16 s. |
+| 20, 21 | Spoken line breaks, and sentences about text | **PASS as unit tests, not as a live row.** 11 cases in `ParagraphsTests`, including "add a new line to the file" and "New line items are up". The live row still needs saying out loud, because nothing here proves the transcriber punctuates the cue the way the rule expects. |
+| 8 | Parakeet download and first-load compile | **PASS, measured rather than watched.** 471 MB on disk, ~17 s Neural Engine compile once, 0.10 s every load after, ~87 MB resident. The Settings copy for each state exists; whether it *reads* right is a human's call. |
+
+**Not run, and why:** every row involving a held key and a voice. Rows 1 to 7,
+11 to 19 and 23 all require speaking, pressing a real key, or watching the
+light, and a synthetic `CGEvent` hold would prove something about synthetic
+events rather than about dictation. Part 0 §0.3 records that synthetic
+keystrokes are silently dropped on macOS 26 anyway.
+
+**Row 1 is still the one to run first.** It is the regression a user notices
+within a minute, it needs no dictation at all (just Option+arrow in an editor
+with music playing), and nothing above touches it.
+
+---
+
 ## 2026-09-14 — one recognizer, a hold key that can be moved, and nothing lost in silence. QUEUED, NOT YET RUN.
 
 Branch `feat/parakeet-primary`. 386 Core tests and 732 app tests green, the app

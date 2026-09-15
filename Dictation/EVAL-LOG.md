@@ -112,6 +112,31 @@ because it already handles a word being added or removed — and a word carries
 its confidence only where it survived unchanged. Everything the rewrite touched
 arrives `nil`, which `TermMatcher` reads as "no evidence to act on".
 
+### The confidence floor, swept (row 10 of the manual protocol)
+
+The branch shipped Parakeet's floor provisionally at 0.45, reasoning that 0.6
+is a fact about Apple's distribution and another model's softmax is another
+scale. True as far as it went, and wrong in effect. `tools/floorsweep`, fed
+this engine's own tokens joined to the manifest and the founder's real term
+list, over the 30 `propernoun` rows:
+
+| confidence | wins | losses | |
+|---|---|---|---|
+| 0.30 | 0 | 0 | does nothing |
+| 0.40 | **1** | 0 | where 0.45 was sitting |
+| 0.50 | 5 | 0 | |
+| 0.60 | **8** | 0 | shipped |
+
+Identical at similarity 0.65, 0.70 and 0.75, with and without the dictionary
+shield. **Zero losses in every cell**, so the risk the floor exists to manage
+does not appear on this corpus at all; what a low floor costs is repairs.
+
+Apple sweeps the same rows to 10 wins and 0 losses at 0.60, which is the
+useful half of the result: the two engines want the same number for different
+reasons, so `TermMatcher.confidenceFloor` is shared again rather than forked.
+
+Read narrowly. 30 rows, one speaker, and it is losses that would move this.
+
 ### Four things not to measure again
 
 1. **Parakeet's per-word confidence does not come from the library.**
@@ -120,7 +145,8 @@ arrives `nil`, which `TermMatcher` reads as "no evidence to act on".
    `SubwordAssembly` aggregates the pieces; which aggregation is right is not
    obvious and is left as a parameter, because on Set E the pieces of a
    correctly heard `Kizu` score 0.527 and a misheard `chalan` scores 0.575.
-   **The AUC is not measured yet**, so the floor ships provisionally at 0.45.
+   The AUC is still not measured; the floor is swept instead, above, which is
+   the question the product actually asks.
 2. **Parakeet has no biasing API.** Batch `AsrManager` at 0.15.7 takes no
    hotwords, no prompt, no contextual strings. Its CTC rescoring path does, at
    the cost of a second 97.5 MB model and roughly a quarter of the throughput.

@@ -31,17 +31,32 @@ actor ParakeetTranscriber: SpeechEngine {
 
     nonisolated let engineName = "parakeet"
 
-    /// **Deliberately not `TermMatcher.confidenceFloor`.** That 0.6 is a fact
-    /// about Apple's distribution, swept against it. Parakeet's numbers are a
-    /// different scale on a different model, and the sub-word pieces of a
-    /// correctly heard name can score lower than the pieces of a wrong one
-    /// (`Kizu` 0.527 against `chalan` 0.575, measured on Set E). Until
-    /// `tools/engineprobe` puts an AUC on it, this sits low enough that the
-    /// phonetic pass fires rarely rather than wrongly; the passes that carry
-    /// names without looking at confidence at all, aliases and span joins,
-    /// are unaffected.
-    nonisolated var confidenceFloor: Double { Self.provisionalConfidenceFloor }
-    static let provisionalConfidenceFloor = 0.45
+    /// **Swept, not assumed, and the first guess was wrong.**
+    ///
+    /// This shipped provisionally at 0.45 on the reasoning that 0.6 is a fact
+    /// about Apple's distribution and another model's softmax is another
+    /// scale. True as far as it went, and it left the vocabulary layer almost
+    /// switched off. `tools/floorsweep` over the 30 `propernoun` rows, using
+    /// this engine's own tokens and the founder's real term list:
+    ///
+    /// ```
+    /// confidence   wins  losses      (similarity 0.65 to 0.75, shield on)
+    ///       0.30      0       0      does nothing
+    ///       0.40      1       0
+    ///       0.50      5       0
+    ///       0.60      8       0      <- here
+    /// ```
+    ///
+    /// Zero losses at every cell, so the risk this floor exists to manage
+    /// does not appear on this corpus; what a low floor costs is repairs.
+    /// Apple sweeps identically on the same rows (10 wins, 0 losses at 0.60),
+    /// which is the useful part: the two engines want the same number for
+    /// different reasons, so `TermMatcher.confidenceFloor` is shared again
+    /// rather than forked.
+    ///
+    /// Still the narrow reading of a narrow set: 30 rows, one speaker, and
+    /// losses are what would change this, so re-sweep before moving it.
+    nonisolated var confidenceFloor: Double { TermMatcher.confidenceFloor }
 
     /// How a word's confidence is read off its pieces. Swept, not chosen; see
     /// `SubwordAssembly.Aggregation`.
