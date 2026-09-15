@@ -9,8 +9,16 @@ import os
 /// feature and hand the app the ability to read every keystroke the
 /// user types anywhere. Carbon's hot key API asks for neither: the
 /// system matches the combination and calls back only on that one, so
-/// Chalant never sees a key it was not given. It is old, it is C, and
-/// it is the right trade.
+/// these shortcuts never see a key they were not given. It is old, it is
+/// C, and it is the right trade.
+///
+/// **That sentence used to say "so Chalant never sees a key it was not
+/// given", and 1.42.0 made it false.** Hold-to-dictate's own tap watches
+/// `.keyDown` while its key is held, so it can tell `Option+←` from the
+/// start of a sentence; it reads only that a key arrived, never which one.
+/// Nothing about THIS type changed, but a claim about the whole app cannot
+/// live in one type's header once another type stops honouring it. See
+/// `EventTapMonitor`.
 @MainActor
 final class HotKeyCenter {
     private static let log = Logger(subsystem: "com.cj.chalant", category: "hotkeys")

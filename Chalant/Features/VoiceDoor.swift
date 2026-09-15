@@ -1,3 +1,4 @@
+import ChalantDictationCore
 import Foundation
 
 /// Every door onto voice, and which ones an install actually has.
@@ -30,7 +31,8 @@ enum VoiceDoor: CaseIterable {
     case holdTheIsland
     /// The global `.talk` key, which ships bound to nothing.
     case talkHotkey
-    /// Hold left Option anywhere and speak, and the words land in whatever
+    /// Hold the dictation key anywhere and speak (left Option by default,
+    /// `DictationShortcut` since 1.42.0), and the words land in whatever
     /// app you were already typing in. Added by the dictation merge, and it
     /// is a different job from every door above: those turn speech into
     /// island commands, this one turns speech into text at your cursor.
@@ -88,8 +90,16 @@ enum VoiceDoor: CaseIterable {
     /// The 1.12.3 lesson applies with full force here: a hold that nothing
     /// on screen mentions is not a door a person can find. If dictation
     /// ships, some surface has to say this sentence.
-    static func dictationLine(available: Bool) -> String? {
-        available ? "Hold left Option anywhere and talk. Your words land where you were typing." : nil
+    /// `keyName` is the key the user has actually chosen, so the one sentence
+    /// that names the gesture cannot describe a key they moved away from. It
+    /// defaults to the shipped key rather than reading the live setting,
+    /// because a copy function that reaches into `UserDefaults.standard`
+    /// cannot be tested without editing the running app's settings.
+    static func dictationLine(
+        available: Bool, keyName: String = DictationShortcut.default.label
+    ) -> String? {
+        available
+            ? "Hold \(keyName) anywhere and talk. Your words land where you were typing." : nil
     }
 
     /// What ends a live session, in the words the listening caption

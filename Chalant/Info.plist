@@ -19,9 +19,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.41.0</string>
+	<string>1.42.0</string>
 	<key>CFBundleVersion</key>
-	<string>200</string>
+	<string>201</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
@@ -37,7 +37,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Chalant reads your approximate location to show the weather beside your day.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Hold the notch to talk to Chalant, or hold left Option to dictate into whatever you are typing in. Dictation is transcribed entirely on this Mac. Island commands use macOS dictation, which goes to Apple's service when the local model is not ready.</string>
+	<string>Hold the notch to talk to Chalant, or hold your dictation key to dictate into whatever you are typing in. Dictation is transcribed entirely on this Mac. Island commands use macOS dictation, which goes to Apple's service when the local model is not ready.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Chalant creates the reminders you set.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

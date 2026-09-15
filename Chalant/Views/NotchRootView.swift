@@ -238,7 +238,11 @@ struct NotchRootView: View {
         if ChalantRole.current == .dictation {
             return ChalantRole.islandHidden(
                 collapsed: face.state == .collapsed,
-                toastShowing: model.glanceToast != nil,
+                // A recovery counts as a toast for visibility. Without this a
+                // "just dictation" user, whose island is hidden by role, would
+                // be offered a Copy and a Retry they could never see, on the
+                // one path where their words did not land.
+                toastShowing: model.glanceToast != nil || model.dictationRecovery != nil,
                 sentLightShowing: false,
                 somethingWantsYou: model.somethingWantsYou)
         }
@@ -246,14 +250,18 @@ struct NotchRootView: View {
         // resting pill does not surface the instant the aurora fades
         // (founder, 2026-09-03: "I still see the pill coming up after I'm
         // done talking"). Cleared the moment the pointer reaches the notch.
+        // The 1.4 s of enforced quiet after a dictation is exactly when a
+        // recovery appears, so it has to be an exception here too or the words
+        // would be handed back to a hidden island.
         if restAfterDictation, face.state == .collapsed, !face.pointerNear,
-           model.glanceToast == nil, !model.somethingWantsYou {
+           model.glanceToast == nil, model.dictationRecovery == nil, !model.somethingWantsYou {
             return true
         }
         return (autoHideIsland || (face.style == .pill && face.fullscreenBelow))
             && face.state == .collapsed
             && !face.pointerNear
             && model.glanceToast == nil
+            && model.dictationRecovery == nil
             && !model.somethingWantsYou
     }
 
@@ -599,7 +607,8 @@ struct NotchRootView: View {
                                 // what is playing.
                                 accent: Color(white: 0.96),
                                 level: model.dictationLevel, fill: model.dictationFill,
-                                size: dictatingSize
+                                size: dictatingSize,
+                                working: model.dictationPhase == .working
                             )
                             .transition(.opacity)
                         }
@@ -802,11 +811,41 @@ struct NotchRootView: View {
     /// the middle belongs to hardware and only the wings are usable.
     @ViewBuilder
     private var notchSideContent: some View {
-        if let toast = model.glanceToast {
+        if let recovery = model.dictationRecovery {
+            recoveryGlance(recovery)
+        } else if let toast = model.glanceToast {
             toastGlance(toast)
         } else if let item = model.winningCollapsedItem(style: face.style) {
             collapsedGlance(item)
         }
+    }
+
+    /// Words that could not be typed, with the two things a person wants: the
+    /// reason, and another go.
+    ///
+    /// Copy is already half-solved before this appears, because the rescue
+    /// path places the words non-transient and the Clipboard tab archives
+    /// them; the glyph is here so nobody has to know that. Law 1: glyphs that
+    /// light on hover, no capsules, no colour doing the talking.
+    private func recoveryGlance(_ recovery: NotchViewModel.Recovery) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            Text(recovery.reason)
+                .font(Theme.Fonts.microMono)
+                .foregroundStyle(accent)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: Theme.Space.xs)
+            HoverGlyphButton(symbol: "doc.on.doc", label: "Copy what you said") {
+                model.copyRecoveredText()
+            }
+            if let retry = recovery.retry {
+                HoverGlyphButton(symbol: "arrow.clockwise", label: "Try typing it again") {
+                    retry()
+                    model.clearRecovery()
+                }
+            }
+        }
+        .transition(.opacity)
     }
 
     /// One glance, drawn. The precedence is decided above; this only

@@ -24,6 +24,15 @@ jobs:
         run: brew install xcodegen
       - name: Generate project
         run: xcodegen generate
+      # **The Core suite has never run in CI at all**, on any commit, red job
+      # or not: `ChalantDictationCore` is compiled INTO the app target, so
+      # `xcodebuild test` builds its code and runs none of its tests, which
+      # live in an SPM test target nobody invoked. That is 386 tests pinning
+      # every rule allowed to change the user's words, green only when a human
+      # typed `swift test` in `Dictation/`. It runs first because it is three
+      # seconds and it fails for reasons the app build would only obscure.
+      - name: Run the Core suite
+        run: swift test --package-path Dictation
       - name: Run unit tests
         run: >
           xcodebuild test

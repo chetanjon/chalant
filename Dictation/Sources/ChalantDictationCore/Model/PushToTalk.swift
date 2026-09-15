@@ -50,6 +50,11 @@ public struct PushToTalk: Sendable, Equatable {
         /// The release arrived mid-setup and has been remembered. The caller
         /// does nothing now; `ready()` will answer `.abandon`.
         case waitForSetup
+        /// Stop, and keep nothing. The hold was real but the user was doing
+        /// something else with the key: throw the audio away, type nothing,
+        /// say nothing. Distinct from `.abandon`, which is a setup that never
+        /// went live, and from `.finish`, which transcribes.
+        case cancel(String)
         /// Refused, and why. The reason is not decoration: a key that does
         /// nothing and explains nothing is the bug that made this type
         /// necessary.
@@ -72,6 +77,19 @@ public struct PushToTalk: Sendable, Equatable {
     /// turns on remembering this rather than discarding it.
     private var releasedWhileArming = false
 
+    /// Set when a conflicting key cancelled a live hold, so the release that
+    /// follows is expected rather than a refusal worth an error line.
+    /// `Option+←` arrives dozens of times a minute in an editor, and a log
+    /// full of "key up refused" would bury the refusals that matter.
+    private var cancelledWhileDown = false
+
+    /// The reason a release carries after a cancellation, so the caller can
+    /// tell an expected refusal from a broken one without matching prose.
+    public static let cancelledReason = "the hold was cancelled"
+
+    /// Whether the hold in flight was cancelled by another key.
+    public var wasCancelled: Bool { cancelledWhileDown }
+
     public init() {}
 
     /// The key went down.
@@ -79,6 +97,7 @@ public struct PushToTalk: Sendable, Equatable {
         switch state {
         case .idle:
             releasedWhileArming = false
+            cancelledWhileDown = false
             state = .arming
             return .begin
         case .arming:
@@ -109,7 +128,38 @@ public struct PushToTalk: Sendable, Equatable {
     /// anywhere else would be the original bug wearing a different hat.
     public mutating func setupFailed() {
         releasedWhileArming = false
+        cancelledWhileDown = false
         state = .idle
+    }
+
+    /// Another key went down while ours was held.
+    ///
+    /// **This is what `Option+←` needed and never had.** Left Option is a
+    /// real modifier: moving by word, deleting a word and typing an accented
+    /// character are all a left-Option press followed by another key, and
+    /// before this every one of them was indistinguishable from the start of
+    /// a dictation. The tap could not tell, because it only ever watched
+    /// `.flagsChanged` and so never saw the second key at all.
+    ///
+    /// Arming cancels without ever going live. Listening cancels and the
+    /// audio is discarded: the user was issuing a shortcut, not talking, and
+    /// anything transcribed from it would be typed into the document they
+    /// were editing. Idle is not a refusal worth logging, because every
+    /// ordinary keystroke in the day arrives here.
+    public mutating func otherKeyPressed() -> Decision {
+        switch state {
+        case .idle:
+            return .ignored("nothing was listening")
+        case .arming:
+            releasedWhileArming = false
+            cancelledWhileDown = true
+            state = .idle
+            return .cancel("another key was pressed while starting")
+        case .listening:
+            cancelledWhileDown = true
+            state = .idle
+            return .cancel("another key was pressed while listening")
+        }
     }
 
     /// The key came up.
@@ -123,6 +173,10 @@ public struct PushToTalk: Sendable, Equatable {
             releasedWhileArming = true
             return .waitForSetup
         case .idle:
+            if cancelledWhileDown {
+                cancelledWhileDown = false
+                return .ignored(Self.cancelledReason)
+            }
             return .ignored("nothing was listening")
         }
     }

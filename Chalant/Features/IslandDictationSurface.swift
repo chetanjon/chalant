@@ -43,12 +43,21 @@ final class IslandDictationSurface: DictationSurface, DictationDisplayLookup {
         model?.updateDictating(level: DictationStripLevel.normalize(peak: level), mic: mic)
     }
 
+    func finishListening() {
+        model?.finishDictationListening()
+    }
+
     func hide() {
         model?.endDictating()
     }
 
     func say(_ message: String) {
         model?.flashGlance(message)
+    }
+
+    func offerRecovery(text: String, reason: String, retry: (@MainActor () -> Void)?) {
+        model?.offerRecovery(
+            NotchViewModel.Recovery(text: text, reason: reason, retry: retry))
     }
 
     func displayShowing(pid: pid_t) -> CGDirectDisplayID? {

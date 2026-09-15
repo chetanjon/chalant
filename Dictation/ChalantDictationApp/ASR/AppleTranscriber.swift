@@ -21,8 +21,23 @@ import os
 /// `Transcriber` protocol it conforms to lives in Core and stays ungated, so a
 /// future engine could serve older systems through the same seam.
 @available(macOS 26, *)
-actor AppleTranscriber: Transcriber {
+actor AppleTranscriber: Transcriber, SpeechEngine {
     private static let log = Logger(subsystem: "com.cj.chalant.dictation", category: "asr")
+
+    // MARK: - SpeechEngine identity
+
+    nonisolated let engineName = "apple"
+
+    /// Apple's own floor, where it has always been. Swept 2026-08-15 against
+    /// this engine's distribution: its wrong words average 0.757 confidence
+    /// and its right ones 0.909, AUC 0.796 on the propernoun set.
+    nonisolated var confidenceFloor: Double { TermMatcher.confidenceFloor }
+
+    /// No. Part 0 §0.1, CONFIRMED by two independent research passes and by
+    /// the smoke test in `tools/biasprobe`: `contextualStrings` does not bias
+    /// `SpeechTranscriber` at all. The API accepts the strings and silently
+    /// ignores them on this module, which is worse than refusing them.
+    nonisolated let usesHints = false
 
     private var analyzer: SpeechAnalyzer?
     private var transcriber: SpeechTranscriber?
@@ -33,34 +48,25 @@ actor AppleTranscriber: Transcriber {
     private var canonicalLocale: Locale = .init(identifier: "en-US")
     private var analyzerFormat: AVAudioFormat?
 
-    // MARK: Better hearing's copy of the audio
+    // MARK: The utterance's own copy of the audio
     //
-    // While the switch is on, every tap buffer is also resampled to 16 kHz
-    // mono Float32 and kept in memory for the utterance, so a second ear
-    // (WhisperKit, `BetterHearing`) can listen to it after the words have
-    // landed. Capped at 90 s (~5.8 MB); a hold longer than that keeps its
-    // first 90 s, which is more than any dictation the app has ever seen.
-    private(set) var keepSamplesForHearing = false
-    func setKeepSamplesForHearing(_ on: Bool) { keepSamplesForHearing = on }
-    private var hearingConverter: AVAudioConverter?
-    private static let hearingFormat = AVAudioFormat(
-        commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
-    private static let hearingCapSamples = 16_000 * 90
-    private(set) var utteranceSamples: [Float] = []
+    // Every tap buffer is also resampled to 16 kHz mono and kept for the
+    // length of the utterance, so something else can hear it: the fallback
+    // when this engine cannot, or a second opinion. The conversion lives in
+    // `UtteranceTee` now rather than here, because it is no longer Apple's
+    // to own.
+    private var keepsSamples = false
+    func setKeepsSamples(_ on: Bool) { keepsSamples = on }
+    private var tee = UtteranceTee()
     private var converter: AVAudioConverter?
 
     private var eventStream: AsyncStream<TranscriptEvent>?
 
-    /// Optional corpus capture. Writes the RAW microphone buffers, before the
-    /// conversion into the analyzer's format, so a captured utterance can be
-    /// replayed through any engine or locale later rather than only this one.
-    ///
-    /// Created lazily on the first buffer because that is the first moment the
-    /// microphone's real format is known. Safe here and nowhere else: this
-    /// actor drains the ring, so the file write is off the real-time audio
-    /// thread that Part 1 §2 forbids doing any work on.
-    private var captureURL: URL?
-    private var captureFile: AVAudioFile?
+    /// Optional corpus capture, in `RawCapture` since both engines need the
+    /// same best-effort file write. Safe here and nowhere else: this actor
+    /// drains the ring, so the write is off the real-time audio thread that
+    /// Part 1 §2 forbids doing any work on.
+    private var capture = RawCapture()
 
     nonisolated let id = UUID()
 
@@ -153,9 +159,16 @@ actor AppleTranscriber: Transcriber {
 
     // MARK: - Transcriber
 
+    /// The `SpeechEngine` entry point. `hints` is ignored here and the
+    /// `usesHints` note above says why; it is taken rather than refused so
+    /// the controller has one call site for every engine.
+    func begin(locale: Locale, hints: [String]) async throws {
+        try await begin(locale: locale, bias: [])
+    }
+
     func begin(locale: Locale, bias: [BiasTerm]) async throws {
         assembler.reset()
-        utteranceSamples.removeAll(keepingCapacity: true)
+        tee.reset()
 
         if analyzer == nil {
             await prepare(locale: locale, format: nil)
@@ -228,31 +241,17 @@ actor AppleTranscriber: Transcriber {
     /// Returns how many buffers moved, so the caller can tell a silent engine
     /// from an idle one.
     /// Tee this utterance's audio to `url`. Nil turns capture off again.
-    func setCapture(to url: URL?) {
-        captureFile = nil
-        captureURL = url
-    }
+    func setCapture(to url: URL?) { capture.begin(writingTo: url) }
 
     /// Close the capture file so the samples are on disk before anyone reads it.
-    func endCapture() {
-        captureFile = nil
-        captureURL = nil
-    }
+    func endCapture() { capture.end() }
 
     @discardableResult
     func drainAndFeed(from ring: AudioRing) -> Int {
         var moved = 0
         while let item = ring.read() {
-            if let url = captureURL {
-                if captureFile == nil {
-                    captureFile = try? AVAudioFile(
-                        forWriting: url, settings: item.buffer.format.settings)
-                }
-                // Best effort by design: losing a corpus buffer must never cost
-                // the user their words, so this never throws outward.
-                try? captureFile?.write(from: item.buffer)
-            }
-            if keepSamplesForHearing { keepForHearing(item.buffer) }
+            capture.write(item.buffer)
+            if keepsSamples { tee.append(item.buffer) }
             guard let ready = converted(item.buffer) else { continue }
             inputContinuation?.yield(AnalyzerInput(buffer: ready))
             moved += 1
@@ -260,33 +259,44 @@ actor AppleTranscriber: Transcriber {
         return moved
     }
 
-    private func keepForHearing(_ buffer: AVAudioPCMBuffer) {
-        guard utteranceSamples.count < Self.hearingCapSamples else { return }
-        if hearingConverter == nil || hearingConverter?.inputFormat != buffer.format {
-            hearingConverter = AVAudioConverter(from: buffer.format, to: Self.hearingFormat)
+    /// Feed audio we already hold, rather than audio arriving from the ring.
+    ///
+    /// The fallback path: another engine recorded the utterance, could not
+    /// transcribe it, and this one is being asked the same question. The
+    /// samples go in as quarter-second slices, which is what
+    /// `tools/transcribe` has fed the same analyzer since E0 and what its
+    /// determinism gate was measured on (same audio twice, 4 of 4 identical).
+    func feed(samples: [Float], format: AVAudioFormat) async {
+        let slice = AVAudioFrameCount(format.sampleRate / 4)
+        var offset = 0
+        while offset < samples.count {
+            let count = min(Int(slice), samples.count - offset)
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)),
+                let channel = buffer.floatChannelData?[0]
+            else { return }
+            samples.withUnsafeBufferPointer { source in
+                channel.update(from: source.baseAddress! + offset, count: count)
+            }
+            buffer.frameLength = AVAudioFrameCount(count)
+            if let ready = converted(buffer) {
+                inputContinuation?.yield(AnalyzerInput(buffer: ready))
+            }
+            offset += count
         }
-        guard let converter = hearingConverter else { return }
-        let ratio = Self.hearingFormat.sampleRate / buffer.format.sampleRate
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1024
-        guard let out = AVAudioPCMBuffer(pcmFormat: Self.hearingFormat, frameCapacity: capacity) else { return }
-        var supplied = false
-        var error: NSError?
-        converter.convert(to: out, error: &error) { _, status in
-            if supplied { status.pointee = .noDataNow; return nil }
-            supplied = true
-            status.pointee = .haveData
-            return buffer
-        }
-        guard error == nil, out.frameLength > 0, let channel = out.floatChannelData?[0] else { return }
-        utteranceSamples.append(contentsOf: UnsafeBufferPointer(start: channel, count: Int(out.frameLength)))
     }
 
-    /// The utterance's audio for the second ear, and the buffer cleared for
-    /// the next hold.
-    func takeUtteranceSamples() -> [Float] {
-        defer { utteranceSamples.removeAll(keepingCapacity: true) }
-        return utteranceSamples
-    }
+    /// The utterance's audio, 16 kHz mono, for whatever has to hear it again.
+    ///
+    /// **Reading and releasing are two calls now, and the split is the
+    /// point.** They used to be one: `takeUtteranceSamples()` handed the
+    /// array over and cleared it, which was right while the only consumer was
+    /// a second ear that either used them immediately or never. A fallback
+    /// has to be able to read the same audio after a first attempt failed, so
+    /// the engine holds them until somebody says the utterance is over
+    /// (`releaseSamples`), and every path out of `keyUp` says so.
+    func utteranceSamples() -> [Float] { tee.samples }
+
+    func releaseSamples() { tee.reset() }
 
     // MARK: - Internals
 

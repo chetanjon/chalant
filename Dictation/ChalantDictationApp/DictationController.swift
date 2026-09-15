@@ -49,7 +49,26 @@ final class DictationController {
     /// Polls the live microphone's health once a second, for the whole life of
     /// the app, so a deaf ear is found before a session is spent on it.
     private var healthTimer: Timer?
-    private var transcriber: AppleTranscriber?
+    private var transcriber: (any SpeechEngine)?
+    /// Why the utterance in flight is not on the engine the user chose, if it
+    /// is not. Empty when it is. Rides the corpus row, never the log's
+    /// content rules.
+    private var engineNote = ""
+
+    /// Which utterance is current.
+    ///
+    /// **Generalises the guard that used to protect only the swap.** Every
+    /// stage after the key comes up is `await`ed, and a second press, a
+    /// cancellation or a conflicting shortcut can land in any of those gaps.
+    /// Before this, the only thing checking was `swapGeneration`, and only
+    /// for the post-landing swap; a session abandoned mid-finalize could
+    /// still reach `inserter.insert` and type into whatever the user had
+    /// moved on to. Bumped on every key-down and every cancel, and read at
+    /// every point where the next thing would be visible to the user.
+    private var sessionID = 0
+
+    /// Whether the utterance that started as `id` is still the one in flight.
+    private func isCurrent(_ id: Int) -> Bool { sessionID == id }
     private var pumpTask: Task<Void, Never>?
     /// The better ear's swap in flight after an insert, and what is currently
     /// in the document from this utterance, which is what the ear's version is
@@ -182,14 +201,14 @@ final class DictationController {
         // 2026-08-14 when cleanup became the default path, so it would never
         // have fired and the whole 1.4s would have landed on whichever sentence
         // the user happened to dictate first.
-        if Cleanup.mode() != .off {
+        if Cleanup.needsModel() {
             await polisher.warmUp()
         }
-        // The better ear, if the switch is on: download if needed, load, warm.
-        // Nothing happens here when it is off, which is the default.
-        if BetterHearing.isEnabled() {
-            Task { await BetterHearing.shared.prepare() }
-        }
+        // The chosen engine, loaded now rather than behind the first held
+        // key. **Never downloaded here**, only loaded when the model is
+        // already on disk: a launch that reaches for 470 MB unasked is not a
+        // launch. Choosing the engine in Settings is what downloads it.
+        Task { await Self.loadChosenEngine(allowingDownload: false) }
         // The names in Contacts, for both ears, read once now rather than on
         // the first utterance. Only when macOS already allows it; nothing is
         // asked here.
@@ -266,9 +285,105 @@ final class DictationController {
         await audio.currentDevice?.name
     }
 
+    /// Bring the chosen engine's model up, and let the others go.
+    ///
+    /// `allowingDownload` is false at launch and true when somebody picks an
+    /// engine in Settings: the one and only place a 470 MB fetch may start is
+    /// a person choosing it, having read what it costs.
+    ///
+    /// Exactly one model is held at a time. Two would be 1.1 GB of speech
+    /// models in a menu-bar app, which is how Chalant got reclaimed by macOS
+    /// twice in five days.
+    static func loadChosenEngine(allowingDownload: Bool) async {
+        switch SpeechEngineChoice.current() {
+        case .apple:
+            await ParakeetEngine.shared.stop()
+            await BetterHearing.shared.stop()
+        case .parakeet:
+            await BetterHearing.shared.stop()
+            await ParakeetEngine.shared.prepare(allowingDownload: allowingDownload)
+        case .whisper:
+            await ParakeetEngine.shared.stop()
+            if allowingDownload || BetterHearing.isDownloaded {
+                await BetterHearing.shared.prepare()
+            }
+        }
+    }
+
+    /// One more attempt at typing text that could not be typed before.
+    ///
+    /// Aimed at whatever is in front NOW rather than at the app the user was
+    /// in when they spoke: they have moved, the retry button is in their hand,
+    /// and pasting into somewhere they left is the failure this is here to
+    /// undo. Captures a fresh target for the same reason, so nothing stale can
+    /// be pasted into.
+    @MainActor
+    private static func retryInsertion(of text: String, using inserter: InsertionChain) async {
+        let front = NSWorkspace.shared.frontmostApplication
+        let target = InsertionTarget(
+            bundleID: front?.bundleIdentifier, processID: front?.processIdentifier,
+            capturedAt: Date(), appName: front?.localizedName)
+        let outcome = await inserter.insert(text, into: target)
+        Self.log.notice("retry insertion: \(String(describing: outcome), privacy: .public)")
+    }
+
+    /// Apple hearing the same audio, once, because the chosen engine could
+    /// not.
+    ///
+    /// A whole second engine run, deliberately: the alternative is losing the
+    /// sentence, and Part 1 §2 does not trade a sentence for a tidy failure
+    /// path. It goes through a file rather than the ring because the ring's
+    /// buffers are gone by now and Apple's analyzer takes a stream; writing
+    /// 16 kHz mono to a scratch file and feeding it back is the cheapest
+    /// honest way to replay audio we already hold.
+    ///
+    /// Returns nil when Apple cannot answer either, which is the end of the
+    /// road and is reported as such rather than retried.
+    private static func fallback(on samples: [Float], locale: Locale) async -> Transcript? {
+        guard samples.count >= UtteranceTee.minimumSamples else { return nil }
+        let engine = AppleTranscriber()
+        await engine.prepare(locale: locale, format: UtteranceTee.format)
+        do {
+            try await engine.begin(locale: locale, hints: [])
+            await engine.feed(samples: samples, format: UtteranceTee.format)
+            let transcript = try await engine.end()
+            return transcript.tokens.isEmpty ? nil : transcript
+        } catch {
+            Self.log.error("the fallback could not run: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// The engine for one utterance, and a note when it is not the one the
+    /// user asked for.
+    ///
+    /// **A held key never starts a download and never waits for a load.** A
+    /// chosen engine whose model is still arriving is simply not used for
+    /// this utterance: Apple runs it, the row says so, and the next hold gets
+    /// the real answer. The alternative was a first dictation that hangs for
+    /// seventeen seconds behind a progress bar nobody can see.
+    private static func engine(for choice: SpeechEngineChoice) async -> (any SpeechEngine, String) {
+        switch choice {
+        case .apple:
+            return (AppleTranscriber(), "")
+        case .parakeet:
+            guard await ParakeetEngine.shared.isReady else {
+                return (AppleTranscriber(), "parakeetNotReady")
+            }
+            return (ParakeetTranscriber(), "")
+        case .whisper:
+            guard await BetterHearing.shared.isReady else {
+                return (AppleTranscriber(), "whisperNotReady")
+            }
+            return (WhisperTranscriber(), "")
+        }
+    }
+
     // MARK: - The chain
 
     func keyDown() async {
+        // A new press retires everything the last one might still be doing.
+        sessionID &+= 1
         beginUtteranceActivity()
         retirePendingSwap()
         earRestTask?.cancel()
@@ -283,31 +398,11 @@ final class DictationController {
             // refused every press for three hours and never said so once.
             Self.log.error("key down refused: \(why, privacy: .public)")
             return
-        case .capture, .abandon, .finish, .waitForSetup:
+        case .capture, .abandon, .finish, .waitForSetup, .cancel:
             Self.log.error("key down: a press cannot mean any of those")
             return
         }
 
-        // The cleanup model warms NOW, behind the speech, not at release.
-        // The system unloads it five minutes after its last use (measured
-        // 2026-08-21, EVAL-LOG), so the launch prewarm covers only the first
-        // five minutes and every dictation after a longer pause used to pay
-        // the cold load (2.49 s against 0.9 s) at the one moment the user is
-        // waiting. The hold hides it: a polish-worthy utterance is over ~3 s
-        // of speech and the reload takes 0.9 s. A no-op when already warm.
-        // Shadow runs the model too, just after the words land instead of
-        // before, so this warms in every mode but off, where there is no
-        // model to warm.
-        if Cleanup.mode() != .off {
-            Task { await polisher.warmUp() }
-        }
-        // And the second ear, if it put the model down during a long silence.
-        // Fire and forget on purpose: the reload takes about five seconds, far
-        // longer than any hold, so THIS utterance lands without it, exactly as
-        // it would with the ear switched off. The next one has it back.
-        if BetterHearing.isEnabled() {
-            Task { await BetterHearing.shared.wake() }
-        }
 
         guard assetState.isReady else {
             Self.log.error("ignoring key: assets are not ready")
@@ -362,21 +457,40 @@ final class DictationController {
         // 523 ms with the ear asleep, 83 ms warm, and the strip used to wait
         // for that. The mic name follows through the meter. Every way out of
         // the setup below hides it again.
-        surface.show(into: target?.appName ?? target?.bundleID ?? "", mic: nil, on: targetDisplay)
-        startMeter()
+        // **Nothing visible or expensive happens for `activationDelay`.**
+        // The light, the music, the tidy model's prewarm: all of it waits,
+        // because left Option is a real modifier and `Option+←`, `Option+e`
+        // and `Option+Delete` are all a press of it. Before this, every one
+        // of those flashed the aurora, woke the microphone, warmed a language
+        // model and PAUSED whatever the user was listening to
+        // (`NotchViewModel.quietTheRoom` calls `music.pause()`, not a volume
+        // duck), then undid it a moment later.
+        //
+        // **Capture is not deferred, and that is the whole trick.** The audio
+        // gate opens below exactly as it always has, before the analyzer is
+        // even prepared: the ring holds ~1.6 s and the pump drains the
+        // backlog, so a word spoken during the delay is still recorded and
+        // still transcribed. The user loses nothing by the wait except a
+        // light they did not want.
+        scheduleReveal(
+            into: target?.appName ?? target?.bundleID ?? "", on: targetDisplay, session: sessionID)
         onStateChange?()
 
-        let transcriber = AppleTranscriber()
+        // Which ear hears this one, decided here and remembered for the
+        // row: a chosen engine that is not loaded yet does not hold up the
+        // hold and does not start a download, it simply is not used
+        // (`engineForThisUtterance`).
+        let chosen = SpeechEngineChoice.current()
+        let (transcriber, engineNote) = await Self.engine(for: chosen)
         self.transcriber = transcriber
-        // Samples are kept whenever the switch is on, NOT only when the model
-        // is already loaded: gating on readiness at key-down meant a hold
-        // during the model's load window silently lost its second hearing,
-        // and on 2026-08-20 that was most of a night (74 utterances, 5
-        // hearings engaged). The samples cost a few MB for a capped 90 s;
-        // readiness is judged once, at release, when it matters.
-        if BetterHearing.isEnabled() {
-            await transcriber.setKeepSamplesForHearing(true)
-        }
+        self.engineNote = engineNote
+        // The audio is kept for EVERY utterance now, not only when a second
+        // ear was switched on. It is the primary engine's own input on two
+        // of the three paths, and on all three it is what a fallback re-hears
+        // when the chosen engine cannot answer. Gating it on readiness is
+        // what silently lost most of a night on 2026-08-20 (74 utterances,
+        // 5 hearings engaged), so it is not gated on anything.
+        await transcriber.setKeepsSamples(true)
 
         // A dead ear is rebuilt HERE, before the format below is read, so the
         // analyzer is prepared against the engine that will actually feed it.
@@ -398,6 +512,10 @@ final class DictationController {
         // BEFORE the analyzer binds to its format. A healthy mic passes this
         // gate in one or two buffers.
         let heardAtKeyDown = await audio.confirmHearing(within: 0.9)
+        // The first of the five numbers the release path is steered by, and
+        // the only one measured from key-DOWN: how long it took before there
+        // was a microphone worth speaking into.
+        if let startedAt { timings.recordingReady = Date().timeIntervalSince(startedAt) }
         keyDownHeard = heardAtKeyDown
         if !heardAtKeyDown {
             await audio.condemnCurrentInput()
@@ -412,8 +530,13 @@ final class DictationController {
             await transcriber.setCapture(to: url)
         }
 
+        // Names before it listens, but only for an engine that can be told:
+        // Apple accepts them and ignores them (Part 0 §0.1), Parakeet's batch
+        // API has no such parameter at all, and building the list costs a
+        // phonetic pass over the standing vocabulary.
+        let hints = transcriber.usesHints ? await Names.standing() : []
         do {
-            try await transcriber.begin(locale: locale, bias: [])
+            try await transcriber.begin(locale: locale, hints: hints)
         } catch {
             Self.log.error("could not begin transcription: \(error.localizedDescription, privacy: .public)")
             key.setupFailed()
@@ -441,7 +564,7 @@ final class DictationController {
             Self.log.error("setup finished but \(why, privacy: .public)")
             await standDown(transcriber)
             return
-        case .begin, .finish, .waitForSetup:
+        case .begin, .finish, .waitForSetup, .cancel:
             Self.log.error("ready: setup cannot mean any of those")
             await standDown(transcriber)
             return
@@ -486,7 +609,7 @@ final class DictationController {
     /// While the key is held, hand every closed chunk of what has been said so
     /// far to the model, through the same deterministic passes the release
     /// path uses, so the pieces match exactly at release and are already done.
-    private func startPretidy(_ transcriber: AppleTranscriber) {
+    private func startPretidy(_ transcriber: any SpeechEngine) {
         pretidyTask?.cancel()
         // Tidy-ahead exists to shorten a wait the release will make; in
         // shadow there is no wait, so nothing runs during the hold.
@@ -520,9 +643,16 @@ final class DictationController {
             Self.log.info("released while still starting; setup will stand down")
             return
         case .ignored(let why):
-            Self.log.error("key up refused: \(why, privacy: .public)")
+            // A release after a cancelled hold is expected, not a refusal:
+            // `Option+←` arrives dozens of times a minute in an editor, and
+            // an error line for each would bury the refusals that matter.
+            if why == PushToTalk.cancelledReason {
+                Self.log.info("key up after a cancelled hold")
+            } else {
+                Self.log.error("key up refused: \(why, privacy: .public)")
+            }
             return
-        case .begin, .capture, .abandon:
+        case .begin, .capture, .abandon, .cancel:
             Self.log.error("key up: a release cannot mean any of those")
             return
         }
@@ -539,11 +669,31 @@ final class DictationController {
         }
 
         let releasedAt = Date()
+        // A reveal that has not fired yet never fires: a hold that ends a
+        // hair past the threshold should not flash the light on its way out.
+        cancelReveal()
+        // Read once, checked at every point below where the next step would
+        // be visible to the user. Everything from here on is awaited, and a
+        // second press or a cancellation can land in any of those gaps.
+        let session = sessionID
         pretidyTask?.cancel()
         pretidyTask = nil
         await audio.endCapture()
         stopMeter()
-        surface.hide()
+        // **The light stays, still, until the words are actually somewhere.**
+        // `hide()` used to be called here, before draining, finalization,
+        // cleanup and insertion, so everything expensive happened in the dark
+        // and `restAfterDictation` then enforced 1.4 s of quiet on top. That
+        // was invisible while the gap was 0.4 s at p50; it is not reliably
+        // that small any more, and a user looking at nothing cannot tell
+        // "working" from "broken".
+        surface.finishListening()
+        // Every way out of this function from here ends the session, and
+        // there are eight of them. A `defer` is the only way to be sure the
+        // light goes out on all eight: forgetting one would strand the island
+        // in `.dictating`, which makes the next key-up a no-op and leaves the
+        // user's music paused for good (`NotchViewModel` line 109).
+        defer { surface.hide() }
         // Whatever happens below, the hold is over: the ear may rest in a while.
         scheduleEarRest()
 
@@ -573,18 +723,51 @@ final class DictationController {
         // samples are on disk by the time the row naming them is written.
         await transcriber.endCapture()
 
-        let transcript: Transcript
+        // **The one fallback hop.** A chosen engine that throws does not cost
+        // the user their sentence and does not get a second try of its own:
+        // Apple hears the same audio, once, and the row records why. Never
+        // two recognizers on a healthy utterance, which is the whole point of
+        // the change above.
+        //
+        // The distinction that matters is what counts as a failure. Too
+        // little audio, or a microphone that delivered digital silence, is
+        // NOT an engine failure and must not start a fallback: it is silence,
+        // and the user is told so in those words. `SpeechEngine.end()`
+        // returns an empty transcript for that and throws only when the
+        // engine itself could not answer.
+        let samples = await transcriber.utteranceSamples()
+        var transcript: Transcript
         do {
             transcript = try await transcriber.end()
         } catch {
-            Self.log.error("finalization failed: \(error.localizedDescription, privacy: .public)")
-            self.transcriber = nil
+            Self.log.error(
+                "\(transcriber.engineName, privacy: .public) could not finalize: \(error.localizedDescription, privacy: .public)")
+            engineNote = "\(transcriber.engineName)Failed"
+            if let rescued = await Self.fallback(on: samples, locale: locale) {
+                transcript = rescued
+                Self.log.notice("apple answered instead, \(rescued.tokens.count, privacy: .public) words")
+            } else {
+                // Both ears are out. The words are gone whatever happens
+                // next, so say nothing here and let the empty-text path
+                // below tell the user, which it now does.
+                engineNote += "+appleFailed"
+                transcript = Transcript(tokens: [], locale: locale.identifier)
+            }
+        }
+        await transcriber.releaseSamples()
+        // Which engine's numbers the vocabulary layer is about to read. After
+        // a fallback the tokens are Apple's, so the floor must be Apple's
+        // too: carrying Parakeet's across to Apple's distribution would be
+        // the same unmeasured transfer in the other direction.
+        let fellBack = !engineNote.isEmpty && engineNote.hasSuffix("Failed")
+        let engineUsed = fellBack ? "apple" : transcriber.engineName
+        let engineFloor = fellBack ? TermMatcher.confidenceFloor : transcriber.confidenceFloor
+        self.transcriber = nil
+
+        guard isCurrent(session) else {
+            Self.log.info("a newer hold retired this one during finalization; nothing lands")
             return
         }
-        // The utterance's audio for the better ear, before the transcriber
-        // goes. Empty unless the ear was on and ready at key-down.
-        let hearingSamples = await transcriber.takeUtteranceSamples()
-        self.transcriber = nil
 
         // Part 0 §0.5 makes this the number M0 exists to measure. No latency
         // claim is made anywhere until it has been read off real hardware.
@@ -608,87 +791,28 @@ final class DictationController {
         // other output touched.
         let raw = transcript.rawText
 
-        // **The second ear starts HERE now (2026-09-04), and the words wait
-        // for it.** This reverses the note that stood here from 2026-08-20,
-        // and the reversal is worth stating because that note was right about
-        // the hardware: Whisper, the tidy model and the first ear share one
-        // Neural Engine, and a hearing running during the release window
-        // serialized the tidy behind it, so every utterance landed raw with
-        // waits of 1.35 to 5.17 s. What changed is not the hardware but what
-        // the window is FOR. The tidy model earned that window and then did
-        // not use it: measured over the founder's own week, it changed
-        // anything on 3.9% of rows, while the ear disagreed with what landed
-        // on 79 rows and was allowed to fix 21 of them, the rest refused for
-        // want of a safe undo or thrown away because the user had already
-        // typed. So the tidy yields the window to the ear (`mergeEngaged`
-        // below skips the release polish), the contention the old note
-        // measured does not arise, and the words the ear rescues land the
-        // first time instead of arriving as a visible swap or not at all.
+        // **One ear, and the wait goes with the second one (2026-09-14).**
+        // From 1.40.0 two engines heard every sentence and `HearingMerge`
+        // adjudicated them word by word before the words landed. It was the
+        // right idea and it bought real corrections: over the founder's own
+        // week the second ear disagreed 79 times and was allowed to fix 21 of
+        // them, and "I don't want the box" stopped landing as "I want the
+        // box".
         //
-        // The founder chose this shape outright when asked: wait for the
-        // accurate ear rather than keep the instant landing and correct
-        // afterwards.
-        let earIsReady = await BetterHearing.shared.isReady
-        let mergeEngaged =
-            !hearingSamples.isEmpty && BetterHearing.isEnabled()
-            && BetterHearing.mergesAtLanding() && target != nil && practiceLanding == nil
-            && earIsReady
-        let hearingWork: Task<BetterHearing.Hearing?, Never>? =
-            mergeEngaged
-            ? Task(priority: .userInitiated) { [raw] in
-                let hints = await Names.forHearing(heard: raw)
-                return await BetterHearing.shared.hearFully(hearingSamples, hints: hints)
-            }
-            : nil
-
+        // It also cost the whole wait. The only measurement of it is two rows
+        // at 3.48 s and 3.11 s from key release to words, against a p50 of
+        // 0.40 s on 178 rows of the build before, and 45% of those waits were
+        // spent on utterances where the two ears wrote identical words.
+        // Nothing tells you which half you are in beforehand.
+        //
+        // So the choice moves to the user, one engine runs, and this block is
+        // where the second one used to be. `HearingMerge` stays compiled and
+        // tested rather than deleted: `tools/mergeprobe` still sweeps it, and
+        // nothing about it was wrong except the price.
         let prepareStart = Date()
+        let tokens = transcript.tokens
 
-        // Reconcile the two hearings, or keep the engine's and let the old
-        // post-landing swap have the same decode.
-        var tokens = transcript.tokens
-        var mergeOutcomeName = mergeEngaged ? "" : (BetterHearing.isEnabled() ? "earNotReady" : "earOff")
-        var mergeWaitSeconds: Double = 0
-        var earSecondsAtRelease: Double = -1
-        var disputedSpans = 0
-        var mergedSpans = 0
-        var mergeHearing: BetterHearing.Hearing?
-        if let hearingWork {
-            let waitStarted = Date()
-            let ceiling = HearingMerge.waitCeiling(
-                utteranceSeconds: Double(hearingSamples.count) / 16_000)
-            if let hearing = await Deadline.value(of: hearingWork, within: ceiling) ?? nil {
-                mergeHearing = hearing
-                earSecondsAtRelease = hearing.seconds
-                // SWEPT, not chosen: the founder judged forty rows by ear
-                // against the recordings on 2026-09-10, blind to which ear
-                // wrote which line, and `tools/mergeprobe` ran the grid over
-                // their answers. `engineLeads` with the function-word refusal
-                // won every cell it was in (9 rows better, 1 worse, 16 left
-                // alone) and is the only configuration whose result does not
-                // move when the confidence floor moves, which is worth more
-                // than the one extra correction `earLeads` buys for an extra
-                // mistake. Full table in EVAL-LOG.
-                let outcome = HearingMerge.merge(
-                    engine: tokens, ear: hearing.text,
-                    signals: await mergeSignals(engine: tokens, ear: hearing.text),
-                    policy: HearingMerge.Policy.engineLeads)
-                tokens = outcome.tokens
-                mergeOutcomeName = outcome.verdict.rawValue
-                disputedSpans = outcome.disputedSpans
-                mergedSpans = outcome.mergedSpans
-                if outcome.mergedSpans > 0 {
-                    Self.log.notice(
-                        "merged \(outcome.mergedSpans, privacy: .public) of \(outcome.disputedSpans, privacy: .public) disputes from the second ear")
-                }
-            } else {
-                // The decode is still running and is never cancelled, so the
-                // swap below takes it rather than starting a second one.
-                mergeOutcomeName = "budgetMissed"
-            }
-            mergeWaitSeconds = Date().timeIntervalSince(waitStarted)
-        }
-
-        let deterministic = await deterministicText(from: tokens)
+        let deterministic = await deterministicText(from: tokens, confidenceFloor: engineFloor)
         if deterministic != raw {
             Self.log.error(
                 "guardrail trimmed \(raw.count - deterministic.count, privacy: .public) chars of punctuation run")
@@ -707,6 +831,11 @@ final class DictationController {
         // on the release path; the founder feels the whole path, so every
         // piece of it gets a number (2026-08-20).
         let prepareSeconds = Date().timeIntervalSince(prepareStart)
+        // Filled in for the first time (2026-09-14). `StageTimings` has
+        // carried this field since M0 and nothing ever set it, so the
+        // deterministic chain was the one stage on the release path with no
+        // number against it.
+        timings.textPipeline = prepareSeconds
 
         // Refined at once, or as said: wait a short, fixed budget for the
         // tidied text and land it once. Tidy-ahead during the hold usually
@@ -739,15 +868,7 @@ final class DictationController {
             ? "skipped:empty"
             : (mode == .live ? "skipped:noTarget" : (mode == .shadow ? "shadow:pending" : "skipped:off"))
         var modelChunks: [String] = []
-        // The tidy yields its window when the ear has already used it. It
-        // changes anything on 3.9% of rows and the ear had 79 corrections
-        // waiting, so paying both waits back to back would spend the
-        // founder's patience on the weaker of the two.
-        if mergeOutcomeName == "merged" || mergeOutcomeName == "agreed" {
-            polishOutcomeName = "skipped:hearingMerge"
-            modelReason = "skipped:hearingMerge"
-        }
-        if mode == .live, !shaped.isEmpty, let target, mergeHearing == nil {
+        if mode == .live, !shaped.isEmpty, let target {
             let waitStart = Date()
             // The budget is enforced HERE, not only inside the polisher, and
             // for three days it was not enforced anywhere: both waits were
@@ -809,6 +930,25 @@ final class DictationController {
             // rows nobody can label.
             await corpus.discard()
             Self.log.info("nothing heard")
+            // **And it says so now.** This was the commonest way a dictation
+            // ended in silence: the light went out, nothing appeared, and the
+            // reason lived only in the log. It is indistinguishable from a
+            // broken app, which is the failure every other guard in this file
+            // was taught to speak up about.
+            //
+            // There is nothing to put on the clipboard, so this is a sentence
+            // rather than a recovery. It says which of the two silences it was,
+            // because "I heard nothing" and "your microphone heard nothing"
+            // have different answers and the instruments to tell them apart
+            // are already here.
+            if engineNote.hasSuffix("appleFailed") {
+                surface.say("Neither ear could make that out. Nothing was typed.")
+            } else if !keyDownHeard || holdPeak == 0 {
+                let ear = await liveInputName() ?? "your microphone"
+                surface.say("\(ear) heard nothing. Check it is not muted.")
+            } else {
+                surface.say("I didn't catch that.")
+            }
             return
         }
 
@@ -824,14 +964,43 @@ final class DictationController {
         }
 
         guard let target else {
+            // Nothing was in front at key-down, so there is nowhere to aim.
+            // The words still exist and are the user's.
+            Self.log.error("no target was captured; handing the words back")
+            await inserter.leaveOnClipboard(text)
+            surface.offerRecovery(
+                text: text, reason: "Nowhere to type it", retry: nil)
+            return
+        }
+
+        // The last gate before anything is typed. A session that has been
+        // superseded or cancelled since the key came up stops here, which is
+        // the difference between "nothing happened" and "words appeared in
+        // whatever you moved on to".
+        guard isCurrent(session) else {
+            Self.log.info("this hold was retired before it could land; nothing is typed")
             return
         }
 
         // Re-validate: if focus moved between key-down and now, the paste
         // would land in the wrong app.
+        //
+        // **This used to return in silence, and it was the sharpest of the
+        // four.** `InsertionChain` already has a `.targetChanged` path that
+        // saves the words and says so, and this earlier guard short-circuited
+        // before reaching it: switch app before letting go and the sentence
+        // was simply gone, with no message and nothing on the clipboard.
         let front = NSWorkspace.shared.frontmostApplication
         guard front?.processIdentifier == target.processID else {
             Self.log.error("focus moved during dictation; refusing to insert")
+            await inserter.leaveOnClipboard(text)
+            let inserter = self.inserter
+            surface.offerRecovery(text: text, reason: "Focus moved while you spoke") {
+                // Retry aims at whatever is in front NOW, which is where the
+                // user went, and captures its own target so nothing stale can
+                // be pasted into.
+                Task { await Self.retryInsertion(of: text, using: inserter) }
+            }
             return
         }
 
@@ -843,9 +1012,16 @@ final class DictationController {
         let insertOutcomeName: String
         var inserted: String?
         switch outcome {
-        case .inserted(let tier):
+        case .inserted(let tier, let landing):
             inserted = text
-            insertOutcomeName = "inserted:\(tier)"
+            insertOutcomeName = "inserted:\(tier):\(landing.rawValue)"
+            // The one number allowed to say the words are on screen, and only
+            // where the focused field answered both before and after and had
+            // grown. Nil the rest of the time, which is most of the time,
+            // because Electron and web views answer nothing.
+            if landing == .confirmed {
+                timings.visibleConfirmed = Date().timeIntervalSince(releasedAt)
+            }
         case .leftOnClipboard(let reason):
             insertOutcomeName = "leftOnClipboard:\(reason)"
         case .refused(let reason):
@@ -874,13 +1050,7 @@ final class DictationController {
             refinedChanged: refinedChanged,
             polishColdStart: polishColdStart,
             secondsSinceLastPolish: sinceLastPolish,
-            merge: CorpusCapture.Merge(
-                outcome: mergeOutcomeName,
-                waitSeconds: mergeWaitSeconds,
-                earSeconds: earSecondsAtRelease,
-                disputedSpans: disputedSpans,
-                mergedSpans: mergedSpans,
-                earOutput: mergeHearing?.text),
+            merge: nil,
             texts: CorpusCapture.Texts(
                 asrRaw: raw,
                 afterDeterministic: shaped,
@@ -911,7 +1081,10 @@ final class DictationController {
             let role = LandingProbe.focusedRole()
             if LandingRoles.verdict(role: role) == .doesNot {
                 await inserter.leaveOnClipboard(text)
-                surface.say("Nowhere to type. What you said is in your clips.")
+                let inserter = self.inserter
+                surface.offerRecovery(text: text, reason: "Nowhere to type it") {
+                    Task { await Self.retryInsertion(of: text, using: inserter) }
+                }
                 Self.log.notice(
                     "no landing spot (role \(role ?? "none", privacy: .public)); words left on the clipboard")
             } else {
@@ -922,24 +1095,16 @@ final class DictationController {
         if landed {
             await CorrectionObserver.shared.watch(
                 inserted: text, in: target.bundleID)
-            let insertedAt = Date()
             lastLanded = text
             retirePendingSwap()
-            // The swap is the fallback now, not the main path: it runs when
-            // the merge was off, not ready, or did not finish inside its
-            // ceiling. When the ceiling was missed the decode is still
-            // running and is handed over rather than started again, because
-            // starting a second one would put two Whispers on one Neural
-            // Engine to answer the same question.
-            if mergeHearing == nil, !hearingSamples.isEmpty, BetterHearing.isEnabled(),
-                await BetterHearing.shared.isReady
-            {
-                startHearingSwap(
-                    samples: hearingSamples, heard: raw, outcome: outcome, target: target,
-                    insertedAt: insertedAt,
-                    utteranceSeconds: Double(hearingSamples.count) / 16_000,
-                    corpusRow: corpusRow, mode: mode, alreadyRunning: hearingWork)
-            }
+            // **Nothing changes the page after the words land any more.**
+            // The in-place swap was the second ear's only door once the merge
+            // could not be reached in time, and with one engine there is no
+            // second hearing to swap in. `startHearingSwap`, `SwapPolicy` and
+            // `replaceLastInsertion` stay compiled and tested rather than
+            // deleted: the machinery is sound, its tests pin real rules, and
+            // the day something earns a post-landing correction again it
+            // should not have to be rebuilt from the commit log.
         } else if case .inserted = outcome {
             // Rescued above; the toast has already spoken.
         } else {
@@ -947,15 +1112,26 @@ final class DictationController {
             // and the words are already on the clipboard (the chain places
             // them there on every refusal that gets this far). Until tonight
             // nothing SAID so, and a refusal read as words vanishing.
+            let inserter = self.inserter
+            let retry: @MainActor () -> Void = {
+                Task { await Self.retryInsertion(of: text, using: inserter) }
+            }
             switch outcome {
             case .refused(reason: .secureInputActive(let holder)):
+                // No retry offered: while secure input is held the system
+                // drops synthetic keystrokes, so a second attempt would fail
+                // the same way. The words stay out of visible history too.
                 let who = holder.map { " (\($0))" } ?? ""
-                surface.say("A password field has the keyboard\(who). What you said is on the clipboard.")
+                surface.say("A password field has the keyboard\(who). Your words are on the clipboard.")
             case .refused(reason: .targetChanged):
-                surface.say("Focus moved while you spoke. What you said is in your clips.")
+                surface.offerRecovery(
+                    text: text, reason: "Focus moved while you spoke", retry: retry)
+            case .refused(reason: .noTarget):
+                // Said nothing at all before this.
+                surface.offerRecovery(text: text, reason: "Nowhere to type it", retry: retry)
             case .leftOnClipboard:
-                surface.say("Couldn't type there. What you said is in your clips.")
-            default:
+                surface.offerRecovery(text: text, reason: "Couldn't type there", retry: retry)
+            case .inserted:
                 break
             }
         }
@@ -973,16 +1149,115 @@ final class DictationController {
         let overruns = await audio.overrunCount
         Self.log.notice(
             """
-            utterance: \(text.count, privacy: .public) chars, \
+            utterance on \(engineUsed, privacy: .public)\(self.engineNote.isEmpty ? "" : " (\(self.engineNote))", privacy: .public): \(text.count, privacy: .public) chars, \
             finalize \(self.timings.finalization ?? -1, privacy: .public)s, \
             \(refinedAtOnce ? "refined at once" : "raw", privacy: .public) after \
             \(self.timings.polish ?? 0, privacy: .public)s wait, \
-            insert \(self.timings.insertion ?? -1, privacy: .public)s, \
+            dispatch \(self.timings.insertion ?? -1, privacy: .public)s, \
+            \(self.timings.visibleConfirmed.map { "seen after \($0)s" } ?? "arrival unconfirmed", privacy: .public), \
             outcome \(String(describing: outcome), privacy: .public), \
             ring overruns \(overruns, privacy: .public)
             """
         )
 
+        onStateChange?()
+    }
+
+    /// How long the key must be held before anything is shown, paused or
+    /// loaded.
+    ///
+    /// **Not a gate on recording, only on spending.** 180 ms is long enough
+    /// that a shortcut is over before it costs anything and short enough that
+    /// a real hold feels immediate: the founder's own complaint about the
+    /// press feeling slow (2026-08-19) was measured at 523 ms with the ear
+    /// asleep, and this is a third of that. A hold shorter than this produces
+    /// well under the half second any engine here will accept, so it was
+    /// never going to become text.
+    static let activationDelay: Duration = .milliseconds(180)
+
+    private var revealTask: Task<Void, Never>?
+
+    /// Show the light, start the meter, and pay for the model, once the hold
+    /// has lasted long enough to mean something.
+    private func scheduleReveal(into name: String, on display: CGDirectDisplayID?, session: Int) {
+        revealTask?.cancel()
+        revealTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.activationDelay)
+            guard let self, !Task.isCancelled, self.isCurrent(session), self.key.state != .idle
+            else { return }
+            // **Said out loud because it is the assertion of manual row 1.**
+            // "No light" is otherwise only checkable by eye, and the whole
+            // point of the threshold is that an Option+arrow never gets here.
+            // A line at the moment the aurora opens, and the absence of one,
+            // is what makes that row provable by a harness rather than a
+            // person: it is also the moment the music is paused
+            // (`beginDictating` is the only caller of `quietTheRoom`).
+            Self.log.info("revealing: the hold lasted long enough to be one")
+            self.surface.show(into: name, mic: nil, on: display)
+            self.startMeter()
+            self.onStateChange?()
+            // Behind the light rather than in front of it, for the same
+            // reason: an abandoned shortcut must not cost a model load. The
+            // system unloads the tidy model five minutes after its last use
+            // (measured 2026-08-21), so a hold after a longer pause would
+            // otherwise pay 2.49 s against 0.9 s at the one moment the user
+            // is waiting. A no-op when already warm.
+            if Cleanup.needsModel() {
+                Task { await self.polisher.warmUp() }
+            }
+            self.onStateChange?()
+        }
+    }
+
+    private func cancelReveal() {
+        revealTask?.cancel()
+        revealTask = nil
+    }
+
+    /// Another key arrived while the hold key was down, so this was a
+    /// shortcut and not a sentence.
+    ///
+    /// Everything recorded is discarded, nothing is transcribed, nothing is
+    /// typed, and nothing is said: the user pressed `Option+←` and expects
+    /// their cursor to move, not to be told anything about dictation.
+    func otherKeyPressed() async {
+        switch key.otherKeyPressed() {
+        case .cancel(let why):
+            Self.log.info("hold cancelled: \(why, privacy: .public)")
+            await discardUtterance()
+        case .ignored:
+            // The overwhelming majority: an ordinary keystroke with no hold
+            // in flight. Not logged, or the log would be every key of the day.
+            return
+        case .begin, .capture, .abandon, .finish, .waitForSetup:
+            Self.log.error("a conflicting key cannot mean any of those")
+        }
+    }
+
+    /// Stand a live or arming session down and keep nothing from it.
+    private func discardUtterance() async {
+        // Retire anything already in flight from this hold, so a finalize or
+        // an insert that has not reached its next `await` can never land.
+        sessionID &+= 1
+        cancelReveal()
+        pretidyTask?.cancel()
+        pretidyTask = nil
+        pumpTask?.cancel()
+        pumpTask = nil
+        await audio.endCapture()
+        stopMeter()
+        surface.hide()
+        endUtteranceActivity()
+        scheduleEarRest()
+        if let engine = transcriber {
+            await engine.releaseSamples()
+            // Closed rather than abandoned: an engine left mid-stream holds
+            // its analyzer and would queue the next hold behind it. Its text
+            // is deliberately dropped on the floor.
+            _ = try? await engine.end()
+            transcriber = nil
+        }
+        await corpus.discard()
         onStateChange?()
     }
 
@@ -1036,7 +1311,7 @@ final class DictationController {
         }
     }
 
-    private func deterministicText(from tokens: [Token]) async -> String {
+    private func deterministicText(from tokens: [Token], confidenceFloor: Double = TermMatcher.confidenceFloor) async -> String {
 
         // **The vocabulary pass runs FIRST, and on tokens rather than text.**
         // It is the only stage that needs per-word confidence, and confidence
@@ -1071,7 +1346,7 @@ final class DictationController {
         // is a handful per utterance, and the rule this buys is the honest
         // one: if the engine wrote a word the system knows, believe it.
         let unsure = tokens
-            .filter { ($0.confidence ?? 1) < TermMatcher.confidenceFloor }
+            .filter { ($0.confidence ?? 1) < confidenceFloor }
             .map { $0.text.trimmingCharacters(in: .punctuationCharacters).lowercased() }
             .filter { !$0.isEmpty }
         var knownWords: Set<String> = []
@@ -1089,7 +1364,8 @@ final class DictationController {
         // here instead, BEFORE the words land, in every app.
         let earTaught = await LearnedTerms.shared.earCorrections()
         let earFixed = TermMatcher.applyingEarCorrections(
-            tokens: corrected, corrections: earTaught, knownWords: knownWords)
+            tokens: corrected, corrections: earTaught, confidenceFloor: confidenceFloor,
+            knownWords: knownWords)
 
         // Then the phonetic passes, over the hand-kept list plus everything
         // learned, plus the contacts that sound like something in this
@@ -1097,7 +1373,9 @@ final class DictationController {
         // is present.
         let vocabulary = await Names.forMatching(heard: tokens.map(\.text).joined(separator: " "))
         let whole = TermMatcher.joiningSpans(tokens: earFixed, terms: vocabulary)
-        let resolved = TermMatcher.resolving(tokens: whole, terms: vocabulary, knownWords: knownWords)
+        let resolved = TermMatcher.resolving(
+            tokens: whole, terms: vocabulary, confidenceFloor: confidenceFloor,
+            knownWords: knownWords)
 
         // Three stages, in order, all pure and all in Core: refuse what is not
         // text, collapse what was said twice by accident, then remove the words
@@ -1113,14 +1391,19 @@ final class DictationController {
         // commas become full stops only after fillers and repairs are gone,
         // so "and, you know, everybody" has already become "and everybody"
         // by the time the joint is judged (2026-08-28).
-        let deterministic = Breaks.sentencing(Contrast.commaBeforeNot(
-            Restatement.collapsing(
-                Fillers.removing(
-                    Repair.repairing(
-                        Disfluency.collapsingRepetitions(
-                            Guardrail.settlingEllipses(
-                                Guardrail.trimmingPunctuationRun(
-                                    resolved.map(\.text).joined(separator: " ")))))))))
+        // Paragraphs runs LAST, outside Breaks and after it. A spoken cue is
+        // only recognised where punctuation shows it stood alone, and
+        // `Breaks` is what turns a run-on's pause commas into the full stops
+        // that show it (2026-09-14).
+        let deterministic = Paragraphs.applying(
+            Breaks.sentencing(Contrast.commaBeforeNot(
+                Restatement.collapsing(
+                    Fillers.removing(
+                        Repair.repairing(
+                            Disfluency.collapsingRepetitions(
+                                Guardrail.settlingEllipses(
+                                    Guardrail.trimmingPunctuationRun(
+                                        resolved.map(\.text).joined(separator: " "))))))))))
         return deterministic
     }
 
@@ -1317,7 +1600,8 @@ final class DictationController {
     /// key came up during setup. Nothing was recorded, so there is nothing to
     /// transcribe and nothing to insert: this only has to leave nothing
     /// running. The key is already back at idle, so the next press works.
-    private func standDown(_ transcriber: AppleTranscriber) async {
+    private func standDown(_ transcriber: any SpeechEngine) async {
+        cancelReveal()
         endUtteranceActivity()
         scheduleEarRest()
         // The strip opens and capture begins at the press now, so a session
@@ -1338,7 +1622,8 @@ final class DictationController {
 
     /// End a session that went live and then could not run, closing the gate
     /// and the surface the live path had already opened.
-    private func abandonLiveSession(_ transcriber: AppleTranscriber) async {
+    private func abandonLiveSession(_ transcriber: any SpeechEngine) async {
+        cancelReveal()
         endUtteranceActivity()
         _ = key.release()
         await audio.endCapture()
@@ -1380,5 +1665,7 @@ final class DictationController {
     }
 
     /// Latest measured key-release-to-visible, for the menu bar readout.
-    var lastLatency: TimeInterval? { timings.keyReleaseToVisible }
+    /// Latest measured key-release-to-paste-dispatch, for the menu bar
+    /// readout. Not "to visible": see `StageTimings`.
+    var lastLatency: TimeInterval? { timings.keyReleaseToInsertDispatch }
 }

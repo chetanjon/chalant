@@ -1,27 +1,45 @@
 import AppKit
+import ChalantDictationCore
 import CoreGraphics
 import os
 
-/// Watches for left Option being held.
+/// Watches for the hold key, and for anything that means the hold was not one.
 ///
-/// Left rather than right: the founder's keyboard has no right Option key at
-/// all, which is a good reminder that "every Mac has it" is a layout
-/// assumption rather than a fact. Left Option exists on every keyboard, sits
-/// under the left hand, and is only meaningful for typing when combined with a
-/// letter, so holding it alone is free.
+/// Which key is `DictationShortcut`'s business, and the default is still left
+/// Option: it exists on every keyboard, sits under the left hand, and is only
+/// meaningful for typing when combined with a letter. A modifier key never
+/// produces keyDown/keyUp, only `.flagsChanged`, so press and release are
+/// derived from the device-dependent bit for that physical key together with
+/// the keycode of the key that changed.
 ///
-/// A modifier key never produces keyDown/keyUp, only `.flagsChanged`, so the
-/// press and release are derived from the device-dependent right-Option bit
-/// together with the keycode of the key that changed.
+/// **It also watches `.keyDown` now, and that is a posture change worth
+/// stating plainly.** Left Option is a real modifier: `Option+←` moves by
+/// word, `Option+Delete` deletes one, `Option+e` starts an accent. Every one
+/// of those was indistinguishable from the start of a dictation, because this
+/// tap could not see the second key. It can now, and what it does with it is
+/// deliberately the least it can:
+///
+/// - it reads `keyboardEventKeycode` and nothing else, never the character,
+///   never the modifiers, never the target;
+/// - it keeps nothing and logs nothing, in keeping with Part 1's rule that
+///   what you type never enters a log;
+/// - it acts only while our own key is held, and every other keystroke in the
+///   day reaches `PushToTalk.otherKeyPressed()` in the idle state and is
+///   dropped there;
+/// - the tap stays `.listenOnly`, so it cannot alter or swallow a keystroke.
+///
+/// The app already ran a global `.keyDown` monitor on this same path
+/// (`UserActivityWatch`, armed after an insert), so this is not a new
+/// capability. What it does mean is that two pieces of copy that said Chalant
+/// never watches keys are no longer true, and both were corrected in the same
+/// commit rather than left standing.
 final class EventTapMonitor: @unchecked Sendable {
     private static let log = Logger(subsystem: "com.cj.chalant.dictation", category: "hotkey")
 
-    /// `kVK_Option`, the left one.
-    private static let optionKeyCode: Int64 = 58
-    /// `NX_DEVICELALTKEYMASK`. The general `.maskAlternate` bit cannot tell the
-    /// two Option keys apart, and this is the device-dependent bit for the
-    /// left one specifically.
-    private static let optionFlag: UInt64 = 0x0000_0020
+    /// Which key, read once when the tap is installed. Changing the shortcut
+    /// in Settings restarts the tap rather than mutating this, so a live tap
+    /// and the stored choice can never disagree.
+    private let shortcut: DictationShortcut
 
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -29,9 +47,18 @@ final class EventTapMonitor: @unchecked Sendable {
 
     /// Called on the main actor when the key goes down and comes back up.
     private let onChange: @MainActor @Sendable (Bool) -> Void
+    /// Called on the main actor when some other key arrives while ours is
+    /// held. Carries nothing about which key it was.
+    private let onConflict: @MainActor @Sendable () -> Void
 
-    init(onChange: @escaping @MainActor @Sendable (Bool) -> Void) {
+    init(
+        shortcut: DictationShortcut = .default,
+        onChange: @escaping @MainActor @Sendable (Bool) -> Void,
+        onConflict: @escaping @MainActor @Sendable () -> Void
+    ) {
+        self.shortcut = shortcut
         self.onChange = onChange
+        self.onConflict = onConflict
     }
 
     /// Returns false when Accessibility has not been granted, which is the
@@ -40,14 +67,17 @@ final class EventTapMonitor: @unchecked Sendable {
     func start() -> Bool {
         guard tap == nil else { return true }
 
-        // ONLY the events actually being watched. The two `tapDisabled` types
-        // are delivered to the callback whether or not they are in the mask,
-        // and their raw values are 0xFFFFFFFE and 0xFFFFFFFF: shifting 1 by
-        // those is undefined behaviour and corrupts the mask into something
-        // that matches nothing. The tap then installs cleanly, logs success,
-        // and never fires, which is indistinguishable from a permissions
-        // problem. Found by standing up a second identical tap that did work.
-        let mask = CGEventMask(1) << CGEventType.flagsChanged.rawValue
+        // ONLY the events actually being watched, and each bit built from its
+        // own type. The two `tapDisabled` types are delivered to the callback
+        // whether or not they are in the mask, and their raw values are
+        // 0xFFFFFFFE and 0xFFFFFFFF: shifting 1 by those is undefined
+        // behaviour and corrupts the mask into something that matches
+        // nothing. The tap then installs cleanly, logs success, and never
+        // fires, which is indistinguishable from a permissions problem. Found
+        // by standing up a second identical tap that did work.
+        let mask =
+            (CGEventMask(1) << CGEventType.flagsChanged.rawValue)
+            | (CGEventMask(1) << CGEventType.keyDown.rawValue)
 
         let callback: CGEventTapCallBack = { _, type, event, refcon in
             guard let refcon else { return Unmanaged.passUnretained(event) }
@@ -103,17 +133,25 @@ final class EventTapMonitor: @unchecked Sendable {
             return Unmanaged.passUnretained(event)
 
         case .flagsChanged:
-            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-            guard keyCode == Self.optionKeyCode else { break }
-
-            let down = (event.flags.rawValue & Self.optionFlag) != 0
-            Self.log.info("flagsChanged leftOption down=\(down, privacy: .public) wasDown=\(self.isDown, privacy: .public)")
+            let keyCode = UInt16(truncatingIfNeeded: event.getIntegerValueField(.keyboardEventKeycode))
+            guard let down = shortcut.isDown(keyCode: keyCode, rawFlags: event.flags.rawValue)
+            else { break }
+            Self.log.info(
+                "flagsChanged hold key down=\(down, privacy: .public) wasDown=\(self.isDown, privacy: .public)")
             if down != isDown {
                 isDown = down
                 let handler = onChange
                 // Hop off the tap thread before doing anything real.
                 Task { @MainActor in handler(down) }
             }
+
+        case .keyDown:
+            // Only while our own key is held, and only the fact that it
+            // happened. Nothing about the keystroke is read beyond whether it
+            // is ours, kept, or logged.
+            guard isDown else { break }
+            let handler = onConflict
+            Task { @MainActor in handler() }
 
         default:
             break

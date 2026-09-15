@@ -52,4 +52,25 @@ enum Cleanup {
     static func setMode(_ mode: Mode, in defaults: UserDefaults = .standard) {
         defaults.set(mode.rawValue, forKey: modeKey)
     }
+
+    /// Whether the on-device model will actually be asked anything.
+    ///
+    /// **Not the same question as `mode != .off`, and the difference was
+    /// costing every key-down a prewarm for nothing.** In `shadow` the model
+    /// runs exactly once per utterance, inside `startShadowPolish`, which is
+    /// gated on there being a corpus row to write its answer into. Corpus
+    /// capture is off by default. So on a default install the model is never
+    /// called, and the app was still asking `modelmanagerd` to load it at
+    /// launch and again on every single hold: Neural Engine work and battery
+    /// spent to warm something nothing would use.
+    ///
+    /// `live` always needs it. `shadow` needs it only while the recordings
+    /// switch is on. `off` never does.
+    static func needsModel(in defaults: UserDefaults = .standard) -> Bool {
+        switch mode(in: defaults) {
+        case .off: return false
+        case .live: return true
+        case .shadow: return CorpusCapture.isEnabled(in: defaults)
+        }
+    }
 }

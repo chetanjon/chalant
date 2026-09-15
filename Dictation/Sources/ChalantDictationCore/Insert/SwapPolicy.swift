@@ -122,7 +122,7 @@ public enum SwapPolicy {
         let before = s.inserted.trimmingCharacters(in: .whitespacesAndNewlines)
         let after = s.tidied.trimmingCharacters(in: .whitespacesAndNewlines)
         if after.isEmpty || after == before { return .keep(.unchanged) }
-        guard case .inserted(let tier) = s.outcome, tier != .clipboardOnly else { return .keep(.notPasted) }
+        guard case .inserted(let tier, _) = s.outcome, tier != .clipboardOnly else { return .keep(.notPasted) }
         if s.userActedSinceInsert { return .keep(.userActed) }
         if !s.frontIsStillTarget { return .keep(.focusMoved) }
         if s.secondsSinceInsert > maximumDelay(for: s.source, utteranceSeconds: s.utteranceSeconds) {

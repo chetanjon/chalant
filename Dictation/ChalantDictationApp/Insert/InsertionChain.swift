@@ -107,14 +107,31 @@ actor InsertionChain: TextInserter {
                 return .refused(reason: .targetChanged)
             }
 
-            let landed = await attempt(tier, text: spaced, placedAt: placedAt, bundleID: bundleID)
-            if landed {
-                record(success: tier, for: bundleID)
-                if let saved { Task { await pasteboard.restore(saved) } }
-                Self.log.info("inserted at tier \(tier.rawValue, privacy: .public) into \(bundleID, privacy: .public)")
-                return .inserted(tier: tier)
+            // Measured before the paste, so afterwards there is something to
+            // compare against. Nil in Electron and every web view, which
+            // `LandingCheck` reads as uncertain rather than as failure.
+            let before = await MainActor.run { FocusedField.measure() }
+            let dispatched = await attempt(tier, text: spaced, bundleID: bundleID)
+            guard dispatched else {
+                record(failure: tier, for: bundleID)
+                continue
             }
-            record(failure: tier, for: bundleID)
+            let after = await MainActor.run { FocusedField.measure() }
+            let verdict = LandingCheck.verdict(before: before, after: after, inserted: spaced.count)
+            if LandingCheck.countsAsFailure(verdict) {
+                // The keystroke went out and the field did not move. Try the
+                // next tier; do NOT paste again on this one, which would
+                // double the text if the verdict is wrong.
+                Self.log.error(
+                    "tier \(tier.rawValue, privacy: .public) dispatched but nothing landed in \(bundleID, privacy: .public)")
+                record(failure: tier, for: bundleID)
+                continue
+            }
+            record(success: tier, for: bundleID)
+            if let saved { Task { await pasteboard.restore(saved, ours: placedAt) } }
+            Self.log.info(
+                "inserted at tier \(tier.rawValue, privacy: .public) into \(bundleID, privacy: .public), \(verdict.rawValue, privacy: .public)")
+            return .inserted(tier: tier, landing: verdict)
         }
 
         // The floor. Part 0 §0.3 makes this "a first-class outcome with good
@@ -149,9 +166,9 @@ actor InsertionChain: TextInserter {
         else { return false }
         let padded = lastPadding.before + tidied + lastPadding.after
         let saved = await pasteboard.snapshot()
-        _ = await pasteboard.place(padded)
+        let placedForSwap = await pasteboard.place(padded)
         let swapped = SystemEventsPaste.undoThenPaste()
-        if let saved { Task { await pasteboard.restore(saved) } }
+        if let saved { Task { await pasteboard.restore(saved, ours: placedForSwap) } }
         return swapped
     }
 
@@ -173,8 +190,10 @@ actor InsertionChain: TextInserter {
 
     // MARK: - Tiers
 
+    /// Send the keystroke. Says only that it was dispatched; whether anything
+    /// arrived is `LandingCheck`'s question, asked by the caller.
     private func attempt(
-        _ tier: InsertionTier, text: String, placedAt: Int, bundleID: String
+        _ tier: InsertionTier, text: String, bundleID: String
     ) async -> Bool {
         switch tier {
         case .systemEvents:
@@ -187,10 +206,16 @@ actor InsertionChain: TextInserter {
 
         case .cgEvent:
             CGEventInserter.sendPaste()
-            // Part 0 §0.3: verify, because the events can be dropped silently.
-            // A short grace period, because consumption is not instantaneous.
+            // **The old check here was wrong, not merely weak.** It asked
+            // `pasteboard.wasConsumed(since:)`, and the change count advances
+            // on a WRITE while a paste is a read, so it answered "did anybody
+            // copy something in the last 120 ms": almost always no, so this
+            // tier reported failure on pastes that worked and demoted itself
+            // out of existence. The grace period stays, because the field
+            // does not update instantly; the verdict is now the caller's,
+            // from the focused field itself.
             try? await Task.sleep(for: .milliseconds(120))
-            return await pasteboard.wasConsumed(since: placedAt)
+            return true
 
         case .clipboardOnly:
             // Not an attempt at all: reaching it means the ladder is exhausted

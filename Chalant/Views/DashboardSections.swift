@@ -1,3 +1,4 @@
+import ChalantDictationCore
 import ServiceManagement
 import SwiftUI
 
@@ -43,10 +44,65 @@ struct GeneralSection: View {
                 + "have is thrown away."
         }
     }
-    // Off, and it downloads nothing until it is on: a 606 MB model, memory
-    // while loaded, more battery per sentence. See `BetterHearing`.
-    @AppStorage(BetterHearing.enabledKey) private var betterHearing = false
+    // Which ear hears you. The stored value can be absent on an older
+    // profile, in which case `SpeechEngineChoice.current` reads the old
+    // Better hearing switch to decide; this default only matters for the
+    // picker's own binding, and `onChange` writes a real value the moment
+    // anybody touches it.
+    @AppStorage(SpeechEngineChoice.key) private var speechEngine = SpeechEngineChoice.current().rawValue
     @ObservedObject private var hearingStatus = HearingStatus.shared
+    @ObservedObject private var parakeetStatus = ParakeetStatus.shared
+    @AppStorage(DictationShortcutStore.key) private var holdKeyStorage = DictationShortcut.default.storage
+
+    private var holdKey: DictationShortcut {
+        DictationShortcut.from(storage: holdKeyStorage) ?? .default
+    }
+
+    private var chosenEngine: SpeechEngineChoice {
+        SpeechEngineChoice(rawValue: speechEngine) ?? SpeechEngineChoice.shipped
+    }
+
+    /// One sentence per engine, saying what it costs rather than which is
+    /// "best": the honest answer to that is a measurement on the user's own
+    /// voice, and the app does not have one.
+    private var engineNote: String {
+        switch chosenEngine {
+        case .apple:
+            return "macOS's own recognizer. Nothing to download, and it starts instantly."
+        case .parakeet:
+            return "A stronger model, on this Mac. It downloads "
+                + "\(ParakeetEngine.downloadSizeDescription) once, then recognises a sentence "
+                + "in about a tenth of a second. Nothing leaves this Mac."
+        case .whisper:
+            return "The ear Chalant used to run second. It downloads "
+                + "\(BetterHearing.downloadSizeDescription) once, it is the only one that can "
+                + "be told your names before it listens, and it is the slowest of the three by "
+                + "about a second a sentence. Nothing leaves this Mac."
+        }
+    }
+
+    private var engineStatusLine: String {
+        switch chosenEngine {
+        case .apple: return "Ready."
+        case .parakeet: return parakeetStatus.line
+        case .whisper: return hearingStatus.line
+        }
+    }
+
+    /// A retry offered only where there is something to retry: law 5, a
+    /// control appears when it can do something.
+    private var engineRetry: (() -> Void)? {
+        switch chosenEngine {
+        case .apple:
+            return nil
+        case .parakeet:
+            guard parakeetStatus.canRetry else { return nil }
+            return { Task { await ParakeetEngine.shared.prepare(allowingDownload: true) } }
+        case .whisper:
+            guard case .failed = hearingStatus.state else { return nil }
+            return { Task { await BetterHearing.shared.prepare() } }
+        }
+    }
 
     /// "You run 1.32.0 · checked just now", or "· looking…" mid-check;
     /// with checking switched off, the version alone, which is all the
@@ -222,10 +278,33 @@ struct GeneralSection: View {
                     // Read off VoiceDoor, never written here, for the same
                     // reason the tour's line is: the app must not describe a
                     // gesture in one place and ship another.
-                    SettingNote(VoiceDoor.dictationLine(available: true) ?? "")
+                    SettingNote(
+                        VoiceDoor.dictationLine(available: true, keyName: holdKey.label) ?? "")
                     SettingNote(
                         "The first time you turn this on, macOS asks for Input Monitoring and "
                         + "Accessibility. It needs both: one to notice the key, one to place the text."
+                    )
+                    SettingDivider()
+                    // **A choice, since 1.42.0.** Left Option is a real
+                    // modifier: Option+arrow moves by word, Option+Delete
+                    // deletes one, Option+e starts an accent. Chalant cancels
+                    // those now rather than treating them as speech, but if
+                    // they are still a nuisance the gesture can move.
+                    SettingPicker(
+                        label: "Hold key",
+                        selection: $holdKeyStorage,
+                        options: DictationShortcut.allCases.map { ($0.label, $0.storage) },
+                        width: 320)
+                        .onChange(of: holdKeyStorage) { _, _ in
+                            // The tap reads the key once when it installs, so
+                            // it is restarted rather than mutated: a live tap
+                            // and the stored choice can never disagree.
+                            Dictation.shared.stop()
+                            Dictation.shared.start()
+                        }
+                    SettingNote(
+                        "Hold it alone to talk. Pressing any other key while it is held means you "
+                        + "wanted that shortcut, so Chalant stands down and types nothing."
                     )
                     if dictationOn || !dictationHealth.allReady {
                         SettingDivider()
@@ -247,24 +326,31 @@ struct GeneralSection: View {
                     SettingNote(cleanupNote)
 
                     SettingDivider()
-                    // A switch, and off, because it costs something real
-                    // (a 606 MB download, memory, battery) for something
-                    // measured but not free. See verification/EAR_2026-08-17.md.
-                    SettingToggle(label: "Better hearing", isOn: $betterHearing)
-                    SettingNote(
-                        "A second, stronger ear on this Mac listens to what you said after "
-                        + "the words land, and corrects them in place a second or two later "
-                        + "when it heard better: names, numbers, the word you actually said. "
-                        + "It downloads a \(BetterHearing.downloadSizeDescription) model once, "
-                        + "uses memory while it is loaded and more battery per sentence. "
-                        + "Nothing leaves this Mac."
-                    )
-                    SettingNote(hearingStatus.line)
-                        .onChange(of: betterHearing) { _, on in
-                            Task {
-                                if on { await BetterHearing.shared.prepare() } else { await BetterHearing.shared.stop() }
-                            }
+                    // **A picker, not a switch, since 1.42.0.** Two ears used
+                    // to run on every sentence and argue before the words
+                    // landed. It was accurate and it cost the whole wait, so
+                    // the second ear became a choice instead of a passenger.
+                    // One recognizer runs per dictation; all three run here.
+                    SettingPicker(
+                        label: "Recognizer",
+                        selection: $speechEngine,
+                        options: SpeechEngineChoice.allCases.map { ($0.label, $0.rawValue) })
+                        .onChange(of: speechEngine) { _, _ in
+                            // Act now rather than at next launch, the same
+                            // rule the "Hold to dictate" switch follows. This
+                            // is also the ONE place a model download may
+                            // start: the person chose it, having read what it
+                            // costs, one line above.
+                            Dictation.shared.reloadEngine(allowingDownload: true)
                         }
+                    SettingNote(engineNote)
+                    SettingNote(engineStatusLine)
+                    if let retry = engineRetry {
+                        Button("Try again", action: retry)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .tint(Theme.controlTint)
+                    }
 
                     SettingDivider()
                     // Law 6 says defaults over switches, and this is the same

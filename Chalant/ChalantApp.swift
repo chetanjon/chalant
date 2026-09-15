@@ -24,7 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let updater = SPUStandardUpdaterController(
         startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil
     )
-    /// Hold left Option to dictate. Off until the user asks for it, because
+    /// Hold the dictation key to dictate, left Option by default. Off until
+    /// the user asks for it, because
     /// starting it is what raises the Input Monitoring and Accessibility
     /// prompts, and nobody updating Chalant asked to be interrupted by two.
     /// Shared with the settings toggle, so turning the switch on starts it
