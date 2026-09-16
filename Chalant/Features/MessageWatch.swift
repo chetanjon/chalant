@@ -102,6 +102,29 @@ final class MessageWatch {
         }
     }
 
+    /// What may be written about a banner: the name of the app that
+    /// posted it, and for one this does not recognize, the identifiers
+    /// that would explain why.
+    ///
+    /// **Never the title and never the body.** A description reads
+    /// `App, title, body`, so only its first field may be logged; the
+    /// rest is somebody's actual message, which is what this feature is
+    /// for and never what its log is for. `MessageWatchTests` holds
+    /// this to it.
+    static func logMarkers(for banner: Banner, matched: Bool) -> [String] {
+        let apps = banner.descriptions.map { described in
+            described.split(
+                separator: ",", maxSplits: 1, omittingEmptySubsequences: false
+            ).first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? ""
+        }
+        var seen: [String] = []
+        for field in apps + (matched ? [] : banner.identifiers)
+        where !field.isEmpty && !seen.contains(field) && seen.count < 10 {
+            seen.append(field)
+        }
+        return seen
+    }
+
     // MARK: - The live watch
 
     /// Called on the main actor for every message that arrives while
@@ -192,27 +215,22 @@ final class MessageWatch {
             let banner = Self.read(window)
             if logsEveryBanner {
                 let mine = Self.isMessages(banner)
-                // Who wrote is logged only for a banner this feature is
-                // about to act on, and what they wrote is never logged
-                // at all. Somebody's messages are not debugging
-                // material, and every other app's notifications are
-                // none of this app's business beyond "not mine".
-                // A banner this does not recognize is the interesting
-                // one: if a real Messages banner ever fails to match,
-                // its identifiers are the next place to look, so an
-                // unmatched banner brings them along and a matched one
-                // does not need to.
-                var seen: [String] = []
-                for described in banner.descriptions + (mine ? [] : banner.identifiers)
-                where !seen.contains(described) && seen.count < 10 {
-                    seen.append(described)
-                }
+                // Nothing anybody wrote is logged, and neither is who
+                // wrote it: a log that has to be sanitized before it can
+                // be pasted is a log nobody pastes.
+                // Only the FIRST field of each description, which is the
+                // app's own name. The rest of that string is the title
+                // and the body, meaning somebody's actual message: it
+                // is what this feature is for, never what its log is
+                // for. A banner this does not recognize brings its
+                // identifiers along, because if a real Messages banner
+                // ever fails to match, those are the next place to look.
+                let seen = Self.logMarkers(for: banner, matched: mine)
                 WireLog.note(
                     event: "banner",
                     ntype: seen.isEmpty ? "no-desc" : seen.joined(separator: "|"),
                     tool: mine ? "messages" : "other",
-                    response: "lines=\(banner.texts.count)"
-                        + (mine ? " from=\(banner.texts.first ?? "")" : "")
+                    response: "lines=\(banner.texts.count) fields=\(banner.descriptions.count)"
                 )
             }
             guard let sighting = Self.sighting(from: banner) else { return }

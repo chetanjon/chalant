@@ -106,6 +106,34 @@ final class MessageWatchTests: XCTestCase {
         XCTAssertFalse(MessageWatch.messagesAppName.hasSuffix(".app"))
     }
 
+    /// The log may say which app posted a banner. It may never say
+    /// what anybody wrote, or who wrote it: a description reads
+    /// `App, title, body` and only the first field is fit to keep.
+    func testTheLogNeverCarriesAnybodysMessage() {
+        let real = banner(texts: ["Mum", "the hospital called about dad"])
+        let markers = MessageWatch.logMarkers(for: real, matched: true)
+
+        XCTAssertTrue(markers.contains("Messages"))
+        for marker in markers {
+            XCTAssertFalse(marker.contains("hospital"), "logged a message body")
+            XCTAssertFalse(marker.contains("Mum"), "logged who wrote")
+        }
+    }
+
+    /// An unrecognized banner is the one worth diagnosing, so it brings
+    /// its identifiers. Still no content, and no sender.
+    func testAnUnrecognizedBannerLogsItsIdentifiersOnly() {
+        let other = banner(texts: ["Boss", "you are fired"], app: "Mail")
+        let markers = MessageWatch.logMarkers(for: other, matched: false)
+
+        XCTAssertTrue(markers.contains("Mail"))
+        XCTAssertTrue(markers.contains("widgets-overlay-view"))
+        for marker in markers {
+            XCTAssertFalse(marker.contains("fired"))
+            XCTAssertFalse(marker.contains("Boss"))
+        }
+    }
+
     func testTheSightingCarriesWhenItWasSeen() {
         let when = Date(timeIntervalSince1970: 1_000)
         let seen = MessageWatch.sighting(
