@@ -40,14 +40,13 @@ final class MessageWatchTests: XCTestCase {
         XCTAssertEqual(seen?.body, "are you coming for dinner")
     }
 
-    /// A banner can break a long message across several texts. All of
-    /// it is the message; only the first line is who.
-    func testRemainingLinesJoinIntoOneMessage() {
+    /// A message holding its own comma keeps all of it.
+    func testTheWholeMessageSurvivesItsOwnCommas() {
         let seen = MessageWatch.sighting(
-            from: banner(texts: ["Ravi", "running late", "start without me"])
+            from: banner(texts: ["Ravi", "running late, start without me"])
         )
         XCTAssertEqual(seen?.sender, "Ravi")
-        XCTAssertEqual(seen?.body, "running late start without me")
+        XCTAssertEqual(seen?.body, "running late, start without me")
     }
 
     /// Previews hidden: the banner says somebody wrote, never what.
@@ -57,10 +56,13 @@ final class MessageWatchTests: XCTestCase {
         XCTAssertNil(MessageWatch.sighting(from: banner(texts: [])))
     }
 
-    func testBlankLinesDoNotCountAsAMessage() {
-        XCTAssertNil(
-            MessageWatch.sighting(from: banner(texts: ["Mum", "   ", "\n"]))
+    /// Previews off: the description is "Messages, Mum" and there is
+    /// nothing anybody could reply to.
+    func testABannerWithNoBodyIsNotASighting() {
+        let quiet = MessageWatch.Banner(
+            texts: ["Mum"], identifiers: [], descriptions: ["Messages, Mum"]
         )
+        XCTAssertNil(MessageWatch.sighting(from: quiet))
     }
 
     /// The whole point of the app check: a calendar alert and a build
@@ -132,6 +134,59 @@ final class MessageWatchTests: XCTestCase {
             XCTAssertFalse(marker.contains("fired"))
             XCTAssertFalse(marker.contains("Boss"))
         }
+    }
+
+    /// The panel, captured live on 2026-09-15 when the notification
+    /// centre was opened: ten lines, every notification on the Mac,
+    /// plus the widgets. Read positionally this looked exactly like a
+    /// message, which is how "open Notification Center, get offered a
+    /// reply to an old text" would have shipped.
+    private var openedNotificationCentre: MessageWatch.Banner {
+        MessageWatch.Banner(
+            texts: [
+                "Edit Widgets", "Clear Notifications", "Journal",
+                "Time to Write", "Messages", "Mum", "are you coming",
+                "3 more notifications", "Calendar", "Weather",
+            ],
+            identifiers: ["widgets-overlay-view"],
+            descriptions: [
+                "Notification Center",
+                "Edit Widgets",
+                "Clear Notifications…",
+                "Stacked summary: Journal, Time to Write, Take a moment",
+                "Messages, Mum, are you coming",
+                "Phone, +1 (555) 010 0000, missed call",
+                "3 more notifications",
+                "Calendar",
+                "Weather",
+            ]
+        )
+    }
+
+    func testTheOpenedNotificationCentreIsNotAMessageArriving() {
+        XCTAssertNil(MessageWatch.sighting(from: openedNotificationCentre))
+    }
+
+    /// Chrome carries no comma, so it is not mistaken for a
+    /// notification; the three real ones in that panel are.
+    func testChromeIsNotCountedAsANotification() {
+        let found = MessageWatch.notifications(in: openedNotificationCentre)
+        XCTAssertEqual(found.count, 3)
+        XCTAssertFalse(found.contains("Edit Widgets"))
+        XCTAssertFalse(found.contains("Notification Center"))
+    }
+
+    /// A name with a comma in it, which is why the sender is taken
+    /// from the static texts rather than from the first comma.
+    func testASenderWhoseNameHoldsACommaIsReadWhole() {
+        let awkward = MessageWatch.Banner(
+            texts: ["Dad, Mum", "we land at six"],
+            identifiers: [],
+            descriptions: ["Messages, Dad, Mum, we land at six"]
+        )
+        let seen = MessageWatch.sighting(from: awkward)
+        XCTAssertEqual(seen?.sender, "Dad, Mum")
+        XCTAssertEqual(seen?.body, "we land at six")
     }
 
     func testTheSightingCarriesWhenItWasSeen() {

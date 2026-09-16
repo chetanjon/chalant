@@ -40,6 +40,36 @@ window itself described as `Notification Center`. That is what
 against the app's localized display name rather than searching for a
 substring.
 
+### 3. Opening Notification Center hands over EVERYTHING, and it looked like a message
+
+Caught live at 22:45 when the notification panel was opened. One window,
+ten lines, every notification on the Mac plus the widgets:
+
+```
+Notification Center | Edit Widgets | Clear Notifications… |
+Stacked summary: Journal, Time to Write, ... | <app>, <title>, <body> |
+Phone, <number>, <call transcript> | 3 more notifications |
+Calendar | Weather | Clock
+```
+
+The first reading counted static texts by position, so this panel would
+have been read as a sender (its first line) and a message (the other
+nine). **Opening Notification Center could have offered a reply to an
+hours-old text.** The parse now comes from the notification's own
+description instead, and a window holding anything other than exactly one
+notification is refused: a panel has several, a single banner has one.
+
+Two consequences worth knowing. Chrome carries no comma (`Edit Widgets`,
+`Clear Notifications…`), which is what separates it from a notification
+shaped `App, title, body`. And two texts arriving close enough together to
+stack are refused as well, so the second gets no card; the banner still
+shows, which is the pre-existing behaviour, and safety wins the tie.
+
+**This is also why the banner log now keeps only the app name.** That
+capture put a phone number and a voicemail transcript into `wire.log`
+under a comment promising it never would. The line was deleted and a test
+now fails if a body or a sender reaches the log again.
+
 ### Still not run
 
 **A real Messages banner has never been read.** Everything above was

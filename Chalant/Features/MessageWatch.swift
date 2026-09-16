@@ -67,21 +67,61 @@ final class MessageWatch {
         return shown.isEmpty || shown.hasSuffix(".app") ? "Messages" : shown
     }()
 
+    /// The descriptions that are notifications rather than chrome. A
+    /// notification describes itself as `App, title, body`; the
+    /// window's own name, "Edit Widgets" and "Clear Notifications…"
+    /// carry no comma and drop out here.
+    static func notifications(in banner: Banner) -> [String] {
+        banner.descriptions.filter { $0.contains(", ") }
+    }
+
     /// The reading, with no screen involved.
     ///
-    /// The first line of a Messages banner is who, the rest is what
-    /// they said. A banner with only one line is a notification with
-    /// no message in it (previews hidden, most often), and that is not
-    /// something anyone can reply to, so it is not a sighting.
-    static func sighting(from banner: Banner, now: Date = Date()) -> Sighting? {
-        guard isMessages(banner) else { return nil }
+    /// Taken from the notification's own description rather than by
+    /// counting static texts, which was wrong in a way only real data
+    /// showed (2026-09-15): opening Notification Center hands over one
+    /// window holding every notification on the Mac plus the widgets,
+    /// ten lines of it. Read positionally, that made the panel's first
+    /// line a sender and the rest a message, so merely opening the
+    /// panel could have offered a reply to an hours-old text.
+    ///
+    /// So: exactly one notification in the window, or this is a panel
+    /// or a stack and not a message arriving.
+    static func sighting(
+        from banner: Banner, now: Date = Date(), appName: String = messagesAppName
+    ) -> Sighting? {
+        let notifications = notifications(in: banner)
+        guard notifications.count == 1, let described = notifications.first else {
+            return nil
+        }
+        let fields = described.split(
+            separator: ",", maxSplits: 1, omittingEmptySubsequences: false
+        )
+        guard fields.count == 2,
+              fields[0].trimmingCharacters(in: .whitespaces)
+                  .caseInsensitiveCompare(appName) == .orderedSame
+        else { return nil }
+
+        let rest = String(fields[1]).trimmingCharacters(in: .whitespaces)
+        // Who, then what. A sender's name can hold a comma of its own
+        // ("Dad, Mum"), so the static texts decide where the name ends:
+        // the title is one of them, verbatim.
         let lines = banner.texts
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        guard lines.count >= 2 else { return nil }
-        let sender = lines[0]
-        let body = lines.dropFirst().joined(separator: " ")
+        let sender = lines
+            .filter { rest.hasPrefix($0 + ",") }
+            .max(by: { $0.count < $1.count })
+            ?? String(
+                rest.split(separator: ",", maxSplits: 1,
+                           omittingEmptySubsequences: false).first ?? ""
+            ).trimmingCharacters(in: .whitespaces)
+
+        let body = rest.dropFirst(sender.count)
+            .drop(while: { $0 == "," || $0 == " " })
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        // No body is previews turned off: the banner says somebody
+        // wrote, never what, and there is nothing to reply to.
         guard !sender.isEmpty, !body.isEmpty else { return nil }
         return Sighting(sender: sender, body: body, seen: now)
     }
@@ -93,7 +133,7 @@ final class MessageWatch {
     /// have you seen this" would otherwise make a calendar alert look
     /// like a conversation.
     static func isMessages(_ banner: Banner, appName: String = messagesAppName) -> Bool {
-        banner.descriptions.contains { described in
+        notifications(in: banner).contains { described in
             guard let first = described.split(
                 separator: ",", maxSplits: 1, omittingEmptySubsequences: false
             ).first else { return false }
