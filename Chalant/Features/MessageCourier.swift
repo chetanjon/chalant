@@ -147,7 +147,10 @@ final class MessageCourier {
     }
 
     /// Resolve who and stage what; the returned line is the read-back.
-    private func stage(
+    /// Stage a message to a known recipient. Reachable from outside
+    /// the voice path because the island's reply card already knows
+    /// who it is answering: the banner named them.
+    func stage(
         recipient: String,
         body: String,
         using resolve: (String) async -> Resolution = { await MessageCourier.resolve($0) }

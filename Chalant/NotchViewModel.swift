@@ -83,6 +83,9 @@ final class NotchViewModel: ObservableObject {
     enum Pane {
         case none
         case welcome
+        /// A text just arrived and the island is offering the reply.
+        /// Like `.welcome`, it takes the panel for as long as it is up.
+        case message
     }
 
     /// Cleared to nil the instant this becomes `.collapsed` (see the
@@ -304,6 +307,138 @@ final class NotchViewModel: ObservableObject {
             self.pane = .welcome
             self.expand()
         }
+    }
+
+    // MARK: - A text arrives
+
+    /// The message waiting on the island, and the reply being spoken
+    /// into it. See `MessageReply` for the three rules it keeps.
+    let messages = MessageReply()
+    private let messageWatch = MessageWatch()
+    /// Whether the island was already open when the message arrived.
+    /// Closing the card puts it back the way it was found rather than
+    /// collapsing something the user had deliberately opened.
+    private var islandWasOpenBeforeMessage = false
+
+    /// Start listening for incoming iMessages, if there is an island
+    /// for them to land on. A dictation-only Chalant has no island and
+    /// no doors into one, so it gets no watcher either rather than a
+    /// card that can never be shown.
+    private func watchForMessages() {
+        guard ChalantRole.current != .dictation else { return }
+        messageWatch.onSighting = { [weak self] sighting in
+            self?.showMessage(sighting)
+        }
+        messageWatch.start()
+
+        // The watch lives inside another process's window tree, so it
+        // dies with that process. macOS restarts NotificationCenter
+        // rarely, but a watcher that goes quietly deaf until the next
+        // relaunch is the worst kind of bug to report: everything looks
+        // fine and nothing arrives.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification,
+            object: nil, queue: .main
+        ) { [weak self] note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey]
+                as? NSRunningApplication
+            guard app?.bundleIdentifier == "com.apple.notificationcenterui" else { return }
+            MainActor.assumeIsolated {
+                self?.messageWatch.stop()
+                self?.messageWatch.start()
+            }
+        }
+    }
+
+    /// When a message may take the island, as plain values so the rule
+    /// can be tested without building a model (the `IslandFace`
+    /// convention).
+    ///
+    /// - A dictation-only Chalant has no island to pop from.
+    /// - Mid-hold, the card stays away entirely: expanding over a live
+    ///   dictation leaves the room ducked forever (`micIsLive`), and no
+    ///   message is worth eating somebody's sentence. The banner still
+    ///   did its job; this one simply gets no card.
+    /// - Already open and in use: replacing what somebody is in the
+    ///   middle of is an interruption, not an offer.
+    /// - The welcome tour keeps the island to itself. It owns the same
+    ///   dictation landing spot, and its `onDisappear` would clear the
+    ///   card's out from under it; a first run is also the last moment
+    ///   to interrupt somebody with a text.
+    static func messageMayShow(
+        role: ChalantRole, micIsLive: Bool, expanded: Bool, midInteraction: Bool,
+        welcomeIsUp: Bool = false
+    ) -> Bool {
+        messageBlockReason(
+            role: role, micIsLive: micIsLive, expanded: expanded,
+            midInteraction: midInteraction, welcomeIsUp: welcomeIsUp
+        ) == nil
+    }
+
+    /// The same rule, saying which one stopped it. `nil` means the card
+    /// may show.
+    ///
+    /// A reason rather than a bare no, because the one question the
+    /// banner log could not answer was "it saw my message, so why did
+    /// nothing appear". Now it answers that itself.
+    static func messageBlockReason(
+        role: ChalantRole, micIsLive: Bool, expanded: Bool, midInteraction: Bool,
+        welcomeIsUp: Bool = false
+    ) -> String? {
+        if role == .dictation { return "dictation-only" }
+        if micIsLive { return "mid-hold" }
+        if welcomeIsUp { return "welcome-tour" }
+        if expanded, midInteraction { return "island-in-use" }
+        return nil
+    }
+
+    private func showMessage(_ sighting: MessageWatch.Sighting) {
+        let blocked = Self.messageBlockReason(
+            role: ChalantRole.current,
+            micIsLive: micIsLive,
+            expanded: state == .expanded,
+            midInteraction: isMidInteraction,
+            welcomeIsUp: pane == .welcome
+        )
+        // Nothing about the message itself, only what became of it.
+        WireLog.note(
+            event: "message-card", ntype: blocked ?? "shown",
+            tool: "messages", response: blocked == nil ? "card up" : "no card"
+        )
+        guard blocked == nil else { return }
+        islandWasOpenBeforeMessage = state == .expanded
+        messages.show(sighting) { [weak self] in self?.closeMessage() }
+        // The card holds the landing spot only while it is up, and only
+        // for its own press-and-hold button: a plain Option hold still
+        // types into whatever the user is really working in.
+        Dictation.shared.holdPracticeLanding { [weak self] text in
+            guard let self else { return }
+            Task { await self.messages.heard(text) }
+        }
+        pane = .message
+        // `takeKey: false`, and this is the whole difference between a
+        // notification and an interruption. A card that appeared on its
+        // own may never take the keyboard: the founder was typing in a
+        // terminal once and their keystrokes stopped arriving
+        // (2026-08-03). Clicking the card still focuses it, because a
+        // click is being asked.
+        expand(takeKey: false)
+    }
+
+    /// The card goes: faded, dismissed, or sent. Dictation goes back to
+    /// the app in front of the user in the same breath, because a
+    /// landing spot that outlives its card is how a sentence meant for
+    /// an editor ends up addressed to a person.
+    func closeMessage() {
+        Dictation.shared.holdPracticeLanding(nil)
+        messages.dismiss()
+        if pane == .message {
+            pane = .none
+            // An island the user had open stays open: the card
+            // borrowed the panel, it did not take the island.
+            if !islandWasOpenBeforeMessage { collapse() }
+        }
+        islandWasOpenBeforeMessage = false
     }
 
     /// Say once, plainly, that the last run ended badly.
@@ -807,6 +942,7 @@ final class NotchViewModel: ObservableObject {
 
     func start() {
         music.start()
+        watchForMessages()
         clipboard.start()
         stats.start()
         shortcuts.announce = { [weak self] message in
