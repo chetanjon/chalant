@@ -159,7 +159,16 @@ final class NotchViewModel: ObservableObject {
 
     @Published var isHovering = false
     /// Which lower panel the switcher is showing. `.today` is home.
-    @Published var tab: Tab = .today
+    @Published var tab: Tab = .today {
+        didSet {
+            // A panel shortcut or a dropped file asked for somewhere else
+            // while a message card held the panel. The card drew over the
+            // destination, so the shortcut did nothing anyone could see,
+            // and the card's fade then threw the destination away too.
+            guard pane == .message, state == .expanded, oldValue != tab else { return }
+            stepMessageAside()
+        }
+    }
 
     /// The one destination the island has given its whole height to,
     /// or nil for the ordinary expanded island.
@@ -180,7 +189,15 @@ final class NotchViewModel: ObservableObject {
     }
 
     func unfocus() { focusedTab = nil }
-    @Published var pane: Pane = .none
+    @Published var pane: Pane = .none {
+        didSet {
+            // The one place a message card is let go of. `pane` can be
+            // changed from a dozen places (collapse, the tour, its replay,
+            // whatever is added next), and a card left behind with words in
+            // it blocked every later message as "mid-reply" until relaunch.
+            if oldValue == .message, pane != .message { tearDownMessage() }
+        }
+    }
 
     /// The island's expanded size, measured from the content itself,
     /// the island hugs what's shown instead of reserving a fixed void.
@@ -323,25 +340,31 @@ final class NotchViewModel: ObservableObject {
     /// collapsing something the user had deliberately opened.
     private var islandWasOpenBeforeMessage = false
 
-    /// True from the moment the card's own mic button goes down until
-    /// that hold has finished being heard. It is the ONLY thing that may
-    /// point dictation at the card.
+    /// The card's mic button is physically down. It decides one thing:
+    /// whether a dictation reveal belongs to the card (and leaves the
+    /// island as it is) or to somebody's Option hold (and gets the strip).
+    /// While it is down the Option key is refused by `PushToTalk.press`, so
+    /// no foreign hold can be mistaken for the card's.
     ///
-    /// The first build held the dictation landing spot for as long as
-    /// the card was up, on the belief that only the card's button would
-    /// use it. That was false: the landing spot diverts EVERY hold, so a
-    /// text arriving while somebody dictated into their editor sent the
-    /// next sentence to the card, and a card dismissed by a click left
-    /// the diversion armed until relaunch, silently eating dictation
-    /// (six of six reviewers, 2026-09-19). The landing is now armed by
-    /// one press, for that press, and disarms itself on delivery, on
-    /// silence, and on every way the card can go.
-    private(set) var cardHostsDictation = false
-    private var landingDisarm: DispatchWorkItem?
+    /// It points dictation at NOTHING. The first two builds borrowed the
+    /// tour's global landing slot, for the card's life and then for one
+    /// press plus a patience timer, and both leaked: an Option hold could
+    /// land in the card, and a card closed mid-finalize typed the private
+    /// reply into the front app. The words now travel with the press that
+    /// heard them (`Dictation.press(landingIn:)`), and if the card has gone
+    /// by the time they arrive they are dropped, never typed.
+    private(set) var cardMicDown = false
     /// The mic is live on the card's behalf, with the island left
     /// exactly as it was. Set in `beginDictating`, cleared in
     /// `endDictating`.
     private var cardDictationLive = false
+    /// Whether this press ever went live. A hold the controller refused
+    /// (model still downloading, microphone not granted) never does, and
+    /// the card has to say so rather than claim to be listening.
+    private var cardPressWentLive = false
+    /// A reply was in progress when somebody's own Option hold took the
+    /// island for its strip. The card comes back when that hold ends.
+    private var restoreCardAfterHold = false
 
     /// Start listening for incoming iMessages, if there is an island
     /// for them to land on. A dictation-only Chalant has no island and
@@ -421,7 +444,7 @@ final class NotchViewModel: ObservableObject {
     private func showMessage(_ sighting: MessageWatch.Sighting) {
         let blocked = Self.messageBlockReason(
             role: ChalantRole.current,
-            micIsLive: micIsLive || cardHostsDictation,
+            micIsLive: micIsLive || cardMicDown,
             expanded: state == .expanded,
             // A focused island draws one destination and nothing else,
             // so a card mounted there was never drawn while the log
@@ -438,9 +461,15 @@ final class NotchViewModel: ObservableObject {
         )
         guard blocked == nil else { return }
         // A card replacing a card keeps what it was told the first time.
-        if pane != .message { islandWasOpenBeforeMessage = state == .expanded }
+        let replacing = pane == .message
+        if !replacing { islandWasOpenBeforeMessage = state == .expanded }
         messages.show(sighting) { [weak self] in self?.closeMessage() }
         pane = .message
+        // Already open: the card goes where the island already is. Asking
+        // to expand again can mean a hand-off to another display, which is
+        // a collapse and an expansion, and the collapse would take the card
+        // just shown with it and leave a bare island open (two displays).
+        guard state != .expanded else { return }
         // `takeKey: false`, and this is the whole difference between a
         // notification and an interruption. A card that appeared on its
         // own may never take the keyboard: the founder was typing in a
@@ -450,69 +479,76 @@ final class NotchViewModel: ObservableObject {
         expand(takeKey: false)
     }
 
-    /// The card's mic button went down. This press, and nothing else,
-    /// points dictation at the card.
+    /// The card's mic button went down.
     func messageTalkPress() {
-        guard let asked = messages.sighting, Dictation.shared.isRunning else { return }
+        guard let asked = messages.sighting, Dictation.shared.isRunning,
+              !cardMicDown else { return }
         messages.talkPressed()
         guard messages.phase == .listening else { return }
-        landingDisarm?.cancel()
-        cardHostsDictation = true
-        Dictation.shared.holdPracticeLanding { [weak self] text in
-            // One shot. The landing spot belonged to that press alone.
-            self?.disarmLanding()
+        cardMicDown = true
+        cardPressWentLive = false
+        Dictation.shared.press { [weak self] text in
+            // Delivered by the session that heard it. `heard` drops the
+            // words if this card has gone or belongs to someone else now.
             self?.messages.heard(text, for: asked)
         }
-        Dictation.shared.practicePress()
     }
 
     /// The button came up. `held` is false for a click that was never a
     /// hold: nothing was said, so nothing should be waited for.
     func messageTalkRelease(held: Bool) {
-        guard cardHostsDictation else { return }
+        guard cardMicDown else { return }
+        cardMicDown = false
         Dictation.shared.practiceRelease()
-        messages.talkReleased(held: held)
-        guard held else { return disarmLanding() }
-        // Silence produces no words, so the landing would never be
-        // called and never disarm itself. A hold into an editor ten
-        // seconds later must not find it still pointing here.
-        let work = DispatchWorkItem { [weak self] in self?.disarmLanding() }
-        landingDisarm = work
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + MessageReply.hearingPatience, execute: work
-        )
-    }
-
-    private func disarmLanding() {
-        landingDisarm?.cancel()
-        landingDisarm = nil
-        guard cardHostsDictation else { return }
-        cardHostsDictation = false
-        Dictation.shared.holdPracticeLanding(nil)
+        if held, !cardPressWentLive {
+            // Held long enough to have gone live, and never did: the
+            // controller refused it. Saying "Got it" now would be a lie.
+            messages.talkRefused()
+        } else {
+            messages.talkReleased(held: held)
+        }
     }
 
     /// Everything the card holds, let go. Every way the card can leave
-    /// comes through here: the X, the fade, a send, a click elsewhere, a
-    /// hotkey, an Option hold. The first build cleaned up only on the
-    /// paths it had thought of, and the ones it had not left the mic
-    /// hot or the landing armed.
+    /// ends here, because `pane` itself calls it on the way out of
+    /// `.message`: the X, the fade, a send, a click elsewhere, a hotkey,
+    /// the tour, anything added later. The first build cleaned up only on
+    /// the exits it had thought of.
     private func tearDownMessage() {
-        if messages.phase == .listening { Dictation.shared.practiceRelease() }
-        disarmLanding()
+        if cardMicDown {
+            cardMicDown = false
+            Dictation.shared.practiceRelease()
+        }
+        restoreCardAfterHold = false
         messages.dismiss()
+    }
+
+    /// Something else wants the panel. An unanswered card gives it up
+    /// without closing the island; a reply in progress keeps it and says
+    /// so, because a draft is never the price of a shortcut.
+    @discardableResult
+    private func stepMessageAside() -> Bool {
+        guard pane == .message else { return true }
+        if messages.isMidReply || cardMicDown || cardDictationLive {
+            messages.note("Finish this reply, or close it, first.")
+            return false
+        }
+        pane = .none
+        islandWasOpenBeforeMessage = false
+        return true
     }
 
     /// The card goes: faded, dismissed, or sent.
     func closeMessage() {
-        let wasUp = pane == .message
-        tearDownMessage()
-        if wasUp {
-            pane = .none
-            // An island the user had open stays open: the card
-            // borrowed the panel, it did not take the island.
-            if !islandWasOpenBeforeMessage { collapse() }
-        }
+        guard pane == .message else { return tearDownMessage() }
+        let wasOpenBefore = islandWasOpenBeforeMessage
+        pane = .none   // tears the card down on its way out
         islandWasOpenBeforeMessage = false
+        // An island the user had open stays open, but only while they are
+        // still there. Hover-out is ignored for as long as a card is up, so
+        // an island that was hover-opened and then left would otherwise
+        // stay open with nothing left to close it.
+        if !wasOpenBefore || !isHovering { collapse() }
     }
 
     /// An untouched card is not the user's doing, so their next click in
@@ -524,12 +560,18 @@ final class NotchViewModel: ObservableObject {
         pane != .message || messages.engaged
     }
 
-    /// The way forward the card always has: the conversation itself.
+    /// The way forward the card always has: the conversation itself. Any
+    /// words already written go with it, so "reply in Messages" never
+    /// costs the reply.
     func openMessageInMessages() {
         var target = URL(fileURLWithPath: "/System/Applications/Messages.app")
-        if case .known(_, let handle) = messages.recipient,
-           let direct = URL(string: "sms:\(handle.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? handle)") {
-            target = direct
+        if case .known(_, let handle) = messages.recipient {
+            var parts = URLComponents()
+            parts.scheme = "sms"
+            parts.path = handle
+            let draft = messages.draft.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !draft.isEmpty { parts.queryItems = [URLQueryItem(name: "body", value: draft)] }
+            if let direct = parts.url { target = direct }
         }
         NSWorkspace.shared.open(target)
         closeMessage()
@@ -1601,12 +1643,9 @@ final class NotchViewModel: ObservableObject {
         // Whatever closed the island closed the card with it: a click
         // elsewhere, Escape, the hotkey, the gear. Every one of those
         // used to leave the card's mic or its dictation landing behind.
-        if pane == .message {
-            tearDownMessage()
-            islandWasOpenBeforeMessage = false
-        }
+        if pane == .message { islandWasOpenBeforeMessage = false }
         state = .collapsed
-        pane = .none
+        pane = .none   // leaving `.message` lets the card go (see `pane`)
         focusedTab = nil
         // The island always reopens small and clean, unless the user
         // asked it to reopen where they left off.
@@ -1804,7 +1843,7 @@ final class NotchViewModel: ObservableObject {
         // the doubled-text failure the sibling state exists to prevent.
         // Refused out loud, because a mic that does nothing and says nothing
         // is the other half of that same bug.
-        if state == .dictating {
+        if state == .dictating || cardMicDown || cardDictationLive {
             Self.log.notice("talk refused: a dictation hold has the microphone")
             return
         }
@@ -1863,7 +1902,8 @@ final class NotchViewModel: ObservableObject {
         // pulled the card out from under the finger holding it and then
         // collapsed the island, so the words landed on a card nobody
         // could see and a reply could never be finished.
-        if cardHostsDictation, pane == .message, state == .expanded {
+        if cardMicDown, pane == .message, state == .expanded {
+            cardPressWentLive = true
             dictationVoice.reset()
             dictationLevel = 0
             dictationFill = 0
@@ -1877,9 +1917,16 @@ final class NotchViewModel: ObservableObject {
         // busy with their own sentence. The card steps aside completely
         // rather than sharing a screen with the strip.
         if pane == .message {
-            tearDownMessage()
-            pane = .none
-            islandWasOpenBeforeMessage = false
+            if messages.isMidReply {
+                // Their own sentence, into their own editor, exactly as
+                // rule 3 says. But a reply half written must not be the
+                // price of it: the strip borrows the island, and the card
+                // comes back when the hold ends (`endDictating`).
+                restoreCardAfterHold = true
+            } else {
+                pane = .none
+                islandWasOpenBeforeMessage = false
+            }
         }
         // Same handling as `startListening()`: a display already holding the
         // island keeps it unless dictation resolved one of its own, which it
@@ -1977,6 +2024,11 @@ final class NotchViewModel: ObservableObject {
         music.expandedVisible = false
         state = .collapsed
         expandedDisplayID = nil
+        // A reply was in progress when this hold took the island.
+        if restoreCardAfterHold {
+            restoreCardAfterHold = false
+            if pane == .message, messages.isShowing { expand(takeKey: false) }
+        }
     }
 
     /// The one door into a listening session, because the invariant
@@ -1991,6 +2043,10 @@ final class NotchViewModel: ObservableObject {
     /// inside 1.2 seconds and then click outside, and the app was deaf
     /// until relaunch.
     private func startListening() {
+        // A voice session and a message card cannot share the island. An
+        // unanswered card steps aside; a reply in progress is never the
+        // price of a hotkey, so that one refuses and says why on the card.
+        if pane == .message, !stepMessageAside() { return }
         // A listening session needs an owner display too, just like an
         // expansion — `state(_:expandedOn:face:)` treats `.listening`
         // the same as `.expanded`, so with no owner every face would

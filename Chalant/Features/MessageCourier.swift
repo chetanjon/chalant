@@ -337,7 +337,7 @@ final class MessageCourier {
 
     // MARK: - Who
 
-    enum Resolution {
+    enum Resolution: Equatable {
         case none
         case denied
         /// The Contacts dialog has not been answered yet; the ask
@@ -369,7 +369,11 @@ final class MessageCourier {
     /// Look the spoken name up in the user's address book. Nickname
     /// beats given name beats full name; several equal hits come back
     /// as a question instead of a guess.
-    nonisolated static func resolve(_ spokenName: String) async -> Resolution {
+    /// - Parameter strict: for a name READ OFF A BANNER rather than spoken.
+    ///   See `decide`.
+    nonisolated static func resolve(
+        _ spokenName: String, strict: Bool = false
+    ) async -> Resolution {
         // Anything not undetermined/denied/restricted passes (limited
         // access counts as a yes). The undetermined case fires the
         // ask without waiting and reports itself, so no caller ever
@@ -423,16 +427,60 @@ final class MessageCourier {
                 // was a lie (review-caught).
                 return .failed
             }
-            let tier = [exactNick, exactGiven, exactFull, prefixFull]
-                .first { !$0.isEmpty } ?? []
-            let reachable = tier.filter { Self.handle(for: $0) != nil }
-            guard !reachable.isEmpty else { return .none }
-            if reachable.count == 1, let contact = reachable.first,
-               let handle = Self.handle(for: contact) {
-                return .one(name: Self.displayName(contact), handle: handle)
+            func people(_ contacts: [CNContact]) -> [Person] {
+                contacts.map {
+                    Person(id: $0.identifier, name: Self.displayName($0),
+                           handle: Self.handle(for: $0))
+                }
             }
-            return .many(reachable.map(Self.displayName))
+            return Self.decide(
+                nick: people(exactNick), given: people(exactGiven),
+                full: people(exactFull), prefix: people(prefixFull),
+                strict: strict
+            )
         }.value
+    }
+
+    /// One contact, reduced to what deciding needs, so the decision can be
+    /// tested without an address book.
+    struct Person: Equatable {
+        let id: String
+        let name: String
+        let handle: String?
+    }
+
+    /// Who a name means.
+    ///
+    /// **Spoken**, the first tier with anybody in it wins (nickname, then
+    /// given name, then full name, then a full-name prefix). That is right
+    /// for a name somebody just said: they meant their "Mum", and the
+    /// read-back catches a wrong pick before anything is sent.
+    ///
+    /// **Strict** is for a name read off a notification banner, where
+    /// nobody chose anything and there is no read-back of the recipient to
+    /// catch a wrong one. There the question is not "which tier is best"
+    /// but "is there exactly ONE contact this could be". Every exact tier
+    /// counts together, a prefix never counts ("Sam" is not "Samantha"),
+    /// and two candidates of any kind is a refusal. A reply that cannot be
+    /// aimed with certainty is opened in Messages instead, where the
+    /// conversation itself is the address.
+    nonisolated static func decide(
+        nick: [Person], given: [Person], full: [Person], prefix: [Person],
+        strict: Bool
+    ) -> Resolution {
+        let pool: [Person]
+        if strict {
+            var seen = Set<String>()
+            pool = (nick + given + full).filter { seen.insert($0.id).inserted }
+        } else {
+            pool = [nick, given, full, prefix].first { !$0.isEmpty } ?? []
+        }
+        let reachable = pool.filter { $0.handle != nil }
+        guard !reachable.isEmpty else { return .none }
+        if reachable.count == 1, let person = reachable.first, let handle = person.handle {
+            return .one(name: person.name, handle: handle)
+        }
+        return .many(reachable.map(\.name))
     }
 
     /// Mobile first, then any phone, then an email; iMessage answers

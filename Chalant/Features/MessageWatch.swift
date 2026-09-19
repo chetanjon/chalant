@@ -49,9 +49,18 @@ final class MessageWatch {
     }
 
     struct Sighting: Equatable {
+        /// Identity, so "is this still the card that asked" never comes
+        /// down to two messages that happen to read the same.
+        var id = UUID()
         let sender: String
         let body: String
         let seen: Date
+        /// How many lines of text the banner carried. Every one-to-one
+        /// message measured so far carried exactly two, sender and
+        /// message (sixteen of sixteen, 2026-09-16). Anything else is a
+        /// shape nobody has measured, a group thread most likely, and the
+        /// card will not aim a reply at it.
+        var lineCount = 2
     }
 
     /// What Messages is called on this Mac, in this language. Asked of
@@ -123,7 +132,7 @@ final class MessageWatch {
         // No body is previews turned off: the banner says somebody
         // wrote, never what, and there is nothing to reply to.
         guard !sender.isEmpty, !body.isEmpty else { return nil }
-        return Sighting(sender: sender, body: body, seen: now)
+        return Sighting(sender: sender, body: body, seen: now, lineCount: lines.count)
     }
 
     /// Did Messages post this banner?

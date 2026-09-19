@@ -409,9 +409,14 @@ struct ExpandedView: View {
                     talkRelease: { held in model.messageTalkRelease(held: held) },
                     send: {
                         Task {
+                            let card = model.messages.sighting?.id
                             guard await model.messages.send() else { return }
                             // Long enough to read who it went to.
                             try? await Task.sleep(for: .seconds(1.6))
+                            // Only the card that sent. A newer message may
+                            // have taken its place in those 1.6 seconds, and
+                            // closing THAT would swallow a text unread.
+                            guard model.messages.sighting?.id == card else { return }
                             model.closeMessage()
                         }
                     },

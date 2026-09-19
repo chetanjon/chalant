@@ -262,13 +262,87 @@ final class MessageReplyTests: XCTestCase {
         XCTAssertFalse(reply.isShowing)
     }
 
-    func testATouchedCardNeverFades() async throws {
+    /// Words in the field are a reply in progress. It stays.
+    func testACardWithWordsInItNeverFades() async throws {
         let reply = MessageReply(courier: Fake().courier, life: 0.05)
         reply.show(sam, onFade: {})
         reply.touch()
+        reply.draft = "on my"
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertTrue(reply.isShowing)
-        XCTAssertTrue(reply.engaged)
+    }
+
+    /// One stray click must not pin a card open for ever: a touched card
+    /// that then sits empty and idle for a whole life is unattended
+    /// again. Left up, it blocked every later message as "mid-reply".
+    func testATouchedButAbandonedCardStillGoes() async throws {
+        let reply = MessageReply(courier: Fake().courier, life: 0.05)
+        reply.show(sam, onFade: {})
+        reply.touch()
+        XCTAssertTrue(reply.isMidReply, "clicked into: the next keystroke is this conversation's")
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertFalse(reply.isShowing)
+    }
+
+    /// A shape nobody has measured, a group thread most likely. Every
+    /// one-to-one message seen so far carried exactly two lines.
+    func testAnUnmeasuredBannerShapeIsNeverRepliedTo() async {
+        let fake = Fake()
+        var group = MessageWatch.Sighting(sender: "Sam", body: "Ravi: dinner?", seen: Date())
+        group.lineCount = 3
+        let reply = await shown(fake, group)
+
+        guard case .cannotReply = reply.recipient else {
+            return XCTFail("a three line banner must not resolve to one person")
+        }
+        reply.draft = "yes"
+        XCTAssertFalse(reply.canSend)
+    }
+
+    /// The controller refused the hold. The card says so instead of
+    /// "Got it" over a microphone that was never open.
+    func testARefusedHoldSaysSoInsteadOfPretending() async {
+        let reply = await shown(Fake())
+        reply.talkPressed()
+        reply.talkRefused()
+        XCTAssertEqual(reply.phase, .idle)
+        XCTAssertEqual(reply.hint, "Dictation isn't ready yet. Type your reply for now.")
+    }
+
+    /// Messages took a moment. By the time it answered, Ravi's message
+    /// had taken the card. "Sent to Sam" must not appear under Ravi.
+    func testASendResultNeverLandsOnADifferentCard() async {
+        let fake = Fake()
+        let swap = SwapOnSend(resolve: fake.courier.resolve, replacement: ravi)
+        let reply = MessageReply(courier: swap.courier)
+        swap.subject = reply
+        reply.show(sam, onFade: {})
+        await settle()
+        reply.draft = "on my way"
+        _ = await reply.send()
+
+        XCTAssertEqual(reply.sighting?.sender, "Ravi")
+        XCTAssertEqual(reply.phase, .idle, "Ravi's card must not read Sent to Sam")
+        XCTAssertEqual(reply.draft, "", "and Sam's words must not sit under Ravi's name")
+    }
+
+    /// A courier whose send replaces the card mid-flight, the way a
+    /// second text arriving during a slow send does.
+    private final class SwapOnSend {
+        let resolve: (String) async -> MessageCourier.Resolution
+        let replacement: MessageWatch.Sighting
+        weak var subject: MessageReply?
+        init(resolve: @escaping (String) async -> MessageCourier.Resolution,
+             replacement: MessageWatch.Sighting) {
+            self.resolve = resolve
+            self.replacement = replacement
+        }
+        @MainActor var courier: MessageReply.Courier {
+            MessageReply.Courier(resolve: resolve, send: { [self] _, _, _ in
+                await MainActor.run { subject?.show(replacement, onFade: {}) }
+                return .sent(name: "Sam Ali")
+            })
+        }
     }
 
     /// What decides whether a newer message may take the card.

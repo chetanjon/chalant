@@ -189,6 +189,21 @@ final class MessageWatchTests: XCTestCase {
         XCTAssertEqual(seen?.body, "we land at six")
     }
 
+    /// The sighting records how many lines the banner had, because two
+    /// is the only shape ever measured for a one-to-one message and the
+    /// card refuses to aim a reply at any other.
+    func testTheSightingRecordsHowManyLinesTheBannerHad() {
+        let plain = MessageWatch.sighting(from: banner(texts: ["Sam", "hello"]))
+        XCTAssertEqual(plain?.lineCount, 2)
+
+        let threaded = MessageWatch.Banner(
+            texts: ["Family", "Sam", "who is cooking"],
+            identifiers: [],
+            descriptions: ["Messages, Family, Sam, who is cooking"]
+        )
+        XCTAssertEqual(MessageWatch.sighting(from: threaded)?.lineCount, 3)
+    }
+
     func testTheSightingCarriesWhenItWasSeen() {
         let when = Date(timeIntervalSince1970: 1_000)
         let seen = MessageWatch.sighting(

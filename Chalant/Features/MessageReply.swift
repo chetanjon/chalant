@@ -68,7 +68,9 @@ final class MessageReply: ObservableObject {
                     if let literal = MessageCourier.literalHandle(sender) {
                         return .one(name: sender, handle: literal)
                     }
-                    return await MessageCourier.resolve(sender)
+                    // Strict: a banner title is nobody's choice, so it
+                    // must mean exactly one contact or it means nobody.
+                    return await MessageCourier.resolve(sender, strict: true)
                 },
                 send: { name, handle, body in
                     // Staged and confirmed in one breath. The courier's
@@ -76,7 +78,18 @@ final class MessageReply: ObservableObject {
                     // arrives long after a read-back; here the words are
                     // on screen under the button being pressed.
                     courier.stage(name: name, handle: handle, body: body)
-                    return await courier.confirmSendOutcome()
+                    var outcome = await courier.confirmSendOutcome()
+                    // With Messages closed, the first ask only wakes it.
+                    // The person pressed Send once; they should not have
+                    // to press it again to find out it was always going
+                    // to work.
+                    var tries = 0
+                    while outcome == .wakingUp, tries < 4 {
+                        tries += 1
+                        try? await Task.sleep(for: .milliseconds(900))
+                        outcome = await courier.confirmSendOutcome()
+                    }
+                    return outcome
                 }
             )
         }
@@ -131,6 +144,10 @@ final class MessageReply: ObservableObject {
     /// under another person's name.
     var isMidReply: Bool {
         guard isShowing else { return false }
+        // Clicked into, even with nothing written yet: the next keystroke
+        // belongs to THIS conversation. A newer message sliding in under
+        // the cursor would put those words under someone else's name.
+        if engaged { return true }
         switch phase {
         case .idle, .failed:
             return !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -164,14 +181,22 @@ final class MessageReply: ObservableObject {
         draft = ""
         hint = nil
         engaged = false
-        hovering = false
+        // `hovering` is deliberately kept: a card replaced under the
+        // pointer is still under the pointer, and resetting it made the
+        // new card fade while somebody was reading it.
         armFade()
 
+        guard sighting.lineCount == 2 else {
+            recipient = .cannotReply(
+                "This looks like a group or a thread Chalant hasn't seen before, so it won't guess who a reply would reach. Reply in Messages."
+            )
+            return
+        }
         Task { [weak self] in
             guard let self else { return }
             let answer = await courier.resolve(sighting.sender)
             // The card may have moved on while Contacts was thinking.
-            guard self.sighting == sighting else { return }
+            guard self.sighting?.id == sighting.id else { return }
             recipient = Self.recipient(for: answer, sender: sighting.sender)
         }
     }
@@ -208,18 +233,29 @@ final class MessageReply: ObservableObject {
     /// person's now, and it stays until they are done with it.
     func touch() {
         engaged = true
-        fade?.cancel()
-        fade = nil
+        armFade()
+    }
+
+    private var isUnattended: Bool {
+        guard isShowing, !hovering else { return false }
+        guard draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        switch phase {
+        case .idle, .failed: return true
+        default: return false
+        }
     }
 
     private func armFade() {
         fade?.cancel()
         fade = nil
-        // Only an untouched, idle card fades. One being read, written
-        // in, or sent from is not unattended.
-        guard isShowing, !engaged, !hovering else { return }
+        // Only an unattended card fades: nothing written, nothing in
+        // flight, nobody's pointer on it. A touched card counts as
+        // unattended again once it has sat empty and idle for a whole
+        // life; otherwise one stray click would pin a card open for ever
+        // and block every later message behind it.
+        guard isUnattended else { return }
         let work = DispatchWorkItem { [weak self] in
-            guard let self, isShowing, !engaged, !hovering else { return }
+            guard let self, isUnattended else { return }
             let done = onFade
             dismiss()
             done?()
@@ -253,9 +289,26 @@ final class MessageReply: ObservableObject {
             guard let self, phase == .hearing else { return }
             phase = .idle
             hint = "I didn't catch that. Try again, or type it."
+            armFade()
         }
         hearingTimeout = work
         DispatchQueue.main.asyncAfter(deadline: .now() + hearingPatience, execute: work)
+    }
+
+    /// The hold was long enough to have gone live and never did: the
+    /// model is still downloading, or the microphone is not granted. The
+    /// first build said "Listening" and then "Got it" over a dead mic.
+    func talkRefused() {
+        guard phase == .listening else { return }
+        phase = .idle
+        hint = "Dictation isn't ready yet. Type your reply for now."
+        armFade()
+    }
+
+    /// Something the island needs the person to know, said on the card
+    /// because the card is what they are looking at.
+    func note(_ line: String) {
+        hint = line
     }
 
     /// Words came back from dictation, for the card that asked for them.
@@ -264,11 +317,14 @@ final class MessageReply: ObservableObject {
     /// down. If a different one is showing now, the words are dropped:
     /// a sentence spoken to one person never lands under another's name.
     func heard(_ text: String, for asked: MessageWatch.Sighting) {
-        guard let sighting, sighting == asked else { return }
+        guard let sighting, sighting.id == asked.id else { return }
         hearingTimeout?.cancel()
         hearingTimeout = nil
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if phase == .hearing || phase == .listening { phase = .idle }
+        // Only "hearing" ends here. Words from an earlier hold can arrive
+        // while the mic is down again, and flipping to idle then would
+        // show a resting card under a finger that is still talking.
+        if phase == .hearing { phase = .idle }
         guard !words.isEmpty else {
             hint = "I didn't catch that. Try again, or type it."
             return
@@ -290,9 +346,15 @@ final class MessageReply: ObservableObject {
         touch()
         hint = nil
         phase = .sending
+        let sender = sighting?.id
         let outcome = await courier.send(name, handle, body)
-        // Dismissed while Messages was working: nothing to report to.
-        guard isShowing else { return outcome == .sent(name: name) }
+        // Dismissed or replaced while Messages was working: the result
+        // belongs to a card that is gone. Writing it onto whatever is up
+        // now would put "Sent to Sam" under Ravi's message.
+        guard let sender, sighting?.id == sender else {
+            if case .sent = outcome { return true }
+            return false
+        }
         switch outcome {
         case .sent(let sentTo):
             draft = ""

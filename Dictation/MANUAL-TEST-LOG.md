@@ -91,9 +91,48 @@ notification panel opened at 20:54 carried eleven lines and fifty-four
 descriptions and was refused, and FaceTime notifications
 (`FACETIME_NOTIFICATION`, `lines=0`) were refused too.
 
+### 5. 2026-09-19: the card appears on real messages, and the first build could not be replied from
+
+The founder confirmed a card popped on a real incoming iMessage, which closes
+the display question. Two review rounds then found the first build broken in
+ways no test had caught, each confirmed by reading the code before it was
+touched:
+
+| Found | What a person met |
+|---|---|
+| The tour's GLOBAL dictation landing was borrowed for the card's life | A plain Option hold landed in the card (the rule the founder had been told was kept). A card closed by a click left it armed, silently eating dictation until relaunch. |
+| A hold flips the island to `.dictating` and then collapses it | Holding the reply button removed the card from under the finger; the words landed on a card nobody could see. **A reply could never be finished.** |
+| `isStaged == false` was the only success signal | A stale draft showed "Sent." though nothing left. |
+| `isMidInteraction` includes `pane != .none` | The card counted as "island in use": newest never won. |
+| Courier strings written for the voice path | A card with buttons said "Say send" and "say it again". |
+| Second round: the landing was still global, for one press plus 8 s | An Option hold inside that window still landed in the card, and a card closed mid-finalize **typed the private reply into the front app**. |
+| Banner titles resolved with the voice path's fuzzy tiers | "Sam" could resolve to "Samantha", or to a nickname over a given name, with no read-back of the recipient to catch it. |
+
+What replaced it: one reply field (talk or type, Return or the arrow sends what
+it shows); a landing that travels WITH the press (`DictationController.
+sessionLandings`), so the Option key can never carry one and words for a card
+that has gone are dropped rather than typed; a hold the card starts leaves the
+island as it is; the courier answers with a `SendOutcome` instead of a
+sentence; strict recipient resolution (exactly one contact across every exact
+tier, a prefix never counts); and one teardown, on `pane` itself.
+
+Looked at in a Debug build through the `debug message` command (the card needs
+no banner to be looked at): the card is the whole island, the field reads as a
+chat field, the send arrow exists only with words, and the caption says "Not
+sent yet" and names who it goes to.
+
 ### Still not run
 
-**Nobody has watched a card appear, or sent a reply from one.** The log
+**Nobody has sent a reply from the redesigned card on a real conversation.**
+The Debug build cannot: it has its own TCC identity, so no Contacts, no
+Messages automation. It needs the signed build, a real incoming text, and the
+founder's hand on the mic. Also unmeasured: a named group banner, an unnamed
+group banner, and a green-bubble SMS banner. The card fails closed on any
+banner that is not the measured two-line shape, but an SMS sender produces
+exactly that shape and the reply is forced onto iMessage, where AppleScript
+reports success and Messages may show Not Delivered.
+
+**Nobody has watched a card appear, or sent a reply from one** (superseded above). The log
 proves the message was recognized; it did not, until now, record what
 became of it. A `message-card` line was added for exactly that: it says
 `shown`, or which rule refused it (`mid-hold`, `island-in-use`,

@@ -217,6 +217,15 @@ final class Dictation {
         live.press()
     }
 
+    /// A press that brings its own landing: the words of THIS hold go to
+    /// `landing` and nowhere else, and no other hold is affected. The
+    /// message card's mic uses this; see `DictationController.sessionLandings`
+    /// for why it must never borrow the tour's global slot.
+    func press(landingIn landing: @escaping (String) -> Void) {
+        guard #available(macOS 26, *), let live = stack as? DictationStack else { return }
+        live.press(landing: landing)
+    }
+
     func practiceRelease() {
         guard #available(macOS 26, *), let live = stack as? DictationStack else { return }
         live.release()
@@ -273,6 +282,8 @@ private final class DictationStack {
     }
 
     /// The same two calls the event tap makes, from a button instead.
-    func press() { Task { await controller.keyDown() } }
+    func press(landing: ((String) -> Void)? = nil) {
+        Task { await controller.keyDown(landing: landing) }
+    }
     func release() { Task { await controller.keyUp() } }
 }

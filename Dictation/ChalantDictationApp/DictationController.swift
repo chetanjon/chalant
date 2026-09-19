@@ -37,6 +37,23 @@ final class DictationController {
     /// they have seen it work rather than before (the risk register's
     /// "design onboarding around a single scripted success").
     var practiceLanding: ((String) -> Void)?
+    /// A landing that belongs to ONE press, keyed by that press's session.
+    ///
+    /// The island's message card dictates a reply through its own mic
+    /// button. It first borrowed `practiceLanding` above, and that slot is
+    /// global: while it is set EVERY hold lands there, the Option key
+    /// included. So a text arriving while somebody dictated into their editor
+    /// took their next sentence, a card closed mid-finalize sent a private
+    /// reply into whatever app was in front, and a slot left armed swallowed
+    /// dictation until relaunch (two review rounds, 2026-09-19).
+    ///
+    /// A landing handed in WITH the press cannot do any of that. The Option
+    /// key never brings one, so its words can only ever go where they always
+    /// went. A session that brought one delivers to it and to nothing else:
+    /// if whoever asked has gone, the closure drops the words, and they are
+    /// never typed anywhere. `practiceLanding` stays for the tour, whose
+    /// whole point is that the Option hold itself lands in the try-it card.
+    private var sessionLandings: [Int: (String) -> Void] = [:]
     /// Whatever shows that dictation is listening. Chalant hands in its
     /// island; the panel this used to own is gone.
     private let surface: any DictationSurface
@@ -381,9 +398,13 @@ final class DictationController {
 
     // MARK: - The chain
 
-    func keyDown() async {
+    func keyDown(landing: ((String) -> Void)? = nil) async {
         // A new press retires everything the last one might still be doing.
         sessionID &+= 1
+        // Only the previous session can still be finishing; anything older
+        // was refused or abandoned before it ever reached a key-up.
+        sessionLandings = sessionLandings.filter { $0.key == sessionID &- 1 }
+        if let landing { sessionLandings[sessionID] = landing }
         beginUtteranceActivity()
         retirePendingSwap()
         earRestTask?.cancel()
@@ -956,6 +977,12 @@ final class DictationController {
         // nothing is inserted anywhere, and no app is touched. The corpus
         // keeps nothing either, because a practice sentence has no app and
         // no document to be right or wrong in.
+        if let owned = sessionLandings.removeValue(forKey: session) {
+            await corpus.discard()
+            Self.log.info("session landing: \(text.count, privacy: .public) chars")
+            owned(text)
+            return
+        }
         if let practiceLanding {
             await corpus.discard()
             Self.log.info("practice landing: \(text.count, privacy: .public) chars")

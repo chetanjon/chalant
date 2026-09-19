@@ -59,6 +59,9 @@ struct MessageCard: View {
         .padding(Theme.Space.l)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onHover { reply.hover($0) }
+        // SwiftUI sends no hover(false) when a view is removed, and a
+        // pointer flag that outlives its view pins the next card open.
+        .onDisappear { reply.hover(false) }
         // Escape leaves, once the card has the keyboard. It never takes
         // the keyboard by itself, so this cannot steal a keystroke from
         // whatever the person was typing in when the message arrived.
