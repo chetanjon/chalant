@@ -369,20 +369,43 @@ final class NotchViewModel: ObservableObject {
         role: ChalantRole, micIsLive: Bool, expanded: Bool, midInteraction: Bool,
         welcomeIsUp: Bool = false
     ) -> Bool {
-        guard role != .dictation else { return false }
-        guard !micIsLive else { return false }
-        guard !welcomeIsUp else { return false }
-        return !expanded || !midInteraction
+        messageBlockReason(
+            role: role, micIsLive: micIsLive, expanded: expanded,
+            midInteraction: midInteraction, welcomeIsUp: welcomeIsUp
+        ) == nil
+    }
+
+    /// The same rule, saying which one stopped it. `nil` means the card
+    /// may show.
+    ///
+    /// A reason rather than a bare no, because the one question the
+    /// banner log could not answer was "it saw my message, so why did
+    /// nothing appear". Now it answers that itself.
+    static func messageBlockReason(
+        role: ChalantRole, micIsLive: Bool, expanded: Bool, midInteraction: Bool,
+        welcomeIsUp: Bool = false
+    ) -> String? {
+        if role == .dictation { return "dictation-only" }
+        if micIsLive { return "mid-hold" }
+        if welcomeIsUp { return "welcome-tour" }
+        if expanded, midInteraction { return "island-in-use" }
+        return nil
     }
 
     private func showMessage(_ sighting: MessageWatch.Sighting) {
-        guard Self.messageMayShow(
+        let blocked = Self.messageBlockReason(
             role: ChalantRole.current,
             micIsLive: micIsLive,
             expanded: state == .expanded,
             midInteraction: isMidInteraction,
             welcomeIsUp: pane == .welcome
-        ) else { return }
+        )
+        // Nothing about the message itself, only what became of it.
+        WireLog.note(
+            event: "message-card", ntype: blocked ?? "shown",
+            tool: "messages", response: blocked == nil ? "card up" : "no card"
+        )
+        guard blocked == nil else { return }
         islandWasOpenBeforeMessage = state == .expanded
         messages.show(sighting) { [weak self] in self?.closeMessage() }
         // The card holds the landing spot only while it is up, and only

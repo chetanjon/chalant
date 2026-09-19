@@ -70,13 +70,35 @@ capture put a phone number and a voicemail transcript into `wire.log`
 under a comment promising it never would. The line was deleted and a test
 now fails if a body or a sender reaches the log again.
 
+### 4. CONFIRMED on real messages, 2026-09-16
+
+The build ran on this Mac for a day. **Sixteen real Messages banners were
+recognized**, every one of them the same shape:
+
+```
+2026-09-16 13:41:55  banner  type=Notification Center|Messages  tool=messages  -> lines=2 fields=2
+2026-09-16 15:54:05  banner  type=Notification Center|Messages  tool=messages  -> lines=2 fields=2
+2026-09-16 17:01:18  banner  type=Notification Center|Messages  tool=messages  -> lines=2 fields=2
+```
+
+`Messages` is the first field of the notification's description, there is
+exactly one notification in the window, and the two static texts are the
+sender and the message. **The inference the feature rested on is now a
+measurement.** Nothing was loosened to make this pass.
+
+The same day also confirmed the refusals working on real traffic: the
+notification panel opened at 20:54 carried eleven lines and fifty-four
+descriptions and was refused, and FaceTime notifications
+(`FACETIME_NOTIFICATION`, `lines=0`) were refused too.
+
 ### Still not run
 
-**A real Messages banner has never been read.** Everything above was
-measured with a synthetic notification, so the `App, title, body` shape is
-proven but "Messages" appearing in that first field is inferred, not seen.
-The next incoming text on this Mac settles it, and the wire log captures it
-without anyone having to be watching.
+**Nobody has watched a card appear, or sent a reply from one.** The log
+proves the message was recognized; it did not, until now, record what
+became of it. A `message-card` line was added for exactly that: it says
+`shown`, or which rule refused it (`mid-hold`, `island-in-use`,
+`welcome-tour`, `dictation-only`). The next real message on a running build
+leaves that evidence by itself.
 
 ---
 

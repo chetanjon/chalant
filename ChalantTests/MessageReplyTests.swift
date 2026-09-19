@@ -232,6 +232,37 @@ final class MessageMayShowTests: XCTestCase {
         )
     }
 
+    /// Every refusal names itself, so a log can answer "it saw my
+    /// message, why did nothing appear".
+    func testEveryRefusalSaysWhich() {
+        XCTAssertEqual(
+            NotchViewModel.messageBlockReason(
+                role: .dictation, micIsLive: false, expanded: false, midInteraction: false
+            ), "dictation-only"
+        )
+        XCTAssertEqual(
+            NotchViewModel.messageBlockReason(
+                role: .island, micIsLive: true, expanded: false, midInteraction: false
+            ), "mid-hold"
+        )
+        XCTAssertEqual(
+            NotchViewModel.messageBlockReason(
+                role: .island, micIsLive: false, expanded: true,
+                midInteraction: false, welcomeIsUp: true
+            ), "welcome-tour"
+        )
+        XCTAssertEqual(
+            NotchViewModel.messageBlockReason(
+                role: .island, micIsLive: false, expanded: true, midInteraction: true
+            ), "island-in-use"
+        )
+        XCTAssertNil(
+            NotchViewModel.messageBlockReason(
+                role: .both, micIsLive: false, expanded: false, midInteraction: false
+            )
+        )
+    }
+
     /// The tour owns the same landing spot, and its exit would clear
     /// the card's. A first run is also the worst moment to be texted.
     func testTheWelcomeTourIsNeverInterrupted() {
