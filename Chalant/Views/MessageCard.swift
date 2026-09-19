@@ -1,29 +1,42 @@
 import SwiftUI
 
-/// The message that just arrived, and the reply being spoken into it.
+/// The message that just arrived, and the reply being written into it.
 ///
 /// Reads top down the way the moment does: who wrote, what they said,
-/// then the one thing to do about it. No pills behind anything that is
-/// merely selected (law 1), no dividers (law 2), and the send button
-/// exists only once there are words to send (law 5).
+/// then one reply field. Talking fills the field, typing fills the
+/// field, and Send or Return sends exactly what it shows. It is the
+/// session composer's idiom (field, mic, a send arrow that exists only
+/// once there are words) because that is the shape every chat app has
+/// already taught, and nothing here should need learning.
 ///
-/// The reply button holds dictation itself rather than letting a plain
-/// Option hold reach the card. That is deliberate: a text arriving
-/// while somebody dictates into their editor must never turn the next
-/// sentence into an outgoing message.
+/// Laws kept: no pills behind anything merely selected (law 1), air
+/// rather than dividers (law 2), and a control appears only when it can
+/// do something (law 5). That last one is load bearing: the reply
+/// controls exist only when Contacts has placed the sender, the mic only
+/// when dictation is running, the send arrow only with words to send.
+/// The first build showed a talk button that said "Listening." while
+/// nothing listened.
 struct MessageCard: View {
     @ObservedObject var reply: MessageReply
-    @Environment(\.chalantAccent) private var accent
-
-    /// Press and hold these to talk: the same two calls the Option key
-    /// makes, so a refused Input Monitoring cannot make the card
-    /// silently do nothing.
-    var press: () -> Void
-    var release: () -> Void
+    /// The live mic level while the card hosts a hold, 0...1.
+    var level: CGFloat
+    /// Whether dictation can run at all right now.
+    var canTalk: Bool
+    var talkPress: () -> Void
+    var talkRelease: (_ held: Bool) -> Void
     var send: () -> Void
+    var openInMessages: () -> Void
     var dismiss: () -> Void
 
-    @State private var talking = false
+    @Environment(\.chalantAccent) private var accent
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var fieldFocused: Bool
+    @State private var pressedAt: Date?
+
+    /// Shorter than this and the press was a click, not a hold. Long
+    /// enough that a deliberate tap never starts a recording, short
+    /// enough that nobody waits to be heard.
+    private static let holdThreshold: TimeInterval = 0.25
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
@@ -32,59 +45,88 @@ struct MessageCard: View {
                 Text(sighting.body)
                     .font(Theme.Fonts.reading)
                     .foregroundStyle(Theme.textPrimary)
+                    // A long text must not make the island as tall as
+                    // the message and push the reply off the screen. The
+                    // whole of it is one press away, in Messages.
+                    .lineLimit(6)
+                    .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
             }
-            stage
+            answer
         }
         .padding(Theme.Space.l)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onHover { reply.hover($0) }
+        // Escape leaves, once the card has the keyboard. It never takes
+        // the keyboard by itself, so this cannot steal a keystroke from
+        // whatever the person was typing in when the message arrived.
+        .onExitCommand(perform: dismiss)
+        .onChange(of: fieldFocused) { _, focused in
+            if focused { reply.touch() }
+        }
+        .onChange(of: reply.phase) { _, phase in announce(phase) }
+        .animation(reduceMotion ? nil : Theme.Motion.content, value: reply.phase)
+        .animation(reduceMotion ? nil : Theme.Motion.content, value: reply.recipient)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Message from \(reply.sighting?.sender ?? "")")
     }
 
+    // MARK: - Who and what
+
     private func header(_ sighting: MessageWatch.Sighting) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.m) {
+        HStack(alignment: .center, spacing: Theme.Space.s) {
+            // Says "this is a text message" before a word is read.
+            Image(systemName: "message.fill")
+                .font(Theme.Fonts.icon(.s))
+                .foregroundStyle(accent)
+                .accessibilityHidden(true)
             Text(sighting.sender)
                 .font(Theme.Fonts.headline)
                 .foregroundStyle(Theme.textPrimary)
-            Spacer(minLength: 0)
-            Button(action: dismiss) {
-                Image(systemName: "xmark")
-                    .font(Theme.Fonts.icon(.s))
-                    .foregroundStyle(Theme.textTertiary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Dismiss")
+                .lineLimit(1)
+            Spacer(minLength: Theme.Space.m)
+            HoverGlyphButton(
+                symbol: "arrow.up.forward.app", label: "Open in Messages",
+                scale: .s, action: openInMessages
+            )
+            HoverGlyphButton(symbol: "xmark", label: "Dismiss", scale: .s, action: dismiss)
+                // Live during a send, it would read as "cancel" and
+                // cannot be one: the message is already with Messages.
+                .disabled(reply.phase == .sending)
+                .opacity(reply.phase == .sending ? 0.3 : 1)
         }
     }
 
+    // MARK: - The reply
+
     @ViewBuilder
-    private var stage: some View {
-        switch reply.stage {
-        case .waiting:
-            HStack(spacing: Theme.Space.m) {
-                talkButton
-                Text(talking ? "" : "Let go and Chalant shows you the words before anything sends.")
-                    .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        case .drafted(let words):
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
-                Text(words)
-                    .font(Theme.Fonts.reading)
-                    .foregroundStyle(Theme.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(Theme.Space.m)
-                    .background(
-                        RoundedRectangle(
-                            cornerRadius: Theme.Radius.artwork, style: .continuous
-                        )
-                        .strokeBorder(accent.opacity(0.30), lineWidth: 1)
-                    )
-                HStack(spacing: Theme.Space.m) {
-                    Button(action: send) {
-                        Text("Send")
+    private var answer: some View {
+        if case .sent(let name) = reply.phase {
+            Label("Sent to \(name)", systemImage: "checkmark.circle.fill")
+                .font(Theme.Fonts.subhead)
+                .foregroundStyle(accent)
+                .transition(.opacity)
+        } else {
+            switch reply.recipient {
+            case .checking:
+                // Contacts answers in a blink. Showing a spinner for it
+                // would be louder than the wait.
+                EmptyView()
+            case .known(let name, _):
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    field(for: name)
+                    caption(for: name)
+                }
+            case .cannotReply(let why):
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    Text(why)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(action: openInMessages) {
+                        Text("Open in Messages")
                             .font(Theme.Fonts.subhead)
                             .foregroundStyle(.black)
                             .padding(.horizontal, Theme.Space.l)
@@ -92,56 +134,141 @@ struct MessageCard: View {
                             .background(Capsule().fill(accent))
                     }
                     .buttonStyle(PressableStyle())
-                    talkButton
                 }
-            }
-        case .sending:
-            Text("Sending.")
-                .font(Theme.Fonts.caption)
-                .foregroundStyle(Theme.textTertiary)
-        case .sent:
-            Text("Sent.")
-                .font(Theme.Fonts.caption)
-                .foregroundStyle(accent)
-        case .refused(let why):
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
-                Text(why)
-                    .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                talkButton
             }
         }
     }
 
-    /// Press and hold to talk, the same gesture the tour's try-it card
-    /// uses, so one muscle memory covers both.
-    private var talkButton: some View {
-        Text(talking ? "Listening. Let go when done." : replyLabel)
-            .font(Theme.Fonts.subhead)
-            .foregroundStyle(talking ? .black : Theme.textPrimary)
-            .padding(.horizontal, Theme.Space.l)
-            .padding(.vertical, Theme.Space.s)
-            .background(Capsule().fill(talking ? accent : Theme.hairlineFaint))
-            .contentShape(Capsule())
+    private func field(for name: String) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            TextField(placeholder(for: name), text: $reply.draft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(Theme.Fonts.body)
+                .lineLimit(1...4)
+                .focused($fieldFocused)
+                .onSubmit(send)
+                .disabled(reply.phase == .sending || reply.phase == .listening)
+                .accessibilityLabel("Reply to \(name)")
+            if canTalk { mic }
+            if reply.canSend {
+                HoverGlyphButton(
+                    symbol: "arrow.up.circle.fill", label: "Send to \(name)",
+                    scale: .m, tint: accent, action: send
+                )
+                .transition(.opacity)
+            }
+        }
+        .padding(Theme.Space.m)
+        .chalantField(active: fieldFocused || reply.phase == .listening)
+    }
+
+    private func placeholder(for name: String) -> String {
+        switch reply.phase {
+        case .listening: return "Listening"
+        case .hearing: return "Writing that down"
+        default: return "Reply to \(first(of: name))"
+        }
+    }
+
+    /// Press and hold to talk. The gesture measures its own length so a
+    /// click can be told from a hold: a click starts nothing, and the
+    /// card says so rather than silently doing nothing.
+    private var mic: some View {
+        let listening = reply.phase == .listening
+        return Image(systemName: listening ? "mic.fill" : "mic")
+            .font(Theme.Fonts.icon(.m))
+            .foregroundStyle(listening ? accent : Theme.textSecondary)
+            .frame(width: 28, height: 28)
+            .background(
+                Circle()
+                    .fill(accent.opacity(listening ? 0.18 : 0))
+                    // The ring breathes with the voice, so holding it
+                    // feels heard rather than merely pressed.
+                    .scaleEffect(listening && !reduceMotion ? 1 + level * 0.9 : 1)
+                    .animation(reduceMotion ? nil : Theme.Motion.hover, value: level)
+            )
+            .contentShape(Circle())
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in
-                        guard !talking else { return }
-                        talking = true
-                        press()
+                        guard pressedAt == nil else { return }
+                        pressedAt = Date()
+                        talkPress()
                     }
                     .onEnded { _ in
-                        guard talking else { return }
-                        talking = false
-                        release()
+                        guard let began = pressedAt else { return }
+                        pressedAt = nil
+                        talkRelease(Date().timeIntervalSince(began) >= Self.holdThreshold)
                     }
             )
+            .help("Hold to talk")
+            .accessibilityElement()
+            .accessibilityLabel("Hold to talk your reply")
+            .accessibilityHint("Your words appear in the reply field. Nothing is sent until you press Send.")
+            .accessibilityAddTraits(.isButton)
+            // The card going away mid-hold must never leave the mic hot.
+            .onDisappear {
+                guard pressedAt != nil else { return }
+                pressedAt = nil
+                talkRelease(false)
+            }
     }
 
-    private var replyLabel: String {
-        if case .drafted = reply.stage { return "Say it again" }
-        if case .refused = reply.stage { return "Try again" }
-        return "Press and hold to reply"
+    /// One quiet line that always says the thing most worth knowing
+    /// right now. It used to open with "Let go" before anyone had
+    /// pressed anything, and go blank while they talked.
+    private func caption(for name: String) -> some View {
+        let line: String
+        var tone = Theme.textTertiary
+        switch reply.phase {
+        case .listening:
+            line = "Listening. Let go when you are done."
+        case .hearing:
+            line = "Got it. Writing that down."
+        case .sending:
+            line = "Sending to \(name)."
+        case .failed(let why):
+            line = why
+            tone = Theme.textSecondary
+        case .idle, .sent:
+            if let hint = reply.hint {
+                line = hint
+                tone = Theme.textSecondary
+            } else if reply.canSend {
+                line = "Not sent yet. Press Return or the arrow to send it to \(name)."
+            } else if canTalk {
+                line = "Type a reply, or hold the mic and talk."
+            } else {
+                line = "Type a reply and press Return."
+            }
+        }
+        return Text(line)
+            .font(Theme.Fonts.caption)
+            .foregroundStyle(tone)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// "Reply to Sam", not "Reply to Sam Ali". A sender who is a number
+    /// or an address has no first name, and splitting one on its spaces
+    /// produced "Reply to +1".
+    private func first(of name: String) -> String {
+        guard MessageCourier.literalHandle(name) == nil else { return name }
+        return name.split(separator: " ").first.map(String.init) ?? name
+    }
+
+    /// State changes said aloud for anyone not looking at the card.
+    private func announce(_ phase: MessageReply.Phase) {
+        let words: String?
+        switch phase {
+        case .listening: words = "Listening"
+        case .hearing: words = "Writing that down"
+        case .sending: words = "Sending"
+        case .sent(let name): words = "Sent to \(name)"
+        case .failed(let why): words = why
+        case .idle: words = reply.draft.isEmpty ? nil : "Reply ready. Not sent yet."
+        }
+        guard let words else { return }
+        AccessibilityNotification.Announcement(words).post()
     }
 }

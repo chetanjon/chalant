@@ -3,191 +3,300 @@ import XCTest
 
 /// The card's behaviour, with nobody's phone involved.
 ///
-/// The rules under test are the three the feature was agreed on: a
-/// moment rather than an inbox, nothing sent without a second press,
-/// and never a guess about who.
+/// Every test here is one of the founder's rules or one of the failures
+/// the 2026-09-19 audit found in the first build: a reply that could be
+/// dictated and then never sent, "Sent." shown for a message that never
+/// left, a draft thrown away by the next text, spoken-command wording on
+/// a card that cannot hear.
 @MainActor
 final class MessageReplyTests: XCTestCase {
     /// A courier that records instead of texting.
     private final class Fake {
-        var staged: (recipient: String, body: String)?
-        var confirmed = 0
-        var dropped = 0
-        /// What `stage` answers, and whether it took.
-        var stageAnswer = "To Sam: “hello”. Say send, or anything else to drop it."
-        var stageTakes = true
-        /// What `confirm` answers, and whether the message went.
-        var confirmAnswer = "Sent."
-        var confirmClears = true
+        var resolution: MessageCourier.Resolution = .one(name: "Sam Ali", handle: "+15550100")
+        var outcome: MessageCourier.SendOutcome = .sent(name: "Sam Ali")
+        var sends: [(name: String, handle: String, body: String)] = []
 
         var courier: MessageReply.Courier {
             MessageReply.Courier(
-                stage: { [self] recipient, body in
-                    staged = stageTakes ? (recipient, body) : nil
-                    return stageAnswer
-                },
-                isStaged: { [self] in staged != nil },
-                confirm: { [self] in
-                    confirmed += 1
-                    if confirmClears { staged = nil }
-                    return confirmAnswer
-                },
-                drop: { [self] in
-                    dropped += 1
-                    staged = nil
+                resolve: { [self] _ in resolution },
+                send: { [self] name, handle, body in
+                    sends.append((name, handle, body))
+                    return outcome
                 }
             )
         }
     }
 
     private let sam = MessageWatch.Sighting(
-        sender: "Sam", body: "are you coming", seen: Date()
+        sender: "Sam", body: "are you coming", seen: Date(timeIntervalSince1970: 1)
     )
     private let ravi = MessageWatch.Sighting(
-        sender: "Ravi", body: "call me", seen: Date()
+        sender: "Ravi", body: "call me", seen: Date(timeIntervalSince1970: 2)
     )
 
-    func testAMessageShowsAndWaits() {
-        let reply = MessageReply(courier: Fake().courier)
-        reply.show(sam, onFade: {})
-        XCTAssertTrue(reply.isShowing)
-        XCTAssertEqual(reply.stage, .waiting)
-        XCTAssertEqual(reply.sighting?.sender, "Sam")
+    /// Show a card and let Contacts answer.
+    private func shown(
+        _ fake: Fake, _ sighting: MessageWatch.Sighting? = nil,
+        life: TimeInterval = 30, patience: TimeInterval = 8
+    ) async -> MessageReply {
+        let reply = MessageReply(courier: fake.courier, life: life, hearingPatience: patience)
+        reply.show(sighting ?? sam, onFade: {})
+        await settle()
+        return reply
     }
 
-    /// Newest wins: the founder chose a moment, not a stack.
-    func testANewerMessageReplacesTheOlderOne() {
+    private func settle() async {
+        for _ in 0..<5 { await Task.yield() }
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+
+    // MARK: Who, settled before anybody speaks
+
+    func testTheRecipientIsSettledOnArrival() async {
+        let reply = await shown(Fake())
+        XCTAssertEqual(reply.recipient, .known(name: "Sam Ali", handle: "+15550100"))
+    }
+
+    /// Two Sams: the card refuses up front, in words that mention a
+    /// button and never a spoken command.
+    func testAnAmbiguousSenderIsRefusedBeforeAnyoneTalks() async {
         let fake = Fake()
-        let reply = MessageReply(courier: fake.courier)
-        reply.show(sam, onFade: {})
+        fake.resolution = .many(["Sam Ali", "Sam Torres"])
+        let reply = await shown(fake)
+
+        guard case .cannotReply(let why) = reply.recipient else {
+            return XCTFail("two Sams must never be resolved")
+        }
+        XCTAssertTrue(why.contains("won't guess"))
+        XCTAssertFalse(reply.canSend)
+        reply.draft = "on my way"
+        XCTAssertFalse(reply.canSend, "words do not make an unknown recipient known")
+        let sent = await reply.send()
+        XCTAssertFalse(sent)
+        XCTAssertTrue(fake.sends.isEmpty)
+    }
+
+    func testAStrangerIsRefusedNotGuessed() async {
+        let fake = Fake()
+        fake.resolution = .none
+        let reply = await shown(fake)
+        guard case .cannotReply = reply.recipient else { return XCTFail() }
+        reply.talkPressed()
+        XCTAssertEqual(reply.phase, .idle, "the mic does nothing when no reply can go")
+    }
+
+    /// The first build put the courier's voice-path strings on the card
+    /// verbatim. A card has buttons; nobody can "say" anything to it.
+    func testNoCardCopyTellsAnyoneToSpeakACommand() {
+        let resolutions: [MessageCourier.Resolution] = [
+            .none, .denied, .unasked, .failed, .many(["A", "B"]),
+        ]
+        let outcomes: [MessageCourier.SendOutcome] = [
+            .nothingStaged, .stale, .wakingUp, .askingPermission,
+            .blocked, .notSignedIn, .failed("boom"),
+        ]
+        var lines: [String] = outcomes.map(MessageReply.explain)
+        for resolution in resolutions {
+            if case .cannotReply(let why) = MessageReply.recipient(for: resolution, sender: "Sam") {
+                lines.append(why)
+            }
+        }
+        for line in lines {
+            XCTAssertFalse(line.lowercased().contains("say "), line)
+            XCTAssertFalse(line.contains("\u{2014}"), "no em dashes: \(line)")
+            XCTAssertFalse(line.isEmpty)
+        }
+    }
+
+    // MARK: One field, filled by talking or typing
+
+    func testHeardWordsLandInTheFieldAndNothingIsSent() async {
+        let fake = Fake()
+        let reply = await shown(fake)
+        reply.talkPressed()
+        XCTAssertEqual(reply.phase, .listening)
+        reply.talkReleased(held: true)
+        XCTAssertEqual(reply.phase, .hearing)
+        reply.heard("on my way", for: sam)
+
+        XCTAssertEqual(reply.draft, "on my way")
+        XCTAssertEqual(reply.phase, .idle)
+        XCTAssertTrue(fake.sends.isEmpty, "hearing must never send")
+    }
+
+    /// Typed a few words, then talked: the first part is not lost.
+    func testTalkingAddsToWhatWasTyped() async {
+        let reply = await shown(Fake())
+        reply.draft = "yes,"
+        reply.talkPressed()
+        reply.talkReleased(held: true)
+        reply.heard("see you at six", for: sam)
+        XCTAssertEqual(reply.draft, "yes, see you at six")
+    }
+
+    /// A click is not a hold. It starts nothing and says why, instead
+    /// of silently doing nothing the way the first build did.
+    func testAClickOnTheMicExplainsItself() async {
+        let reply = await shown(Fake())
+        reply.talkPressed()
+        reply.talkReleased(held: false)
+        XCTAssertEqual(reply.phase, .idle)
+        XCTAssertNotNil(reply.hint)
+    }
+
+    /// Silence produces no words at all. The card must not wait for
+    /// them for ever.
+    func testHearingGivesUpRatherThanHangingForEver() async throws {
+        let reply = await shown(Fake(), patience: 0.05)
+        reply.talkPressed()
+        reply.talkReleased(held: true)
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertEqual(reply.phase, .idle)
+        XCTAssertNotNil(reply.hint)
+    }
+
+    /// The reply was spoken to Sam. Ravi's message is on the card when
+    /// the words come back. They are dropped: a sentence meant for one
+    /// person never lands under another's name.
+    func testWordsSpokenToOnePersonNeverLandOnAnother() async {
+        let fake = Fake()
+        let reply = await shown(fake)
+        reply.talkPressed()
+        reply.talkReleased(held: true)
         reply.show(ravi, onFade: {})
+        await settle()
+        reply.heard("love you too", for: sam)
+
         XCTAssertEqual(reply.sighting?.sender, "Ravi")
-        XCTAssertEqual(reply.stage, .waiting)
-        // Anything staged for the first one must never survive into
-        // the second: that is how a reply reaches the wrong person.
-        XCTAssertGreaterThan(fake.dropped, 0)
+        XCTAssertEqual(reply.draft, "")
     }
 
-    func testHeardWordsAreStagedAndReadBackButNotSent() async {
+    // MARK: Sending, and telling the truth about it
+
+    func testSendGoesToTheResolvedPersonWithExactlyTheFieldsWords() async {
         let fake = Fake()
-        let reply = MessageReply(courier: fake.courier)
-        reply.show(sam, onFade: {})
-        await reply.heard("on my way")
-
-        XCTAssertEqual(reply.stage, .drafted("on my way"))
-        XCTAssertEqual(fake.staged?.recipient, "Sam")
-        XCTAssertEqual(fake.staged?.body, "on my way")
-        XCTAssertEqual(fake.confirmed, 0, "staging must never send")
-    }
-
-    func testSilenceStagesNothing() async {
-        let fake = Fake()
-        let reply = MessageReply(courier: fake.courier)
-        reply.show(sam, onFade: {})
-        await reply.heard("   ")
-        XCTAssertEqual(reply.stage, .waiting)
-        XCTAssertNil(fake.staged)
-    }
-
-    /// Contacts could not place the sender, or placed several of them.
-    /// The card says so in the courier's own words and sends nothing.
-    func testAnUnresolvableSenderIsRefusedNotGuessed() async {
-        let fake = Fake()
-        fake.stageTakes = false
-        fake.stageAnswer = "Which one? Sam Ali · Sam Torres. Say text and the fuller name."
-        let reply = MessageReply(courier: fake.courier)
-        reply.show(sam, onFade: {})
-        await reply.heard("on my way")
-
-        XCTAssertEqual(
-            reply.stage,
-            .refused("Which one? Sam Ali · Sam Torres. Say text and the fuller name.")
-        )
-        let sent = await reply.send()
-        XCTAssertFalse(sent)
-        XCTAssertEqual(fake.confirmed, 0)
-    }
-
-    func testNothingSendsWithoutADraft() async {
-        let fake = Fake()
-        let reply = MessageReply(courier: fake.courier)
-        reply.show(sam, onFade: {})
-        let sent = await reply.send()
-        XCTAssertFalse(sent)
-        XCTAssertEqual(fake.confirmed, 0)
-    }
-
-    func testTheSecondPressSends() async {
-        let fake = Fake()
-        let reply = MessageReply(courier: fake.courier)
-        reply.show(sam, onFade: {})
-        await reply.heard("on my way")
+        let reply = await shown(fake)
+        reply.draft = "  on my way  "
         let sent = await reply.send()
 
         XCTAssertTrue(sent)
-        XCTAssertEqual(fake.confirmed, 1)
-        XCTAssertEqual(reply.stage, .sent)
+        XCTAssertEqual(fake.sends.count, 1)
+        XCTAssertEqual(fake.sends.first?.name, "Sam Ali")
+        XCTAssertEqual(fake.sends.first?.handle, "+15550100")
+        XCTAssertEqual(fake.sends.first?.body, "on my way")
+        XCTAssertEqual(reply.phase, .sent(name: "Sam Ali"))
     }
 
-    /// Messages held it back, a grant dialog most often. The words
-    /// stay staged and the card says why rather than claiming it went.
-    func testASendThatDidNotGoIsNotReportedAsSent() async {
+    func testAnEmptyFieldSendsNothing() async {
         let fake = Fake()
-        fake.confirmClears = false
-        fake.confirmAnswer = "macOS is asking to let Chalant use Messages. Click Allow, then say send."
-        let reply = MessageReply(courier: fake.courier)
-        reply.show(sam, onFade: {})
-        await reply.heard("on my way")
+        let reply = await shown(fake)
+        reply.draft = "   "
+        XCTAssertFalse(reply.canSend)
         let sent = await reply.send()
-
         XCTAssertFalse(sent)
-        XCTAssertEqual(
-            reply.stage,
-            .refused("macOS is asking to let Chalant use Messages. Click Allow, then say send.")
-        )
+        XCTAssertTrue(fake.sends.isEmpty)
     }
 
-    func testDismissingClearsTheCardAndTheStagedWords() async {
+    /// The bug that shipped to the branch: a stale message cleared the
+    /// courier's stage exactly the way a delivered one does, and the
+    /// card called that "Sent.". Nothing but `.sent` is sent.
+    func testOnlyARealSendIsEverCalledSent() async {
+        let failures: [MessageCourier.SendOutcome] = [
+            .nothingStaged, .stale, .wakingUp, .askingPermission,
+            .blocked, .notSignedIn, .failed("boom"),
+        ]
+        for outcome in failures {
+            let fake = Fake()
+            fake.outcome = outcome
+            let reply = await shown(fake)
+            reply.draft = "on my way"
+            let sent = await reply.send()
+
+            XCTAssertFalse(sent, "\(outcome)")
+            guard case .failed = reply.phase else {
+                return XCTFail("\(outcome) was reported as \(reply.phase)")
+            }
+        }
+    }
+
+    /// The first send ever almost always meets a macOS dialog. Nobody
+    /// should have to say the sentence again because of it.
+    func testAFailedSendKeepsTheWordsAndCanBeRetried() async {
         let fake = Fake()
-        let reply = MessageReply(courier: fake.courier)
-        reply.show(sam, onFade: {})
-        await reply.heard("on my way")
-        reply.dismiss()
+        fake.outcome = .askingPermission
+        let reply = await shown(fake)
+        reply.draft = "on my way"
+        _ = await reply.send()
 
-        XCTAssertFalse(reply.isShowing)
-        XCTAssertNil(reply.sighting)
-        XCTAssertEqual(reply.stage, .waiting)
-        XCTAssertNil(fake.staged)
+        XCTAssertEqual(reply.draft, "on my way")
+        XCTAssertTrue(reply.canSend)
+
+        fake.outcome = .sent(name: "Sam Ali")
+        let sent = await reply.send()
+        XCTAssertTrue(sent)
+        XCTAssertEqual(fake.sends.count, 2)
     }
 
-    /// Unattended, the card goes on its own. This is the whole
-    /// "moment, not an inbox" rule, with the clock shortened.
-    func testAnUnattendedCardFadesOnItsOwn() async throws {
+    // MARK: A moment, not an inbox, and never mid-sentence
+
+    func testAnUntouchedCardFadesOnItsOwn() async throws {
         let reply = MessageReply(courier: Fake().courier, life: 0.05)
         var faded = false
         reply.show(sam) { faded = true }
-        try await Task.sleep(for: .seconds(0.3))
-
+        try await Task.sleep(for: .milliseconds(300))
         XCTAssertFalse(reply.isShowing)
         XCTAssertTrue(faded)
     }
 
-    /// The bug this exists to stop: the card fading while somebody is
-    /// mid-sentence, which takes the landing spot away with it and
-    /// leaves the words with nowhere to go.
-    func testACardBeingTalkedIntoDoesNotFade() async throws {
+    /// Reading it with the pointer on it is not ignoring it.
+    func testACardUnderThePointerDoesNotFade() async throws {
         let reply = MessageReply(courier: Fake().courier, life: 0.05)
-        var faded = false
-        reply.show(sam) { faded = true }
-        reply.holdOpen()
-        try await Task.sleep(for: .seconds(0.3))
-
+        reply.show(sam, onFade: {})
+        reply.hover(true)
+        try await Task.sleep(for: .milliseconds(300))
         XCTAssertTrue(reply.isShowing)
-        XCTAssertFalse(faded)
+
+        // And the clock starts again once the pointer leaves.
+        reply.hover(false)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertFalse(reply.isShowing)
     }
 
-    /// The card is a moment, so it has a life. Half a minute is long
-    /// enough to read and decide without becoming an unread count.
+    func testATouchedCardNeverFades() async throws {
+        let reply = MessageReply(courier: Fake().courier, life: 0.05)
+        reply.show(sam, onFade: {})
+        reply.touch()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(reply.isShowing)
+        XCTAssertTrue(reply.engaged)
+    }
+
+    /// What decides whether a newer message may take the card.
+    func testMidReplyIsAnythingWithWordsOrAMicInIt() async {
+        let reply = await shown(Fake())
+        XCTAssertFalse(reply.isMidReply, "an unanswered card can be replaced")
+
+        reply.draft = "on my"
+        XCTAssertTrue(reply.isMidReply, "typed words are a reply in progress")
+
+        reply.draft = ""
+        reply.talkPressed()
+        XCTAssertTrue(reply.isMidReply, "so is a held mic")
+        reply.talkReleased(held: true)
+        XCTAssertTrue(reply.isMidReply, "and words on their way back")
+    }
+
+    func testDismissingClearsEverything() async {
+        let reply = await shown(Fake())
+        reply.draft = "on my way"
+        reply.dismiss()
+
+        XCTAssertFalse(reply.isShowing)
+        XCTAssertEqual(reply.draft, "")
+        XCTAssertEqual(reply.phase, .idle)
+        XCTAssertFalse(reply.engaged)
+    }
+
     func testTheCardsLifeIsHalfAMinute() {
         XCTAssertEqual(MessageReply.life, 30)
     }
@@ -228,6 +337,30 @@ final class MessageMayShowTests: XCTestCase {
         XCTAssertFalse(
             NotchViewModel.messageMayShow(
                 role: .island, micIsLive: true, expanded: false, midInteraction: false
+            )
+        )
+    }
+
+    /// Somebody is answering the last message. A newer one must not
+    /// take the card: their words would be thrown away, or left under
+    /// the wrong name.
+    func testANewMessageNeverReplacesAReplyInProgress() {
+        XCTAssertEqual(
+            NotchViewModel.messageBlockReason(
+                role: .island, micIsLive: false, expanded: true,
+                midInteraction: true, cardMidReply: true
+            ), "mid-reply"
+        )
+    }
+
+    /// The first build counted its own unanswered card as "the island
+    /// is busy", so the second text of a burst never showed and newest
+    /// wins was dead code.
+    func testAnUnansweredCardIsReplacedByANewerMessage() {
+        XCTAssertNil(
+            NotchViewModel.messageBlockReason(
+                role: .island, micIsLive: false, expanded: true,
+                midInteraction: true, showingIdleCard: true
             )
         )
     }

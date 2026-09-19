@@ -303,6 +303,11 @@ struct ExpandedView: View {
     private var layoutRows: [IslandRow] {
         let rows = model.layout.layout.rows
         guard model.pane != .none else { return rows }
+        // A message is the whole island while it is up. Drawn under the
+        // music and the soundscapes it arrived as the third thing on the
+        // screen, below two rows nobody had asked about, and a text is
+        // the one arrival that should be readable in a glance.
+        if model.pane == .message { return [IslandRow([.input])] }
         return rows.filter { row in !row.elements.contains { $0.isRequired } }
             + [IslandRow([.input])]
     }
@@ -396,24 +401,21 @@ struct ExpandedView: View {
             } else if model.pane == .message {
                 MessageCard(
                     reply: model.messages,
-                    press: {
-                        // Held open the moment somebody starts
-                        // talking, not when the words come back: a
-                        // card that fades mid-sentence takes the
-                        // landing spot with it.
-                        model.messages.holdOpen()
-                        Dictation.shared.practicePress()
-                    },
-                    release: { Dictation.shared.practiceRelease() },
+                    level: model.dictationLevel,
+                    // No dictation, no mic: a control appears only when
+                    // it can do something. Typing always can.
+                    canTalk: Dictation.shared.isRunning,
+                    talkPress: { model.messageTalkPress() },
+                    talkRelease: { held in model.messageTalkRelease(held: held) },
                     send: {
                         Task {
-                            let went = await model.messages.send()
-                            guard went else { return }
-                            // Let "Sent." be read before the card goes.
-                            try? await Task.sleep(for: .seconds(1.2))
+                            guard await model.messages.send() else { return }
+                            // Long enough to read who it went to.
+                            try? await Task.sleep(for: .seconds(1.6))
                             model.closeMessage()
                         }
                     },
+                    openInMessages: { model.openMessageInMessages() },
                     dismiss: { model.closeMessage() }
                 )
                 .transition(.opacity)

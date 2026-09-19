@@ -147,10 +147,7 @@ final class MessageCourier {
     }
 
     /// Resolve who and stage what; the returned line is the read-back.
-    /// Stage a message to a known recipient. Reachable from outside
-    /// the voice path because the island's reply card already knows
-    /// who it is answering: the banner named them.
-    func stage(
+    private func stage(
         recipient: String,
         body: String,
         using resolve: (String) async -> Resolution = { await MessageCourier.resolve($0) }
@@ -188,6 +185,15 @@ final class MessageCourier {
         }
     }
 
+    /// Stage for somebody already resolved. The island's reply card
+    /// asks Contacts who the sender is the moment their message
+    /// arrives, so by the time there are words there is nothing left
+    /// to look up, and nothing left to guess.
+    @discardableResult
+    func stage(name: String, handle: String, body: String) -> String {
+        stagePending(name: name, handle: handle, body: body)
+    }
+
     /// Stage, front the grant, read back: one door for every path.
     private func stagePending(name: String, handle: String, body: String) -> String {
         pending = Pending(name: name, handle: handle, body: body, staged: Date())
@@ -211,28 +217,76 @@ final class MessageCourier {
 
     // MARK: - Sending
 
+    /// What became of a send, as a value rather than a sentence.
+    ///
+    /// The voice path only ever needed words to say back. The island's
+    /// reply card needs to KNOW: it once showed "Sent." for a message
+    /// that had gone stale and never left, because "nothing is staged
+    /// any more" was the only signal it had, and a stale message clears
+    /// the stage exactly the way a delivered one does (2026-09-19).
+    enum SendOutcome: Equatable {
+        case sent(name: String)
+        case nothingStaged
+        /// Staged too long ago to trust; the stage is cleared.
+        case stale
+        /// Messages has not answered about the grant yet. Still staged.
+        case wakingUp
+        /// macOS is showing the automation dialog. Still staged.
+        case askingPermission
+        /// The user refused automation of Messages. Still staged.
+        case blocked
+        /// No iMessage account on this Mac. Still staged.
+        case notSignedIn
+        /// Messages returned an error. Still staged.
+        case failed(String)
+    }
+
     /// Fire the staged message through Messages.app. The words only
     /// leave once the grant is already settled: a permission dialog
     /// raised mid-send would block the script lane and wedge the
     /// island, so an unsettled grant answers with instructions and
     /// keeps the message staged for the next "send".
     func confirmSend() async -> String {
-        guard let message = pending else { return "Nothing staged to send." }
+        switch await confirmSendOutcome() {
+        case .sent(let name):
+            return "Sent to \(name)."
+        case .nothingStaged:
+            return "Nothing staged to send."
+        case .stale:
+            return "That message went stale. Say it again."
+        case .wakingUp:
+            return "Messages is waking up. Say send again in a moment."
+        case .askingPermission:
+            return "macOS is asking to let Chalant use Messages. Click Allow, then say send."
+        case .blocked:
+            return "macOS blocked Chalant from Messages. System Settings, Privacy and Security, Automation, then say send again."
+        case .notSignedIn:
+            return "Messages isn't signed in to iMessage on this Mac. It holds; say send once that's fixed."
+        case .failed(let error):
+            return "Messages balked: \(error). It holds; say send to try again."
+        }
+    }
+
+    /// The same send, answering with what happened instead of what to
+    /// say about it. Every string above is derived from this, so the
+    /// voice path reads exactly as it always has.
+    func confirmSendOutcome() async -> SendOutcome {
+        guard let message = pending else { return .nothingStaged }
         guard Date().timeIntervalSince(message.staged) < Self.shelfLife else {
             pending = nil
-            return "That message went stale. Say it again."
+            return .stale
         }
 
         guard let grant = await messagesGrantStatus() else {
             primeMessagesGrant()
-            return "Messages is waking up. Say send again in a moment."
+            return .wakingUp
         }
         switch grant {
         case -1744:
             primeMessagesGrant()
-            return "macOS is asking to let Chalant use Messages. Click Allow, then say send."
+            return .askingPermission
         case -1743:
-            return "macOS blocked Chalant from Messages. System Settings, Privacy and Security, Automation, then say send again."
+            return .blocked
         default:
             break
         }
@@ -249,15 +303,13 @@ final class MessageCourier {
         let error = await Self.runScript(script)
         guard let error else {
             pending = nil
-            return "Sent to \(message.name)."
+            return .sent(name: message.name)
         }
-        if error.contains("-1743") {
-            return "macOS blocked Chalant from Messages. System Settings, Privacy and Security, Automation, then say send again."
-        }
+        if error.contains("-1743") { return .blocked }
         if error.contains("service type") || error.contains("account") {
-            return "Messages isn't signed in to iMessage on this Mac. It holds; say send once that's fixed."
+            return .notSignedIn
         }
-        return "Messages balked: \(error). It holds; say send to try again."
+        return .failed(error)
     }
 
     /// Runs on the script lane; returns nil on success, the error
