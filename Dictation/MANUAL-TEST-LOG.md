@@ -187,6 +187,13 @@ rather than answered at the wrong number. The send is
 
 `ConversationMatchTests`, 11 tests, built from the shapes above. 810 overall.
 
+**The enumeration was then run exactly as the app runs it** (same script,
+verbatim) and its output checked against the Swift parser: 148 rows, 135 one to
+one and 13 groups, every row exactly four tab-separated fields, **nothing
+dropped or misparsed**. Of 48 named senders, 47 resolve to exactly one thread
+and one is ambiguous and would be refused. The founder's conversation list was
+deleted from disk afterwards; none of it is in the repo or the tests.
+
 ### Still not run
 
 **Nobody has sent a reply from the redesigned card on a real conversation.**

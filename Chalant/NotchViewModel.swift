@@ -1286,6 +1286,26 @@ final class NotchViewModel: ObservableObject {
                     self.messages.draft = String(text.dropFirst("debug reply ".count))
                     return
                 }
+                // "debug aim Name" reports which thread a banner name
+                // would be answered in, and over which service, without
+                // sending anything. The one check that cannot be faked:
+                // it runs against the real Messages on this Mac.
+                if text.hasPrefix("debug aim ") {
+                    let sender = String(text.dropFirst("debug aim ".count))
+                    Task { @MainActor in
+                        let threads = await MessageCourier.conversations()
+                        let answer = MessageCourier.conversation(named: sender, in: threads)
+                        var line = "threads=\(threads.count) "
+                        switch answer {
+                        case .one(let found):
+                            line += "-> \(found.service) \(found.id)"
+                        case .several: line += "-> refused: several"
+                        case .none: line += "-> refused: none"
+                        }
+                        WireLog.note(event: "debug-aim", tool: "messages", response: line)
+                    }
+                    return
+                }
                 // "debug voice" reports the speech stack's health.
                 if text == "debug voice" {
                     self.expand()
