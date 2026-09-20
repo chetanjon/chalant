@@ -121,6 +121,34 @@ no banner to be looked at): the card is the whole island, the field reads as a
 chat field, the send arrow exists only with words, and the caption says "Not
 sent yet" and names who it goes to.
 
+### 6. A third round, on the one property that matters
+
+Two adversaries were set on the redesign with one instruction each: make words
+go to the wrong place, or leave the app stuck. The first found a real hole and
+its skeptic never ran (session limit), so it was traced by hand and confirmed:
+
+**`keyDown` bumped `sessionID` BEFORE asking whether the press was accepted.**
+Hold the card's mic, then press the dictation key out of habit (the app's own
+main gesture). That press is refused by `PushToTalk` as "already listening",
+but the id had already moved, so the hold still running finalized under an id
+its landing was not filed under. The lookup missed, the words fell through to
+`target`, and **the private reply was typed into whatever app was in front.**
+Exactly the failure the per-press landing exists to prevent.
+
+Two fixes, both structural:
+
+1. The press is asked first. A refused press now changes nothing at all: no
+   id, no purge, no landing.
+2. Ownership outlives the closure (`DictationController.Landings`). "Where do
+   these words go" may stop having an answer; "do these words belong to
+   somebody other than the app in front" may not. A session still owed and no
+   longer deliverable DROPS its words. Writing the test for this found the
+   second half: two further presses during a slow finalize purged the closure,
+   and before this the words would have been typed.
+
+`SessionLandingTests` pins all of it: 7 tests on the bookkeeping alone, with
+no microphone involved. 799 tests overall.
+
 ### Still not run
 
 **Nobody has sent a reply from the redesigned card on a real conversation.**
