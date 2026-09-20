@@ -12,15 +12,20 @@ import XCTest
 final class MessageReplyTests: XCTestCase {
     /// A courier that records instead of texting.
     private final class Fake {
-        var resolution: MessageCourier.Resolution = .one(name: "Sam Ali", handle: "+15550100")
+        /// An ordinary SMS thread, which is what most of them are.
+        static let thread = MessageCourier.Conversation(
+            id: "any;-;+15550100", service: "SMS",
+            name: "Sam Ali", handle: "+15550100", isGroup: false)
+
+        var aim: MessageReply.Recipient = .known(name: "Sam Ali", thread: Fake.thread)
         var outcome: MessageCourier.SendOutcome = .sent(name: "Sam Ali")
-        var sends: [(name: String, handle: String, body: String)] = []
+        var sends: [(thread: MessageCourier.Conversation, name: String, body: String)] = []
 
         var courier: MessageReply.Courier {
             MessageReply.Courier(
-                resolve: { [self] _ in resolution },
-                send: { [self] name, handle, body in
-                    sends.append((name, handle, body))
+                aim: { [self] _ in aim },
+                send: { [self] thread, name, body in
+                    sends.append((thread, name, body))
                     return outcome
                 }
             )
@@ -54,14 +59,14 @@ final class MessageReplyTests: XCTestCase {
 
     func testTheRecipientIsSettledOnArrival() async {
         let reply = await shown(Fake())
-        XCTAssertEqual(reply.recipient, .known(name: "Sam Ali", handle: "+15550100"))
+        XCTAssertEqual(reply.recipient, .known(name: "Sam Ali", thread: Fake.thread))
     }
 
     /// Two Sams: the card refuses up front, in words that mention a
     /// button and never a spoken command.
     func testAnAmbiguousSenderIsRefusedBeforeAnyoneTalks() async {
         let fake = Fake()
-        fake.resolution = .many(["Sam Ali", "Sam Torres"])
+        fake.aim = MessageReply.Courier.several("Sam")
         let reply = await shown(fake)
 
         guard case .cannotReply(let why) = reply.recipient else {
@@ -78,7 +83,7 @@ final class MessageReplyTests: XCTestCase {
 
     func testAStrangerIsRefusedNotGuessed() async {
         let fake = Fake()
-        fake.resolution = .none
+        fake.aim = MessageReply.recipient(for: .none, sender: "Sam")
         let reply = await shown(fake)
         guard case .cannotReply = reply.recipient else { return XCTFail() }
         reply.talkPressed()
@@ -101,6 +106,7 @@ final class MessageReplyTests: XCTestCase {
                 lines.append(why)
             }
         }
+        if case .cannotReply(let why) = MessageReply.Courier.several("Sam") { lines.append(why) }
         for line in lines {
             XCTAssertFalse(line.lowercased().contains("say "), line)
             XCTAssertFalse(line.contains("\u{2014}"), "no em dashes: \(line)")
@@ -182,7 +188,7 @@ final class MessageReplyTests: XCTestCase {
         XCTAssertTrue(sent)
         XCTAssertEqual(fake.sends.count, 1)
         XCTAssertEqual(fake.sends.first?.name, "Sam Ali")
-        XCTAssertEqual(fake.sends.first?.handle, "+15550100")
+        XCTAssertEqual(fake.sends.first?.thread, Fake.thread)
         XCTAssertEqual(fake.sends.first?.body, "on my way")
         XCTAssertEqual(reply.phase, .sent(name: "Sam Ali"))
     }
@@ -313,7 +319,7 @@ final class MessageReplyTests: XCTestCase {
     /// had taken the card. "Sent to Sam" must not appear under Ravi.
     func testASendResultNeverLandsOnADifferentCard() async {
         let fake = Fake()
-        let swap = SwapOnSend(resolve: fake.courier.resolve, replacement: ravi)
+        let swap = SwapOnSend(aim: fake.courier.aim, replacement: ravi)
         let reply = MessageReply(courier: swap.courier)
         swap.subject = reply
         reply.show(sam, onFade: {})
@@ -329,16 +335,16 @@ final class MessageReplyTests: XCTestCase {
     /// A courier whose send replaces the card mid-flight, the way a
     /// second text arriving during a slow send does.
     private final class SwapOnSend {
-        let resolve: (String) async -> MessageCourier.Resolution
+        let aim: (String) async -> MessageReply.Recipient
         let replacement: MessageWatch.Sighting
         weak var subject: MessageReply?
-        init(resolve: @escaping (String) async -> MessageCourier.Resolution,
+        init(aim: @escaping (String) async -> MessageReply.Recipient,
              replacement: MessageWatch.Sighting) {
-            self.resolve = resolve
+            self.aim = aim
             self.replacement = replacement
         }
         @MainActor var courier: MessageReply.Courier {
-            MessageReply.Courier(resolve: resolve, send: { [self] _, _, _ in
+            MessageReply.Courier(aim: aim, send: { [self] _, _, _ in
                 await MainActor.run { subject?.show(replacement, onFade: {}) }
                 return .sent(name: "Sam Ali")
             })

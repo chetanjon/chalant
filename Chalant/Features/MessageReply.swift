@@ -29,9 +29,15 @@ import Foundation
 @MainActor
 final class MessageReply: ObservableObject {
     /// Whether a reply can go to this sender, settled on arrival.
+    ///
+    /// The answer is a THREAD, not a phone number. A number has to be
+    /// guessed out of Contacts and then sent through some service; a
+    /// thread is the conversation this message actually arrived in, and it
+    /// knows its own service. Two thirds of the founder's threads are not
+    /// iMessage (`MessageCourier.Conversation`).
     enum Recipient: Equatable {
         case checking
-        case known(name: String, handle: String)
+        case known(name: String, thread: MessageCourier.Conversation)
         /// Why not, in the card's own words. The way forward is always
         /// the same: open the conversation in Messages.
         case cannotReply(String)
@@ -55,29 +61,60 @@ final class MessageReply: ObservableObject {
     /// The doors to Contacts and Messages, as closures, so every rule
     /// here can be tested without texting anybody.
     struct Courier {
-        var resolve: (_ sender: String) async -> MessageCourier.Resolution
-        var send: (_ name: String, _ handle: String, _ body: String) async
-            -> MessageCourier.SendOutcome
+        /// Who this message can be answered, decided on arrival.
+        var aim: (_ sender: String) async -> Recipient
+        var send: (
+            _ thread: MessageCourier.Conversation, _ name: String, _ body: String
+        ) async -> MessageCourier.SendOutcome
 
         @MainActor
         static var live: Courier {
             let courier = MessageCourier()
             return Courier(
-                resolve: { sender in
-                    // A sender who IS an address needs no address book.
-                    if let literal = MessageCourier.literalHandle(sender) {
-                        return .one(name: sender, handle: literal)
+                aim: { sender in
+                    let threads = await MessageCourier.conversations()
+                    // The name on the banner is the name Messages puts in
+                    // its own participant list, so the thread can usually
+                    // be found without asking Contacts anything.
+                    switch MessageCourier.conversation(named: sender, in: threads) {
+                    case .one(let thread):
+                        return .known(name: sender, thread: thread)
+                    case .several:
+                        return Self.several(sender)
+                    case .none:
+                        break
                     }
-                    // Strict: a banner title is nobody's choice, so it
-                    // must mean exactly one contact or it means nobody.
-                    return await MessageCourier.resolve(sender, strict: true)
+                    // Messages shows a name this Mac does not use in its
+                    // participant list. Contacts is the fallback, strictly:
+                    // a banner title is nobody's choice, so it must mean
+                    // exactly one contact or it means nobody.
+                    let answer = await MessageCourier.resolve(sender, strict: true)
+                    guard case .one(let name, let handle) = answer else {
+                        return MessageReply.recipient(for: answer, sender: sender)
+                    }
+                    switch MessageCourier.conversation(handle: handle, in: threads) {
+                    case .one(let thread):
+                        return .known(name: name, thread: thread)
+                    case .several:
+                        return Self.several(sender)
+                    case .none:
+                        // They are in Contacts, but nothing on this Mac is
+                        // a conversation with that address: they wrote from
+                        // somewhere else, and a reply to the number on their
+                        // card would go somewhere they are not reading.
+                        return .cannotReply(
+                            "Chalant can't tell which conversation this came from. Reply in Messages."
+                        )
+                    }
                 },
-                send: { name, handle, body in
+                send: { thread, name, body in
                     // Staged and confirmed in one breath. The courier's
                     // two minute shelf life guards a spoken "send" that
                     // arrives long after a read-back; here the words are
                     // on screen under the button being pressed.
-                    courier.stage(name: name, handle: handle, body: body)
+                    courier.stage(
+                        name: name, handle: thread.handle, body: body,
+                        chatID: thread.id)
                     var outcome = await courier.confirmSendOutcome()
                     // With Messages closed, the first ask only wakes it.
                     // The person pressed Send once; they should not have
@@ -91,6 +128,12 @@ final class MessageReply: ObservableObject {
                     }
                     return outcome
                 }
+            )
+        }
+
+        static func several(_ sender: String) -> Recipient {
+            .cannotReply(
+                "More than one conversation answers to that name, so Chalant won't guess which. Reply in Messages."
             )
         }
     }
@@ -194,10 +237,10 @@ final class MessageReply: ObservableObject {
         }
         Task { [weak self] in
             guard let self else { return }
-            let answer = await courier.resolve(sighting.sender)
-            // The card may have moved on while Contacts was thinking.
+            let answer = await courier.aim(sighting.sender)
+            // The card may have moved on while Messages was thinking.
             guard self.sighting?.id == sighting.id else { return }
-            recipient = Self.recipient(for: answer, sender: sighting.sender)
+            recipient = answer
         }
     }
 
@@ -341,13 +384,13 @@ final class MessageReply: ObservableObject {
     /// The deliberate press. Sends exactly what the field shows.
     @discardableResult
     func send() async -> Bool {
-        guard canSend, case .known(let name, let handle) = recipient else { return false }
+        guard canSend, case .known(let name, let thread) = recipient else { return false }
         let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         touch()
         hint = nil
         phase = .sending
         let sender = sighting?.id
-        let outcome = await courier.send(name, handle, body)
+        let outcome = await courier.send(thread, name, body)
         // Dismissed or replaced while Messages was working: the result
         // belongs to a card that is gone. Writing it onto whatever is up
         // now would put "Sent to Sam" under Ravi's message.
@@ -370,16 +413,23 @@ final class MessageReply: ObservableObject {
 
     // MARK: - The card's own words
 
-    /// Contacts' answer, as something a card can say. These are NOT the
-    /// courier's strings: those were written for a voice path ("Say
-    /// text and the fuller name") and reached the first build verbatim,
-    /// telling people to speak commands to a card that cannot hear them.
+    /// Contacts' answer when it could NOT place the sender, as something
+    /// a card can say. These are NOT the courier's strings: those were
+    /// written for a voice path ("Say text and the fuller name") and
+    /// reached the first build verbatim, telling people to speak commands
+    /// to a card that cannot hear them.
+    ///
+    /// The `.one` case never becomes a recipient here. A contact is a
+    /// number; a reply needs the thread that number is talking in, and
+    /// finding it is the caller's job (`Courier.live`).
     static func recipient(
         for answer: MessageCourier.Resolution, sender: String
     ) -> Recipient {
         switch answer {
-        case .one(let name, let handle):
-            return .known(name: name, handle: handle)
+        case .one:
+            return .cannotReply(
+                "Chalant can't tell which conversation this came from. Reply in Messages."
+            )
         case .many:
             return .cannotReply(
                 "More than one person in your Contacts has this name, so Chalant won't guess which. Reply in Messages."

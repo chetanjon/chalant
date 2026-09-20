@@ -15,6 +15,9 @@ final class MessageCourier {
         let handle: String
         let body: String
         let staged: Date
+        /// The thread to answer in, when the caller already knows it. The
+        /// island's reply card always does: the message came from there.
+        var chatID: String?
     }
 
     private(set) var pending: Pending?
@@ -190,13 +193,18 @@ final class MessageCourier {
     /// arrives, so by the time there are words there is nothing left
     /// to look up, and nothing left to guess.
     @discardableResult
-    func stage(name: String, handle: String, body: String) -> String {
-        stagePending(name: name, handle: handle, body: body)
+    func stage(
+        name: String, handle: String, body: String, chatID: String? = nil
+    ) -> String {
+        stagePending(name: name, handle: handle, body: body, chatID: chatID)
     }
 
     /// Stage, front the grant, read back: one door for every path.
-    private func stagePending(name: String, handle: String, body: String) -> String {
-        pending = Pending(name: name, handle: handle, body: body, staged: Date())
+    private func stagePending(
+        name: String, handle: String, body: String, chatID: String? = nil
+    ) -> String {
+        pending = Pending(
+            name: name, handle: handle, body: body, staged: Date(), chatID: chatID)
         primeMessagesGrant()
         return readBack()
     }
@@ -291,15 +299,43 @@ final class MessageCourier {
             break
         }
 
+        // **Answer in the thread the message came from.**
+        //
+        // The line below used to be `1st account whose service type =
+        // iMessage` for everybody. Measured on the founder's Mac
+        // 2026-09-20: 84 of their 135 one-to-one threads are SMS and 7
+        // are RCS. For all 91 of those, forcing iMessage asks Messages to
+        // send through an account the other person may not have, and
+        // AppleScript reports no error either way, so the card would have
+        // said "Sent" over a message that never arrived.
+        //
+        // A thread that does not exist yet is the one case with nothing to
+        // answer in, and there iMessage is the only thing to try.
+        var chatID = message.chatID
+        if chatID == nil {
+            let all = await Self.conversations()
+            if case .one(let found) = Self.conversation(handle: message.handle, in: all) {
+                chatID = found.id
+            }
+        }
         // The message stays staged until it actually leaves: every
         // failure below invites a retry, and a retry with nothing
         // staged was a lie the review caught. Success alone clears.
-        let script = """
-        tell application "Messages"
-            set targetService to 1st account whose service type = iMessage
-            send "\(Self.escaped(message.body))" to participant "\(Self.escaped(message.handle))" of targetService
-        end tell
-        """
+        let script: String
+        if let chatID {
+            script = """
+            tell application "Messages"
+                send "\(Self.escaped(message.body))" to chat id "\(Self.escaped(chatID))"
+            end tell
+            """
+        } else {
+            script = """
+            tell application "Messages"
+                set targetService to 1st account whose service type = iMessage
+                send "\(Self.escaped(message.body))" to participant "\(Self.escaped(message.handle))" of targetService
+            end tell
+            """
+        }
         let error = await Self.runScript(script)
         guard let error else {
             pending = nil
@@ -333,6 +369,133 @@ final class MessageCourier {
     private static func escaped(_ text: String) -> String {
         text.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    // MARK: - The conversations already on this Mac
+
+    /// One thread in Messages, as the card needs to see it.
+    ///
+    /// **This, not Contacts, is what a reply should be aimed at.** A name
+    /// in Contacts gives a number; a conversation gives the thread the
+    /// message actually arrived in, and its service. Measured on the
+    /// founder's Mac 2026-09-20: of 135 one-to-one threads, **84 are SMS
+    /// and 7 are RCS. Only 44 are iMessage.** Sending every reply through
+    /// `1st account whose service type = iMessage`, as the voice path
+    /// does, would report success and deliver nothing for two thirds of
+    /// them. Every handle mapped to exactly one thread, so this is not
+    /// ambiguous in practice.
+    struct Conversation: Equatable {
+        /// `any;-;+15551234567` for one to one, `any;+;<guid>` for a group.
+        let id: String
+        /// iMessage, SMS or RCS: whatever this thread actually is.
+        let service: String
+        /// What Messages calls the other person, which is the same name it
+        /// puts in the banner.
+        let name: String
+        let handle: String
+        let isGroup: Bool
+    }
+
+    /// Which thread a banner's sender means.
+    enum ConversationMatch: Equatable {
+        case one(Conversation)
+        /// Two threads answer to that name, so no reply is aimed anywhere.
+        case several
+        case none
+    }
+
+    /// Compare addresses the way people do not: `+1 (555) 010-0142` and
+    /// `+15550100142` are one number, and an address is itself.
+    nonisolated static func addressKey(_ handle: String) -> String {
+        let digits = handle.filter(\.isNumber)
+        if digits.count >= 10 { return String(digits.suffix(10)) }
+        return handle.trimmingCharacters(in: .whitespaces).lowercased()
+    }
+
+    /// The thread a message came from, found by the name on its banner.
+    ///
+    /// A group is never a match: the banner of a group message names the
+    /// person who wrote, and a reply to them alone would be a private
+    /// answer to something said in a room.
+    nonisolated static func conversation(
+        named sender: String, in all: [Conversation]
+    ) -> ConversationMatch {
+        let wanted = sender.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !wanted.isEmpty else { return .none }
+        let byName = all.filter {
+            !$0.isGroup
+                && $0.name.trimmingCharacters(in: .whitespaces).lowercased() == wanted
+        }
+        if byName.count == 1, let only = byName.first { return .one(only) }
+        if byName.count > 1 { return .several }
+
+        // A sender shown as a bare number: the name and the handle are the
+        // same thing, formatted differently.
+        let key = addressKey(sender)
+        let byHandle = all.filter { !$0.isGroup && addressKey($0.handle) == key }
+        if byHandle.count == 1, let only = byHandle.first { return .one(only) }
+        return byHandle.isEmpty ? .none : .several
+    }
+
+    /// The thread for an address, for the Contacts fallback: the banner
+    /// showed a name Messages does not use in its participant list.
+    nonisolated static func conversation(
+        handle: String, in all: [Conversation]
+    ) -> ConversationMatch {
+        let key = addressKey(handle)
+        let hits = all.filter { !$0.isGroup && addressKey($0.handle) == key }
+        if hits.count == 1, let only = hits.first { return .one(only) }
+        return hits.isEmpty ? .none : .several
+    }
+
+    /// Read every thread out of Messages.
+    ///
+    /// One script rather than a question per chat: 145 of them answered in
+    /// about a second, and the card cannot wait longer than it takes to
+    /// read the message it is showing.
+    nonisolated static func conversations() async -> [Conversation] {
+        let source = """
+        tell application "Messages"
+            set out to ""
+            repeat with c in chats
+                try
+                    set ps to participants of c
+                    set n to count of ps
+                    if n is 1 then
+                        set p to item 1 of ps
+                        set out to out & (id of c) & tab & ¬
+                            (service type of account of c as text) & tab & ¬
+                            (name of p as text) & tab & (handle of p as text) & linefeed
+                    else
+                        set out to out & (id of c) & tab & ¬
+                            (service type of account of c as text) & tab & ¬
+                            "" & tab & "" & linefeed
+                    end if
+                end try
+            end repeat
+            return out
+        end tell
+        """
+        let text = await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+            scriptQueue.async {
+                var error: NSDictionary?
+                let answer = NSAppleScript(source: source)?
+                    .executeAndReturnError(&error).stringValue ?? ""
+                continuation.resume(returning: answer)
+            }
+        }
+        return text.split(separator: "\n").compactMap { line in
+            let parts = line.components(separatedBy: "\t")
+            guard parts.count >= 4 else { return nil }
+            let id = parts[0].trimmingCharacters(in: .whitespaces)
+            guard !id.isEmpty else { return nil }
+            return Conversation(
+                id: id, service: parts[1].trimmingCharacters(in: .whitespaces),
+                name: parts[2], handle: parts[3],
+                // The id says so itself, and the participant count agrees.
+                isGroup: id.contains(";+;") || parts[3].isEmpty
+            )
+        }
     }
 
     // MARK: - Who

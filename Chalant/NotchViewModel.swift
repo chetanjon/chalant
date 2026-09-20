@@ -565,7 +565,8 @@ final class NotchViewModel: ObservableObject {
     /// costs the reply.
     func openMessageInMessages() {
         var target = URL(fileURLWithPath: "/System/Applications/Messages.app")
-        if case .known(_, let handle) = messages.recipient {
+        if case .known(_, let thread) = messages.recipient {
+            let handle = thread.handle
             var parts = URLComponents()
             parts.scheme = "sms"
             parts.path = handle

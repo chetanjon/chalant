@@ -149,6 +149,44 @@ Two fixes, both structural:
 `SessionLandingTests` pins all of it: 7 tests on the bookkeeping alone, with
 no microphone involved. 799 tests overall.
 
+### 7. 2026-09-20: the reply was going out over the wrong service for two thirds of conversations
+
+I had written that an SMS sender is indistinguishable from an iMessage one on
+the banner, and that a reply to one could report success and never arrive. That
+was true of the design, not of the Mac. **Messages' own scripting dictionary
+exposes `service type of account of chat`**, so every conversation says what it
+is. Measured on the founder's Mac:
+
+| one-to-one threads | service |
+|---|---|
+| 84 | SMS |
+| 44 | iMessage |
+| 7 | RCS |
+| **135** | **total** |
+
+**Two thirds are not iMessage**, and every reply was being pushed through
+`1st account whose service type = iMessage`. AppleScript reports no error
+either way, so the card would have said "Sent to Mum" over a message that never
+left. Of 135 threads, every handle mapped to exactly one thread: zero ambiguity.
+
+Two more things came out of the same probe:
+
+- **`participant` carries a `name`, and it is the same name the banner shows**
+  ("Ashwitha", "Instinct", "Topgolf"). So the thread can be found from the
+  banner title directly, with no Contacts lookup at all.
+- **A chat id says whether it is a group**: `any;-;+1555...` for one to one,
+  `any;+;<guid>` for a group, confirmed against participant counts.
+
+So the card now aims at a THREAD, not a phone number. `MessageCourier.
+conversations()` reads them all in one script; the banner name finds the
+thread; Contacts is only a fallback for a name Messages does not use in its
+participant list, and even then the address has to match a thread that exists
+here. A contact who wrote from a number that is not on their card is refused
+rather than answered at the wrong number. The send is
+`send "..." to chat id "..."`, which keeps the thread's own service.
+
+`ConversationMatchTests`, 11 tests, built from the shapes above. 810 overall.
+
 ### Still not run
 
 **Nobody has sent a reply from the redesigned card on a real conversation.**
