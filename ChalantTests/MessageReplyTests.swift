@@ -55,6 +55,40 @@ final class MessageReplyTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(20))
     }
 
+    /// Wait for something to become true, rather than sleeping a fixed
+    /// time and hoping. A machine under load (a release runs the suite
+    /// beside a build) stretched these tests past a fixed margin and
+    /// failed one, which is exactly how a timing test ruins a release.
+    @discardableResult
+    private func eventually(
+        _ what: String, within seconds: TimeInterval = 5,
+        _ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        XCTFail("never became true: \(what)", file: file, line: line)
+        return false
+    }
+
+    /// And the opposite: hold something steady for long enough that a
+    /// fade which was going to fire would have fired. Kept generous, and
+    /// measured against the card's own clock rather than the wall.
+    private func stays(
+        _ what: String, for seconds: TimeInterval = 0.6, _ condition: () -> Bool,
+        file: StaticString = #filePath, line: UInt = #line
+    ) async {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            guard condition() else {
+                return XCTFail("stopped being true: \(what)", file: file, line: line)
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
     // MARK: Who, settled before anybody speaks
 
     func testTheRecipientIsSettledOnArrival() async {
@@ -152,12 +186,11 @@ final class MessageReplyTests: XCTestCase {
 
     /// Silence produces no words at all. The card must not wait for
     /// them for ever.
-    func testHearingGivesUpRatherThanHangingForEver() async throws {
+    func testHearingGivesUpRatherThanHangingForEver() async {
         let reply = await shown(Fake(), patience: 0.05)
         reply.talkPressed()
         reply.talkReleased(held: true)
-        try await Task.sleep(for: .milliseconds(250))
-        XCTAssertEqual(reply.phase, .idle)
+        await eventually("the card stops waiting for words") { reply.phase == .idle }
         XCTAssertNotNil(reply.hint)
     }
 
@@ -245,49 +278,44 @@ final class MessageReplyTests: XCTestCase {
 
     // MARK: A moment, not an inbox, and never mid-sentence
 
-    func testAnUntouchedCardFadesOnItsOwn() async throws {
+    func testAnUntouchedCardFadesOnItsOwn() async {
         let reply = MessageReply(courier: Fake().courier, life: 0.05)
         var faded = false
         reply.show(sam) { faded = true }
-        try await Task.sleep(for: .milliseconds(300))
-        XCTAssertFalse(reply.isShowing)
+        await eventually("an unattended card goes") { !reply.isShowing }
         XCTAssertTrue(faded)
     }
 
     /// Reading it with the pointer on it is not ignoring it.
-    func testACardUnderThePointerDoesNotFade() async throws {
+    func testACardUnderThePointerDoesNotFade() async {
         let reply = MessageReply(courier: Fake().courier, life: 0.05)
         reply.show(sam, onFade: {})
         reply.hover(true)
-        try await Task.sleep(for: .milliseconds(300))
-        XCTAssertTrue(reply.isShowing)
+        await stays("a card under the pointer") { reply.isShowing }
 
         // And the clock starts again once the pointer leaves.
         reply.hover(false)
-        try await Task.sleep(for: .milliseconds(300))
-        XCTAssertFalse(reply.isShowing)
+        await eventually("it goes once the pointer leaves") { !reply.isShowing }
     }
 
     /// Words in the field are a reply in progress. It stays.
-    func testACardWithWordsInItNeverFades() async throws {
+    func testACardWithWordsInItNeverFades() async {
         let reply = MessageReply(courier: Fake().courier, life: 0.05)
         reply.show(sam, onFade: {})
         reply.touch()
         reply.draft = "on my"
-        try await Task.sleep(for: .milliseconds(300))
-        XCTAssertTrue(reply.isShowing)
+        await stays("a card with words in it") { reply.isShowing }
     }
 
     /// One stray click must not pin a card open for ever: a touched card
     /// that then sits empty and idle for a whole life is unattended
     /// again. Left up, it blocked every later message as "mid-reply".
-    func testATouchedButAbandonedCardStillGoes() async throws {
+    func testATouchedButAbandonedCardStillGoes() async {
         let reply = MessageReply(courier: Fake().courier, life: 0.05)
         reply.show(sam, onFade: {})
         reply.touch()
         XCTAssertTrue(reply.isMidReply, "clicked into: the next keystroke is this conversation's")
-        try await Task.sleep(for: .milliseconds(300))
-        XCTAssertFalse(reply.isShowing)
+        await eventually("a touched but empty card is unattended again") { !reply.isShowing }
     }
 
     /// A shape nobody has measured, a group thread most likely. Every
