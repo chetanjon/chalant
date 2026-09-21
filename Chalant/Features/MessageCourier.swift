@@ -454,6 +454,13 @@ final class MessageCourier {
     /// about a second, and the card cannot wait longer than it takes to
     /// read the message it is showing.
     nonisolated static func conversations() async -> [Conversation] {
+        // **Never launch Messages to look.** `tell application` starts an
+        // app that is not running, and a card appears for every text: one
+        // ignored message would put Messages in the Dock. The send may
+        // launch it, because sending was asked for; looking was not.
+        guard messagesBundleIDs.contains(where: {
+            !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty
+        }) else { return [] }
         let source = """
         tell application "Messages"
             set out to ""
@@ -670,7 +677,7 @@ final class MessageCourier {
 
     // MARK: - The grant
 
-    private static let messagesBundleIDs = ["com.apple.MobileSMS", "com.apple.iChat"]
+    static let messagesBundleIDs = ["com.apple.MobileSMS", "com.apple.iChat"]
 
     private var runningMessagesBundleID: String? {
         Self.messagesBundleIDs.first {

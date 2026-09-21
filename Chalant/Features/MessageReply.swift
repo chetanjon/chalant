@@ -73,6 +73,14 @@ final class MessageReply: ObservableObject {
             return Courier(
                 aim: { sender in
                     let threads = await MessageCourier.conversations()
+                    // Messages is not running, so nothing here knows which
+                    // conversation this is, and looking is not worth
+                    // launching it for. Opening it is one press away.
+                    guard !threads.isEmpty else {
+                        return .cannotReply(
+                            "Messages isn't open, so Chalant can't tell which conversation this is. Open it to reply."
+                        )
+                    }
                     // The name on the banner is the name Messages puts in
                     // its own participant list, so the thread can usually
                     // be found without asking Contacts anything.

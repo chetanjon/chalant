@@ -318,6 +318,21 @@ final class MessageReplyTests: XCTestCase {
         await eventually("a touched but empty card is unattended again") { !reply.isShowing }
     }
 
+    /// Messages closed: the card says so rather than promising a reply
+    /// it cannot aim. Looking is never worth launching Messages for,
+    /// because a card appears for every text, including ignored ones.
+    func testWithMessagesClosedTheCardOffersToOpenIt() async {
+        let fake = Fake()
+        fake.aim = .cannotReply(
+            "Messages isn't open, so Chalant can't tell which conversation this is. Open it to reply."
+        )
+        let reply = await shown(fake)
+        guard case .cannotReply(let why) = reply.recipient else { return XCTFail() }
+        XCTAssertTrue(why.contains("Open it"))
+        reply.draft = "on my way"
+        XCTAssertFalse(reply.canSend)
+    }
+
     /// A shape nobody has measured, a group thread most likely. Every
     /// one-to-one message seen so far carried exactly two lines.
     func testAnUnmeasuredBannerShapeIsNeverRepliedTo() async {
