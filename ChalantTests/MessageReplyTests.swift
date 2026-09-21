@@ -318,19 +318,29 @@ final class MessageReplyTests: XCTestCase {
         await eventually("a touched but empty card is unattended again") { !reply.isShowing }
     }
 
-    /// Messages closed: the card says so rather than promising a reply
-    /// it cannot aim. Looking is never worth launching Messages for,
-    /// because a card appears for every text, including ignored ones.
-    func testWithMessagesClosedTheCardOffersToOpenIt() async {
+    /// Messages closed: looking is not worth launching it for, but the
+    /// reply still works. Contacts says who, and the thread is found at
+    /// send time, by which point sending has launched Messages.
+    func testWithMessagesClosedTheThreadIsFoundAtSendTime() async {
         let fake = Fake()
-        fake.aim = .cannotReply(
-            "Messages isn't open, so Chalant can't tell which conversation this is. Open it to reply."
-        )
+        let later = MessageCourier.deferred(name: "Sam Ali", handle: "+15550100")
+        fake.aim = .known(name: "Sam Ali", thread: later)
         let reply = await shown(fake)
-        guard case .cannotReply(let why) = reply.recipient else { return XCTFail() }
-        XCTAssertTrue(why.contains("Open it"))
+
         reply.draft = "on my way"
-        XCTAssertFalse(reply.canSend)
+        XCTAssertTrue(reply.canSend, "a closed Messages must not disable the reply")
+        let sent = await reply.send()
+        XCTAssertTrue(sent)
+        XCTAssertEqual(fake.sends.first?.thread.id, "", "no thread known yet")
+        XCTAssertEqual(fake.sends.first?.thread.handle, "+15550100", "but the address is")
+    }
+
+    /// An empty id means "not looked up yet", never "send it nowhere".
+    func testADeferredThreadCarriesNoIdAndNoService() {
+        let later = MessageCourier.deferred(name: "Sam", handle: "+15550100")
+        XCTAssertTrue(later.id.isEmpty)
+        XCTAssertTrue(later.service.isEmpty)
+        XCTAssertFalse(later.isGroup)
     }
 
     /// A shape nobody has measured, a group thread most likely. Every

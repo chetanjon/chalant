@@ -311,7 +311,7 @@ final class MessageCourier {
         //
         // A thread that does not exist yet is the one case with nothing to
         // answer in, and there iMessage is the only thing to try.
-        var chatID = message.chatID
+        var chatID = message.chatID.flatMap { $0.isEmpty ? nil : $0 }
         if chatID == nil {
             let all = await Self.conversations()
             if case .one(let found) = Self.conversation(handle: message.handle, in: all) {
@@ -386,6 +386,9 @@ final class MessageCourier {
     /// ambiguous in practice.
     struct Conversation: Equatable {
         /// `any;-;+15551234567` for one to one, `any;+;<guid>` for a group.
+        /// Empty when the thread is not known yet: Messages was closed, so
+        /// nothing could be looked up without launching it, and the send
+        /// resolves it instead (see `deferred`).
         let id: String
         /// iMessage, SMS or RCS: whatever this thread actually is.
         let service: String
@@ -394,6 +397,13 @@ final class MessageCourier {
         let name: String
         let handle: String
         let isGroup: Bool
+    }
+
+    /// An address with no thread found yet, because Messages was not
+    /// running to be asked. The send looks it up, by which time Messages
+    /// is running because sending is what launches it.
+    static func deferred(name: String, handle: String) -> Conversation {
+        Conversation(id: "", service: "", name: name, handle: handle, isGroup: false)
     }
 
     /// Which thread a banner's sender means.

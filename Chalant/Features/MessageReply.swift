@@ -73,13 +73,18 @@ final class MessageReply: ObservableObject {
             return Courier(
                 aim: { sender in
                     let threads = await MessageCourier.conversations()
-                    // Messages is not running, so nothing here knows which
-                    // conversation this is, and looking is not worth
-                    // launching it for. Opening it is one press away.
+                    // Messages is not running, so there is nothing to read
+                    // and looking is not worth launching it for. Contacts
+                    // can still say who this is, and the send finds the
+                    // thread later, once sending has launched Messages.
                     guard !threads.isEmpty else {
-                        return .cannotReply(
-                            "Messages isn't open, so Chalant can't tell which conversation this is. Open it to reply."
-                        )
+                        let answer = await MessageCourier.resolve(sender, strict: true)
+                        guard case .one(let name, let handle) = answer else {
+                            return MessageReply.recipient(for: answer, sender: sender)
+                        }
+                        return .known(
+                            name: name,
+                            thread: MessageCourier.deferred(name: name, handle: handle))
                     }
                     // The name on the banner is the name Messages puts in
                     // its own participant list, so the thread can usually
