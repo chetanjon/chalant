@@ -37,6 +37,68 @@ final class DictationController {
     /// they have seen it work rather than before (the risk register's
     /// "design onboarding around a single scripted success").
     var practiceLanding: ((String) -> Void)?
+    /// A landing belongs to ONE press, and to the session that press opened.
+    ///
+    /// The island's message card dictates a reply through its own mic
+    /// button. It first borrowed `practiceLanding` above, and that slot is
+    /// global: while it is set EVERY hold lands there, the Option key
+    /// included. So a text arriving while somebody dictated into their editor
+    /// took their next sentence, a card closed mid-finalize sent a private
+    /// reply into whatever app was in front, and a slot left armed swallowed
+    /// dictation until relaunch (two review rounds, 2026-09-19).
+    ///
+    /// A landing handed in WITH the press cannot do any of that. The Option
+    /// key never brings one, so its words can only ever go where they always
+    /// went. A session that brought one delivers to it and to nothing else:
+    /// if whoever asked has gone, the closure drops the words, and they are
+    /// never typed anywhere. `practiceLanding` stays for the tour, whose
+    /// whole point is that the Option hold itself lands in the try-it card.
+    /// Which holds owe their words to somebody, and to whom.
+    ///
+    /// A value type so the rule can be tested without a microphone: the
+    /// bookkeeping is where this went wrong twice, not the audio.
+    struct Landings {
+        private var closures: [Int: (String) -> Void] = [:]
+        private var owed: [Int] = []
+
+        /// How many owed sessions are remembered after their closure has
+        /// been let go of. Ownership has to outlive the closure, because
+        /// the two answer different questions: "where do these words go"
+        /// can stop having an answer, but "do these words belong to
+        /// somebody other than the app in front" must NEVER stop having
+        /// one. A session still owed and no longer deliverable drops its
+        /// words; it must not fall through to being typed.
+        private static let remembered = 8
+
+        /// A press was ACCEPTED under `session`. Only the previous session
+        /// can still be holding a closure worth keeping; ownership is
+        /// remembered for longer, on purpose.
+        mutating func began(session: Int, landing: ((String) -> Void)?) {
+            closures = closures.filter { $0.key == session &- 1 }
+            if let landing {
+                closures[session] = landing
+                owed.append(session)
+            }
+            if owed.count > Self.remembered {
+                owed.removeFirst(owed.count - Self.remembered)
+            }
+        }
+
+        /// Does this session owe its words to somebody. Asked by
+        /// membership, not by whether a closure survived: a hold that
+        /// began with a landing must never fall through to being typed,
+        /// even if whoever asked has gone and the closure was cleared.
+        func owes(_ session: Int) -> Bool { owed.contains(session) }
+
+        /// Take the words out. Returns the closure if one is still there,
+        /// nil if the asker has gone and the words are to be dropped.
+        mutating func take(_ session: Int) -> ((String) -> Void)? {
+            owed.removeAll { $0 == session }
+            return closures.removeValue(forKey: session)
+        }
+    }
+
+    private var landings = Landings()
     /// Whatever shows that dictation is listening. Chalant hands in its
     /// island; the panel this used to own is gone.
     private let surface: any DictationSurface
@@ -381,14 +443,20 @@ final class DictationController {
 
     // MARK: - The chain
 
-    func keyDown() async {
-        // A new press retires everything the last one might still be doing.
-        sessionID &+= 1
+    func keyDown(landing: ((String) -> Void)? = nil) async {
         beginUtteranceActivity()
         retirePendingSwap()
         earRestTask?.cancel()
         earRestTask = nil
         Self.log.info("keyDown entered")
+        // **Asked before anything is changed**, because a refused press has
+        // to leave the session that is already running exactly as it was.
+        // The id used to be bumped first: press the hold key by habit while
+        // the island's message card had the microphone, and that refused
+        // press still moved the id, so the running hold finalized under an
+        // id its landing was not filed under, the lookup missed, and the
+        // private reply went down the insertion ladder into whatever app
+        // was in front (review, 2026-09-19).
         switch key.press() {
         case .begin:
             break
@@ -402,6 +470,12 @@ final class DictationController {
             Self.log.error("key down: a press cannot mean any of those")
             return
         }
+        // Accepted, so this is a new session: it retires everything the last
+        // one might still be doing.
+        sessionID &+= 1
+        // Only the previous session can still be finishing; anything older
+        // was refused or abandoned before it ever reached a key-up.
+        landings.began(session: sessionID, landing: landing)
 
 
         guard assetState.isReady else {
@@ -956,6 +1030,19 @@ final class DictationController {
         // nothing is inserted anywhere, and no app is touched. The corpus
         // keeps nothing either, because a practice sentence has no app and
         // no document to be right or wrong in.
+        // Membership decides, not the closure. A hold that began with a
+        // landing belongs to whoever asked for it and to nobody else: if
+        // they have gone, the words are DROPPED. They are never typed
+        // somewhere instead, which is the whole point of the design and is
+        // now true even if the closure itself has been cleared.
+        if landings.owes(session) {
+            await corpus.discard()
+            let owner = landings.take(session)
+            Self.log.info(
+                "session landing: \(text.count, privacy: .public) chars, delivered=\(owner != nil, privacy: .public)")
+            owner?(text)
+            return
+        }
         if let practiceLanding {
             await corpus.discard()
             Self.log.info("practice landing: \(text.count, privacy: .public) chars")

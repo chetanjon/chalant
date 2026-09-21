@@ -302,7 +302,12 @@ struct ExpandedView: View {
     /// it alone, which is how the tour has always behaved.
     private var layoutRows: [IslandRow] {
         let rows = model.layout.layout.rows
-        guard model.pane == .welcome else { return rows }
+        guard model.pane != .none else { return rows }
+        // A message is the whole island while it is up. Drawn under the
+        // music and the soundscapes it arrived as the third thing on the
+        // screen, below two rows nobody had asked about, and a text is
+        // the one arrival that should be readable in a glance.
+        if model.pane == .message { return [IslandRow([.input])] }
         return rows.filter { row in !row.elements.contains { $0.isRequired } }
             + [IslandRow([.input])]
     }
@@ -393,6 +398,32 @@ struct ExpandedView: View {
             if model.pane == .welcome {
                 WelcomeView(model: model)
                     .transition(.opacity)
+            } else if model.pane == .message {
+                MessageCard(
+                    reply: model.messages,
+                    level: model.dictationLevel,
+                    // No dictation, no mic: a control appears only when
+                    // it can do something. Typing always can.
+                    canTalk: Dictation.shared.isRunning,
+                    talkPress: { model.messageTalkPress() },
+                    talkRelease: { held in model.messageTalkRelease(held: held) },
+                    send: {
+                        Task {
+                            let card = model.messages.sighting?.id
+                            guard await model.messages.send() else { return }
+                            // Long enough to read who it went to.
+                            try? await Task.sleep(for: .seconds(1.6))
+                            // Only the card that sent. A newer message may
+                            // have taken its place in those 1.6 seconds, and
+                            // closing THAT would swallow a text unread.
+                            guard model.messages.sighting?.id == card else { return }
+                            model.closeMessage()
+                        }
+                    },
+                    openInMessages: { model.openMessageInMessages() },
+                    dismiss: { model.closeMessage() }
+                )
+                .transition(.opacity)
             } else {
                 // Identity per tab, so SwiftUI sees a swap to transition
                 // rather than one view quietly changing its contents.

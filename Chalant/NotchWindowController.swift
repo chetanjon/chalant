@@ -325,7 +325,10 @@ final class NotchWindowController {
                 guard let self else { return }
                 if self.viewModel.state == .listening {
                     self.viewModel.cancelListening()
-                } else {
+                } else if self.viewModel.clickAwayMayCollapse {
+                    // A message card nobody has touched appeared on its
+                    // own, so a click in the app they are working in is
+                    // not a verdict on it. See `clickAwayMayCollapse`.
                     self.viewModel.collapse()
                 }
             }

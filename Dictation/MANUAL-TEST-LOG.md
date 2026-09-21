@@ -5,6 +5,215 @@ here. "Should work" and "now supports" are not evidence.
 
 ---
 
+## 2026-09-15 — reply to a text from the island: the two live measurements the feature rests on
+
+Run on this Mac against a Developer ID build of `feat/island-message-reply`
+(a Debug build cannot do this: it has no Accessibility grant, see the
+2026-09-14 entry below). Notifications were posted with `display
+notification` and read back out of the wire log.
+
+### 1. The watcher sees a live banner
+
+```
+2026-09-15 13:27:21  banner  type=Notification Center|Script Editor, Alpha Sender, First body  tool=other  -> lines=2
+2026-09-15 13:27:30  banner  type=Notification Center|Script Editor, Beta Sender, Second body  tool=other  -> lines=2
+```
+
+Two banners nine seconds apart, **both caught**, each with its title and
+body read out of the tree. The `AXObserver` on `NotificationCenter`'s
+`kAXWindowCreatedNotification` is the right hook.
+
+### 2. The posting app names itself in the DESCRIPTION, not the identifier
+
+The first attempt classified on `AXIdentifier` and would have matched
+nothing, ever:
+
+```
+type=widgets-overlay-view,0A11494F-90EE-432C-8891-4C71750F3207,title,body
+```
+
+Generic layout names and the notification's own UUID. **No bundle id
+anywhere in the tree.** What does carry the app is a description shaped
+`App, title, body` (`Script Editor, Alpha Sender, First body`), with the
+window itself described as `Notification Center`. That is what
+`MessageWatch.isMessages` tests, matching the first comma-separated field
+against the app's localized display name rather than searching for a
+substring.
+
+### 3. Opening Notification Center hands over EVERYTHING, and it looked like a message
+
+Caught live at 22:45 when the notification panel was opened. One window,
+ten lines, every notification on the Mac plus the widgets:
+
+```
+Notification Center | Edit Widgets | Clear Notifications… |
+Stacked summary: Journal, Time to Write, ... | <app>, <title>, <body> |
+Phone, <number>, <call transcript> | 3 more notifications |
+Calendar | Weather | Clock
+```
+
+The first reading counted static texts by position, so this panel would
+have been read as a sender (its first line) and a message (the other
+nine). **Opening Notification Center could have offered a reply to an
+hours-old text.** The parse now comes from the notification's own
+description instead, and a window holding anything other than exactly one
+notification is refused: a panel has several, a single banner has one.
+
+Two consequences worth knowing. Chrome carries no comma (`Edit Widgets`,
+`Clear Notifications…`), which is what separates it from a notification
+shaped `App, title, body`. And two texts arriving close enough together to
+stack are refused as well, so the second gets no card; the banner still
+shows, which is the pre-existing behaviour, and safety wins the tie.
+
+**This is also why the banner log now keeps only the app name.** That
+capture put a phone number and a voicemail transcript into `wire.log`
+under a comment promising it never would. The line was deleted and a test
+now fails if a body or a sender reaches the log again.
+
+### 4. CONFIRMED on real messages, 2026-09-16
+
+The build ran on this Mac for a day. **Sixteen real Messages banners were
+recognized**, every one of them the same shape:
+
+```
+2026-09-16 13:41:55  banner  type=Notification Center|Messages  tool=messages  -> lines=2 fields=2
+2026-09-16 15:54:05  banner  type=Notification Center|Messages  tool=messages  -> lines=2 fields=2
+2026-09-16 17:01:18  banner  type=Notification Center|Messages  tool=messages  -> lines=2 fields=2
+```
+
+`Messages` is the first field of the notification's description, there is
+exactly one notification in the window, and the two static texts are the
+sender and the message. **The inference the feature rested on is now a
+measurement.** Nothing was loosened to make this pass.
+
+The same day also confirmed the refusals working on real traffic: the
+notification panel opened at 20:54 carried eleven lines and fifty-four
+descriptions and was refused, and FaceTime notifications
+(`FACETIME_NOTIFICATION`, `lines=0`) were refused too.
+
+### 5. 2026-09-19: the card appears on real messages, and the first build could not be replied from
+
+The founder confirmed a card popped on a real incoming iMessage, which closes
+the display question. Two review rounds then found the first build broken in
+ways no test had caught, each confirmed by reading the code before it was
+touched:
+
+| Found | What a person met |
+|---|---|
+| The tour's GLOBAL dictation landing was borrowed for the card's life | A plain Option hold landed in the card (the rule the founder had been told was kept). A card closed by a click left it armed, silently eating dictation until relaunch. |
+| A hold flips the island to `.dictating` and then collapses it | Holding the reply button removed the card from under the finger; the words landed on a card nobody could see. **A reply could never be finished.** |
+| `isStaged == false` was the only success signal | A stale draft showed "Sent." though nothing left. |
+| `isMidInteraction` includes `pane != .none` | The card counted as "island in use": newest never won. |
+| Courier strings written for the voice path | A card with buttons said "Say send" and "say it again". |
+| Second round: the landing was still global, for one press plus 8 s | An Option hold inside that window still landed in the card, and a card closed mid-finalize **typed the private reply into the front app**. |
+| Banner titles resolved with the voice path's fuzzy tiers | "Sam" could resolve to "Samantha", or to a nickname over a given name, with no read-back of the recipient to catch it. |
+
+What replaced it: one reply field (talk or type, Return or the arrow sends what
+it shows); a landing that travels WITH the press (`DictationController.
+sessionLandings`), so the Option key can never carry one and words for a card
+that has gone are dropped rather than typed; a hold the card starts leaves the
+island as it is; the courier answers with a `SendOutcome` instead of a
+sentence; strict recipient resolution (exactly one contact across every exact
+tier, a prefix never counts); and one teardown, on `pane` itself.
+
+Looked at in a Debug build through the `debug message` command (the card needs
+no banner to be looked at): the card is the whole island, the field reads as a
+chat field, the send arrow exists only with words, and the caption says "Not
+sent yet" and names who it goes to.
+
+### 6. A third round, on the one property that matters
+
+Two adversaries were set on the redesign with one instruction each: make words
+go to the wrong place, or leave the app stuck. The first found a real hole and
+its skeptic never ran (session limit), so it was traced by hand and confirmed:
+
+**`keyDown` bumped `sessionID` BEFORE asking whether the press was accepted.**
+Hold the card's mic, then press the dictation key out of habit (the app's own
+main gesture). That press is refused by `PushToTalk` as "already listening",
+but the id had already moved, so the hold still running finalized under an id
+its landing was not filed under. The lookup missed, the words fell through to
+`target`, and **the private reply was typed into whatever app was in front.**
+Exactly the failure the per-press landing exists to prevent.
+
+Two fixes, both structural:
+
+1. The press is asked first. A refused press now changes nothing at all: no
+   id, no purge, no landing.
+2. Ownership outlives the closure (`DictationController.Landings`). "Where do
+   these words go" may stop having an answer; "do these words belong to
+   somebody other than the app in front" may not. A session still owed and no
+   longer deliverable DROPS its words. Writing the test for this found the
+   second half: two further presses during a slow finalize purged the closure,
+   and before this the words would have been typed.
+
+`SessionLandingTests` pins all of it: 7 tests on the bookkeeping alone, with
+no microphone involved. 799 tests overall.
+
+### 7. 2026-09-20: the reply was going out over the wrong service for two thirds of conversations
+
+I had written that an SMS sender is indistinguishable from an iMessage one on
+the banner, and that a reply to one could report success and never arrive. That
+was true of the design, not of the Mac. **Messages' own scripting dictionary
+exposes `service type of account of chat`**, so every conversation says what it
+is. Measured on the founder's Mac:
+
+| one-to-one threads | service |
+|---|---|
+| 84 | SMS |
+| 44 | iMessage |
+| 7 | RCS |
+| **135** | **total** |
+
+**Two thirds are not iMessage**, and every reply was being pushed through
+`1st account whose service type = iMessage`. AppleScript reports no error
+either way, so the card would have said "Sent to Mum" over a message that never
+left. Of 135 threads, every handle mapped to exactly one thread: zero ambiguity.
+
+Two more things came out of the same probe:
+
+- **`participant` carries a `name`, and it is the same name the banner shows**
+  ("Ashwitha", "Instinct", "Topgolf"). So the thread can be found from the
+  banner title directly, with no Contacts lookup at all.
+- **A chat id says whether it is a group**: `any;-;+1555...` for one to one,
+  `any;+;<guid>` for a group, confirmed against participant counts.
+
+So the card now aims at a THREAD, not a phone number. `MessageCourier.
+conversations()` reads them all in one script; the banner name finds the
+thread; Contacts is only a fallback for a name Messages does not use in its
+participant list, and even then the address has to match a thread that exists
+here. A contact who wrote from a number that is not on their card is refused
+rather than answered at the wrong number. The send is
+`send "..." to chat id "..."`, which keeps the thread's own service.
+
+`ConversationMatchTests`, 11 tests, built from the shapes above. 810 overall.
+
+**The enumeration was then run exactly as the app runs it** (same script,
+verbatim) and its output checked against the Swift parser: 148 rows, 135 one to
+one and 13 groups, every row exactly four tab-separated fields, **nothing
+dropped or misparsed**. Of 48 named senders, 47 resolve to exactly one thread
+and one is ambiguous and would be refused. The founder's conversation list was
+deleted from disk afterwards; none of it is in the repo or the tests.
+
+### Still not run
+
+**Nobody has sent a reply from the redesigned card on a real conversation.**
+The Debug build cannot: it has its own TCC identity, so no Contacts, no
+Messages automation. It needs the signed build, a real incoming text, and the
+founder's hand on the mic. Also unmeasured: a named group banner, an unnamed
+group banner, and a green-bubble SMS banner. The card fails closed on any
+banner that is not the measured two-line shape, but an SMS sender produces
+exactly that shape and the reply is forced onto iMessage, where AppleScript
+reports success and Messages may show Not Delivered.
+
+**Nobody has watched a card appear, or sent a reply from one** (superseded above). The log
+proves the message was recognized; it did not, until now, record what
+became of it. A `message-card` line was added for exactly that: it says
+`shown`, or which rule refused it (`mid-hold`, `island-in-use`,
+`welcome-tour`, `dictation-only`). The next real message on a running build
+leaves that evidence by itself.
+
+---
+
 ## 2026-09-14 (night) — row 1 attempted live. BLOCKED on permissions, and the block is the finding.
 
 Attempted with a synthetic hold against both builds, on this Mac, using the

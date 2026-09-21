@@ -15,6 +15,9 @@ final class MessageCourier {
         let handle: String
         let body: String
         let staged: Date
+        /// The thread to answer in, when the caller already knows it. The
+        /// island's reply card always does: the message came from there.
+        var chatID: String?
     }
 
     private(set) var pending: Pending?
@@ -185,9 +188,23 @@ final class MessageCourier {
         }
     }
 
+    /// Stage for somebody already resolved. The island's reply card
+    /// asks Contacts who the sender is the moment their message
+    /// arrives, so by the time there are words there is nothing left
+    /// to look up, and nothing left to guess.
+    @discardableResult
+    func stage(
+        name: String, handle: String, body: String, chatID: String? = nil
+    ) -> String {
+        stagePending(name: name, handle: handle, body: body, chatID: chatID)
+    }
+
     /// Stage, front the grant, read back: one door for every path.
-    private func stagePending(name: String, handle: String, body: String) -> String {
-        pending = Pending(name: name, handle: handle, body: body, staged: Date())
+    private func stagePending(
+        name: String, handle: String, body: String, chatID: String? = nil
+    ) -> String {
+        pending = Pending(
+            name: name, handle: handle, body: body, staged: Date(), chatID: chatID)
         primeMessagesGrant()
         return readBack()
     }
@@ -208,53 +225,127 @@ final class MessageCourier {
 
     // MARK: - Sending
 
+    /// What became of a send, as a value rather than a sentence.
+    ///
+    /// The voice path only ever needed words to say back. The island's
+    /// reply card needs to KNOW: it once showed "Sent." for a message
+    /// that had gone stale and never left, because "nothing is staged
+    /// any more" was the only signal it had, and a stale message clears
+    /// the stage exactly the way a delivered one does (2026-09-19).
+    enum SendOutcome: Equatable {
+        case sent(name: String)
+        case nothingStaged
+        /// Staged too long ago to trust; the stage is cleared.
+        case stale
+        /// Messages has not answered about the grant yet. Still staged.
+        case wakingUp
+        /// macOS is showing the automation dialog. Still staged.
+        case askingPermission
+        /// The user refused automation of Messages. Still staged.
+        case blocked
+        /// No iMessage account on this Mac. Still staged.
+        case notSignedIn
+        /// Messages returned an error. Still staged.
+        case failed(String)
+    }
+
     /// Fire the staged message through Messages.app. The words only
     /// leave once the grant is already settled: a permission dialog
     /// raised mid-send would block the script lane and wedge the
     /// island, so an unsettled grant answers with instructions and
     /// keeps the message staged for the next "send".
     func confirmSend() async -> String {
-        guard let message = pending else { return "Nothing staged to send." }
+        switch await confirmSendOutcome() {
+        case .sent(let name):
+            return "Sent to \(name)."
+        case .nothingStaged:
+            return "Nothing staged to send."
+        case .stale:
+            return "That message went stale. Say it again."
+        case .wakingUp:
+            return "Messages is waking up. Say send again in a moment."
+        case .askingPermission:
+            return "macOS is asking to let Chalant use Messages. Click Allow, then say send."
+        case .blocked:
+            return "macOS blocked Chalant from Messages. System Settings, Privacy and Security, Automation, then say send again."
+        case .notSignedIn:
+            return "Messages isn't signed in to iMessage on this Mac. It holds; say send once that's fixed."
+        case .failed(let error):
+            return "Messages balked: \(error). It holds; say send to try again."
+        }
+    }
+
+    /// The same send, answering with what happened instead of what to
+    /// say about it. Every string above is derived from this, so the
+    /// voice path reads exactly as it always has.
+    func confirmSendOutcome() async -> SendOutcome {
+        guard let message = pending else { return .nothingStaged }
         guard Date().timeIntervalSince(message.staged) < Self.shelfLife else {
             pending = nil
-            return "That message went stale. Say it again."
+            return .stale
         }
 
         guard let grant = await messagesGrantStatus() else {
             primeMessagesGrant()
-            return "Messages is waking up. Say send again in a moment."
+            return .wakingUp
         }
         switch grant {
         case -1744:
             primeMessagesGrant()
-            return "macOS is asking to let Chalant use Messages. Click Allow, then say send."
+            return .askingPermission
         case -1743:
-            return "macOS blocked Chalant from Messages. System Settings, Privacy and Security, Automation, then say send again."
+            return .blocked
         default:
             break
         }
 
+        // **Answer in the thread the message came from.**
+        //
+        // The line below used to be `1st account whose service type =
+        // iMessage` for everybody. Measured on the founder's Mac
+        // 2026-09-20: 84 of their 135 one-to-one threads are SMS and 7
+        // are RCS. For all 91 of those, forcing iMessage asks Messages to
+        // send through an account the other person may not have, and
+        // AppleScript reports no error either way, so the card would have
+        // said "Sent" over a message that never arrived.
+        //
+        // A thread that does not exist yet is the one case with nothing to
+        // answer in, and there iMessage is the only thing to try.
+        var chatID = message.chatID.flatMap { $0.isEmpty ? nil : $0 }
+        if chatID == nil {
+            let all = await Self.conversations()
+            if case .one(let found) = Self.conversation(handle: message.handle, in: all) {
+                chatID = found.id
+            }
+        }
         // The message stays staged until it actually leaves: every
         // failure below invites a retry, and a retry with nothing
         // staged was a lie the review caught. Success alone clears.
-        let script = """
-        tell application "Messages"
-            set targetService to 1st account whose service type = iMessage
-            send "\(Self.escaped(message.body))" to participant "\(Self.escaped(message.handle))" of targetService
-        end tell
-        """
+        let script: String
+        if let chatID {
+            script = """
+            tell application "Messages"
+                send "\(Self.escaped(message.body))" to chat id "\(Self.escaped(chatID))"
+            end tell
+            """
+        } else {
+            script = """
+            tell application "Messages"
+                set targetService to 1st account whose service type = iMessage
+                send "\(Self.escaped(message.body))" to participant "\(Self.escaped(message.handle))" of targetService
+            end tell
+            """
+        }
         let error = await Self.runScript(script)
         guard let error else {
             pending = nil
-            return "Sent to \(message.name)."
+            return .sent(name: message.name)
         }
-        if error.contains("-1743") {
-            return "macOS blocked Chalant from Messages. System Settings, Privacy and Security, Automation, then say send again."
-        }
+        if error.contains("-1743") { return .blocked }
         if error.contains("service type") || error.contains("account") {
-            return "Messages isn't signed in to iMessage on this Mac. It holds; say send once that's fixed."
+            return .notSignedIn
         }
-        return "Messages balked: \(error). It holds; say send to try again."
+        return .failed(error)
     }
 
     /// Runs on the script lane; returns nil on success, the error
@@ -280,9 +371,153 @@ final class MessageCourier {
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
+    // MARK: - The conversations already on this Mac
+
+    /// One thread in Messages, as the card needs to see it.
+    ///
+    /// **This, not Contacts, is what a reply should be aimed at.** A name
+    /// in Contacts gives a number; a conversation gives the thread the
+    /// message actually arrived in, and its service. Measured on the
+    /// founder's Mac 2026-09-20: of 135 one-to-one threads, **84 are SMS
+    /// and 7 are RCS. Only 44 are iMessage.** Sending every reply through
+    /// `1st account whose service type = iMessage`, as the voice path
+    /// does, would report success and deliver nothing for two thirds of
+    /// them. Every handle mapped to exactly one thread, so this is not
+    /// ambiguous in practice.
+    struct Conversation: Equatable {
+        /// `any;-;+15551234567` for one to one, `any;+;<guid>` for a group.
+        /// Empty when the thread is not known yet: Messages was closed, so
+        /// nothing could be looked up without launching it, and the send
+        /// resolves it instead (see `deferred`).
+        let id: String
+        /// iMessage, SMS or RCS: whatever this thread actually is.
+        let service: String
+        /// What Messages calls the other person, which is the same name it
+        /// puts in the banner.
+        let name: String
+        let handle: String
+        let isGroup: Bool
+    }
+
+    /// An address with no thread found yet, because Messages was not
+    /// running to be asked. The send looks it up, by which time Messages
+    /// is running because sending is what launches it.
+    static func deferred(name: String, handle: String) -> Conversation {
+        Conversation(id: "", service: "", name: name, handle: handle, isGroup: false)
+    }
+
+    /// Which thread a banner's sender means.
+    enum ConversationMatch: Equatable {
+        case one(Conversation)
+        /// Two threads answer to that name, so no reply is aimed anywhere.
+        case several
+        case none
+    }
+
+    /// Compare addresses the way people do not: `+1 (555) 010-0142` and
+    /// `+15550100142` are one number, and an address is itself.
+    nonisolated static func addressKey(_ handle: String) -> String {
+        let digits = handle.filter(\.isNumber)
+        if digits.count >= 10 { return String(digits.suffix(10)) }
+        return handle.trimmingCharacters(in: .whitespaces).lowercased()
+    }
+
+    /// The thread a message came from, found by the name on its banner.
+    ///
+    /// A group is never a match: the banner of a group message names the
+    /// person who wrote, and a reply to them alone would be a private
+    /// answer to something said in a room.
+    nonisolated static func conversation(
+        named sender: String, in all: [Conversation]
+    ) -> ConversationMatch {
+        let wanted = sender.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !wanted.isEmpty else { return .none }
+        let byName = all.filter {
+            !$0.isGroup
+                && $0.name.trimmingCharacters(in: .whitespaces).lowercased() == wanted
+        }
+        if byName.count == 1, let only = byName.first { return .one(only) }
+        if byName.count > 1 { return .several }
+
+        // A sender shown as a bare number: the name and the handle are the
+        // same thing, formatted differently.
+        let key = addressKey(sender)
+        let byHandle = all.filter { !$0.isGroup && addressKey($0.handle) == key }
+        if byHandle.count == 1, let only = byHandle.first { return .one(only) }
+        return byHandle.isEmpty ? .none : .several
+    }
+
+    /// The thread for an address, for the Contacts fallback: the banner
+    /// showed a name Messages does not use in its participant list.
+    nonisolated static func conversation(
+        handle: String, in all: [Conversation]
+    ) -> ConversationMatch {
+        let key = addressKey(handle)
+        let hits = all.filter { !$0.isGroup && addressKey($0.handle) == key }
+        if hits.count == 1, let only = hits.first { return .one(only) }
+        return hits.isEmpty ? .none : .several
+    }
+
+    /// Read every thread out of Messages.
+    ///
+    /// One script rather than a question per chat: 145 of them answered in
+    /// about a second, and the card cannot wait longer than it takes to
+    /// read the message it is showing.
+    nonisolated static func conversations() async -> [Conversation] {
+        // **Never launch Messages to look.** `tell application` starts an
+        // app that is not running, and a card appears for every text: one
+        // ignored message would put Messages in the Dock. The send may
+        // launch it, because sending was asked for; looking was not.
+        guard messagesBundleIDs.contains(where: {
+            !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty
+        }) else { return [] }
+        let source = """
+        tell application "Messages"
+            set out to ""
+            repeat with c in chats
+                try
+                    set ps to participants of c
+                    set n to count of ps
+                    if n is 1 then
+                        set p to item 1 of ps
+                        set out to out & (id of c) & tab & ¬
+                            (service type of account of c as text) & tab & ¬
+                            (name of p as text) & tab & (handle of p as text) & linefeed
+                    else
+                        set out to out & (id of c) & tab & ¬
+                            (service type of account of c as text) & tab & ¬
+                            "" & tab & "" & linefeed
+                    end if
+                end try
+            end repeat
+            return out
+        end tell
+        """
+        let text = await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+            scriptQueue.async {
+                var error: NSDictionary?
+                let answer = NSAppleScript(source: source)?
+                    .executeAndReturnError(&error).stringValue ?? ""
+                continuation.resume(returning: answer)
+            }
+        }
+        return text.split(separator: "\n").compactMap { line in
+            let parts = line.components(separatedBy: "\t")
+            guard parts.count >= 4 else { return nil }
+            let id = parts[0].trimmingCharacters(in: .whitespaces)
+            guard !id.isEmpty else { return nil }
+            return Conversation(
+                id: id, service: parts[1].trimmingCharacters(in: .whitespaces),
+                name: parts[2], handle: parts[3],
+                // The id says so itself, and the participant count agrees.
+                isGroup: id.contains(";+;") || parts[3].isEmpty
+            )
+        }
+    }
+
     // MARK: - Who
 
-    enum Resolution {
+    enum Resolution: Equatable {
         case none
         case denied
         /// The Contacts dialog has not been answered yet; the ask
@@ -314,7 +549,11 @@ final class MessageCourier {
     /// Look the spoken name up in the user's address book. Nickname
     /// beats given name beats full name; several equal hits come back
     /// as a question instead of a guess.
-    nonisolated static func resolve(_ spokenName: String) async -> Resolution {
+    /// - Parameter strict: for a name READ OFF A BANNER rather than spoken.
+    ///   See `decide`.
+    nonisolated static func resolve(
+        _ spokenName: String, strict: Bool = false
+    ) async -> Resolution {
         // Anything not undetermined/denied/restricted passes (limited
         // access counts as a yes). The undetermined case fires the
         // ask without waiting and reports itself, so no caller ever
@@ -368,16 +607,60 @@ final class MessageCourier {
                 // was a lie (review-caught).
                 return .failed
             }
-            let tier = [exactNick, exactGiven, exactFull, prefixFull]
-                .first { !$0.isEmpty } ?? []
-            let reachable = tier.filter { Self.handle(for: $0) != nil }
-            guard !reachable.isEmpty else { return .none }
-            if reachable.count == 1, let contact = reachable.first,
-               let handle = Self.handle(for: contact) {
-                return .one(name: Self.displayName(contact), handle: handle)
+            func people(_ contacts: [CNContact]) -> [Person] {
+                contacts.map {
+                    Person(id: $0.identifier, name: Self.displayName($0),
+                           handle: Self.handle(for: $0))
+                }
             }
-            return .many(reachable.map(Self.displayName))
+            return Self.decide(
+                nick: people(exactNick), given: people(exactGiven),
+                full: people(exactFull), prefix: people(prefixFull),
+                strict: strict
+            )
         }.value
+    }
+
+    /// One contact, reduced to what deciding needs, so the decision can be
+    /// tested without an address book.
+    struct Person: Equatable {
+        let id: String
+        let name: String
+        let handle: String?
+    }
+
+    /// Who a name means.
+    ///
+    /// **Spoken**, the first tier with anybody in it wins (nickname, then
+    /// given name, then full name, then a full-name prefix). That is right
+    /// for a name somebody just said: they meant their "Mum", and the
+    /// read-back catches a wrong pick before anything is sent.
+    ///
+    /// **Strict** is for a name read off a notification banner, where
+    /// nobody chose anything and there is no read-back of the recipient to
+    /// catch a wrong one. There the question is not "which tier is best"
+    /// but "is there exactly ONE contact this could be". Every exact tier
+    /// counts together, a prefix never counts ("Sam" is not "Samantha"),
+    /// and two candidates of any kind is a refusal. A reply that cannot be
+    /// aimed with certainty is opened in Messages instead, where the
+    /// conversation itself is the address.
+    nonisolated static func decide(
+        nick: [Person], given: [Person], full: [Person], prefix: [Person],
+        strict: Bool
+    ) -> Resolution {
+        let pool: [Person]
+        if strict {
+            var seen = Set<String>()
+            pool = (nick + given + full).filter { seen.insert($0.id).inserted }
+        } else {
+            pool = [nick, given, full, prefix].first { !$0.isEmpty } ?? []
+        }
+        let reachable = pool.filter { $0.handle != nil }
+        guard !reachable.isEmpty else { return .none }
+        if reachable.count == 1, let person = reachable.first, let handle = person.handle {
+            return .one(name: person.name, handle: handle)
+        }
+        return .many(reachable.map(\.name))
     }
 
     /// Mobile first, then any phone, then an email; iMessage answers
@@ -404,7 +687,7 @@ final class MessageCourier {
 
     // MARK: - The grant
 
-    private static let messagesBundleIDs = ["com.apple.MobileSMS", "com.apple.iChat"]
+    static let messagesBundleIDs = ["com.apple.MobileSMS", "com.apple.iChat"]
 
     private var runningMessagesBundleID: String? {
         Self.messagesBundleIDs.first {
