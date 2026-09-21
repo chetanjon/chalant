@@ -170,6 +170,9 @@ final class MessageReply: ObservableObject {
     /// the phase alone does not: a click that should have been a hold.
     @Published private(set) var hint: String?
 
+    /// Told what the aim came to, for the log. Set by the island.
+    var onAimed: ((Recipient) -> Void)?
+
     /// Has anybody touched this card. An untouched card ignores clicks
     /// elsewhere and fades by itself; a touched one is the person's.
     private(set) var engaged = false
@@ -254,6 +257,11 @@ final class MessageReply: ObservableObject {
             // The card may have moved on while Messages was thinking.
             guard self.sighting?.id == sighting.id else { return }
             recipient = answer
+            // Whether a reply can go, and over what. No names, no words:
+            // this is the one thing about a real message that could not be
+            // checked any other way, since a real banner cannot be made to
+            // order.
+            onAimed?(answer)
         }
     }
 
@@ -461,6 +469,16 @@ final class MessageReply: ObservableObject {
             )
         case .failed:
             return .cannotReply("Contacts didn't answer just now. Reply in Messages.")
+        }
+    }
+
+    /// The aim, in a few words that give nothing away.
+    static func summary(of recipient: Recipient) -> String {
+        switch recipient {
+        case .checking: return "checking"
+        case .known(_, let thread):
+            return thread.id.isEmpty ? "ready, thread at send" : "ready over \(thread.service)"
+        case .cannotReply: return "cannot reply"
         }
     }
 

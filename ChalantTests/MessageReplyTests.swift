@@ -318,6 +318,29 @@ final class MessageReplyTests: XCTestCase {
         await eventually("a touched but empty card is unattended again") { !reply.isShowing }
     }
 
+    /// The log line must say whether a reply can go, and over what, and
+    /// must never carry a name or a word of the message.
+    func testTheAimSummaryGivesNothingAway() {
+        let sms = MessageReply.summary(
+            of: .known(name: "Sam Ali", thread: Fake.thread))
+        XCTAssertEqual(sms, "ready over SMS")
+
+        let later = MessageReply.summary(
+            of: .known(
+                name: "Sam Ali",
+                thread: MessageCourier.deferred(name: "Sam Ali", handle: "+15550100")))
+        XCTAssertEqual(later, "ready, thread at send")
+
+        XCTAssertEqual(MessageReply.summary(of: .checking), "checking")
+        XCTAssertEqual(
+            MessageReply.summary(of: .cannotReply("anything at all")), "cannot reply")
+
+        for line in [sms, later, MessageReply.summary(of: .cannotReply("x"))] {
+            XCTAssertFalse(line.contains("Sam"))
+            XCTAssertFalse(line.contains("15550100"))
+        }
+    }
+
     /// Messages closed: looking is not worth launching it for, but the
     /// reply still works. Contacts says who, and the thread is found at
     /// send time, by which point sending has launched Messages.

@@ -463,6 +463,11 @@ final class NotchViewModel: ObservableObject {
         // A card replacing a card keeps what it was told the first time.
         let replacing = pane == .message
         if !replacing { islandWasOpenBeforeMessage = state == .expanded }
+        messages.onAimed = { answer in
+            WireLog.note(
+                event: "message-aim", ntype: MessageReply.summary(of: answer),
+                tool: "messages", response: "")
+        }
         messages.show(sighting) { [weak self] in self?.closeMessage() }
         pane = .message
         // Already open: the card goes where the island already is. Asking
